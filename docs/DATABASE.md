@@ -27,11 +27,33 @@ Organizations and profiles share a BEFORE INSERT OR UPDATE trigger. Inserts set 
 
 Primary keys and country/organization unique codes provide their own indexes. The area `(country_id, id)` unique index supports country lookup and its same-country parent FK; `parent_id` is indexed for child traversal and referential checks. Organization `administrative_area_id` is indexed for geographic lookup and its FK. Profiles already index their Auth FK through their primary key. No unused status, language, JSONB, spatial or timestamp indexes are added.
 
-## RLS state and M1.2 boundary
+## M1.2 memberships and authorization
 
-All four tables enable RLS with **no policies**. All table privileges are explicitly revoked from PUBLIC, `anon` and `authenticated`, overriding Supabase default grants. Anonymous and signed-in clients cannot read or change geography, organizations or profiles, including their own profile. An `ACTIVE` status alone grants nothing. `service_role` has explicit CRUD privileges and bypasses RLS for trusted backend work; table owners/superusers can perform migrations and seed. Privileged credentials must never enter clients.
+Migration 20260917140000_memberships_roles_rls.sql adds user_organizations with composite primary key (user_id, organization_id), restrictive profile/organization foreign keys, a constrained role and default database creation time. The primary key supports caller membership lookups; the organization_id index supports rosters and reverse FK checks. No seed memberships or global profile role are introduced.
 
-M1.2 must introduce memberships, roles and narrowly scoped grants/policies together, with allowed/denied and cross-organization tests. No membership table, access request, approval flow or temporary public-read policy exists in M1.1. Shared/client types will be generated when the first consuming contract is introduced; no client SDK is added here.
+Protected access requires an ACTIVE profile and membership in the requested organization. Roles are independently evaluated per organization. An ACTIVE user without membership can read/edit their own profile but cannot read organizations. All clients remain unable to create, update or delete organizations.
+
+| Caller | Geography SELECT | Profile | Organizations SELECT | Membership SELECT | Membership mutations |
+| --- | --- | --- | --- | --- | --- |
+| Anonymous | None | None | None | None | None |
+| Pending, suspended, rejected | All reference rows | None | None | None | None |
+| ACTIVE FIREFIGHTER | All reference rows | Own; safe edits | Own organizations | Own rows | None |
+| ACTIVE MANAGER | All reference rows | Own; safe edits | Own organizations | Own rows and managed rosters | FIREFIGHTER rows in managed organizations only |
+| ACTIVE ADMIN | All reference rows | Own; safe edits | Own organizations | Own rows and administered rosters | Any role in administered organizations only |
+
+Geography also permits authenticated identities without a profile or organization, supporting future organization selection without exposing organizations. A non-null authenticated identity is required. Inactive historical reference rows remain readable; all geography writes remain privileged.
+
+Profile UPDATE grants cover only display_name, preferred_language, start_screen and inspection_mode. Security status, identity, email and timestamps cannot be client-written. No client profile INSERT or DELETE is granted. Membership INSERT grants exclude created_at; UPDATE grants cover role only, preventing identity moves and timestamp forgery. Managers cannot promote even a FIREFIGHTER to MANAGER, modify another manager/admin, or elevate themselves. UPDATE policies check both the existing and resulting row. ADMIN may demote/remove their own membership; last-admin protection and initial-admin provisioning remain trusted operational responsibilities.
+
+### RLS helpers
+
+The non-API-exposed private schema grants authenticated callers USAGE, never CREATE. Helpers have an empty search_path, fully qualified references, explicit EXECUTE privileges and no anonymous/PUBLIC access:
+
+- private.is_active_user(): STABLE, read-only SECURITY DEFINER boolean lookup of the caller's current profile.
+- private.has_organization_role(org_id, roles[]): STABLE, read-only SECURITY DEFINER lookup joining the caller's current membership and ACTIVE profile. No arbitrary target-user argument or JWT metadata role is trusted.
+- private.is_organization_member(org_id): SECURITY INVOKER wrapper checking the three allowed roles.
+
+The two postgres-owned definer helpers are the narrow recursion boundary: invoker reads inside policies would re-enter profiles/membership RLS. They return only caller-specific booleans, execute no writes or dynamic SQL, and use primary-key lookups. Service-role CRUD remains trusted backend access bypassing RLS; never distribute privileged keys to clients. Existing deployed migrations remain unchanged.
 
 ## Development seed
 
@@ -51,4 +73,4 @@ supabase stop
 
 Reset discards only local database data and replays migrations plus seed. Never use --linked or a remote database URL for a local reset. No login, linked project or production keys are needed for local commands. The committed config already initializes the project; do not rerun init over it.
 
-pgTAP tests exercise schema constraints, recursive hierarchy, defaults, Auth/profile identity, timestamps, seed repeatability and default-deny access. The RLS tests check both actual revoked privileges and row filtering after transaction-local test grants, which are rolled back. Final membership/role isolation tests belong to M1.2. Before a future remote migration, review it and validate staging through the approved release process; this task deploys nothing.
+pgTAP tests exercise schema constraints, recursive hierarchy, defaults, Auth/profile identity, timestamps, seed repeatability and default-deny access. The RLS tests check both actual revoked privileges and row filtering after transaction-local test grants, which are rolled back. M1.2 tests use actual authenticated grants and JWT claims to exercise permitted operations, cross-organization isolation, inactive accounts, metadata forgery and direct escalation attempts. Before a future remote migration, review it and validate staging through the approved release process; this task deploys nothing.
