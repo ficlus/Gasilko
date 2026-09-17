@@ -8,7 +8,9 @@ import si.gasilko.app.core.auth.AuthRepository
 import si.gasilko.app.core.auth.SupabaseAuthGateway
 
 class AuthViewModel(application: Application) : AndroidViewModel(application) {
-    private val repository = AuthRepository(SupabaseAuthGateway.create(application, viewModelScope), viewModelScope)
+    private val gateway = SupabaseAuthGateway.create(application, viewModelScope)
+    private val repository = AuthRepository(gateway, viewModelScope)
+    override fun onCleared() { gateway?.close(); super.onCleared() }
     val state = repository.state
     fun refresh() { viewModelScope.launch { repository.refresh() } }
     fun signIn(email: String, password: String) { viewModelScope.launch { repository.signIn(email, password) } }

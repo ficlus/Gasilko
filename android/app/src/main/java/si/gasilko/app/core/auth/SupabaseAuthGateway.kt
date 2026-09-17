@@ -13,6 +13,8 @@ import io.github.jan.supabase.postgrest.postgrest
 import io.github.jan.supabase.logging.LogLevel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -36,6 +38,7 @@ class SupabaseAuthGateway(private val client: SupabaseClient, scope: CoroutineSc
             "invalid_credentials" -> AuthMessage.INVALID_CREDENTIALS
             "email_not_confirmed" -> AuthMessage.CONFIRM_EMAIL
             "weak_password" -> AuthMessage.WEAK_PASSWORD
+            "refresh_token_not_found", "refresh_token_already_used", "session_not_found", "session_expired", "bad_jwt", "user_not_found" -> AuthMessage.EXPIRED
             "user_already_exists", "email_exists" -> AuthMessage.SIGNUP_NOTICE
             else -> if (e.statusCode == 401 || e.statusCode == 403) AuthMessage.EXPIRED else AuthMessage.ERROR
         })
@@ -51,17 +54,22 @@ class SupabaseAuthGateway(private val client: SupabaseClient, scope: CoroutineSc
     }
     override suspend fun verifiedAccountStatus(): String? = request {
         client.auth.awaitInitialization()
+        if (client.auth.sessionStatus.value is SessionStatus.RefreshFailure) throw AuthFailure(AuthMessage.ERROR)
         if (client.auth.currentSessionOrNull() == null) throw AuthFailure(AuthMessage.EXPIRED)
         client.auth.retrieveUserForCurrentSession()
         client.postgrest.rpc("get_my_account_status").decodeAs<String?>()
     }
-    override suspend fun signOut() = request { client.auth.signOut(); Unit }
+    override suspend fun signOut() = request {
+        if (client.auth.sessionStatus.value is SessionStatus.RefreshFailure) throw AuthFailure(AuthMessage.ERROR)
+        client.auth.signOut(); Unit
+    }
+    fun close() { CoroutineScope(Dispatchers.IO).launch { client.close() } }
     companion object {
         fun create(context: Context, scope: CoroutineScope): SupabaseAuthGateway? {
             val url = BuildConfig.SUPABASE_URL; val key = BuildConfig.SUPABASE_PUBLISHABLE_KEY
             if (url.isBlank() || !key.startsWith("sb_publishable_")) return null
             val uri = try { URI(url) } catch (_: Exception) { return null }
-            if (uri.scheme != "https") return null
+            if (uri.scheme != "https" || uri.host.isNullOrBlank()) return null
             val client = createSupabaseClient(url, key) {
                 defaultLogLevel = LogLevel.NONE
                 install(Auth) { sessionManager = KeystoreSessionManager(context.applicationContext) }
