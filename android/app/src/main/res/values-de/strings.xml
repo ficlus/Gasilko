@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">Hydrantenverwaltung</string>
+    <string name="foundation_running">Die Projektbasis läuft.</string>
+</resources>
