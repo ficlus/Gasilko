@@ -1,9 +1,13 @@
 import Link from 'next/link';
-import { notFound } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
 import { dictionary, isLocale } from '../../lib/i18n';
+import { serverClient } from '../../lib/supabase/server';
+import { loadAccount } from '../../lib/auth/load';
+import { AuthForm } from '../../features/auth/AuthForm';
+export const dynamic = 'force-dynamic';
 export default async function Home({ params }: { params: Promise<{ locale: string }> }) {
-  const { locale } = await params;
-  if (!isLocale(locale)) notFound();
-  const text = dictionary(locale);
-  return <main><h1>{text.title}</h1><p>{text.foundation}</p><nav aria-label={text.language}><Link href="/sl" lang="sl" hrefLang="sl">{text.slovenian}</Link><Link href="/de" lang="de" hrefLang="de">{text.german}</Link></nav></main>;
+  const { locale } = await params; if (!isLocale(locale)) notFound(); const t = dictionary(locale);
+  const account = await loadAccount(await serverClient());
+  if (account.state !== 'UNAUTHENTICATED' && account.state !== 'ERROR') redirect('/' + locale + '/account');
+  return <main><h1>{t.title}</h1><AuthForm locale={locale}/><nav aria-label={t.language}><Link href="/sl" lang="sl">{t.slovenian}</Link><Link href="/de" lang="de">{t.german}</Link></nav></main>;
 }

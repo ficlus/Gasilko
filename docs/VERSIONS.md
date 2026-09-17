@@ -32,3 +32,7 @@ Official sources consulted before selection:
 - https://supabase.com/docs/guides/local-development/database-migrations
 
 Package versions and peer compatibility were also checked against the official npm registry. This deliberately uses compatible stable releases rather than prerelease SDKs or every newest major. Reassess pins through verified upgrades.
+
+## M1.3 auth dependencies
+
+Web adds exact @supabase/supabase-js 2.116.0 and @supabase/ssr 0.12.7 (MIT), the maintained Supabase clients/cookie integration for Next.js 16, plus server-only 0.0.1 (MIT) for import boundaries. Android adds supabase-kt 3.6.0 Auth/PostgREST (MIT) and Ktor OkHttp 3.4.3 (Apache-2.0); upstream 3.6.0 uses this repository's Kotlin 2.3.21 and coroutines 1.10.2. AndroidX Lifecycle 2.10.0 (Apache-2.0) supplies ViewModel and lifecycle-safe Compose collection. JUnit 4.13.2 (EPL-1.0) and coroutines-test 1.10.2 (Apache-2.0) enable repository tests. These fill missing auth/session/test capabilities; no unrelated dependency is upgraded. Sources checked: Supabase official SSR guidance, supabase-community/supabase-kt 3.6.0 release/source/license, Android Keystore documentation and package license metadata.

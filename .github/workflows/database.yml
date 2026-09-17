@@ -25,5 +25,7 @@ jobs:
           docker exec -i supabase_db_gasilko psql -U postgres -d postgres -v ON_ERROR_STOP=1 < supabase/seed.sql
       - run: supabase db lint --local --level warning
       - run: supabase test db
+      - name: Real local Auth signup, session and RLS integration
+        run: node supabase/tests/auth.integration.mjs
       - if: always()
         run: supabase stop --no-backup

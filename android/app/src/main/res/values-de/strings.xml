@@ -1,4 +1,31 @@
 <resources>
     <string name="app_name">Hydrantenverwaltung</string>
     <string name="foundation_running">Die Projektbasis läuft.</string>
+    <string name="auth_sign_in">Anmelden</string>
+    <string name="auth_sign_up">Registrieren</string>
+    <string name="auth_sign_out">Abmelden</string>
+    <string name="auth_email">E-Mail</string>
+    <string name="auth_password">Passwort</string>
+    <string name="auth_display_name">Anzeigename</string>
+    <string name="auth_loading">Wird geladen …</string>
+    <string name="auth_invalid_credentials">E-Mail oder Passwort ist falsch.</string>
+    <string name="auth_pending">Ihr Konto wartet auf die Freigabe durch einen Administrator.</string>
+    <string name="auth_suspended">Ihr Konto ist gesperrt.</string>
+    <string name="auth_rejected">Ihr Zugang wurde abgelehnt.</string>
+    <string name="auth_active">Sie sind angemeldet.</string>
+    <string name="auth_auth_error">Der Vorgang ist fehlgeschlagen. Prüfen Sie Ihre Verbindung und versuchen Sie es erneut.</string>
+    <string name="auth_profile_unavailable">Der Kontostatus kann nicht geprüft werden. Der Zugriff bleibt gesperrt. Versuchen Sie es erneut.</string>
+    <string name="auth_refresh_status">Status aktualisieren</string>
+    <string name="auth_confirm_email">Bestätigen Sie vor der Anmeldung Ihre E-Mail-Adresse.</string>
+    <string name="auth_signup_notice">Prüfen Sie Ihr Postfach auf eine Bestätigung. Wenn das Konto bereits besteht, melden Sie sich an.</string>
+    <string name="auth_weak_password">Geben Sie einen Namen und ein Passwort mit mindestens 8 Zeichen ein.</string>
+    <string name="auth_rate_limited">Zu viele Versuche. Versuchen Sie es später erneut.</string>
+    <string name="auth_configuration">Die Anmeldung ist noch nicht konfiguriert. Wenden Sie sich an die Administration.</string>
+    <string name="auth_authorization_notice">Der Organisationszugriff erfordert eine genehmigte Mitgliedschaft und die passende Rolle.</string>
+    <string name="auth_admin_shell">Administrationsportal</string>
+    <string name="auth_shell_notice">Die Anmeldung ist eingerichtet. Die Organisationsverwaltung folgt später.</string>
+    <string name="auth_session_expired">Die Sitzung ist abgelaufen. Melden Sie sich erneut an.</string>
+    <string name="auth_language">Sprache</string>
+    <string name="auth_slovenian">Slovenščina</string>
+    <string name="auth_german">Deutsch</string>
 </resources>

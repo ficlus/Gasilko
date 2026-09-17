@@ -6,7 +6,7 @@ set local request.jwt.claims = '{}';
 -- M1.2 now permits named authenticated reads; anonymous/default-deny invariants remain.
 insert into public.organizations (id,name,code,type) values ('94000000-0000-4000-8000-000000000001','Protected','RLS-TEST','OTHER');
 insert into auth.users(id) values ('95000000-0000-4000-8000-000000000001');
-insert into public.profiles(id) values ('95000000-0000-4000-8000-000000000001');
+-- Profile provisioned by M1.3 trigger.
 select ok((select relrowsecurity from pg_class where oid='public.countries'::regclass),'countries RLS enabled');
 select ok(not exists(select 1 from pg_policy where polrelid='public.countries'::regclass and 0=any(polroles)),'countries has no policy for PUBLIC');
 select ok((select count(*)>0 from public.countries),'countries contains fixtures visible to trusted owner');

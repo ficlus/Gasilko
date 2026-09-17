@@ -74,3 +74,11 @@ supabase stop
 Reset discards only local database data and replays migrations plus seed. Never use --linked or a remote database URL for a local reset. No login, linked project or production keys are needed for local commands. The committed config already initializes the project; do not rerun init over it.
 
 pgTAP tests exercise schema constraints, recursive hierarchy, defaults, Auth/profile identity, timestamps, seed repeatability and default-deny access. The RLS tests check both actual revoked privileges and row filtering after transaction-local test grants, which are rolled back. M1.2 tests use actual authenticated grants and JWT claims to exercise permitted operations, cross-organization isolation, inactive accounts, metadata forgery and direct escalation attempts. Before a future remote migration, review it and validate staging through the approved release process; this task deploys nothing.
+
+## M1.3 Auth provisioning and status
+
+Migration 20260917170000_auth_profile_provisioning.sql adds an AFTER INSERT trigger on auth.users. The private, postgres-owned provisioning function inserts the matching profile in the same transaction, with fixed PENDING_APPROVAL/DASHBOARD/GUIDED values. It copies Auth email and only safe name/language metadata (bounded string name; sl/de language, otherwise sl). Authorization metadata is ignored. ON CONFLICT DO NOTHING makes retries and the migration's missing-profile backfill safe without resetting existing approvals/preferences. Signup fails transactionally if provisioning fails. No memberships are created. The function is not executable by API roles.
+
+The no-argument get_my_account_status RPC returns only the caller's current account-status string (or null when absent). This fixed-search-path, read-only definer function permits pending/suspended/rejected account screens without broadening any M1.2 table policy. Anonymous execution is revoked. Clients must fail closed on missing/unrecognized status. Profile email is a signup snapshot, never an authorization input. Future email-change synchronization must use verified Auth events.
+
+M1.1/M1.2 test fixtures now rely on automatic provisioning; their security assertions remain intact. The deliberately missing-profile fixture is explicitly removed by the test owner to retain failure coverage. No production client can delete it.

@@ -8,8 +8,8 @@ import org.junit.Test
 
 class LaunchTest {
     @get:Rule val compose = createAndroidComposeRule<MainActivity>()
-    @Test fun launchShowsLocalizedFoundation() {
+    @Test fun launchWithoutConfigShowsLocalizedSetupState() {
         compose.onNodeWithText(compose.activity.getString(R.string.app_name)).assertIsDisplayed()
-        compose.onNodeWithText(compose.activity.getString(R.string.foundation_running)).assertIsDisplayed()
+        compose.onNodeWithText(compose.activity.getString(R.string.auth_configuration)).assertIsDisplayed()
     }
 }
