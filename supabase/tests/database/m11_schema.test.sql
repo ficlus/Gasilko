@@ -17,7 +17,7 @@ insert into public.organizations (id,administrative_area_id,name,code,type) valu
  ('92000000-0000-4000-8000-000000000001','91000000-0000-4000-8000-000000000001','Test organization','TEST-ONE','OTHER');
 insert into auth.users (id,email) values
  ('93000000-0000-4000-8000-000000000001','m11-fixture@example.invalid');
-insert into public.profiles (id) values ('93000000-0000-4000-8000-000000000001');
+-- M1.3 trigger already provisioned this fixture.
 
 select ok((select id is not null and active from public.countries where code='ZZ'), 'country active default');
 select is((select inspection_interval_months from public.organizations where code='TEST-ONE'),12,'default interval');
@@ -97,6 +97,7 @@ select ok((select id is not null from inserted),'area UUID generated on server')
 with inserted as (insert into public.organizations(name,code,type,created_at,updated_at) values ('Generated UUID','GENERATED','OTHER','2000-01-01','2100-01-01') returning *)
 select ok((select id is not null and created_at=statement_timestamp() and updated_at=statement_timestamp() from inserted),'organization UUID and server insertion timestamps');
 insert into auth.users(id) values ('93000000-0000-4000-8000-000000000002');
+delete from public.profiles where id='93000000-0000-4000-8000-000000000002';
 with inserted as (insert into public.profiles(id,created_at,updated_at) values ('93000000-0000-4000-8000-000000000002','2000-01-01','2100-01-01') returning *)
 select ok((select created_at=statement_timestamp() and updated_at=statement_timestamp() from inserted),'profile server insertion timestamps');
 create temporary table original_timestamps as select 'organization' as kind,created_at,updated_at from public.organizations where code='TEST-ONE'

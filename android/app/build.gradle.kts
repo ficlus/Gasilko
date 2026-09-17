@@ -12,14 +12,28 @@ android {
         targetSdk = 36
         versionCode = 1
         versionName = "0.0.1"
+        val authUrl = providers.environmentVariable("ANDROID_SUPABASE_URL").orElse("").get()
+        val authKey = providers.environmentVariable("ANDROID_SUPABASE_PUBLISHABLE_KEY").orElse("").get()
+        require(authKey.isEmpty() || authKey.startsWith("sb_publishable_")) { "Use a publishable Supabase key only" }
+        fun quoted(value: String) = "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "").replace("\r", "") + "\""
+        buildConfigField("String", "SUPABASE_URL", quoted(authUrl))
+        buildConfigField("String", "SUPABASE_PUBLISHABLE_KEY", quoted(authKey))
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
-    buildFeatures { compose = true }
+    buildFeatures { compose = true; buildConfig = true }
     lint { abortOnError = true }
 }
 kotlin { jvmToolchain(17) }
 dependencies {
+    implementation(platform("io.github.jan-tennert.supabase:bom:3.6.0"))
+    implementation("io.github.jan-tennert.supabase:auth-kt")
+    implementation("io.github.jan-tennert.supabase:postgrest-kt")
+    implementation("io.ktor:ktor-client-okhttp:3.4.3")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.10.0")
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.10.0")
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
     implementation(platform("androidx.compose:compose-bom:2025.12.01"))
     implementation("androidx.activity:activity-compose:1.12.4")
     implementation("androidx.compose.material3:material3")

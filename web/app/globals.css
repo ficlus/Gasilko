@@ -6,3 +6,10 @@ p { line-height: 1.6; }
 nav { display: flex; gap: 1.5rem; margin-top: 2rem; }
 a { color: #005c70; text-underline-offset: .2em; }
 a:focus-visible { outline: 3px solid #005c70; outline-offset: 5px; }
+
+form, label { display: grid; gap: .5rem; }
+form { max-width: 28rem; gap: 1.2rem; }
+input, select, button { font: inherit; padding: .75rem; border: 1px solid #58717a; border-radius: .4rem; }
+button { cursor: pointer; background: #005c70; color: white; }
+button:disabled { opacity: .6; cursor: wait; }
+.actions { display: flex; gap: 1rem; flex-wrap: wrap; }

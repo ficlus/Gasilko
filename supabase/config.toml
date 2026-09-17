@@ -27,8 +27,13 @@ file_size_limit = "50MiB"
 [auth]
 enabled = true
 site_url = "http://localhost:3000"
-additional_redirect_urls = []
+additional_redirect_urls = ["http://localhost:3000/auth/callback", "http://localhost:3000/auth/callback?locale=sl", "http://localhost:3000/auth/callback?locale=de"]
 jwt_expiry = 3600
-enable_signup = false
+enable_signup = true
+minimum_password_length = 8
+[auth.email]
+enable_signup = true
+enable_confirmations = true
+double_confirm_changes = true
 [analytics]
 enabled = false

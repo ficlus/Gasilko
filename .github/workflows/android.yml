@@ -40,6 +40,16 @@ jobs:
           arch: x86_64
           working-directory: android
           script: ./gradlew connectedDebugAndroidTest
+      - name: Report executed Android test counts
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import glob
+          import xml.etree.ElementTree as ET
+          for label, pattern in [('JVM', 'app/build/test-results/testDebugUnitTest/TEST-*.xml'), ('Instrumentation', 'app/build/outputs/androidTest-results/connected/**/*.xml')]:
+              suites = [ET.parse(p).getroot() for p in glob.glob(pattern, recursive=True)]
+              print(label, {k: sum(int(s.get(k, 0)) for s in suites) for k in ['tests', 'failures', 'errors', 'skipped']})
+          PY
       - uses: actions/upload-artifact@v4
         if: always()
         with:

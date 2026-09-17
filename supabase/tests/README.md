@@ -15,3 +15,5 @@ supabase test db
 This uses only the local container and does not require credentials. The test container mounts only the tests directory, so SQL test files must not include files outside it.
 
 M1.2 authorization tests use production column grants, SET LOCAL ROLE and simulated request.jwt.claims. Fixtures cover anonymous, pending, suspended, rejected, missing-profile, unaffiliated and multi-organization identities plus all three roles. Tests exercise helpers, recursion-free reads, safe preferences, membership constraints, permitted manager/admin operations, revoked access, cross-organization CRUD, UPSERT escalation and forged JWT metadata. Denied operations either raise the expected SQLSTATE or affect zero rows; privileged final assertions verify protected state remains intact.
+
+M1.3 adds transactional provisioning and narrow status-RPC tests. Auth identities now provision profiles automatically; existing fixture setup is adapted without removing security assertions. The database workflow also runs auth.integration.mjs against the disposable local GoTrue/PostgREST stack, including signup, confirmation gating, login, refresh and logout.

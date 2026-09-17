@@ -1,4 +1,31 @@
 <resources>
     <string name="app_name">Upravljanje hidrantov</string>
     <string name="foundation_running">Projektna osnova deluje.</string>
+    <string name="auth_sign_in">Prijava</string>
+    <string name="auth_sign_up">Registracija</string>
+    <string name="auth_sign_out">Odjava</string>
+    <string name="auth_email">E-pošta</string>
+    <string name="auth_password">Geslo</string>
+    <string name="auth_display_name">Prikazno ime</string>
+    <string name="auth_loading">Nalaganje …</string>
+    <string name="auth_invalid_credentials">E-pošta ali geslo ni pravilno.</string>
+    <string name="auth_pending">Vaš račun čaka na odobritev skrbnika.</string>
+    <string name="auth_suspended">Vaš račun je začasno onemogočen.</string>
+    <string name="auth_rejected">Dostop ni bil odobren.</string>
+    <string name="auth_active">Prijavljeni ste.</string>
+    <string name="auth_auth_error">Prijava trenutno ni uspela. Preverite povezavo in poskusite znova.</string>
+    <string name="auth_profile_unavailable">Stanja računa ni mogoče preveriti. Dostop ostaja zaklenjen. Poskusite znova.</string>
+    <string name="auth_refresh_status">Osveži stanje</string>
+    <string name="auth_confirm_email">Pred prijavo potrdite e-poštni naslov.</string>
+    <string name="auth_signup_notice">Preverite e-pošto za potrditev registracije. Če račun že obstaja, se prijavite.</string>
+    <string name="auth_weak_password">Vnesite ime in geslo z najmanj 8 znaki.</string>
+    <string name="auth_rate_limited">Preveč poskusov. Poskusite pozneje.</string>
+    <string name="auth_configuration">Prijava še ni konfigurirana. Obrnite se na skrbnika.</string>
+    <string name="auth_authorization_notice">Dostop do organizacije zahteva odobreno članstvo in ustrezno vlogo.</string>
+    <string name="auth_admin_shell">Skrbniški portal</string>
+    <string name="auth_shell_notice">Prijava je pripravljena. Upravljanje organizacij bo na voljo pozneje.</string>
+    <string name="auth_session_expired">Seja je potekla. Ponovno se prijavite.</string>
+    <string name="auth_language">Jezik</string>
+    <string name="auth_slovenian">Slovenščina</string>
+    <string name="auth_german">Deutsch</string>
 </resources>
