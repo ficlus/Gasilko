@@ -1,0 +1,15 @@
+{
+  "name": "gasilko",
+  "private": true,
+  "packageManager": "pnpm@11.19.0",
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "scripts": {
+    "web:dev": "pnpm --dir web dev",
+    "web:lint": "pnpm --dir web lint",
+    "web:typecheck": "pnpm --dir web typecheck",
+    "web:test": "pnpm --dir web test",
+    "web:build": "pnpm --dir web build"
+  }
+}

@@ -1,0 +1,1 @@
+-- M0 intentionally seeds no users, credentials, organizations or domain data.

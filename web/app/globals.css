@@ -1,0 +1,8 @@
+:root { font-family: system-ui, sans-serif; color: #122d35; background: #f3f6f7; }
+body { margin: 0; }
+main { max-width: 48rem; margin: 12vh auto; padding: 2rem; }
+h1 { font-size: clamp(2rem, 5vw, 3rem); }
+p { line-height: 1.6; }
+nav { display: flex; gap: 1.5rem; margin-top: 2rem; }
+a { color: #005c70; text-underline-offset: .2em; }
+a:focus-visible { outline: 3px solid #005c70; outline-offset: 5px; }
