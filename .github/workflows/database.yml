@@ -19,6 +19,10 @@ jobs:
           version: 2.117.0
       - run: supabase start
       - run: supabase db reset --local
+      - name: Verify seed can be applied repeatedly
+        run: |
+          docker exec -i supabase_db_gasilko psql -U postgres -d postgres -v ON_ERROR_STOP=1 < supabase/seed.sql
+          docker exec -i supabase_db_gasilko psql -U postgres -d postgres -v ON_ERROR_STOP=1 < supabase/seed.sql
       - run: supabase db lint --local --level warning
       - run: supabase test db
       - if: always()
