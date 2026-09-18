@@ -7,7 +7,7 @@ if (!['http://127.0.0.1:54321', 'http://localhost:54321'].includes(base)) throw 
 const apiKey = config.PUBLISHABLE_KEY || config.ANON_KEY;
 const email = `m13-${randomUUID()}@example.com`;
 const password = randomBytes(24).toString('base64url');
-let id, organizationId, count = 0;
+let id, organizationId, reviewerId, count = 0;
 function check(condition, label) { if (!condition) throw Error(label); count++; console.log(`ok ${count} - ${label}`); }
 function sql(query) { return execFileSync('docker', ['exec', '-i', 'supabase_db_gasilko', 'psql', '-U', 'postgres', '-d', 'postgres', '-At', '-v', 'ON_ERROR_STOP=1'], { input: query, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim(); }
 async function request(path, body, token, method = 'POST') {
@@ -46,6 +46,22 @@ try {
     const organizations = await request('/rest/v1/organizations?select=id', null, session.access_token, 'GET');
     check(organizations.ok && organizations.data.length === 0, `${status} without membership has no protected organization data`);
   }
+  const reviewerEmail=`m15-reviewer-${randomUUID()}@example.com`;
+  const reviewerSignup=await request('/auth/v1/signup',{email:reviewerEmail,password});
+  reviewerId=reviewerSignup.data?.id || reviewerSignup.data?.user?.id;
+  if(!reviewerSignup.ok || !/^[0-9a-f-]{36}$/.test(reviewerId))throw Error('Reviewer fixture failed');
+  sql(`update auth.users set email_confirmed_at=now() where id='${reviewerId}'; select private.bootstrap_first_admin('${organizationId}','${reviewerId}','${reviewerId}'); update public.profiles set account_status='PENDING_APPROVAL' where id='${id}';`);
+  const reviewerLogin=await request('/auth/v1/token?grant_type=password',{email:reviewerEmail,password});
+  if(!reviewerLogin.ok)throw Error('Reviewer sign-in failed');
+  const queue=await request('/rest/v1/rpc/list_reviewable_access_requests',{},reviewerLogin.data.access_token);
+  check(queue.ok && queue.data.length===1,'real reviewer receives scoped queue');
+  const reviewed=await request('/rest/v1/rpc/review_organization_access',{request_id:queue.data[0].id,decision:'APPROVED'},reviewerLogin.data.access_token);
+  check(reviewed.ok && reviewed.data==='APPROVED','real reviewer API approves atomically');
+  check((await request('/rest/v1/rpc/get_my_account_status',{},session.access_token)).data==='ACTIVE','same applicant session observes activation without login');
+  const ownMembership=await request('/rest/v1/user_organizations?select=organization_id,role',null,session.access_token,'GET');
+  check(ownMembership.ok && ownMembership.data.length===1 && ownMembership.data[0].organization_id===organizationId && ownMembership.data[0].role==='FIREFIGHTER','same session sees approved membership');
+  const ownOrganizations=await request('/rest/v1/organizations?select=id',null,session.access_token,'GET');
+  check(ownOrganizations.ok && ownOrganizations.data.length===1 && ownOrganizations.data[0].id===organizationId,'approved session sees only its organization');
   const refresh = await request('/auth/v1/token?grant_type=refresh_token', { refresh_token: session.refresh_token });
   check(refresh.ok && !!refresh.data.access_token, 'session refresh succeeds');
   session = refresh.data;
@@ -59,5 +75,9 @@ try {
   console.error(`Auth integration failed after ${count} completed assertions`);
   process.exitCode = 1;
 } finally {
-  if (id && /^[0-9a-f-]{36}$/.test(id)) sql(`begin; delete from public.organization_access_requests where user_id='${id}'; delete from public.organizations where code='M14-INTEGRATION'; delete from public.profiles where id='${id}'; delete from auth.users where id='${id}'; commit;`);
+  if (id && /^[0-9a-f-]{36}$/.test(id)) {
+    const identities=[id,reviewerId].filter(value=>value&&/^[0-9a-f-]{36}$/.test(value)).map(value=>`'${value}'`).join(',');
+    sql(`begin; update public.organizations set active=false where code='M14-INTEGRATION'; delete from public.organization_access_requests where user_id in (${identities}); delete from public.user_organizations where user_id in (${identities}); delete from public.organizations where code='M14-INTEGRATION'; delete from public.profiles where id in (${identities}); delete from auth.users where id in (${identities}); commit;`);
+    // Audit remains append-only in the disposable stack; references are snapshots.
+  }
 }

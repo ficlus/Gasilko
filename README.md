@@ -70,6 +70,12 @@ Reset destroys local data. No linked/production project is used. See [DATABASE](
 
 ## CI and scope
 
+M1.5 adds a Web approval queue linked from the account/admin screen. ACTIVE MANAGER may review FIREFIGHTER requests in managed organizations; ADMIN may also review MANAGER requests. Approval atomically creates membership and activates an eligible pending account. Rejection preserves history and does not change account status. Suspended/rejected accounts are never silently activated. Android request refresh also refreshes authoritative account state, so approval opens the active shell without another login.
+
+First ADMIN is provisioned only through the [trusted database procedure](docs/ADMIN_BOOTSTRAP.md). Direct membership mutations retain M1.2 authority checks and cannot remove/demote the final ADMIN of an active organization. Security events are append-only and readable only by same-org ACTIVE ADMIN. See [DATABASE](docs/DATABASE.md) for exact RPC/results/locking contracts. No later milestone features are included.
+
+After local database and Auth tests, run `node supabase/tests/review.concurrency.mjs` on the disposable stack. It tests competing review/bootstrap/admin-mutation transactions, including REPEATABLE READ, and retains audit fixtures until the next local reset. CI runs it automatically. Manual staging acceptance: bootstrap a test ADMIN; verify manager/admin queue scope and approve/reject in both languages; refresh the applicant's existing Web/Android session; verify the correct membership and shell; test physical-device foreground/rotation/network retry. Google provider checks remain in [GOOGLE_AUTH](docs/GOOGLE_AUTH.md).
+
 Pushes and pull requests run Android lint/unit-test/debug build plus emulator tests, Web lint/typecheck/tests/build, and clean Supabase reset/lint/pgTAP and local Auth integration tests. Failed checks are never ignored. No deployment is configured. Required check protection must be configured by a repository administrator before merging. Approval and first-admin bootstrap remain M1.5.
 
 ## M1.3 email/password setup

@@ -20,7 +20,7 @@ private fun Selection(label:String,choices:List<Choice>,selected:String?,enabled
     }
 }
 @Composable
-fun AccessScreen(repository:AccessRepository,back:()->Unit,signOut:()->Unit) {
+fun AccessScreen(repository:AccessRepository,back:()->Unit,signOut:()->Unit,refreshAccount:()->Unit = {}) {
     val state by repository.state.collectAsStateWithLifecycle();val scope=rememberCoroutineScope()
     var ready by remember { mutableStateOf(false) }
     LaunchedEffect(repository){repository.load();ready=true}
@@ -51,7 +51,7 @@ fun AccessScreen(repository:AccessRepository,back:()->Unit,signOut:()->Unit) {
             if(state.history.isEmpty())Text(stringResource(R.string.access_no_requests))
             state.history.forEach{r->Text(r.organizationName);Text(stringResource(if(r.role=="MANAGER")R.string.access_manager else R.string.access_firefighter));Text(stringResource(when(r.status){"PENDING"->R.string.access_request_pending;"APPROVED"->R.string.access_request_approved;"REJECTED"->R.string.access_request_rejected;else->R.string.access_request_error}))}
             if(state.moreHistory)TextButton(enabled=!state.busy,onClick={scope.launch{repository.more("history")}}){Text(stringResource(R.string.access_load_more))}
-            Button(enabled=!state.busy,onClick={scope.launch{repository.load()}}){Text(stringResource(R.string.access_refresh_requests))}
+            Button(enabled=!state.busy,onClick={scope.launch{repository.load();refreshAccount()}}){Text(stringResource(R.string.access_refresh_requests))}
         }
         TextButton(onClick=signOut){Text(stringResource(R.string.auth_sign_out))}
     }}
