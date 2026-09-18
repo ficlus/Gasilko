@@ -1,0 +1,12 @@
+import test from 'node:test';import assert from 'node:assert/strict';
+import { startGoogle } from '../lib/auth/google.ts';
+import { canRequest,submitAccess } from '../lib/access/client.ts';
+test('Google delegates to SDK with fixed provider and locale callback',async()=>{let args;assert.equal(await startGoogle({auth:{signInWithOAuth:async a=>{args=a;return{error:null}}}},'https://example.invalid','de'),true);assert.deepEqual(args,{provider:'google',options:{redirectTo:'https://example.invalid/auth/callback?locale=de'}})});
+test('Google errors fail without claiming login',async()=>assert.equal(await startGoogle({auth:{signInWithOAuth:async()=>{throw Error('provider')}}},'https://example.invalid','sl'),false));
+test('Google rejects unsupported locale',async()=>assert.equal(await startGoogle({},'https://example.invalid','../admin'),false));
+for(const state of ['SUSPENDED','REJECTED','ERROR','UNAUTHENTICATED'])test(state+' has no request onboarding',()=>assert.equal(canRequest(state),false));
+for(const state of ['ACTIVE','PENDING_APPROVAL'])test(state+' may enter limited request onboarding',()=>assert.equal(canRequest(state),true));
+test('request sends no caller identity or approval fields',async()=>{let args;const result=await submitAccess({rpc:async(...a)=>{args=a;return{data:{result:'SUBMITTED'},error:null}}},'org','MANAGER');assert.equal(result,'SUBMITTED');assert.deepEqual(args,['request_organization_access',{organization:'org',desired_role:'MANAGER'}]);});
+test('ADMIN rejected before RPC',async()=>{assert.equal(await submitAccess({rpc:()=>{throw Error('must not call')}},'org','ADMIN'),'INVALID_ROLE');});
+for(const result of ['DUPLICATE_REQUEST','ALREADY_MEMBER','UNAVAILABLE','NOT_ALLOWED'])test('safe '+result+' result preserved',async()=>assert.equal(await submitAccess({rpc:async()=>({data:{result}})},'org','FIREFIGHTER'),result));
+test('unknown provider error is not exposed',async()=>assert.equal(await submitAccess({rpc:async()=>({error:{message:'internal SQL'}})},'org','FIREFIGHTER'),'ERROR'));

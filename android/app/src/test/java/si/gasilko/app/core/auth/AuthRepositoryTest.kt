@@ -17,10 +17,15 @@ class AuthRepositoryTest {
         var confirmed = true
         var receivedName = ""
         override suspend fun verifiedAccountStatus(): String? { wait?.await(); failure?.let { throw AuthFailure(it) }; return status }
+        override suspend fun startGoogle() { failure?.let { throw AuthFailure(it) } }
+        override suspend fun completeGoogle(code:String) { failure?.let { throw AuthFailure(it) } }
         override suspend fun signIn(email: String, password: String) { failure?.let { throw AuthFailure(it) } }
         override suspend fun signUp(email: String, password: String, displayName: String, language: String): Boolean { receivedName=displayName; return !confirmed }
         override suspend fun signOut() { failure?.let { throw AuthFailure(it) }; sessions.value=SessionSignal.UNAUTHENTICATED }
     }
+    @Test fun googleLaunchDoesNotAuthorize() = runTest { val g=Fake();val r=AuthRepository(g,backgroundScope);runCurrent();r.google();assertEquals(AuthRoute.UNAUTHENTICATED,r.state.value.route) }
+    @Test fun googleCallbackUsesSameStatusGate() = runTest { val g=Fake();g.status="PENDING_APPROVAL";val r=AuthRepository(g,backgroundScope);runCurrent();r.googleCallback("fixture");assertEquals(AuthRoute.PENDING_APPROVAL,r.state.value.route) }
+    @Test fun googleExchangeFailureDoesNotAuthorize() = runTest { val g=Fake();g.failure=AuthMessage.ERROR;val r=AuthRepository(g,backgroundScope);runCurrent();r.googleCallback("fixture");assertEquals(AuthRoute.UNAUTHENTICATED,r.state.value.route) }
     @Test fun startsLoadingWithoutProtectedFlash() = runTest { val r=AuthRepository(Fake(),backgroundScope); assertEquals(AuthRoute.LOADING,r.state.value.route) }
     @Test fun noSessionIsUnauthenticated() = runTest { val g=Fake();val r=AuthRepository(g,backgroundScope);g.sessions.value=SessionSignal.UNAUTHENTICATED;runCurrent();assertEquals(AuthRoute.UNAUTHENTICATED,r.state.value.route) }
     private fun restored(status:String,expected:AuthRoute) = runTest { val g=Fake();g.status=status;val r=AuthRepository(g,backgroundScope);g.sessions.value=SessionSignal.AUTHENTICATED;runCurrent();assertEquals(expected,r.state.value.route) }

@@ -7,7 +7,7 @@ if (!['http://127.0.0.1:54321', 'http://localhost:54321'].includes(base)) throw 
 const apiKey = config.PUBLISHABLE_KEY || config.ANON_KEY;
 const email = `m13-${randomUUID()}@example.com`;
 const password = randomBytes(24).toString('base64url');
-let id, count = 0;
+let id, organizationId, count = 0;
 function check(condition, label) { if (!condition) throw Error(label); count++; console.log(`ok ${count} - ${label}`); }
 function sql(query) { return execFileSync('docker', ['exec', '-i', 'supabase_db_gasilko', 'psql', '-U', 'postgres', '-d', 'postgres', '-At', '-v', 'ON_ERROR_STOP=1'], { input: query, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim(); }
 async function request(path, body, token, method = 'POST') {
@@ -30,6 +30,15 @@ try {
   check(login.ok && !!login.data.access_token, 'email/password sign in succeeds after confirmation');
   let session = login.data;
   check((await request('/auth/v1/user', null, session.access_token, 'GET')).ok, 'restored access token validates against Auth');
+  organizationId = randomUUID();
+  sql(`insert into public.organizations(id,name,code,type,administrative_area_id) values ('${organizationId}','Request integration','M14-INTEGRATION','OTHER','20000000-0000-4000-8000-000000000001');`);
+  const discovery=await request('/rest/v1/rpc/discover_organizations',{country:'10000000-0000-4000-8000-000000000001'},session.access_token);
+  check(discovery.ok && discovery.data.some(o=>o.id===organizationId), 'pending user discovers selection metadata');
+  const attempts=await Promise.all([1,2].map(()=>request('/rest/v1/rpc/request_organization_access',{organization:organizationId,desired_role:'FIREFIGHTER'},session.access_token)));
+  check(attempts.filter(r=>r.data?.result==='SUBMITTED').length===1 && attempts.filter(r=>r.data?.result==='DUPLICATE_REQUEST').length===1,'concurrent requests create one pending row');
+  check((await request('/rest/v1/rpc/request_organization_access',{organization:organizationId,desired_role:'ADMIN'},session.access_token)).data?.result==='INVALID_ROLE','direct API ADMIN request denied');
+  check(!(await request('/rest/v1/organization_access_requests',{user_id:id,organization_id:organizationId,requested_role:'FIREFIGHTER',status:'APPROVED'},session.access_token)).ok,'direct table approval bypass denied');
+  check((await request('/rest/v1/rpc/get_my_account_status',{},session.access_token)).data==='PENDING_APPROVAL','request does not activate profile');
   for (const status of ['PENDING_APPROVAL', 'SUSPENDED', 'REJECTED', 'ACTIVE']) {
     sql(`update public.profiles set account_status='${status}' where id='${id}';`);
     const state = await request('/rest/v1/rpc/get_my_account_status', {}, session.access_token);
@@ -50,5 +59,5 @@ try {
   console.error(`Auth integration failed after ${count} completed assertions`);
   process.exitCode = 1;
 } finally {
-  if (id && /^[0-9a-f-]{36}$/.test(id)) sql(`begin; delete from public.profiles where id='${id}'; delete from auth.users where id='${id}'; commit;`);
+  if (id && /^[0-9a-f-]{36}$/.test(id)) sql(`begin; delete from public.organization_access_requests where user_id='${id}'; delete from public.organizations where code='M14-INTEGRATION'; delete from public.profiles where id='${id}'; delete from auth.users where id='${id}'; commit;`);
 }

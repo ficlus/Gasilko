@@ -70,9 +70,13 @@ Reset destroys local data. No linked/production project is used. See [DATABASE](
 
 ## CI and scope
 
-Pushes and pull requests run Android lint/unit-test/debug build plus an emulator launch test, web frozen dependency install/lint/typecheck/localization tests/build, and a clean Supabase start/reset/database lint/pgTAP test. Failed checks are never ignored. No deployment is configured. Required check protection must be configured by a repository administrator before merging. No deployment or M1.4/M1.5 feature is included.
+Pushes and pull requests run Android lint/unit-test/debug build plus emulator tests, Web lint/typecheck/tests/build, and clean Supabase reset/lint/pgTAP and local Auth integration tests. Failed checks are never ignored. No deployment is configured. Required check protection must be configured by a repository administrator before merging. Approval and first-admin bootstrap remain M1.5.
 
 ## M1.3 email/password setup
+
+M1.4 adds Google sign-in and organization access requests. Follow [Google setup and manual acceptance](docs/GOOGLE_AUTH.md) for provider configuration, redirects, Android deep links and supported identity linking.
+
+Pending/active users can open Request access, choose a country, navigate any number of area levels (or browse country-wide), choose an active organization and FIREFIGHTER/MANAGER, and confirm. Database validation returns a safe result. Multiple organizations have independent requests; own history displays PENDING/APPROVED/REJECTED with refresh and pagination. Requests never grant memberships or activate profiles. This online onboarding flow does not implement offline field workflows. See [DATABASE](docs/DATABASE.md) and [SECURITY](docs/SECURITY.md) for discovery scope and future review contracts.
 
 In ignored web/.env.local set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY using the project's public URL and sb_publishable_ key. For Android set ANDROID_SUPABASE_URL and ANDROID_SUPABASE_PUBLISHABLE_KEY in the build environment, then rebuild. These are explicitly mapped public values only; never copy a secret/service key into either client. Android requires an HTTPS endpoint (use a development HTTPS tunnel or staging for device testing). Configuration is checked without logging key values.
 
@@ -80,7 +84,7 @@ Enable email/password signup in Supabase Auth, require email confirmation and at
 
 Signup collects email/password, display name and language. The Auth insert transaction creates one pending profile; after confirmation, sign in normally. Web same-browser confirmation can also exchange its PKCE code through /auth/callback. Android users confirm in their email client then return to sign in; no app deep-link flow is required. Existing-email responses are intentionally generic to avoid account enumeration.
 
-Session restore verifies identity and current database status before showing the shell. Pending users see an approval explanation and refresh/signout; suspended/rejected users remain locked. ACTIVE users see an account shell, and only an own ADMIN membership permits the Web /sl/admin or /de/admin shell. No organization selection, access requests, approval UI, Google login or 30-day offline access is implemented. Those remain M1.4/M1.5 and later offline work.
+Session restore verifies identity and current database status before showing the shell. Pending users see an approval explanation, request access, refresh and signout; suspended/rejected users remain locked. ACTIVE users see an account shell, and only an own ADMIN membership permits the Web /sl/admin or /de/admin shell. Approval UI and 30-day offline access remain later work.
 
 After local database tests, run node supabase/tests/auth.integration.mjs to test real disposable Auth signup/login/refresh/logout and RLS. This script refuses nonlocal endpoints, uses generated ephemeral credentials, confirms only its own fixture through the local database, and cleans up afterward. It never prints tokens.
 

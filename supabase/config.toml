@@ -27,7 +27,7 @@ file_size_limit = "50MiB"
 [auth]
 enabled = true
 site_url = "http://localhost:3000"
-additional_redirect_urls = ["http://localhost:3000/auth/callback", "http://localhost:3000/auth/callback?locale=sl", "http://localhost:3000/auth/callback?locale=de"]
+additional_redirect_urls = ["http://localhost:3000/auth/callback", "http://localhost:3000/auth/callback?locale=sl", "http://localhost:3000/auth/callback?locale=de", "si.gasilko.app://auth-callback"]
 jwt_expiry = 3600
 enable_signup = true
 minimum_password_length = 8
@@ -37,3 +37,9 @@ enable_confirmations = true
 double_confirm_changes = true
 [analytics]
 enabled = false
+
+# Optional local provider testing: uncomment only with server environment configured.
+# [auth.external.google]
+# enabled = true
+# client_id = "env(SUPABASE_AUTH_EXTERNAL_GOOGLE_CLIENT_ID)"
+# secret = "env(SUPABASE_AUTH_EXTERNAL_GOOGLE_SECRET)"

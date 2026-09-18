@@ -8,6 +8,19 @@ import org.junit.Test
 import si.gasilko.app.core.auth.*
 import si.gasilko.app.feature.auth.AuthContent
 class AuthContentTest {
+    @Test fun googleButtonStartsProviderFlow() {
+        var called = false
+        compose.setContent { MaterialTheme { AuthContent(AuthState(AuthRoute.UNAUTHENTICATED), {_,_->}, {_,_,_,_->}, {}, {}, google = { called = true }) } }
+        compose.onNodeWithText(text(R.string.access_continue_google)).performClick()
+        compose.runOnIdle { org.junit.Assert.assertTrue(called) }
+    }
+    @Test fun pendingCanOpenRequestsWithoutActiveShell() {
+        var called = false
+        compose.setContent { MaterialTheme { AuthContent(AuthState(AuthRoute.PENDING_APPROVAL), {_,_->}, {_,_,_,_->}, {}, {}, requestAccess = { called = true }) } }
+        compose.onNodeWithText(text(R.string.access_request_access)).performScrollTo().performClick()
+        compose.runOnIdle { org.junit.Assert.assertTrue(called) }
+        compose.onNodeWithText(text(R.string.auth_active)).assertDoesNotExist()
+    }
     @get:Rule val compose=createComposeRule()
     private fun text(id:Int)=InstrumentationRegistry.getInstrumentation().targetContext.getString(id)
     private fun show(route:AuthRoute) { compose.setContent { MaterialTheme { AuthContent(AuthState(route),{_,_->},{_,_,_,_->},{},{}) } } }

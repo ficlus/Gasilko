@@ -3,6 +3,7 @@ import { useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { dictionary, type Locale } from '../../lib/i18n';
 import { browserClient } from '../../lib/supabase/browser';
+import { startGoogle } from '../../lib/auth/google';
 import { errorKey } from '../../lib/auth/state';
 export function AuthForm({ locale }: { locale: Locale }) {
   const t = dictionary(locale); const router = useRouter();
@@ -27,7 +28,7 @@ export function AuthForm({ locale }: { locale: Locale }) {
       }
     } catch { setMessage(t.authError); } finally { setBusy(false); const field = form.elements.namedItem('password'); if (field instanceof HTMLInputElement) field.value = ''; }
   }
-  return <section><h2>{signup ? t.signUp : t.signIn}</h2><form onSubmit={submit}>
+  return <section><button disabled={busy} onClick={async () => { setBusy(true); setMessage(''); if (!(await startGoogle(browserClient(), window.location.origin, locale))) setMessage(t.authError); setBusy(false); }}>{t.continueGoogle}</button><h2>{signup ? t.signUp : t.signIn}</h2><form onSubmit={submit}>
     <label>{t.email}<input name="email" type="email" autoComplete="email" required maxLength={254} disabled={busy}/></label>
     <label>{t.password}<input name="password" type="password" autoComplete={signup ? 'new-password' : 'current-password'} minLength={signup ? 8 : 1} maxLength={256} required disabled={busy}/></label>
     {signup && <><label>{t.displayName}<input name="display_name" autoComplete="name" required maxLength={120} disabled={busy}/></label><label>{t.language}<select name="preferred_language" defaultValue={locale} disabled={busy}><option value="sl">{t.slovenian}</option><option value="de">{t.german}</option></select></label></>}

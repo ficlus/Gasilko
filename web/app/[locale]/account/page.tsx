@@ -10,5 +10,5 @@ export default async function Account({ params }: { params: Promise<{ locale: st
   const account = await loadAccount(await serverClient());
   if (account.state === 'UNAUTHENTICATED') redirect('/' + locale);
   const text = { ACTIVE: t.active, PENDING_APPROVAL: t.pending, SUSPENDED: t.suspended, REJECTED: t.rejected, ERROR: t.profileUnavailable }[account.state];
-  return <main><h1>{t.title}</h1><p>{text}</p>{account.state === 'ACTIVE' && <p>{t.authorizationNotice}</p>}{account.admin && <Link href={'/' + locale + '/admin'}>{t.adminShell}</Link>}<SessionControls locale={locale}/></main>;
+  return <main><h1>{t.title}</h1><p>{text}</p>{account.state === 'ACTIVE' && <p>{t.authorizationNotice}</p>}{account.admin && <Link href={'/' + locale + '/admin'}>{t.adminShell}</Link>}{(account.state==='ACTIVE'||account.state==='PENDING_APPROVAL')&&<p><Link href={'/'+locale+'/requests'}>{t.requestAccess}</Link></p>}<SessionControls locale={locale}/></main>;
 }
