@@ -149,8 +149,8 @@ select ok((select count(*)>0 from public.audit_log where organization_id='d20000
 reset role;
 set local request.jwt.claims='{"sub":"d1000000-0000-4000-8000-000000000001","role":"authenticated"}';
 set local role authenticated;
-select is((with c as (update public.user_organizations set role='MANAGER' where user_id='d1000000-0000-4000-8000-000000000012' and organization_id='d2000000-0000-4000-8000-000000000001' returning *) select count(*)::int from c),1,'one of multiple admins can be demoted');
-select is((with c as (delete from public.user_organizations where user_id='d1000000-0000-4000-8000-000000000005' and organization_id='d2000000-0000-4000-8000-000000000001' returning *) select count(*)::int from c),1,'one of multiple admins can be removed');
+with c as (update public.user_organizations set role='MANAGER' where user_id='d1000000-0000-4000-8000-000000000012' and organization_id='d2000000-0000-4000-8000-000000000001' returning *) select is((select count(*)::int from c),1,'one of multiple admins can be demoted');
+with c as (delete from public.user_organizations where user_id='d1000000-0000-4000-8000-000000000005' and organization_id='d2000000-0000-4000-8000-000000000001' returning *) select is((select count(*)::int from c),1,'one of multiple admins can be removed');
 select throws_ok($q$delete from public.user_organizations where user_id='d1000000-0000-4000-8000-000000000001' and organization_id='d2000000-0000-4000-8000-000000000001'$q$,'23514',null,'remaining final ADMIN protected');
 reset role;
 set local request.jwt.claims='{}';

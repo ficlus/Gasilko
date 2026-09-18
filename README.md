@@ -1,6 +1,6 @@
 # Gasilko — Hydrant Management Platform
 
-Foundation for an offline-first Android field application and Next.js administration portal backed by Supabase. The authoritative product and architecture specification is [docs/SPEC.md](docs/SPEC.md); agent rules are [AGENTS.md](AGENTS.md). M1.3 provides email/password authentication and account-state routing; domain workflows remain in later milestones.
+Foundation for an offline-first Android field application and Next.js administration portal backed by Supabase. The authoritative specification is [docs/SPEC.md](docs/SPEC.md); agent rules are [AGENTS.md](AGENTS.md). M1 provides authentication, organization access requests, trusted review, scoped roles and security audit. Hydrant and offline field workflows remain in later milestones.
 
 ~~~text
 .github/workflows/       Android, web and database CI
@@ -76,7 +76,7 @@ First ADMIN is provisioned only through the [trusted database procedure](docs/AD
 
 After local database and Auth tests, run `node supabase/tests/review.concurrency.mjs` on the disposable stack. It tests competing review/bootstrap/admin-mutation transactions, including REPEATABLE READ, and retains audit fixtures until the next local reset. CI runs it automatically. Manual staging acceptance: bootstrap a test ADMIN; verify manager/admin queue scope and approve/reject in both languages; refresh the applicant's existing Web/Android session; verify the correct membership and shell; test physical-device foreground/rotation/network retry. Google provider checks remain in [GOOGLE_AUTH](docs/GOOGLE_AUTH.md).
 
-Pushes and pull requests run Android lint/unit-test/debug build plus emulator tests, Web lint/typecheck/tests/build, and clean Supabase reset/lint/pgTAP and local Auth integration tests. Failed checks are never ignored. No deployment is configured. Required check protection must be configured by a repository administrator before merging. Approval and first-admin bootstrap remain M1.5.
+Pushes and pull requests run Android lint/unit-test/debug build plus emulator tests, Web lint/typecheck/tests/build, clean Supabase reset/lint/pgTAP, local Auth integration and concurrency tests. Failed checks are never ignored. No deployment is configured. Required check protection must be configured by a repository administrator before merging.
 
 ## M1.3 email/password setup
 
@@ -90,8 +90,8 @@ Enable email/password signup in Supabase Auth, require email confirmation and at
 
 Signup collects email/password, display name and language. The Auth insert transaction creates one pending profile; after confirmation, sign in normally. Web same-browser confirmation can also exchange its PKCE code through /auth/callback. Android users confirm in their email client then return to sign in; no app deep-link flow is required. Existing-email responses are intentionally generic to avoid account enumeration.
 
-Session restore verifies identity and current database status before showing the shell. Pending users see an approval explanation, request access, refresh and signout; suspended/rejected users remain locked. ACTIVE users see an account shell, and only an own ADMIN membership permits the Web /sl/admin or /de/admin shell. Approval UI and 30-day offline access remain later work.
+Session restore verifies identity and current database status before showing the shell. Pending users see an approval explanation, request access, refresh and signout; suspended/rejected users remain locked. ACTIVE users see an account shell, and only an own ADMIN membership permits the Web /sl/admin or /de/admin shell. Managers enter only the scoped review route. The 30-day offline authorization window remains later work.
 
 After local database tests, run node supabase/tests/auth.integration.mjs to test real disposable Auth signup/login/refresh/logout and RLS. This script refuses nonlocal endpoints, uses generated ephemeral credentials, confirms only its own fixture through the local database, and cleans up afterward. It never prints tokens.
 
-Manual acceptance with a configured staging project: verify real email delivery/confirmation in both languages; signup and sign in on Web and Android; restart/rotate/background the Android app; expire/revoke a test session; disconnect the network during restore/signout then retry; change the test account through pending/active/suspended/rejected in a trusted maintenance session; verify direct admin URLs remain protected and a firefighter never enters the admin shell. Verify signout and encrypted persistence on physical devices from supported vendors. No approval/provisioning UI is provided.
+Manual acceptance with configured staging: verify email delivery/confirmation in both languages; sign in on Web and Android; restart/rotate/background Android; expire/revoke a test session; disconnect during restore/signout then retry; verify account-state changes and direct admin-route protection. Verify signout and encrypted persistence on supported physical devices. Review and bootstrap acceptance is described above.
