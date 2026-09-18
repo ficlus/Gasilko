@@ -1,5 +1,13 @@
 # Database foundation
 
+## M2.2 current hydrant authorization
+
+Migration `20260918150000_hydrant_authorization.sql` adds scoped SELECT policies and six controlled mutation RPCs. ACTIVE organization members read active hydrants; MANAGER/ADMIN also read inactive hydrants. Active global types require an ACTIVE member in at least one organization; active local types require own membership, and ADMIN may read inactive own types. Mutations require an active organization. Direct client writes remain revoked; no M1 read/audit authority is broadened.
+
+FIREFIGHTER can create and change status; MANAGER/ADMIN can also edit master fields and deactivate/reactivate; only ADMIN can manage local types. Actor identity comes from auth.uid(). Existing-hydrant changes require an expected version, checked after locking; stale input raises HYDRANT_VERSION_CONFLICT. Successful online creation returns version 2 because the existing allocator increments the inserted version-1 row. Mutation and audit are atomic, with no-op suppression. Organization serialization and profile locks recheck live authority after concurrent revocation.
+
+See [HYDRANT_API.md](HYDRANT_API.md) for the full permission matrix, all function signatures, field allowlists, errors, locking, audit events and M3 assumptions. M2.1 schema/allocator behavior below remains authoritative; its default-deny SELECT/no-actor-authorization descriptions are historical and superseded by M2.2. No Android/Web registry UI or sync is introduced.
+
 ## M2.1 hydrant registry foundation
 
 Migration `20260918120000_hydrant_data_model.sql` adds the database model only. No hydrant UI, sync, inspection scheduling or final CRUD authorization is included.
