@@ -12,6 +12,10 @@ android {
         targetSdk = 36
         versionCode = 1
         versionName = "0.0.1"
+        val callbackScheme = providers.environmentVariable("ANDROID_AUTH_REDIRECT_SCHEME").orElse("si.gasilko.app").get()
+        require(callbackScheme.matches(Regex("[a-z][a-z0-9+.-]*")))
+        manifestPlaceholders["authRedirectScheme"] = callbackScheme
+        buildConfigField("String", "AUTH_REDIRECT_SCHEME", "\"" + callbackScheme + "\"")
         val authUrl = providers.environmentVariable("ANDROID_SUPABASE_URL").orElse("").get()
         val authKey = providers.environmentVariable("ANDROID_SUPABASE_PUBLISHABLE_KEY").orElse("").get()
         require(authKey.isEmpty() || authKey.startsWith("sb_publishable_")) { "Use a publishable Supabase key only" }

@@ -16,6 +16,8 @@ enum class SessionSignal { LOADING, AUTHENTICATED, UNAUTHENTICATED, UNAVAILABLE 
 class AuthFailure(val reason: AuthMessage) : Exception()
 interface AuthGateway {
     val sessions: StateFlow<SessionSignal>
+    suspend fun startGoogle() { throw AuthFailure(AuthMessage.ERROR) }
+    suspend fun completeGoogle(code: String) { throw AuthFailure(AuthMessage.ERROR) }
     suspend fun signIn(email: String, password: String)
     suspend fun signUp(email: String, password: String, displayName: String, language: String): Boolean
     suspend fun verifiedAccountStatus(): String?
@@ -54,6 +56,17 @@ class AuthRepository(private val gateway: AuthGateway?, private val scope: Corou
         } catch (e: AuthFailure) {
             mutableState.value = AuthState(if (e.reason == AuthMessage.EXPIRED) AuthRoute.UNAUTHENTICATED else AuthRoute.ERROR, e.reason)
         } catch (_: Exception) { mutableState.value = AuthState(AuthRoute.ERROR, AuthMessage.ERROR) }
+    }
+    suspend fun google() = operations.withLock {
+        val client=gateway?:return@withLock
+        mutableState.value=AuthState()
+        try { client.startGoogle(); mutableState.value=AuthState(AuthRoute.UNAUTHENTICATED)
+        } catch(e: CancellationException) { throw e
+        } catch(_: Exception) { mutableState.value=AuthState(AuthRoute.UNAUTHENTICATED,AuthMessage.ERROR) }
+    }
+    suspend fun googleCallback(code: String?) {
+        if(code==null) { mutableState.value=AuthState(AuthRoute.UNAUTHENTICATED,AuthMessage.ERROR);return }
+        authenticate { it.completeGoogle(code);false }
     }
     suspend fun refresh() = operations.withLock {
         if (gateway == null) return@withLock

@@ -22,10 +22,13 @@ import si.gasilko.app.core.auth.*
 fun AuthScreen(model: AuthViewModel = viewModel()) {
     val state by model.state.collectAsStateWithLifecycle()
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { model.refresh() }
-    AuthContent(state, model::signIn, model::signUp, model::refresh, model::signOut)
+    var requests by remember { mutableStateOf(false) }
+    LaunchedEffect(state.route) { if(state.route==AuthRoute.UNAUTHENTICATED) requests=false }
+    if(requests && state.route in listOf(AuthRoute.ACTIVE,AuthRoute.PENDING_APPROVAL)) AccessScreen(model.access,{requests=false},{requests=false;model.signOut()})
+    else AuthContent(state, model::signIn, model::signUp, model::refresh, model::signOut, model::google, {requests=true})
 }
 @Composable
-fun AuthContent(state: AuthState, signIn: (String,String)->Unit, signUp: (String,String,String,String)->Unit, refresh: ()->Unit, signOut: ()->Unit) {
+fun AuthContent(state: AuthState, signIn: (String,String)->Unit, signUp: (String,String,String,String)->Unit, refresh: ()->Unit, signOut: ()->Unit, google: ()->Unit = {}, requestAccess: (()->Unit)? = null) {
     Scaffold { padding -> Column(Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         Text(stringResource(R.string.app_name), style = MaterialTheme.typography.headlineMedium)
         when (state.route) {
@@ -34,6 +37,7 @@ fun AuthContent(state: AuthState, signIn: (String,String)->Unit, signUp: (String
                 var signup by remember { mutableStateOf(false) }; var email by remember { mutableStateOf("") }
                 // Passwords are ephemeral Compose state, never SavedStateHandle/rememberSaveable/disk.
                 var password by remember { mutableStateOf("") }; var name by remember { mutableStateOf("") }; var language by remember { mutableStateOf("sl") }
+                OutlinedButton(onClick=google){Text(stringResource(R.string.access_continue_google))}
                 Text(stringResource(if (signup) R.string.auth_sign_up else R.string.auth_sign_in))
                 OutlinedTextField(email, { email = it }, label = { Text(stringResource(R.string.auth_email)) }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email))
                 OutlinedTextField(password, { password = it }, label = { Text(stringResource(R.string.auth_password)) }, singleLine = true, visualTransformation = PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password))
@@ -61,6 +65,7 @@ fun AuthContent(state: AuthState, signIn: (String,String)->Unit, signUp: (String
                 }
                 Text(stringResource(text))
                 if (state.route == AuthRoute.ACTIVE) Text(stringResource(R.string.auth_authorization_notice))
+                if(requestAccess!=null && state.route in listOf(AuthRoute.ACTIVE,AuthRoute.PENDING_APPROVAL)) Button(onClick=requestAccess){Text(stringResource(R.string.access_request_access))}
                 if (state.message != AuthMessage.CONFIGURATION) {
                     Button(onClick = refresh) { Text(stringResource(R.string.auth_refresh_status)) }
                     TextButton(onClick = signOut) { Text(stringResource(R.string.auth_sign_out)) }

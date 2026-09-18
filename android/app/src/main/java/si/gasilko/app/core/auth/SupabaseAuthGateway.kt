@@ -3,6 +3,8 @@ package si.gasilko.app.core.auth
 import android.content.Context
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.createSupabaseClient
+import io.github.jan.supabase.auth.FlowType
+import io.github.jan.supabase.auth.providers.Google
 import io.github.jan.supabase.auth.Auth
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.auth.providers.builtin.Email
@@ -43,6 +45,9 @@ class SupabaseAuthGateway(private val client: SupabaseClient, scope: CoroutineSc
             else -> if (e.statusCode == 401 || e.statusCode == 403) AuthMessage.EXPIRED else AuthMessage.ERROR
         })
     } catch (_: Exception) { throw AuthFailure(AuthMessage.ERROR) }
+    override suspend fun startGoogle() = request { client.auth.signInWith(Google); Unit }
+    override suspend fun completeGoogle(code: String) = request { client.auth.exchangeCodeForSession(code); Unit }
+    fun accessGateway() = si.gasilko.app.core.access.SupabaseAccessGateway(client)
     override suspend fun signIn(email: String, password: String) = request {
         client.auth.signInWith(Email) { this.email = email; this.password = password }; Unit
     }
@@ -72,7 +77,14 @@ class SupabaseAuthGateway(private val client: SupabaseClient, scope: CoroutineSc
             if (uri.scheme != "https" || uri.host.isNullOrBlank()) return null
             val client = createSupabaseClient(url, key) {
                 defaultLogLevel = LogLevel.NONE
-                install(Auth) { sessionManager = KeystoreSessionManager(context.applicationContext) }
+                install(Auth) {
+                    val encrypted = KeystoreSessionManager(context.applicationContext)
+                    sessionManager = encrypted
+                    codeVerifierCache = encrypted
+                    flowType = FlowType.PKCE
+                    scheme = BuildConfig.AUTH_REDIRECT_SCHEME
+                    host = "auth-callback"
+                }
                 install(Postgrest)
             }
             return SupabaseAuthGateway(client, scope)

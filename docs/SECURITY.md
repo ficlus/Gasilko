@@ -1,5 +1,19 @@
 # Security foundation
 
+## M1.4 Google and request boundary
+
+Google uses existing Supabase authorization and provisioning. Web uses SSR PKCE; Android validates exact callback scheme/host, rejects fragments/errors/duplicate or missing codes, then exchanges using the encrypted persisted verifier. Callback possession alone grants no app access. Provider secrets stay in Supabase; never log codes/tokens. Identity linking is delegated to Supabase with no client-email merge.
+
+Pending/active users discover exactly organization id/name/code/type/administrative_area_id through a scoped RPC, limited to active, geographically assigned organizations. Geography remains authenticated reference data. Own history additionally reveals historical organization name and request role/status/time. Protected organization/profile/membership policies remain unchanged.
+
+Creation accepts organization and role only, derives auth.uid(), validates account/organization/area/country and own membership, locks applicant profile and relies on a partial unique pending-pair index. Direct client mutations and history deletion are denied. Definers have explicit ownership, empty search paths, qualified names and authenticated-only EXECUTE. Requests never grant membership or activate profiles.
+
+New tests cover impersonation, ADMIN, forged approval/reviewer/time, edits/deletion, cross-user reads, duplicates, inactive organizations and existing members; real local Auth integration tests concurrent submissions. Previous RLS suites remain. Google metadata fixtures exercise the same trigger. External provider/device acceptance is manual: see [Google authentication](GOOGLE_AUTH.md).
+
+M1.5 must independently authorize reviewers, lock applicant profile before pending request, and atomically change membership/review/allowed account status with trusted audit and bootstrap safeguards. Existing membership permissions do not constitute a request approval endpoint. No client review or bootstrap path is implemented.
+
+## Existing foundation and milestone history
+
 Client applications contain no privileged secrets. Public Supabase URLs and publishable keys may be mapped explicitly into clients later; Supabase secret/service-role keys, CLI tokens and Firebase admin credentials belong only in trusted server environments. M0 reads no environment secrets and initializes no SDK clients. Never enumerate all environment variables into Next config or Android BuildConfig. Any future server secret reader must be guarded with Next.js server-only boundaries and authorization tests.
 
 Authentication is not authorization. RLS is mandatory for protected domain tables and storage objects. Approved membership, account state and role must restrict every organization request, including direct API calls; UI visibility is insufficient. Pending, suspended and cross-organization access must be denied. Privileged operations execute in trusted database functions or backend code and explicitly authorize the actor even when using a key that bypasses RLS.
