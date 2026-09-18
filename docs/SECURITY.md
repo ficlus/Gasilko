@@ -1,5 +1,19 @@
 # Security foundation
 
+## M1.5 current administrative boundary
+
+Review authority is ACTIVE + organization role: MANAGER reviews only FIREFIGHTER; ADMIN reviews FIREFIGHTER/MANAGER. Queue projection exposes display name and request/organization metadata only. Server-rendered Web review routes revalidate Auth identity, profile status and own reviewer membership, while RPC checks remain authoritative on every action. The existing ADMIN-only root shell remains ADMIN-only; managers receive only `/[locale]/admin/requests`.
+
+Approval, membership creation, allowed activation, review metadata and audit commit atomically. Rejection never activates or creates membership. SUSPENDED/REJECTED applicants cannot be approved. No global profile-edit grant is added. Existing memberships return ALREADY_MEMBER and are not overwritten. Direct request mutation remains denied.
+
+Every direct membership write passes a database trigger, preserving M1.2 role restrictions and serializing on a private organization row. Authority is checked again after the lock, preventing stale authorization from concurrent role removal. Final ADMIN removal/demotion is rejected. Actual serialization-row updates also protect stronger isolation levels by forcing stale writers to abort. Deadlocks/serialization failures are safe rollbacks requiring whole-transaction retry.
+
+First-admin bootstrap is a private postgres-only operation, inaccessible to anon/authenticated/service_role and absent from exposed schemas. It validates eligible target, active organization and zero ADMIN under the same lock. [ADMIN_BOOTSTRAP](ADMIN_BOOTSTRAP.md) specifies verified operator attribution and staging/production steps. No bootstrap UI or global super-admin exists.
+
+Audit writes come from private database functions/triggers; client-supplied actor/time or provider metadata is never accepted. Application writes use auth.uid(), bootstrap uses its trusted verified operator, and raw maintenance uses a clearly marked database-system principal. Audit is append-only, with no client/service-role write grants and mutation/truncate rejection triggers. Only ACTIVE organization ADMIN can read that organization's security history. No email/profile enumeration is introduced.
+
+The previous milestone sections below are historical; M1.5 supersedes their deferred approval/bootstrap/audit/last-admin notes. External Google provider and physical-device acceptance remain manual; CI covers real local Auth, approval with an existing session, adversarial SQL/RPC calls, audit rollback, and independent-connection concurrency.
+
 ## M1.4 Google and request boundary
 
 Google uses existing Supabase authorization and provisioning. Web uses SSR PKCE; Android validates exact callback scheme/host, rejects fragments/errors/duplicate or missing codes, then exchanges using the encrypted persisted verifier. Callback possession alone grants no app access. Provider secrets stay in Supabase; never log codes/tokens. Identity linking is delegated to Supabase with no client-email merge.

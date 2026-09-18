@@ -23,8 +23,8 @@ fun AuthScreen(model: AuthViewModel = viewModel()) {
     val state by model.state.collectAsStateWithLifecycle()
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { model.refresh() }
     var requests by remember { mutableStateOf(false) }
-    LaunchedEffect(state.route) { if(state.route==AuthRoute.UNAUTHENTICATED) requests=false }
-    if(requests && state.route in listOf(AuthRoute.ACTIVE,AuthRoute.PENDING_APPROVAL)) AccessScreen(model.access,{requests=false},{requests=false;model.signOut()})
+    LaunchedEffect(state.route) { if(state.route==AuthRoute.UNAUTHENTICATED || state.route==AuthRoute.ACTIVE) requests=false }
+    if(requests && state.route in listOf(AuthRoute.ACTIVE,AuthRoute.PENDING_APPROVAL)) AccessScreen(model.access,{requests=false},{requests=false;model.signOut()},model::refresh)
     else AuthContent(state, model::signIn, model::signUp, model::refresh, model::signOut, model::google, {requests=true})
 }
 @Composable

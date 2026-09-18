@@ -27,5 +27,7 @@ jobs:
       - run: supabase test db
       - name: Real local Auth signup, session and RLS integration
         run: node supabase/tests/auth.integration.mjs
+      - name: Review and last-admin concurrency
+        run: node supabase/tests/review.concurrency.mjs
       - if: always()
         run: supabase stop --no-backup
