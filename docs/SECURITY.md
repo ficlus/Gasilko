@@ -1,5 +1,13 @@
 # Security foundation
 
+## M2.1 hydrant default-deny boundary
+
+`hydrants` and `hydrant_types` have RLS enabled with no policies. All table privileges are revoked from PUBLIC, anon, authenticated and service_role; no temporary CRUD/read/delete access exists, including for ACTIVE organization ADMIN. Existing M1 authorization is unchanged. Only trusted database maintenance can manipulate the foundation until M2.2 defines scoped CRUD and actor authorization.
+
+The postgres-owned, empty-search-path `private.assign_hydrant_code(uuid,uuid,uuid)` is inaccessible to all API roles, including service_role. Its explicit organization/hydrant pair prevents accidental cross-organization allocation; row locking and an atomic per-organization counter prevent duplicate issuance. The private reservation ledger authorizes the first code assignment without trusting client-settable session flags. Direct assignment, replacement and clearing are rejected by the hydrant trigger. Private counters and reservations have no API privileges and retain committed identifiers even after trusted physical deletion. They are permanent operational records and must not be purged. Prefixes remain reserved after organization renames; conflicting reuse fails closed. See DATABASE.md for the precise allocation/retry contract.
+
+Database triggers enforce global/same-organization type ownership, immutable identities/ownership, server timestamps and server versioning. Profile FKs require valid actor identities; they do not establish actor authority. M2.1 has no client mutation path. M2.2 must derive actors from authenticated identity, authorize membership/account state/role, and control editable columns before exposing CRUD or allocation. Future optimistic sync requires an expected-version condition; the server-maintained version column alone is not a conflict API. No M2.2 policy or M3 sync is implemented here.
+
 ## M1.5 current administrative boundary
 
 Review authority is ACTIVE + organization role: MANAGER reviews only FIREFIGHTER; ADMIN reviews FIREFIGHTER/MANAGER. Queue projection exposes display name and request/organization metadata only. Server-rendered Web review routes revalidate Auth identity, profile status and own reviewer membership, while RPC checks remain authoritative on every action. The existing ADMIN-only root shell remains ADMIN-only; managers receive only `/[locale]/admin/requests`.

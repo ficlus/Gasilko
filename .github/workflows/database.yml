@@ -29,5 +29,7 @@ jobs:
         run: node supabase/tests/auth.integration.mjs
       - name: Review and last-admin concurrency
         run: node supabase/tests/review.concurrency.mjs
+      - name: Hydrant code allocation concurrency
+        run: node supabase/tests/hydrant.concurrency.mjs
       - if: always()
         run: supabase stop --no-backup
