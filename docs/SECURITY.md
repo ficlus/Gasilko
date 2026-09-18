@@ -1,5 +1,15 @@
 # Security foundation
 
+## M2.2 current hydrant boundary
+
+Hydrant/type reads now use ACTIVE profile plus organization-specific membership/role RLS. FIREFIGHTER sees only active hydrants; MANAGER/ADMIN see own inactive hydrants too. Global active types require membership somewhere; local types require own membership (inactive local types are ADMIN-only). No direct client INSERT/UPDATE/DELETE/UPSERT/TRUNCATE is granted. service_role has no new table or function privileges.
+
+Six authenticated-only, postgres-owned, empty-search-path RPCs explicitly authorize each operation and derive actors from auth.uid(). Creation/status are available to members, master edits and activation changes to MANAGER/ADMIN, and local type management to ADMIN. Strict field allowlists reject ownership, actor, code, version and timestamp forgery. A foreign or inaccessible target never returns data. The private M2.1 allocator remains inaccessible to clients.
+
+Expected versions are mandatory for existing hydrant mutations, checked under row lock. The shared organization security lock and caller profile lock prevent queued mutations from retaining concurrently revoked authority. All application mutations and their scoped audit events commit together; rejected/no-op calls produce no audit. Audit payloads omit free-form text and secrets. Existing ADMIN-only audit visibility is unchanged. [HYDRANT_API.md](HYDRANT_API.md) specifies the complete API, error and concurrency contract.
+
+The M2.1 default-deny SELECT and deferred actor notes below are historical. M2.2 supersedes them without changing M1 policies, M2.1 schema invariants or the permanent code reservation rules. No M3 synchronization or client UI is included.
+
 ## M2.1 hydrant default-deny boundary
 
 `hydrants` and `hydrant_types` have RLS enabled with no policies. All table privileges are revoked from PUBLIC, anon, authenticated and service_role; no temporary CRUD/read/delete access exists, including for ACTIVE organization ADMIN. Existing M1 authorization is unchanged. Only trusted database maintenance can manipulate the foundation until M2.2 defines scoped CRUD and actor authorization.

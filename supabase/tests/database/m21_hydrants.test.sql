@@ -131,7 +131,8 @@ select pg_temp.new_hydrant('{"id":"e2100000-0000-4000-8000-000000000037"}');
 select throws_ok($$select private.assign_hydrant_code('e2100000-0000-4000-8000-000000000011','e2100000-0000-4000-8000-000000000037','e2100000-0000-4000-8000-000000000001')$$,'22003',null,'exhaustion fails rather than reusing or truncating');
 select ok((select code is null and version=1 from public.hydrants where id='e2100000-0000-4000-8000-000000000037'),'failed allocation atomic');
 select ok((select bool_and(relrowsecurity) from pg_class where oid in ('public.hydrants'::regclass,'public.hydrant_types'::regclass)),'both tables have RLS');
-select is((select count(*)::integer from pg_policies where schemaname='public' and tablename in ('hydrants','hydrant_types')),0,'no temporary broad policies');
+-- M2.2 adds scoped SELECT policies; the M2.1 no-direct-write boundary remains.
+select is((select count(*)::integer from pg_policies where schemaname='public' and tablename in ('hydrants','hydrant_types') and cmd <> 'SELECT'),0,'no direct mutation policies');
 select ok(not has_table_privilege('anon','public.hydrants','SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER'),'anon has no public.hydrants privileges');
 select ok(not has_table_privilege('anon','public.hydrant_types','SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER'),'anon has no public.hydrant_types privileges');
 select ok(not has_table_privilege('anon','private.hydrant_code_counters','SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER'),'anon has no private.hydrant_code_counters privileges');
@@ -143,15 +144,15 @@ select throws_ok($$delete from public.hydrants$$,'42501',null,'anon direct hydra
 select throws_ok($$select * from public.hydrant_types$$,'42501',null,'anon direct hydrant_types read denied');
 select throws_ok($$delete from public.hydrant_types$$,'42501',null,'anon direct hydrant_types delete denied');
 reset role;
-select ok(not has_table_privilege('authenticated','public.hydrants','SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER'),'authenticated has no public.hydrants privileges');
-select ok(not has_table_privilege('authenticated','public.hydrant_types','SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER'),'authenticated has no public.hydrant_types privileges');
+select ok(not has_table_privilege('authenticated','public.hydrants','INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER'),'authenticated has no public.hydrants mutation privileges');
+select ok(not has_table_privilege('authenticated','public.hydrant_types','INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER'),'authenticated has no public.hydrant_types mutation privileges');
 select ok(not has_table_privilege('authenticated','private.hydrant_code_counters','SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER'),'authenticated has no private.hydrant_code_counters privileges');
 select ok(not has_table_privilege('authenticated','private.hydrant_code_assignments','SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER'),'authenticated has no private.hydrant_code_assignments privileges');
 select ok(not has_function_privilege('authenticated','private.assign_hydrant_code(uuid,uuid,uuid)','EXECUTE'),'authenticated cannot execute allocator');
 set local role authenticated;
-select throws_ok($$select * from public.hydrants$$,'42501',null,'authenticated direct hydrants read denied');
+select is((select count(*)::integer from public.hydrants),0,'authenticated without identity sees no hydrants');
 select throws_ok($$delete from public.hydrants$$,'42501',null,'authenticated direct hydrants delete denied');
-select throws_ok($$select * from public.hydrant_types$$,'42501',null,'authenticated direct hydrant_types read denied');
+select is((select count(*)::integer from public.hydrant_types),0,'authenticated without identity sees no types');
 select throws_ok($$delete from public.hydrant_types$$,'42501',null,'authenticated direct hydrant_types delete denied');
 reset role;
 select ok(not has_table_privilege('service_role','public.hydrants','SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER'),'service_role has no public.hydrants privileges');
@@ -170,4 +171,3 @@ update public.hydrant_types set created_at='2000-01-01',updated_at='2000-01-01' 
 select ok((select created_at>'2000-01-02' and updated_at>'2000-01-02' from public.hydrant_types where id='30000000-0000-4000-8000-000000000001'),'type timestamps server-maintained');
 select * from finish();
 rollback;
-
