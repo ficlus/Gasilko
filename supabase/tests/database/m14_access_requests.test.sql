@@ -25,6 +25,7 @@ select private.provision_profile('c1000000-0000-4000-8000-000000000001');
 select is((select count(*)::integer from public.profiles where id='c1000000-0000-4000-8000-000000000001'),1,'repeated Google login and provisioning do not duplicate profile');
 insert into public.user_organizations(user_id,organization_id,role) values ('c1000000-0000-4000-8000-000000000003','c2000000-0000-4000-8000-000000000001','FIREFIGHTER');
 set local role anon;
+select throws_ok($test$insert into public.organization_access_requests(user_id,organization_id,requested_role) values ('c1000000-0000-4000-8000-000000000001','c2000000-0000-4000-8000-000000000001','FIREFIGHTER')$test$,'42501',null,'anonymous direct creation denied');
 select throws_ok($test$select public.request_organization_access('c2000000-0000-4000-8000-000000000001','FIREFIGHTER')$test$,'42501',null,'anonymous RPC creation denied');
 select throws_ok($test$select * from public.discover_organizations('10000000-0000-4000-8000-000000000001')$test$,'42501',null,'anonymous discovery denied');
 select throws_ok($test$select * from public.list_my_access_requests()$test$,'42501',null,'anonymous history denied');
