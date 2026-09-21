@@ -38,7 +38,15 @@ class HydrantContractTest {
     @Test fun collidingOtherActorNeverAcknowledged()=runTest{val w=Wire().apply{prior=JsonObject(record.jsonObject+mapOf("created_by" to JsonPrimitive("other")))};try{OnlineHydrantRepository(w).create("a","h",HydrantForm("h","t",address="Street").fields());fail()}catch(e:RegistryFailure){assertEquals(RegistryError.FORBIDDEN,e.reason)};assertEquals(0,w.rpcCalls)}
     @Test fun networkMappedWithoutLeakingException()=runTest{val w=Wire().apply{fail=true};try{OnlineHydrantRepository(w).list(HydrantQuery("a"));fail()}catch(e:RegistryFailure){assertEquals(RegistryError.NETWORK,e.reason);assertNull(e.message)}}
     @Test fun missingDetailMapsUnavailable()=runTest{try{OnlineHydrantRepository(Wire()).get("a","missing");fail()}catch(e:RegistryFailure){assertEquals(RegistryError.UNAVAILABLE,e.reason)}}
-    @Test fun scalarAndArrayRpcResponsesDecode(){assertEquals(decodeHydrant(record),decodeHydrant(JsonArray(listOf(record))))}
+    @Test fun scalarAndArrayRpcResponsesDecode(){
+        val metadata=JsonObject(record.jsonObject + mapOf("created_at" to JsonPrimitive("2026-09-01T10:00:00Z"),
+            "updated_at" to JsonPrimitive("2026-09-02T10:00:00Z"), "updated_by" to JsonPrimitive("editor")))
+        val decoded=decodeHydrant(metadata)
+        assertEquals(decoded,decodeHydrant(JsonArray(listOf(metadata))))
+        assertEquals("2026-09-01T10:00:00Z",decoded.createdAt)
+        assertEquals("2026-09-02T10:00:00Z",decoded.updatedAt)
+        assertEquals("editor",decoded.updatedBy)
+    }
     @Test fun membershipsAndOrganizationsPageWithoutMixingRosters()=runTest {
         val calls=mutableListOf<Triple<String,Map<String,String?>,String?>>()
         val wire=object: RegistryTransport {

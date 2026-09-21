@@ -88,7 +88,9 @@ class RoomHydrantRepository(
         require(row.organization == organization)
         dao.upsertHydrants(listOf(HydrantEntity.from(account, row)))
         // Returned values also cross the same Room boundary as normal detail reads.
-        get(organization, row.id)
+        val stored = dao.get(account, organization, row.id)!!.value
+        checkAccount(account)
+        stored
     }
     override suspend fun create(organization: String, id: String, fields: HydrantFields) =
         write(organization) { online.create(organization, id, fields) }
