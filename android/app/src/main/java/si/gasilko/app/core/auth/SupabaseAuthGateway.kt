@@ -48,9 +48,14 @@ class SupabaseAuthGateway(private val client: SupabaseClient, scope: CoroutineSc
     override suspend fun startGoogle() = request { client.auth.awaitInitialization(); client.auth.signInWith(Google); Unit }
     override suspend fun completeGoogle(code: String) = request { client.auth.awaitInitialization(); client.auth.exchangeCodeForSession(code); Unit }
     fun accessGateway() = si.gasilko.app.core.access.SupabaseAccessGateway(client)
-    fun hydrantRepository() = si.gasilko.app.feature.hydrants.data.OnlineHydrantRepository(
-        si.gasilko.app.feature.hydrants.data.SupabaseRegistryTransport(client)
-    ) { operation, reason -> android.util.Log.w("HydrantRegistry", "$operation: ${reason.name}") }
+    fun hydrantRepository(context: Context): si.gasilko.app.feature.hydrants.domain.HydrantRepository {
+        val transport = si.gasilko.app.feature.hydrants.data.SupabaseRegistryTransport(client)
+        val online = si.gasilko.app.feature.hydrants.data.OnlineHydrantRepository(transport) { operation, reason ->
+            android.util.Log.w("HydrantRegistry", "$operation: ${reason.name}")
+        }
+        return si.gasilko.app.feature.hydrants.data.RoomHydrantRepository(
+            si.gasilko.app.core.database.RegistryDatabase.open(context), online, transport::actor)
+    }
     override suspend fun signIn(email: String, password: String) = request {
         client.auth.signInWith(Email) { this.email = email; this.password = password }; Unit
     }

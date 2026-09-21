@@ -1,6 +1,7 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+    id("org.jetbrains.kotlin.kapt")
     id("org.jetbrains.kotlin.plugin.compose")
 }
 android {
@@ -29,6 +30,7 @@ android {
     lint { abortOnError = true }
 }
 kotlin { jvmToolchain(17) }
+kapt { arguments { arg("room.schemaLocation", "$projectDir/schemas") } }
 dependencies {
     implementation(platform("io.github.jan-tennert.supabase:bom:3.6.0"))
     implementation("io.github.jan-tennert.supabase:auth-kt")
@@ -44,6 +46,7 @@ dependencies {
     implementation("androidx.compose.ui:ui")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     implementation("androidx.room:room-runtime:2.8.4")
+    kapt("androidx.room:room-compiler:2.8.4")
     implementation("androidx.work:work-runtime-ktx:2.11.2")
     androidTestImplementation(platform("androidx.compose:compose-bom:2025.12.01"))
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")

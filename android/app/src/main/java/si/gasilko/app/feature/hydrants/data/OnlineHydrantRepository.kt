@@ -46,7 +46,8 @@ fun decodeHydrant(value: JsonElement): Hydrant {
     return Hydrant(row.text("id")!!,row.text("organization_id")!!,row.text("code"),row.text("hydrant_type_id")!!,
         HydrantStatus.valueOf(row.text("status")!!),row.text("latitude")?.toDouble(),row.text("longitude")?.toDouble(),
         row.text("address"),row.text("location_description"),row.text("notes"),row.text("inspection_interval_months")?.toInt(),
-        row.text("active").toBoolean(),row.text("version")!!.toLong(),row.text("created_by").orEmpty())
+        row.text("active").toBoolean(),row.text("version")!!.toLong(),row.text("created_by").orEmpty(),
+        row.text("created_at"),row.text("updated_at"),row.text("updated_by"))
 }
 class OnlineHydrantRepository(private val wire: RegistryTransport, private val diagnostic: (String,RegistryError)->Unit = {_,_->}): HydrantRepository {
     private suspend fun <T> request(operation: String, block: suspend ()->T): T = try { block() }
