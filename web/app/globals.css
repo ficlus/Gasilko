@@ -13,3 +13,26 @@ input, select, button { font: inherit; padding: .75rem; border: 1px solid #58717
 button { cursor: pointer; background: #005c70; color: white; }
 button:disabled { opacity: .6; cursor: wait; }
 .actions { display: flex; gap: 1rem; flex-wrap: wrap; }
+
+.registry-main { max-width: 72rem; margin: 3rem auto; }
+.registry { display: grid; gap: 1.25rem; min-width: 0; }
+.registry-toolbar { display: flex; flex-wrap: wrap; gap: 1rem; align-items: end; }
+.registry-toolbar select { max-width: 100%; }
+.registry-checkbox { display: flex; align-items: center; }
+.registry-table { overflow-x: auto; max-width: 100%; }
+.registry table { border-collapse: collapse; width: 100%; }
+.registry th, .registry td { text-align: start; padding: .8rem; border-bottom: 1px solid #b5c5ca; overflow-wrap: anywhere; }
+.registry caption { text-align: start; font-weight: 600; padding-block: .75rem; }
+.registry-fields, .hydrant-fields { margin: 0; }
+.hydrant-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr)); gap: 1rem; }
+.hydrant-fields dt { font-weight: 600; }
+.hydrant-fields dd { margin: .4rem 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.registry fieldset { display: grid; gap: 1rem; border: 1px solid #58717a; border-radius: .4rem; min-width: 0; }
+.registry input, .registry select, .registry textarea { box-sizing: border-box; max-width: 100%; min-width: 0; }
+.registry textarea { font: inherit; padding: .75rem; min-height: 6rem; }
+.registry-detail-actions { display: grid; gap: 1rem; }
+.registry dialog { max-width: min(30rem, 80vw); border: 1px solid #58717a; border-radius: .5rem; }
+.registry dialog::backdrop { background: #122d3599; }
+.registry :focus-visible { outline: 3px solid #005c70; outline-offset: 3px; }
+.registry [role=alert] { border-inline-start: 4px solid #9d3618; padding: .75rem; }
+@media (max-width: 40rem) { .registry-main { margin: 1rem auto; padding: 1rem; } .registry-toolbar > label { width: 100%; } .registry table { min-width: 36rem; } }
