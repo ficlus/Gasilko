@@ -15,6 +15,7 @@ import si.gasilko.app.feature.hydrants.presentation.*
 import java.util.Locale
 
 class HydrantScreenTest {
+    @Test fun searchNoMatchesAndClear(){val m=show(Fake(RegistryRole.FIREFIGHTER));compose.onNodeWithTag("filters").performClick();compose.onNodeWithTag("filter-active").assertDoesNotExist();compose.onNodeWithTag("search-input").performTextInput("absent");compose.onNodeWithTag("apply-filters").performScrollTo().performClick();compose.waitForIdle();compose.runOnIdle{assertTrue(m.state.value.rows.isEmpty());assertEquals("absent",m.state.value.query.search)};compose.onNodeWithTag("filters").performClick();compose.onNodeWithTag("clear-filters").performScrollTo().performClick();compose.waitForIdle();compose.runOnIdle{assertEquals(1,m.state.value.rows.size);assertFalse(m.state.value.query.filtered)}}
     @get:Rule val compose=createComposeRule()
     private val scope=CoroutineScope(SupervisorJob()+Dispatchers.Main.immediate)
     @After fun close(){scope.cancel()}
@@ -23,7 +24,7 @@ class HydrantScreenTest {
         var writes=0;var conflict=false
         override suspend fun organizations()=listOf(RegistryOrganization("a","Station A",role))
         override suspend fun types(organization:String)=listOf(HydrantType("t",null,"CUSTOM","Custom type",true))
-        override suspend fun list(organization:String,includeInactive:Boolean,after:String?)=if(row.active || includeInactive)listOf(row)else emptyList()
+        override suspend fun list(query:HydrantQuery,after:String?)=listOf(row).filter(query::matches)
         override suspend fun get(organization:String,id:String)=row
         override suspend fun create(organization:String,id:String,fields:HydrantFields):Hydrant{writes++;row=row.copy(id=id,address=fields.address);return row}
         override suspend fun update(organization:String,id:String,fields:HydrantFields,version:Long):Hydrant{writes++;row=row.copy(notes=fields.notes,version=version+1);return row}

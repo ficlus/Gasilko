@@ -115,4 +115,12 @@
     <string name="h_your_draft">Vaš ohranjeni vnos</string>
     <string name="h_form_notice">Za shranjevanje potrebujete povezavo. Neshranjeni obrazec ni shranjen na napravi.</string>
     <string name="h_organization_inactive">Organizacija je neaktivna; na voljo je le ogled.</string>
+    <string name="h_search">Poišči hidrante</string>
+    <string name="h_search_hint">Oznaka, naslov ali opis lokacije</string>
+    <string name="h_filters">Filtri</string>
+    <string name="h_all">Vsi</string>
+    <string name="h_active_only">Samo aktivni</string>
+    <string name="h_inactive_only">Samo neaktivni</string>
+    <string name="h_clear_filters">Počisti filtre</string>
+    <string name="h_no_matches">Noben hidrant ne ustreza filtrom.</string>
 </resources>

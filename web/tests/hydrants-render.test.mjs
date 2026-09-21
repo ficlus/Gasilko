@@ -10,6 +10,7 @@ import { RegistryController } from '../lib/hydrants/controller.ts';
 registerHooks({
   resolve(specifier, context, next) {
     if(specifier==='next/link')return next('next/link.js',context);
+    if(specifier==='next/navigation')return next('next/navigation.js',context);
     try{return next(specifier,context)}catch(error){
       if(specifier.startsWith('.'))for(const suffix of ['.ts','.tsx'])try{return next(specifier+suffix,context)}catch{ /* Try the next source extension. */ }
       throw error;
@@ -34,4 +35,5 @@ test('rendered German detail uses localized statuses and actions',async()=>{cons
 test('rendered create form has dynamic type, labels and no editable identity',async()=>{const html=await render('FIREFIGHTER','new');assert.ok(html.includes('Custom hydrant'));assert.ok(html.includes('for="hydrant-latitude"'));assert.ok(html.includes('for="hydrant-type"'));assert.ok(!html.includes('hydrant-code'));assert.ok(!html.includes('expected_version'))});
 test('rendered firefighter direct edit route has safe error and no form',async()=>{const html=await render('FIREFIGHTER','edit');assert.ok(html.includes('role="alert"'));assert.ok(!html.includes('<form'))});
 test('rendered manager confirmation is labeled and cancel receives focus',async()=>{const html=await render('MANAGER','detail','sl',c=>c.requestActive());assert.ok(html.includes('<dialog'));assert.ok(html.includes('aria-labelledby="deactivate-heading"'));assert.ok(html.includes('autofocus=""'));assert.ok(html.includes('Prekliči'))});
-test('rendered registry table has caption, headers, organization and scoped links',async()=>{const html=await render('MANAGER','list');assert.ok(html.includes('<caption>Station A'));assert.ok(html.includes('scope="col"'));assert.ok(html.includes('scope="row"'));assert.ok(html.includes('/h?org=a'));assert.ok(html.includes('Vključi neaktivne'))});
+test('rendered registry table has caption, headers, organization and scoped links',async()=>{const html=await render('MANAGER','list');assert.ok(html.includes('<caption>Station A'));assert.ok(html.includes('scope="col"'));assert.ok(html.includes('scope="row"'));assert.ok(html.includes('/h?org=a'));assert.ok(html.includes('Samo neaktivni'))});
+test('rendered firefighter search exposes no inactive filter and submits explicitly',async()=>{const html=await render('FIREFIGHTER','list');assert.ok(html.includes('method="get"'));assert.ok(html.includes('name="q"'));assert.ok(html.includes('name="type"'));assert.ok(html.includes('name="status"'));assert.ok(!html.includes('name="active"'));assert.ok(!html.includes('name="after"'))});

@@ -115,4 +115,12 @@
     <string name="h_your_draft">Ihr beibehaltener Entwurf</string>
     <string name="h_form_notice">Zum Speichern ist eine Verbindung erforderlich. Ein ungespeichertes Formular wird nicht dauerhaft auf dem Gerät gespeichert.</string>
     <string name="h_organization_inactive">Die Organisation ist inaktiv; nur Lesen ist möglich.</string>
+    <string name="h_search">Hydranten suchen</string>
+    <string name="h_search_hint">Kennung, Adresse oder Standort</string>
+    <string name="h_filters">Filter</string>
+    <string name="h_all">Alle</string>
+    <string name="h_active_only">Nur aktive</string>
+    <string name="h_inactive_only">Nur inaktive</string>
+    <string name="h_clear_filters">Filter zurücksetzen</string>
+    <string name="h_no_matches">Keine Hydranten entsprechen den Filtern.</string>
 </resources>

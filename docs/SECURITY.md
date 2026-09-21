@@ -1,5 +1,9 @@
 # Security foundation
 
+## M2.5 read-only search
+
+`search_hydrants` uses SECURITY INVOKER with existing table RLS, validates ACTIVE identity and scoped membership, and separately limits firefighters to active records. Only authenticated has EXECUTE. Search is bound literal `strpos(lower(...), needle)` data, never SQL/PostgREST fragments; pages are capped at 100. No direct write, type visibility or actor privilege is broadened. See [search security and verification](HYDRANT_SEARCH.md).
+
 ## M2.2 current hydrant boundary
 
 Hydrant/type reads now use ACTIVE profile plus organization-specific membership/role RLS. FIREFIGHTER sees only active hydrants; MANAGER/ADMIN see own inactive hydrants too. Global active types require membership somewhere; local types require own membership (inactive local types are ADMIN-only). No direct client INSERT/UPDATE/DELETE/UPSERT/TRUNCATE is granted. service_role has no new table or function privileges.

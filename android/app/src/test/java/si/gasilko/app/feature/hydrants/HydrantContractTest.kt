@@ -11,6 +11,8 @@ import si.gasilko.app.R
 import java.io.IOException
 
 class HydrantContractTest {
+    @Test fun searchUsesBoundedTypedRpcWithoutFilterSyntax()=runTest {val w=Wire();OnlineHydrantRepository(w).list(HydrantQuery("a",search=" %_'(), ",type="t",status=HydrantStatus.NOT_WORKING,active=ActiveFilter.INACTIVE),"cursor");assertEquals("search_hydrants",w.name);assertEquals("%_'(),",w.args["search_text"]!!.jsonPrimitive.content);assertEquals("inactive",w.args["active_filter"]!!.jsonPrimitive.content);assertEquals("NOT_WORKING",w.args["status_filter"]!!.jsonPrimitive.content);assertEquals("t",w.args["type_id"]!!.jsonPrimitive.content);assertEquals("cursor",w.args["after_id"]!!.jsonPrimitive.content);assertEquals(100,w.args["page_size"]!!.jsonPrimitive.int)}
+    @Test fun decimalNotationMatchesWebRules(){invalid(HydrantForm("x","t",latitude="1e1",longitude="14"),RegistryError.COORDINATES);invalid(HydrantForm("x","t",latitude="0x1.0p1",longitude="14"),RegistryError.COORDINATES)}
     private fun invalid(form: HydrantForm,error: RegistryError){try{form.fields();fail("Expected validation")}catch(e: RegistryFailure){assertEquals(error,e.reason)}}
     @Test fun addressAndDescriptionLocations(){assertEquals("Street",HydrantForm("x","t",address=" Street ").fields().address);assertEquals("Station",HydrantForm("x","t",description="Station").fields().description)}
     @Test fun coordinateBoundariesAndDecimalComma(){assertEquals(-90.0,HydrantForm("x","t",latitude="-90",longitude="180").fields().latitude!!,0.0);assertEquals(46.5,HydrantForm("x","t",latitude="46,5",longitude="14,2").fields().latitude!!,0.0)}
@@ -27,14 +29,14 @@ class HydrantContractTest {
         var name="";var args=buildJsonObject{};var prior:JsonElement?=null;var fail=false;var rpcCalls=0;var filters:Map<String,String?> = emptyMap()
         override fun actor()="me"
         override suspend fun rows(table:String,filters:Map<String,String?>,after:String?):JsonArray {this.filters=filters;if(fail)throw IOException();return JsonArray(listOfNotNull(prior))}
-        override suspend fun rpc(name:String,arguments:JsonObject):JsonElement {this.name=name;args=arguments;rpcCalls++;return record}
+        override suspend fun rpc(name:String,arguments:JsonObject):JsonElement {this.name=name;args=arguments;rpcCalls++;if(fail)throw IOException();return if(name=="search_hydrants")JsonArray(listOf(record))else record}
     }
     @Test fun statusUsesDedicatedRpcAndVersion()=runTest{val w=Wire();OnlineHydrantRepository(w).changeStatus("a","h",HydrantStatus.WORKING,7);assertEquals("change_hydrant_status",w.name);assertEquals(7,w.args["expected_version"]!!.jsonPrimitive.int);assertEquals(setOf("organization","hydrant_id","expected_version","new_status"),w.args.keys)}
     @Test fun masterAndActiveUseNarrowRpcs()=runTest{val w=Wire();val r=OnlineHydrantRepository(w);r.update("a","h",HydrantForm("h","t",address="Street").fields(),8);assertEquals("update_hydrant",w.name);assertFalse(w.args["changes"]!!.jsonObject.containsKey("status"));r.setActive("a","h",false,9);assertEquals("set_hydrant_active",w.name);assertEquals(9,w.args["expected_version"]!!.jsonPrimitive.int)}
     @Test fun createPassesStableUuidAndNoActor()=runTest{val w=Wire();OnlineHydrantRepository(w).create("a","h",HydrantForm("h","t",address="Street").fields());assertEquals("h",w.args["hydrant_id"]!!.jsonPrimitive.content);assertEquals(setOf("organization","hydrant_id","hydrant_type","fields"),w.args.keys)}
     @Test fun uncertainCreateReconcilesOwnUuidWithoutDuplicateRpc()=runTest{val w=Wire().apply{prior=record};val h=OnlineHydrantRepository(w).create("a","h",HydrantForm("h","t",address="Street").fields());assertEquals("A-H-000001",h.code);assertEquals(0,w.rpcCalls);assertEquals(mapOf("organization_id" to "a","id" to "h"),w.filters)}
     @Test fun collidingOtherActorNeverAcknowledged()=runTest{val w=Wire().apply{prior=JsonObject(record.jsonObject+mapOf("created_by" to JsonPrimitive("other")))};try{OnlineHydrantRepository(w).create("a","h",HydrantForm("h","t",address="Street").fields());fail()}catch(e:RegistryFailure){assertEquals(RegistryError.FORBIDDEN,e.reason)};assertEquals(0,w.rpcCalls)}
-    @Test fun networkMappedWithoutLeakingException()=runTest{val w=Wire().apply{fail=true};try{OnlineHydrantRepository(w).list("a",false);fail()}catch(e:RegistryFailure){assertEquals(RegistryError.NETWORK,e.reason);assertNull(e.message)}}
+    @Test fun networkMappedWithoutLeakingException()=runTest{val w=Wire().apply{fail=true};try{OnlineHydrantRepository(w).list(HydrantQuery("a"));fail()}catch(e:RegistryFailure){assertEquals(RegistryError.NETWORK,e.reason);assertNull(e.message)}}
     @Test fun missingDetailMapsUnavailable()=runTest{try{OnlineHydrantRepository(Wire()).get("a","missing");fail()}catch(e:RegistryFailure){assertEquals(RegistryError.UNAVAILABLE,e.reason)}}
     @Test fun scalarAndArrayRpcResponsesDecode(){assertEquals(decodeHydrant(record),decodeHydrant(JsonArray(listOf(record))))}
     @Test fun membershipsAndOrganizationsPageWithoutMixingRosters()=runTest {

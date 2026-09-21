@@ -12,7 +12,8 @@ data class RegistryState(
     val organizations: List<RegistryOrganization> = emptyList(), val organization: RegistryOrganization? = null,
     val rows: List<Hydrant> = emptyList(), val types: List<HydrantType> = emptyList(), val selected: Hydrant? = null,
     val form: HydrantForm? = null, val reviewDraft: HydrantForm? = null,
-    val loading: Boolean = false, val mutating: Boolean = false, val includeInactive: Boolean = false,
+    val loading: Boolean = false, val mutating: Boolean = false,
+    val query: HydrantQuery = HydrantQuery(), val filterDraft: HydrantQuery = HydrantQuery(),
     val more: Boolean = false, val error: RegistryError? = null, val conflict: Boolean = false,
     val confirmDeactivate: Boolean = false, val reloadId: String? = null,
 ) { val manages get() = organization?.role?.manages == true; val writable get() = organization?.active == true }
@@ -35,9 +36,9 @@ class HydrantViewModel(private val repository: HydrantRepository, private val in
                 val organizations=repository.organizations()
                 val org=organizations.find { it.id==old.organization?.id } ?: organizations.firstOrNull()
                 val same=org?.id==old.organization?.id
-                val inactive=same && old.includeInactive && org?.role?.manages==true
+                val query=if(org==null)HydrantQuery() else (if(same)old.query else HydrantQuery()).copy(organization=org.id).normalized(org.role)
                 val types=org?.let { repository.types(it.id) }.orEmpty()
-                val rows=org?.let { repository.list(it.id,inactive) }.orEmpty()
+                val rows=org?.let { repository.list(query) }.orEmpty()
                 var detail: Hydrant?=null; var unavailable: RegistryError?=null
                 val detailId=old.selected?.id ?: old.reloadId ?: old.reviewDraft?.id
                 if(same && detailId!=null && org!=null) try { detail=repository.get(org.id,detailId) }
@@ -46,7 +47,7 @@ class HydrantViewModel(private val repository: HydrantRepository, private val in
                 val keepForm=same && (old.form?.baseVersion==null || org?.role?.manages==true)
                 mutableState.value=old.copy(organizations=organizations,organization=org,types=types,rows=rows,
                     selected=detail,form=old.form.takeIf { keepForm },reviewDraft=old.reviewDraft.takeIf { same },
-                    includeInactive=inactive,loading=false,more=rows.size==100,error=unavailable,reloadId=null)
+                    query=query,filterDraft=query,loading=false,more=rows.size==100,error=unavailable,reloadId=null)
             } catch(e: CancellationException) { throw e }
             catch(e: Exception) { if(stamp==generation) {
                 val error=reason(e)
@@ -63,12 +64,16 @@ class HydrantViewModel(private val repository: HydrantRepository, private val in
         mutableState.value=RegistryState(organizations=state.value.organizations,organization=org)
         refresh()
     }
-    fun includeInactive(value: Boolean) { if(!state.value.manages || state.value.loading || state.value.mutating)return; mutableState.value=state.value.copy(includeInactive=value);refresh() }
+    fun changeFilters(value: HydrantQuery) { val s=state.value;val org=s.organization?:return
+        if(!s.loading && !s.mutating && s.selected==null && s.form==null)mutableState.value=s.copy(filterDraft=value.copy(organization=org.id,search=value.search.take(200),active=if(s.manages)value.active else ActiveFilter.ACTIVE)) }
+    fun applyFilters() { val s=state.value;if(s.loading || s.mutating || s.selected!=null || s.form!=null)return
+        mutableState.value=s.copy(query=s.filterDraft.normalized(s.organization?.role?:RegistryRole.FIREFIGHTER),rows=emptyList(),more=false);refresh() }
+    fun clearFilters() {changeFilters(HydrantQuery());applyFilters()}
     fun loadMore() {
         val old=state.value;val org=old.organization?:return
         if(old.loading || old.mutating || !old.more)return
         mutableState.value=old.copy(loading=true);val stamp=generation
-        start { try { val page=repository.list(org.id,old.includeInactive,old.rows.lastOrNull()?.id)
+        start { try { val page=repository.list(old.query,old.rows.lastOrNull()?.id)
             if(stamp==generation)mutableState.value=old.copy(rows=(old.rows+page).distinctBy { it.id },loading=false,more=page.size==100,error=null)
         }catch(e: CancellationException){throw e}catch(e: Exception){if(stamp==generation)mutableState.value=old.copy(error=reason(e))} }
     }
@@ -119,7 +124,7 @@ class HydrantViewModel(private val repository: HydrantRepository, private val in
             try {
                 val result=action()
                 if(stamp!=generation)return@start
-                mutableState.value=old.copy(selected=result,form=null,reviewDraft=null,mutating=false,conflict=false,error=null)
+                mutableState.value=old.copy(selected=result,rows=old.rows.map { if(it.id==result.id)result else it }.filter { old.query.matches(it) },form=null,reviewDraft=null,mutating=false,conflict=false,error=null)
                 // A failed refresh must never turn an acknowledged mutation into an apparent failed submit.
                 refresh()
             }catch(e: CancellationException){throw e}
@@ -129,7 +134,7 @@ class HydrantViewModel(private val repository: HydrantRepository, private val in
                 if(error==RegistryError.CONFLICT && old.selected!=null) {
                     try { val latest=repository.get(org.id,old.selected.id)
                         if(stamp==generation)mutableState.value=old.copy(selected=latest,
-                            rows=old.rows.map { if(it.id==latest.id)latest else it }.filter { old.includeInactive || it.active },
+                            rows=old.rows.map { if(it.id==latest.id)latest else it }.filter { old.query.matches(it) },
                             form=null,reviewDraft=old.form,mutating=false,conflict=true,error=null)
                     }catch(c: CancellationException){throw c}catch(f: Exception){if(stamp==generation)mutableState.value=old.copy(selected=null,form=null,reviewDraft=old.form,mutating=false,conflict=true,error=reason(f),reloadId=old.selected.id)}
                 } else if(error==RegistryError.FORBIDDEN || error==RegistryError.EXPIRED || error==RegistryError.UNAVAILABLE) {

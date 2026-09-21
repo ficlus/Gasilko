@@ -35,5 +35,7 @@ jobs:
         run: node supabase/tests/hydrant.authorization.integration.mjs
       - name: Hydrant authorization and version concurrency
         run: node supabase/tests/hydrant.authorization.concurrency.mjs
+      - name: Hydrant search REST and 2101-row query plans
+        run: node supabase/tests/hydrant.search.integration.mjs
       - if: always()
         run: supabase stop --no-backup

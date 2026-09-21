@@ -32,7 +32,7 @@ export function payload(f: Fields, create: boolean) {
 export interface HydrantService {
   organizations(): Promise<Organization[]>;
   types(org: string): Promise<HydrantType[]>;
-  list(org: string, inactive: boolean, after?: string): Promise<Hydrant[]>;
+  list(query: import('./query.ts').HydrantQuery): Promise<Hydrant[]>;
   get(org: string, id: string): Promise<Hydrant>;
   create(org: string, id: string, fields: Fields): Promise<Hydrant>;
   update(org: string, id: string, fields: Fields, version: number): Promise<Hydrant>;

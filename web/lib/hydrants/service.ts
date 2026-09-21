@@ -47,11 +47,10 @@ export function hydrantService(client: SupabaseClient): HydrantService {
       return organizations.flatMap(o => { const m = memberships.find(m => m.organization_id === o.id); return m && ['FIREFIGHTER','MANAGER','ADMIN'].includes(m.role) ? [{ ...o, role: m.role }] : []; });
     },
     async types(org) { return [...await pages<HydrantType>('hydrant_types', 'id,organization_id,code,name,active', { organization_id: null }), ...await pages<HydrantType>('hydrant_types', 'id,organization_id,code,name,active', { organization_id: org })]; },
-    async list(org, inactive, after) {
-      let q = client.from('hydrants').select('*').eq('organization_id', org).order('id').limit(50);
-      if (!inactive) q = q.eq('active', true);
-      if (after) q = q.gt('id', after);
-      return checked(await q) as Hydrant[];
+    async list(q) {
+      return checked(await client.rpc('search_hydrants', { organization: q.organizationId,
+        search_text: q.search.trim(), type_id: q.typeId ?? null, status_filter: q.status ?? null,
+        active_filter: q.active, after_id: q.after ?? null, page_size: 50 })) as Hydrant[];
     },
     async get(org, id) { const rows = await find(org, id); if (!rows.length) throw new RegistryError('unavailable'); return record(rows[0]); },
     async create(org, id, f) {

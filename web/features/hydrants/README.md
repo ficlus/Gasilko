@@ -1,5 +1,9 @@
 # Web hydrant registry — M2.4
 
+## M2.5 integration
+
+List reads now use typed `HydrantQuery` and the bounded read-only `search_hydrants` RPC. Search/type/status/active controls submit explicitly and reset UUID pagination. Validated URL state (`org`, `q`, `type`, `status`, `active`, `after`) survives refresh/back/forward and is retained in detail/edit return links. Pages replace the current 50-row result; the older Load more/include-inactive behavior below is superseded. Organization switching navigates with reset filters. See [shared semantics, security, index rationale and performance verification](../../../docs/HYDRANT_SEARCH.md). Distance/nearby → M4; inspection due/overdue → M5.
+
 Routes under `/[locale]/hydrants` (Slovenian `sl`, German `de`): list, `/new`, `/[id]` detail and `/[id]/edit`. An optional catch-all page validates these shapes and UUIDs, validates the existing Auth user/account on every server navigation, and redirects locked accounts through the existing account flow. The account page links ACTIVE users to the registry. No second authentication system is introduced.
 
 `lib/hydrants/domain.ts` owns typed records, drafts, validation, capabilities and mutation field allowlists. `service.ts` encapsulates every hydrant read and the four M2.2 RPCs using the existing browser Supabase client and RLS. `controller.ts` manages loading/content/error/refresh, scoped organization state, mutation guards and conflict review. React consumes typed state through `useSyncExternalStore`; no raw hydrant query is issued by a component. No privileged keys, direct writes, grants, schema changes or new dependencies are needed.
