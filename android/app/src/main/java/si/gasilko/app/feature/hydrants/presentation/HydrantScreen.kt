@@ -11,6 +11,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -18,6 +19,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import si.gasilko.app.R
 import si.gasilko.app.feature.hydrants.domain.*
 
+fun activeLabel(active: ActiveFilter): Int = when(active) { ActiveFilter.ACTIVE->R.string.h_active_only; ActiveFilter.INACTIVE->R.string.h_inactive_only; ActiveFilter.ALL->R.string.h_all }
 fun statusLabel(status: HydrantStatus): Int = when(status) {
     HydrantStatus.WORKING -> R.string.h_working
     HydrantStatus.NOT_WORKING -> R.string.h_not_working
@@ -61,6 +63,8 @@ fun HydrantScreen(model: HydrantViewModel, requestAccess: ()->Unit = {}, signOut
     val state by model.state.collectAsStateWithLifecycle()
     LaunchedEffect(model) { model.refresh() }
     val busy=state.loading || state.mutating
+    var showFilters by remember { mutableStateOf(false) }
+    val keyboard=LocalSoftwareKeyboardController.current
     BackHandler(state.selected!=null || state.form!=null) { if(state.form!=null)model.cancelForm() else model.back() }
     Scaffold { padding -> Column(Modifier.fillMaxSize().padding(padding).imePadding().padding(horizontal=16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
         Text(stringResource(R.string.h_title),style=MaterialTheme.typography.headlineMedium)
@@ -81,13 +85,24 @@ fun HydrantScreen(model: HydrantViewModel, requestAccess: ()->Unit = {}, signOut
             else -> {
                 if(state.organization!=null) {
                     Button(onClick=model::add,enabled=!busy && state.writable,modifier=Modifier.testTag("add")){Text(stringResource(R.string.h_add))}
-                    if(state.manages)Row {
-                        Checkbox(checked=state.includeInactive,onCheckedChange=model::includeInactive,enabled=!busy,modifier=Modifier.testTag("include-inactive"))
-                        Text(stringResource(R.string.h_include_inactive),modifier=Modifier.padding(top=12.dp))
-                    }
+                    TextButton(onClick={showFilters=!showFilters},enabled=!busy,modifier=Modifier.testTag("filters")){Text(stringResource(R.string.h_filters))}
+                    if(state.query.filtered)Text(listOfNotNull(state.query.search.takeIf{it.isNotBlank()},state.query.type?.let { typeName(state.types.find { type->type.id==it }) },state.query.status?.let{stringResource(statusLabel(it))},stringResource(activeLabel(state.query.active))).joinToString(" · "))
                 }
                 LazyColumn(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(8.dp)) {
-                    if(!busy && state.rows.isEmpty())item { Text(stringResource(if(state.organization==null)R.string.h_no_organization else R.string.h_empty)) }
+                    if(showFilters && state.organization!=null)item {
+                        Column(verticalArrangement=Arrangement.spacedBy(8.dp)) {
+                            val q=state.filterDraft
+                            OutlinedTextField(q.search,{model.changeFilters(q.copy(search=it.take(200)))},label={Text(stringResource(R.string.h_search_hint))},enabled=!busy,modifier=Modifier.fillMaxWidth().testTag("search-input"))
+                            Choice(stringResource(R.string.h_type),q.type?.let { typeName(state.types.find { type->type.id==it }) } ?: stringResource(R.string.h_all),
+                                listOf("" to stringResource(R.string.h_all))+state.types.map { it.id to typeName(it) },!busy,"filter-type",{model.changeFilters(q.copy(type=it.ifBlank{null}))})
+                            Choice(stringResource(R.string.h_status),q.status?.let{stringResource(statusLabel(it))} ?: stringResource(R.string.h_all),
+                                listOf("" to stringResource(R.string.h_all))+HydrantStatus.entries.map{it.name to stringResource(statusLabel(it))},!busy,"filter-status",{model.changeFilters(q.copy(status=it.takeIf{it.isNotBlank()}?.let(HydrantStatus::valueOf)))})
+                            if(state.manages)Choice(stringResource(R.string.h_active_state),stringResource(activeLabel(q.active)),ActiveFilter.entries.map{it.name to stringResource(activeLabel(it))},!busy,"filter-active",{model.changeFilters(q.copy(active=ActiveFilter.valueOf(it)))})
+                            Button(onClick={keyboard?.hide();model.applyFilters();showFilters=false},enabled=!busy,modifier=Modifier.testTag("apply-filters")){Text(stringResource(R.string.h_search))}
+                            TextButton(onClick={keyboard?.hide();model.clearFilters();showFilters=false},enabled=!busy,modifier=Modifier.testTag("clear-filters")){Text(stringResource(R.string.h_clear_filters))}
+                        }
+                    }
+                    if(!busy && state.rows.isEmpty())item { Text(stringResource(if(state.organization==null)R.string.h_no_organization else if(state.query.filtered)R.string.h_no_matches else R.string.h_empty)) }
                     items(state.rows,key={it.id}) { h ->
                         OutlinedCard(onClick={model.open(h.id)},enabled=!busy,modifier=Modifier.fillMaxWidth().testTag("hydrant-${h.id}")) {
                             Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(4.dp)) {

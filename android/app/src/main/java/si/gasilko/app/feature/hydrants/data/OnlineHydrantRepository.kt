@@ -85,8 +85,12 @@ class OnlineHydrantRepository(private val wire: RegistryTransport, private val d
         (all("hydrant_types",mapOf("organization_id" to null)) + all("hydrant_types",mapOf("organization_id" to organization)))
             .map { HydrantType(it.text("id")!!,it.text("organization_id"),it.text("code")!!,it.text("name")!!,it.text("active").toBoolean()) }
     }
-    override suspend fun list(organization: String, includeInactive: Boolean, after: String?) = request("list") {
-        wire.rows("hydrants",mapOf("organization_id" to organization) + if(includeInactive) emptyMap() else mapOf("active" to "true"),after).map(::decodeHydrant)
+    override suspend fun list(query: HydrantQuery, after: String?) = request("list") {
+        wire.rpc("search_hydrants",buildJsonObject {
+            put("organization",query.organization);put("search_text",query.search.trim());put("type_id",query.type)
+            put("status_filter",query.status?.name);put("active_filter",query.active.name.lowercase())
+            put("after_id",after);put("page_size",100)
+        }).jsonArray.map(::decodeHydrant)
     }
     override suspend fun get(organization: String, id: String) = request("detail") {
         wire.rows("hydrants",mapOf("organization_id" to organization,"id" to id)).singleOrNull()?.let(::decodeHydrant)

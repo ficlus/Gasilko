@@ -1,5 +1,9 @@
 # Android foundation
 
+## M2.5 search and filters
+
+The registry now uses domain `HydrantQuery` through `HydrantRepository.list(query,after)`. Search/type/status/active draft and applied state live in the ViewModel. Expand Filters, then explicitly Search or Clear; no requests occur per keystroke. Organization changes reset the whole query; active/inactive/all is available only to MANAGER/ADMIN. Applied filters reconcile successful/conflicting mutations and reload bounded results. The older M2.3 include-inactive checkbox is superseded. [Shared search semantics and M3 replacement contract](../docs/HYDRANT_SEARCH.md) document literals, case, type visibility, pagination and tests. Distance/nearby → M4; inspection due/overdue → M5.
+
 ## M2.3 online hydrant registry
 
 ACTIVE accounts enter the registry through the existing Auth gate. `feature/hydrants/domain` defines domain models and the `HydrantRepository` interface; `data/OnlineHydrantRepository` maps JSON transport records and calls existing M2.2 reads/RPCs; `presentation/HydrantViewModel` owns state and operations; Compose consumes domain state only. No database grants, credentials, dependencies, Room entities or sync workers are added.

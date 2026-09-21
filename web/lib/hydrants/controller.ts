@@ -1,16 +1,17 @@
 import { draftFrom, emptyDraft, failure, fields, manages, RegistryError, type Draft, type Failure, type Hydrant, type HydrantService, type HydrantType, type Organization, type Status } from './domain.ts';
+import { defaultFilters, matches, roleFilters, type RegistryFilters } from './query.ts';
 export type Mode = 'list' | 'detail' | 'new' | 'edit';
-export type RegistryState = { organizations: Organization[]; org?: Organization; rows: Hydrant[]; types: HydrantType[]; selected?: Hydrant; draft?: Draft; loading: boolean; busy: boolean; error?: Failure; conflict: boolean; reviewed: boolean; confirm: boolean; inactive: boolean; more: boolean; saved?: Hydrant };
-const initial = (): RegistryState => ({ organizations: [], rows: [], types: [], loading: true, busy: false, conflict: false, reviewed: false, confirm: false, inactive: false, more: false });
+export type RegistryState = { organizations: Organization[]; org?: Organization; rows: Hydrant[]; types: HydrantType[]; selected?: Hydrant; draft?: Draft; loading: boolean; busy: boolean; error?: Failure; conflict: boolean; reviewed: boolean; confirm: boolean; filters: RegistryFilters; more: boolean; saved?: Hydrant };
+const initial = (): RegistryState => ({ organizations: [], rows: [], types: [], loading: true, busy: false, conflict: false, reviewed: false, confirm: false, filters: defaultFilters(), more: false });
 // UI state only. Authorization is always enforced by RLS/RPCs.
 export class RegistryController {
   service: HydrantService; mode: Mode; id?: string; preferred?: string;
   private value = initial(); private listeners = new Set<() => void>(); private generation = 0; private running = false;
-  constructor(service: HydrantService, mode: Mode, id?: string, preferred?: string) { this.service = service; this.mode = mode; this.id = id; this.preferred = preferred; }
+  constructor(service: HydrantService, mode: Mode, id?: string, preferred?: string, filters = defaultFilters()) { this.service = service; this.mode = mode; this.id = id; this.preferred = preferred; this.value.filters = filters; }
   snapshot = () => this.value;
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
   private set(update: Partial<RegistryState>) { this.value = { ...this.value, ...update }; this.listeners.forEach(l => l()); }
-  clear() { this.generation++; this.running = false; this.value = { ...initial(), loading: false, error: 'expired' }; this.listeners.forEach(l => l()); }
+  clear() { this.generation++; this.running = false; this.value = { ...initial(), filters: this.value.filters, loading: false, error: 'expired' }; this.listeners.forEach(l => l()); }
   async load(orgId = this.value.org?.id ?? this.preferred) {
     if (this.running || this.value.busy) return;
     this.running = true; const stamp = this.generation; const old = this.value;
@@ -20,14 +21,14 @@ export class RegistryController {
       if (stamp !== this.generation) return;
       const org = orgId ? organizations.find(o => o.id === orgId) : organizations[0];
       if (!org) { this.set({ ...initial(), loading: false, organizations, error: 'forbidden' }); return; }
-      const inactive = manages(org.role) && old.inactive;
+      const filters = roleFilters(old.filters, org.role);
       const types = await this.service.types(org.id);
-      const rows = this.mode === 'list' ? await this.service.list(org.id, inactive) : [];
+      const rows = this.mode === 'list' ? await this.service.list({ organizationId: org.id, ...filters }) : [];
       const selected = this.id ? await this.service.get(org.id, this.id) : undefined;
       if (stamp !== this.generation) return;
       if (this.mode === 'edit' && !manages(org.role)) throw new RegistryError('forbidden');
       const draft = this.mode === 'new' ? old.draft ?? emptyDraft(crypto.randomUUID()) : this.mode === 'edit' && selected ? old.draft ?? draftFrom(selected) : undefined;
-      this.set({ organizations, org, types, rows, selected, draft, inactive, more: rows.length === 50, loading: false });
+      this.set({ organizations, org, types, rows, selected, draft, filters, more: rows.length === 50, loading: false });
     } catch (e) { if (stamp === this.generation) this.fail(e, true); }
     finally { if (stamp === this.generation) this.running = false; }
   }
@@ -41,11 +42,12 @@ export class RegistryController {
     this.generation++; this.value = { ...initial(), loading: false };
     this.listeners.forEach(l => l()); await this.load(id);
   }
-  async includeInactive(value: boolean) { if (!manages(this.value.org?.role) || this.running || this.value.busy) return; this.set({ inactive: value }); await this.load(); }
+  async applyFilters(filters: RegistryFilters) { if (this.running || this.value.busy || this.mode !== 'list') return; this.set({ filters: { ...filters, after: undefined }, rows: [], more: false }); await this.load(); }
   async more() {
     const s = this.value; if (this.running || s.busy || !s.org || !s.more) return;
     this.running = true; const stamp = this.generation; this.set({ loading: true, error: undefined });
-    try { const page = await this.service.list(s.org.id, s.inactive, s.rows.at(-1)?.id); if (stamp === this.generation) this.set({ rows: [...s.rows, ...page.filter(h => !s.rows.some(old => old.id === h.id))], more: page.length === 50, loading: false }); }
+    const filters = { ...s.filters, after: s.rows.at(-1)?.id };
+    try { const page = await this.service.list({ organizationId: s.org.id, ...filters }); if (stamp === this.generation) this.set({ rows: page, filters, more: page.length === 50, loading: false }); }
     catch (e) { if (stamp === this.generation) this.fail(e); }
     finally { if (stamp === this.generation) this.running = false; }
   }
@@ -79,7 +81,7 @@ export class RegistryController {
     const stamp = this.generation; this.set({ busy: true, error: undefined });
     try {
       const selected = await action(); if (stamp !== this.generation) return;
-      this.set({ selected, busy: false, confirm: false, conflict: false, reviewed: false, ...(this.mode === 'new' || this.mode === 'edit' ? { saved: selected, draft: undefined } : {}) });
+      this.set({ selected, rows: old.rows.map(h => h.id === selected.id ? selected : h).filter(h => matches(h, old.filters)), busy: false, confirm: false, conflict: false, reviewed: false, ...(this.mode === 'new' || this.mode === 'edit' ? { saved: selected, draft: undefined } : {}) });
     } catch (e) {
       if (stamp !== this.generation) return;
       if (failure(e) === 'conflict' && old.selected && old.org) {

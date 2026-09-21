@@ -1,5 +1,7 @@
 # Hydrant authorization API — M2.2
 
+M2.5 adds the authenticated read-only `search_hydrants` RPC. See [search contract](HYDRANT_SEARCH.md) for literal substring/AND filter semantics, invoker/RLS authorization, UUID cursors, bounds and index rationale. The mutation contracts below remain unchanged.
+
 All permissions require an authenticated ACTIVE profile and membership in the relevant organization. Roles are scoped per organization, never inferred from provider metadata or a role in another organization. Anonymous has no table/RPC access. Pending, suspended, rejected and unaffiliated identities read no protected rows and cannot mutate. Read policies retain membership-based historical access when an organization is inactive; all mutations additionally require the organization to be active.
 
 | Operation | FIREFIGHTER | MANAGER | ADMIN |

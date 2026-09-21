@@ -4,6 +4,16 @@ enum class RegistryRole { FIREFIGHTER, MANAGER, ADMIN;
     val manages: Boolean get() = this != FIREFIGHTER
 }
 enum class HydrantStatus { WORKING, NOT_WORKING, NEEDS_INSPECTION, UNKNOWN }
+enum class ActiveFilter { ACTIVE, INACTIVE, ALL }
+data class HydrantQuery(val organization: String = "", val search: String = "", val type: String? = null,
+    val status: HydrantStatus? = null, val active: ActiveFilter = ActiveFilter.ACTIVE) {
+    fun normalized(role: RegistryRole) = copy(search=search.trim().take(200),active=if(role==RegistryRole.FIREFIGHTER)ActiveFilter.ACTIVE else active)
+    val filtered get() = search.isNotBlank() || type!=null || status!=null || active!=ActiveFilter.ACTIVE
+    /** Reconcile visible rows only; repository performs the actual bounded query. */
+    fun matches(h: Hydrant): Boolean = h.organization==organization && (type==null || h.type==type) &&
+        (status==null || h.status==status) && (active==ActiveFilter.ALL || h.active==(active==ActiveFilter.ACTIVE)) &&
+        (search.isBlank() || listOf(h.code,h.address,h.description).any { it?.contains(search.trim(),ignoreCase=true)==true })
+}
 data class RegistryOrganization(val id: String, val name: String, val role: RegistryRole, val active: Boolean = true)
 data class HydrantType(val id: String, val organization: String?, val code: String, val name: String, val active: Boolean)
 data class Hydrant(
@@ -27,7 +37,9 @@ data class HydrantForm(
         if (type.isBlank()) throw RegistryFailure(RegistryError.TYPE)
         fun coordinate(text: String): Double? {
             if (text.isBlank()) return null
-            return text.trim().replace(',', '.').toDoubleOrNull()?.takeIf { it.isFinite() }
+            val decimal=text.trim().replace(',', '.')
+            if(!Regex("[+-]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)").matches(decimal)) throw RegistryFailure(RegistryError.COORDINATES)
+            return decimal.toDoubleOrNull()?.takeIf { it.isFinite() }
                 ?: throw RegistryFailure(RegistryError.COORDINATES)
         }
         val lat = coordinate(latitude); val lon = coordinate(longitude)
@@ -48,7 +60,7 @@ data class HydrantForm(
 interface HydrantRepository {
     suspend fun organizations(): List<RegistryOrganization>
     suspend fun types(organization: String): List<HydrantType>
-    suspend fun list(organization: String, includeInactive: Boolean, after: String? = null): List<Hydrant>
+    suspend fun list(query: HydrantQuery, after: String? = null): List<Hydrant>
     suspend fun get(organization: String, id: String): Hydrant
     suspend fun create(organization: String, id: String, fields: HydrantFields): Hydrant
     suspend fun changeStatus(organization: String, id: String, status: HydrantStatus, version: Long): Hydrant

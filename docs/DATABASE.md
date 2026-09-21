@@ -1,5 +1,9 @@
 # Database foundation
 
+## M2.5 registry search
+
+Migration `20260921140000_hydrant_search.sql` adds the SECURITY INVOKER `search_hydrants` read RPC and `(organization_id,id)` B-tree. Existing RLS, type visibility, mutation grants, audit and code/version rules are unchanged. [Search documentation](HYDRANT_SEARCH.md) defines validation, bounded keyset pages, literal case-insensitive substrings, security tests and 2,101-row EXPLAIN verification. No trigram extension or PostGIS is introduced.
+
 ## M2.2 current hydrant authorization
 
 Migration `20260918150000_hydrant_authorization.sql` adds scoped SELECT policies and six controlled mutation RPCs. ACTIVE organization members read active hydrants; MANAGER/ADMIN also read inactive hydrants. Active global types require an ACTIVE member in at least one organization; active local types require own membership, and ADMIN may read inactive own types. Mutations require an active organization. Direct client writes remain revoked; no M1 read/audit authority is broadened.

@@ -1,11 +1,13 @@
 'use client';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { dictionary, type Locale } from '../../lib/i18n';
 import { browserClient } from '../../lib/supabase/browser';
 import { hydrantService } from '../../lib/hydrants/service';
 import { RegistryController, type Mode } from '../../lib/hydrants/controller';
 import { manages, statuses, type Draft, type Failure, type Hydrant, type HydrantType, type Status } from '../../lib/hydrants/domain';
+import { defaultFilters, hasFilters, queryString, type RegistryFilters } from '../../lib/hydrants/query';
 type Text = ReturnType<typeof dictionary>;
 export function statusLabel(t: Text, status: Status) { return { WORKING: t.hWorking, NOT_WORKING: t.hNotWorking, NEEDS_INSPECTION: t.hNeedsInspection, UNKNOWN: t.hUnknown }[status]; }
 function errorLabel(t: Text, error: Failure) { return { network: t.hNetwork, expired: t.hExpired, forbidden: t.hForbidden, validation: t.hValidation, conflict: t.hConflict, server: t.hServer, unavailable: t.hUnavailable, location: t.hLocation, coordinates: t.hCoordinates, interval: t.hInvalidInterval, type: t.hInvalidType }[error]; }
@@ -14,8 +16,9 @@ function typeLabel(t: Text, type?: HydrantType) {
   const seeded: Record<string, string> = { ABOVE_GROUND: t.hAboveGround, UNDERGROUND: t.hUnderground, WALL: t.hWall, OTHER: t.hOther };
   return (type.organization_id === null ? seeded[type.code] : undefined) ?? type.name;
 }
-export function Registry({ locale, mode, id, org }: { locale: Locale; mode: Mode; id?: string; org?: string }) {
-  const [controller] = useState(() => { const client = browserClient(); return client ? new RegistryController(hydrantService(client), mode, id, org) : null; });
+export function Registry({ locale, mode, id, org, filters }: { locale: Locale; mode: Mode; id?: string; org?: string; filters: RegistryFilters }) {
+  const router = useRouter();
+  const [controller] = useState(() => { const client = browserClient(); return client ? new RegistryController(hydrantService(client), mode, id, org, filters) : null; });
   useEffect(() => {
     if (!controller) return;
     void controller.load();
@@ -23,7 +26,7 @@ export function Registry({ locale, mode, id, org }: { locale: Locale; mode: Mode
     const listener = c?.auth.onAuthStateChange(event => { if (event === 'SIGNED_OUT') controller.clear(); });
     return () => { listener?.data.subscription.unsubscribe(); controller.clear(); };
   }, [controller]);
-  return controller ? <RegistryView locale={locale} controller={controller}/> : <p role="alert">{dictionary(locale).configuration}</p>;
+  return controller ? <RegistryView locale={locale} controller={controller} switchOrg={id => router.push(`/${locale}/hydrants` + queryString(id, defaultFilters()))}/> : <p role="alert">{dictionary(locale).configuration}</p>;
 }
 function DetailFields({ h, types, t }: { h: Hydrant; types: HydrantType[]; t: Text }) {
   const values: [string, string | number | null][] = [[t.hCode, h.code], [t.hType, typeLabel(t, types.find(v => v.id === h.hydrant_type_id))], [t.hStatus, statusLabel(t, h.status)], [t.hLatitude, h.latitude], [t.hLongitude, h.longitude], [t.hAddress, h.address], [t.hDescription, h.location_description], [t.hNotes, h.notes], [t.hInterval, h.inspection_interval_months], [t.hActive, h.active ? t.hActive : t.hInactive], [t.hVersion, h.version]];
@@ -40,15 +43,15 @@ function Confirmation({ controller, t, busy, error }: { controller: RegistryCont
     <div className="actions"><button autoFocus disabled={busy} onClick={() => controller.dismiss()}>{t.hCancel}</button><button disabled={busy} onClick={() => void controller.confirm()}>{busy ? t.hSaving : t.hDeactivate}</button></div>
   </dialog>;
 }
-export function RegistryView({ locale, controller }: { locale: Locale; controller: RegistryController }) {
+export function RegistryView({ locale, controller, switchOrg }: { locale: Locale; controller: RegistryController; switchOrg?: (id: string) => void }) {
   const s = useSyncExternalStore(controller.subscribe, controller.snapshot, controller.snapshot);
-  const t = dictionary(locale), root = `/${locale}/hydrants`, query = s.org ? `?org=${encodeURIComponent(s.org.id)}` : '';
+  const t = dictionary(locale), root = `/${locale}/hydrants`, query = s.org ? queryString(s.org.id,s.filters) : '';
   const blocked = s.loading || s.busy, manager = manages(s.org?.role), writable = !!s.org?.active;
   const alert = useRef<HTMLParagraphElement>(null);
   useEffect(() => { if (s.error || s.conflict) alert.current?.focus(); }, [s.error, s.conflict]);
   const current = s.selected;
   return <section className="registry" aria-busy={blocked}>
-    <div className="registry-toolbar"><label>{t.selectOrganization}<select value={s.org?.id ?? ''} disabled={blocked || controller.mode !== 'list' || s.organizations.length < 2} onChange={e => void controller.switchOrganization(e.target.value)}>
+    <div className="registry-toolbar"><label>{t.selectOrganization}<select value={s.org?.id ?? ''} disabled={blocked || controller.mode !== 'list' || s.organizations.length < 2} onChange={e => switchOrg ? switchOrg(e.target.value) : void controller.switchOrganization(e.target.value)}>
       {!s.org && <option value="">{t.selectOrganization}</option>}{s.organizations.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}</select></label>
       <button disabled={blocked || !!s.saved} onClick={() => void controller.load()}>{s.error ? t.hRetry : t.hRefresh}</button>
       {controller.mode !== 'list' && !s.busy && <Link href={root + query}>{t.hBack}</Link>}
@@ -59,10 +62,20 @@ export function RegistryView({ locale, controller }: { locale: Locale; controlle
     {s.saved ? <><p role="status">{t.hSaved}</p><DetailFields h={s.saved} types={s.types} t={t}/><Link href={`${root}/${s.saved.id}${query}`}>{t.hDetails}</Link></> : <>
     {controller.mode === 'list' && s.org && <>
       <div className="actions">{writable && !blocked && <Link href={root + '/new' + query}>{t.hAdd}</Link>}
-      {manager && <label className="registry-checkbox"><input type="checkbox" checked={s.inactive} disabled={blocked} onChange={e => void controller.includeInactive(e.target.checked)}/>{t.hIncludeInactive}</label>}</div>
-      {!s.loading && !s.error && s.rows.length === 0 && <p>{t.hEmpty}</p>}
+      </div>
+      <form method="get" action={root} className="registry-filters"><fieldset disabled={blocked}><legend>{t.hFilters}</legend><input type="hidden" name="org" value={s.org.id}/>
+        <label>{t.hSearch}<input name="q" type="search" maxLength={200} defaultValue={s.filters.search} placeholder={t.hSearchHint}/></label>
+        <label>{t.hType}<select name="type" defaultValue={s.filters.typeId ?? ''}><option value="">{t.hAll}</option>
+          {s.filters.typeId && !s.types.some(v => v.id === s.filters.typeId) && <option value={s.filters.typeId}>{t.hMissing}</option>}
+          {s.types.map(v => <option key={v.id} value={v.id}>{typeLabel(t,v)} ({v.organization_id ? t.hLocal : t.hGlobal}){!v.active ? ` — ${t.hInactive}` : ''}</option>)}</select></label>
+        <label>{t.hStatus}<select name="status" defaultValue={s.filters.status ?? ''}><option value="">{t.hAll}</option>{statuses.map(v => <option key={v} value={v}>{statusLabel(t,v)}</option>)}</select></label>
+        {manager && <label>{t.hActiveState}<select name="active" defaultValue={s.filters.active}><option value="active">{t.hActiveOnly}</option><option value="inactive">{t.hInactiveOnly}</option><option value="all">{t.hAll}</option></select></label>}
+        <button>{t.hSearch}</button><Link href={root + queryString(s.org.id,defaultFilters())}>{t.hClearFilters}</Link>
+      </fieldset></form>
+      {!s.loading && !s.error && s.rows.length === 0 && <p>{hasFilters(s.filters) || s.filters.after ? t.hNoMatches : t.hEmpty}</p>}
       {s.rows.length > 0 && <div className="registry-table" tabIndex={0} role="region" aria-label={t.hTitle}><table><caption>{s.org.name} — {t.hTitle}</caption><thead><tr>{[t.hCode,t.hType,t.hStatus,t.hAddress,t.hActive].map(label => <th scope="col" key={label}>{label}</th>)}</tr></thead><tbody>{s.rows.map(h => <tr key={h.id}><th scope="row"><Link href={`${root}/${h.id}${query}`}>{h.code ?? t.hMissing}</Link></th><td>{typeLabel(t,s.types.find(v => v.id === h.hydrant_type_id))}</td><td>{statusLabel(t,h.status)}</td><td>{h.address || h.location_description || (h.latitude !== null ? `${h.latitude}, ${h.longitude}` : t.hMissing)}</td><td>{h.active ? t.hActive : t.hInactive}</td></tr>)}</tbody></table></div>}
-      {s.more && <button disabled={blocked} onClick={() => void controller.more()}>{t.loadMore}</button>}
+      <div className="actions">{s.filters.after && <Link href={root + queryString(s.org.id,{...s.filters,after:undefined})}>{t.hFirstPage}</Link>}
+      {s.more && !blocked && <Link href={root + queryString(s.org.id,{...s.filters,after:s.rows.at(-1)?.id})}>{t.hNextPage}</Link>}</div>
     </>}
     {current && (controller.mode === 'detail' || s.conflict) && <>
       <h2>{s.conflict ? t.hLatest : t.hDetails}: {current.code ?? t.hMissing}</h2><DetailFields h={current} types={s.types} t={t}/>
