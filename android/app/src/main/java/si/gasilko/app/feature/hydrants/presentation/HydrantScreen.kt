@@ -56,6 +56,7 @@ private fun Choice(label: String, selected: String, choices: List<Pair<String,St
     }
 }
 @Composable
+@OptIn(ExperimentalLayoutApi::class)
 fun HydrantScreen(model: HydrantViewModel, requestAccess: ()->Unit = {}, signOut: ()->Unit = {}) {
     val state by model.state.collectAsStateWithLifecycle()
     LaunchedEffect(model) { model.refresh() }
@@ -65,7 +66,7 @@ fun HydrantScreen(model: HydrantViewModel, requestAccess: ()->Unit = {}, signOut
         Text(stringResource(R.string.h_title),style=MaterialTheme.typography.headlineMedium)
         Choice(stringResource(R.string.h_organization),state.organization?.name ?: stringResource(R.string.h_select_organization),
             state.organizations.map { it.id to it.name },!busy && state.form==null && state.organizations.size>1,"organization",model::switchOrganization)
-        Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+        FlowRow(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
             TextButton(onClick=model::refresh,enabled=!busy,modifier=Modifier.testTag("refresh")){Text(stringResource(R.string.h_refresh))}
             TextButton(onClick=requestAccess,enabled=!busy && state.form==null){Text(stringResource(R.string.access_request_access))}
             TextButton(onClick=signOut,enabled=!state.mutating){Text(stringResource(R.string.auth_sign_out))}

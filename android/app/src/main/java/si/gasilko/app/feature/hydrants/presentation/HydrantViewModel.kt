@@ -128,7 +128,9 @@ class HydrantViewModel(private val repository: HydrantRepository, private val in
                 val error=reason(e)
                 if(error==RegistryError.CONFLICT && old.selected!=null) {
                     try { val latest=repository.get(org.id,old.selected.id)
-                        if(stamp==generation)mutableState.value=old.copy(selected=latest,form=null,reviewDraft=old.form,mutating=false,conflict=true,error=null)
+                        if(stamp==generation)mutableState.value=old.copy(selected=latest,
+                            rows=old.rows.map { if(it.id==latest.id)latest else it }.filter { old.includeInactive || it.active },
+                            form=null,reviewDraft=old.form,mutating=false,conflict=true,error=null)
                     }catch(c: CancellationException){throw c}catch(f: Exception){if(stamp==generation)mutableState.value=old.copy(selected=null,form=null,reviewDraft=old.form,mutating=false,conflict=true,error=reason(f),reloadId=old.selected.id)}
                 } else if(error==RegistryError.FORBIDDEN || error==RegistryError.EXPIRED || error==RegistryError.UNAVAILABLE) {
                     mutableState.value=old.copy(rows=emptyList(),selected=null,form=null,reviewDraft=null,types=emptyList(),organization=null,mutating=false,error=error)
