@@ -31,5 +31,9 @@ jobs:
         run: node supabase/tests/review.concurrency.mjs
       - name: Hydrant code allocation concurrency
         run: node supabase/tests/hydrant.concurrency.mjs
+      - name: Hydrant Auth and REST authorization
+        run: node supabase/tests/hydrant.authorization.integration.mjs
+      - name: Hydrant authorization and version concurrency
+        run: node supabase/tests/hydrant.authorization.concurrency.mjs
       - if: always()
         run: supabase stop --no-backup
