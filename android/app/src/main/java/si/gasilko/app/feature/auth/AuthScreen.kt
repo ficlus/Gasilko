@@ -25,6 +25,7 @@ fun AuthScreen(model: AuthViewModel = viewModel()) {
     var requests by remember { mutableStateOf(false) }
     LaunchedEffect(state.route) { if(state.route==AuthRoute.UNAUTHENTICATED || state.route==AuthRoute.ACTIVE) requests=false }
     if(requests && state.route in listOf(AuthRoute.ACTIVE,AuthRoute.PENDING_APPROVAL)) AccessScreen(model.access,{requests=false},{requests=false;model.signOut()},model::refresh)
+    else if(state.route == AuthRoute.ACTIVE && model.hydrants != null) si.gasilko.app.feature.hydrants.presentation.HydrantScreen(model.hydrants,{requests=true},model::signOut)
     else AuthContent(state, model::signIn, model::signUp, model::refresh, model::signOut, model::google, {requests=true})
 }
 @Composable

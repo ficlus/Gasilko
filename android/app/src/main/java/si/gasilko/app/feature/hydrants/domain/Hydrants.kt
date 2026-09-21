@@ -1,0 +1,57 @@
+package si.gasilko.app.feature.hydrants.domain
+
+enum class RegistryRole { FIREFIGHTER, MANAGER, ADMIN;
+    val manages: Boolean get() = this != FIREFIGHTER
+}
+enum class HydrantStatus { WORKING, NOT_WORKING, NEEDS_INSPECTION, UNKNOWN }
+data class RegistryOrganization(val id: String, val name: String, val role: RegistryRole, val active: Boolean = true)
+data class HydrantType(val id: String, val organization: String?, val code: String, val name: String, val active: Boolean)
+data class Hydrant(
+    val id: String, val organization: String, val code: String?, val type: String,
+    val status: HydrantStatus, val latitude: Double? = null, val longitude: Double? = null,
+    val address: String? = null, val description: String? = null, val notes: String? = null,
+    val interval: Int? = null, val active: Boolean = true, val version: Long = 1,
+    val createdBy: String = "",
+)
+data class HydrantFields(val type: String, val latitude: Double?, val longitude: Double?,
+    val address: String?, val description: String?, val notes: String?, val interval: Int?,
+    val status: HydrantStatus = HydrantStatus.UNKNOWN)
+enum class RegistryError { NETWORK, EXPIRED, FORBIDDEN, VALIDATION, CONFLICT, SERVER, UNAVAILABLE, LOCATION, COORDINATES, INTERVAL, TYPE }
+class RegistryFailure(val reason: RegistryError) : Exception()
+data class HydrantForm(
+    val id: String, val type: String = "", val latitude: String = "", val longitude: String = "",
+    val address: String = "", val description: String = "", val notes: String = "", val interval: String = "",
+    val status: HydrantStatus = HydrantStatus.UNKNOWN, val baseVersion: Long? = null,
+) {
+    fun fields(): HydrantFields {
+        if (type.isBlank()) throw RegistryFailure(RegistryError.TYPE)
+        fun coordinate(text: String): Double? {
+            if (text.isBlank()) return null
+            return text.trim().replace(',', '.').toDoubleOrNull()?.takeIf { it.isFinite() }
+                ?: throw RegistryFailure(RegistryError.COORDINATES)
+        }
+        val lat = coordinate(latitude); val lon = coordinate(longitude)
+        if ((lat == null) != (lon == null) || (lat != null && lat !in -90.0..90.0) || (lon != null && lon !in -180.0..180.0))
+            throw RegistryFailure(RegistryError.COORDINATES)
+        if (lat == null && address.isBlank() && description.isBlank()) throw RegistryFailure(RegistryError.LOCATION)
+        val months = if (interval.isBlank()) null else interval.trim().toIntOrNull()?.takeIf { it > 0 }
+            ?: throw RegistryFailure(RegistryError.INTERVAL)
+        return HydrantFields(type, lat, lon, address.trim().ifBlank { null }, description.trim().ifBlank { null },
+            notes.trim().ifBlank { null }, months, status)
+    }
+    companion object {
+        fun from(h: Hydrant) = HydrantForm(h.id, h.type, h.latitude?.toString().orEmpty(), h.longitude?.toString().orEmpty(),
+            h.address.orEmpty(), h.description.orEmpty(), h.notes.orEmpty(), h.interval?.toString().orEmpty(), h.status, h.version)
+    }
+}
+/** UI-facing boundary. M3 can replace this online implementation with Room + sync. */
+interface HydrantRepository {
+    suspend fun organizations(): List<RegistryOrganization>
+    suspend fun types(organization: String): List<HydrantType>
+    suspend fun list(organization: String, includeInactive: Boolean, after: String? = null): List<Hydrant>
+    suspend fun get(organization: String, id: String): Hydrant
+    suspend fun create(organization: String, id: String, fields: HydrantFields): Hydrant
+    suspend fun changeStatus(organization: String, id: String, status: HydrantStatus, version: Long): Hydrant
+    suspend fun update(organization: String, id: String, fields: HydrantFields, version: Long): Hydrant
+    suspend fun setActive(organization: String, id: String, active: Boolean, version: Long): Hydrant
+}
