@@ -12,7 +12,7 @@ export function parseFilters(params: Record<string, string | string[] | undefine
     active: one('active') === 'all' || one('active') === 'inactive' ? one('active') as ActiveFilter : 'active',
     after: isUuid(after) ? after : undefined };
 }
-export function roleFilters(filters: RegistryFilters, role: Role): RegistryFilters { return { ...filters, search: filters.search.trim().slice(0,200), active: role === 'FIREFIGHTER' ? 'active' : filters.active }; }
+export function roleFilters(filters: RegistryFilters, role: Role): RegistryFilters { return { ...filters, search: filters.search.trim().slice(0,200), active: role === 'FIREFIGHTER' ? 'active' : filters.active, ...(role === 'FIREFIGHTER' && filters.active !== 'active' ? {after:undefined} : {}) }; }
 export function queryString(org: string, filters: RegistryFilters) {
   const p = new URLSearchParams({ org });
   if (filters.search) p.set('q',filters.search);

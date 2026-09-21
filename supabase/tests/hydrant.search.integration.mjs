@@ -50,6 +50,10 @@ try {
  const scopePlan=plan(`select h.* from public.hydrants h where organization_id='${org}' and active and strpos(lower(coalesce(address,'')),'scale address')>0 order by id limit 50`);
  console.log('Search RPC EXPLAIN '+JSON.stringify(rpcPlan));
  console.log('Scoped predicate EXPLAIN '+JSON.stringify(scopePlan));
+ const sparsePlan=plan(`select * from public.search_hydrants('${org}','Scale address 2101',null,null,'active',null,50)`);
+ const missingPlan=plan(`select * from public.search_hydrants('${org}','no matching address',null,null,'active',null,50)`);
+ console.log('Sparse search EXPLAIN '+JSON.stringify(sparsePlan));
+ console.log('No-match search EXPLAIN '+JSON.stringify(missingPlan));
  check(rpcPlan[0].Plan['Actual Rows']===50,'EXPLAIN actual RPC returns bounded 50');
  console.log(`Hydrant search integration: ${count} assertions passed`);
 }catch(e){console.error('Hydrant search integration failed:',e.message);process.exitCode=1;}

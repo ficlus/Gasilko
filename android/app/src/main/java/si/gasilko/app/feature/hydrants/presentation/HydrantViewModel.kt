@@ -65,9 +65,9 @@ class HydrantViewModel(private val repository: HydrantRepository, private val in
         refresh()
     }
     fun changeFilters(value: HydrantQuery) { val s=state.value;val org=s.organization?:return
-        if(!s.loading && !s.mutating && s.selected==null && s.form==null)mutableState.value=s.copy(filterDraft=value.copy(organization=org.id).normalized(org.role)) }
+        if(!s.loading && !s.mutating && s.selected==null && s.form==null)mutableState.value=s.copy(filterDraft=value.copy(organization=org.id,search=value.search.take(200),active=if(s.manages)value.active else ActiveFilter.ACTIVE)) }
     fun applyFilters() { val s=state.value;if(s.loading || s.mutating || s.selected!=null || s.form!=null)return
-        mutableState.value=s.copy(query=s.filterDraft,rows=emptyList(),more=false);refresh() }
+        mutableState.value=s.copy(query=s.filterDraft.normalized(s.organization?.role?:RegistryRole.FIREFIGHTER),rows=emptyList(),more=false);refresh() }
     fun clearFilters() {changeFilters(HydrantQuery());applyFilters()}
     fun loadMore() {
         val old=state.value;val org=old.organization?:return
