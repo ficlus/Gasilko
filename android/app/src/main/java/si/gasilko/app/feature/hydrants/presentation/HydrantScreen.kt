@@ -61,7 +61,7 @@ fun HydrantScreen(model: HydrantViewModel, requestAccess: ()->Unit = {}, signOut
     LaunchedEffect(model) { model.refresh() }
     val busy=state.loading || state.mutating
     BackHandler(state.selected!=null || state.form!=null) { if(state.form!=null)model.cancelForm() else model.back() }
-    Scaffold { padding -> Column(Modifier.fillMaxSize().padding(padding).padding(horizontal=16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
+    Scaffold { padding -> Column(Modifier.fillMaxSize().padding(padding).imePadding().padding(horizontal=16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
         Text(stringResource(R.string.h_title),style=MaterialTheme.typography.headlineMedium)
         Choice(stringResource(R.string.h_organization),state.organization?.name ?: stringResource(R.string.h_select_organization),
             state.organizations.map { it.id to it.name },!busy && state.form==null && state.organizations.size>1,"organization",model::switchOrganization)
@@ -145,8 +145,9 @@ fun HydrantScreen(model: HydrantViewModel, requestAccess: ()->Unit = {}, signOut
         if(state.conflict && state.selected!=null){Text(stringResource(R.string.h_latest));DetailFields(state.selected,state.types);Text(stringResource(R.string.h_your_draft))}
         val choices=state.types.filter { it.active }.map { type -> type.id to stringResource(R.string.h_type_choice,typeName(type),stringResource(if(type.organization==null)R.string.h_global else R.string.h_local)) }
         Choice(stringResource(R.string.h_type),typeName(state.types.find { it.id==form.type }),choices,enabled,"type",{model.changeForm(form.copy(type=it))})
-        FormText(R.string.h_latitude,form.latitude,enabled,"latitude",true){model.changeForm(form.copy(latitude=it))}
-        FormText(R.string.h_longitude,form.longitude,enabled,"longitude",true){model.changeForm(form.copy(longitude=it))}
+        // Text keyboard keeps minus signs and locale decimal separators available.
+        FormText(R.string.h_latitude,form.latitude,enabled,"latitude"){model.changeForm(form.copy(latitude=it))}
+        FormText(R.string.h_longitude,form.longitude,enabled,"longitude"){model.changeForm(form.copy(longitude=it))}
         FormText(R.string.h_address,form.address,enabled,"address"){model.changeForm(form.copy(address=it))}
         FormText(R.string.h_description,form.description,enabled,"description"){model.changeForm(form.copy(description=it))}
         if(form.baseVersion==null)Choice(stringResource(R.string.h_status),stringResource(statusLabel(form.status)),HydrantStatus.entries.map { it.name to stringResource(statusLabel(it)) },enabled,"create-status",{model.changeForm(form.copy(status=HydrantStatus.valueOf(it)))})
@@ -159,5 +160,5 @@ fun HydrantScreen(model: HydrantViewModel, requestAccess: ()->Unit = {}, signOut
 }
 @Composable private fun FormText(label: Int,value: String,enabled: Boolean,tag: String,numeric: Boolean=false,change: (String)->Unit) {
     OutlinedTextField(value,change,enabled=enabled,label={Text(stringResource(label))},modifier=Modifier.fillMaxWidth().testTag(tag),
-        keyboardOptions=KeyboardOptions(keyboardType=if(numeric)KeyboardType.Decimal else KeyboardType.Text))
+        keyboardOptions=KeyboardOptions(keyboardType=if(numeric)KeyboardType.Number else KeyboardType.Text))
 }

@@ -13,11 +13,11 @@ class HydrantViewModelTest {
     private class Fake(var role: RegistryRole = RegistryRole.MANAGER): HydrantRepository {
         var row=Hydrant("h","a","A-H-000001","t",HydrantStatus.UNKNOWN,address="Original",version=2)
         var fail: RegistryError?=null;var conflict=false;var empty=false;var calls=0;var suppliedVersion=0L;var lastOrg=""
-        var gate: CompletableDeferred<Unit>?=null
+        var gate: CompletableDeferred<Unit>?=null;var getFailure: RegistryError?=null
         override suspend fun organizations(): List<RegistryOrganization> { fail?.let { throw RegistryFailure(it) };return listOf(RegistryOrganization("a","A",role),RegistryOrganization("b","B",RegistryRole.FIREFIGHTER)) }
         override suspend fun types(organization: String)=listOf(HydrantType("t",null,"CUSTOM","Custom",true))
         override suspend fun list(organization: String,includeInactive: Boolean,after: String?): List<Hydrant>{lastOrg=organization;return if(empty || organization!="a" || (!row.active && !includeInactive))emptyList()else listOf(row)}
-        override suspend fun get(organization: String,id: String)=row
+        override suspend fun get(organization: String,id: String): Hydrant {getFailure?.let{throw RegistryFailure(it)};return row}
         private suspend fun write(version: Long?=null){calls++;suppliedVersion=version?:0;gate?.await();if(conflict){row=row.copy(version=row.version+1,address="Server change");throw RegistryFailure(RegistryError.CONFLICT)};fail?.let { throw RegistryFailure(it) }}
         override suspend fun create(organization: String,id: String,fields: HydrantFields): Hydrant {write();row=row.copy(id=id,address=fields.address);return row}
         override suspend fun update(organization: String,id: String,fields: HydrantFields,version: Long): Hydrant{write(version);row=row.copy(address=fields.address,notes=fields.notes,version=version+1);return row}
@@ -43,4 +43,5 @@ class HydrantViewModelTest {
     @Test fun includeInactiveOnlyForManagers()=runTest {val f=Fake(RegistryRole.FIREFIGHTER);val m=HydrantViewModel(f,this);m.refresh();advanceUntilIdle();m.includeInactive(true);assertFalse(m.state.value.includeInactive);f.role=RegistryRole.ADMIN;f.row=f.row.copy(active=false);m.refresh();advanceUntilIdle();m.includeInactive(true);advanceUntilIdle();assertEquals(1,m.state.value.rows.size)}
     @Test fun authorizationFailureClearsProtectedData()=runTest {val f=Fake();val m=HydrantViewModel(f,this);m.refresh();advanceUntilIdle();m.open("h");advanceUntilIdle();f.fail=RegistryError.FORBIDDEN;m.status(HydrantStatus.WORKING);advanceUntilIdle();assertNull(m.state.value.selected);assertNull(m.state.value.organization);assertTrue(m.state.value.rows.isEmpty())}
     @Test fun logoutClearsDraftAndInFlightResult()=runTest {val f=Fake().apply{gate=CompletableDeferred()};val m=HydrantViewModel(f,this);m.refresh();advanceUntilIdle();m.add();m.changeForm(m.state.value.form!!.copy(type="t",address="Private"));m.save();runCurrent();m.clear();f.gate!!.complete(Unit);advanceUntilIdle();assertEquals(RegistryState(),m.state.value)}
+    @Test fun failedConflictReloadRecoversExactDetailOnRefresh()=runTest {val f=Fake();val m=HydrantViewModel(f,this);m.refresh();advanceUntilIdle();m.open("h");advanceUntilIdle();f.conflict=true;f.getFailure=RegistryError.NETWORK;m.status(HydrantStatus.WORKING);advanceUntilIdle();assertNull(m.state.value.selected);assertEquals("h",m.state.value.reloadId);f.getFailure=null;m.refresh();advanceUntilIdle();assertEquals(3L,m.state.value.selected?.version);assertTrue(m.state.value.conflict);assertEquals(1,f.calls)}
 }

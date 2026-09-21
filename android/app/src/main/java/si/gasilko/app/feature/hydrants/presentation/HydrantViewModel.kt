@@ -14,7 +14,7 @@ data class RegistryState(
     val form: HydrantForm? = null, val reviewDraft: HydrantForm? = null,
     val loading: Boolean = false, val mutating: Boolean = false, val includeInactive: Boolean = false,
     val more: Boolean = false, val error: RegistryError? = null, val conflict: Boolean = false,
-    val confirmDeactivate: Boolean = false,
+    val confirmDeactivate: Boolean = false, val reloadId: String? = null,
 ) { val manages get() = organization?.role?.manages == true; val writable get() = organization?.active == true }
 
 class HydrantViewModel(private val repository: HydrantRepository, private val injectedScope: CoroutineScope? = null): ViewModel() {
@@ -39,14 +39,14 @@ class HydrantViewModel(private val repository: HydrantRepository, private val in
                 val types=org?.let { repository.types(it.id) }.orEmpty()
                 val rows=org?.let { repository.list(it.id,inactive) }.orEmpty()
                 var detail: Hydrant?=null; var unavailable: RegistryError?=null
-                val detailId=old.selected?.id ?: old.reviewDraft?.id
+                val detailId=old.selected?.id ?: old.reloadId ?: old.reviewDraft?.id
                 if(same && detailId!=null && org!=null) try { detail=repository.get(org.id,detailId) }
                     catch(e: RegistryFailure) { if(e.reason!=RegistryError.UNAVAILABLE) throw e; unavailable=e.reason }
                 if(stamp!=generation)return@start
                 val keepForm=same && (old.form?.baseVersion==null || org?.role?.manages==true)
                 mutableState.value=old.copy(organizations=organizations,organization=org,types=types,rows=rows,
                     selected=detail,form=old.form.takeIf { keepForm },reviewDraft=old.reviewDraft.takeIf { same },
-                    includeInactive=inactive,loading=false,more=rows.size==100,error=unavailable)
+                    includeInactive=inactive,loading=false,more=rows.size==100,error=unavailable,reloadId=null)
             } catch(e: CancellationException) { throw e }
             catch(e: Exception) { if(stamp==generation) {
                 val error=reason(e)
@@ -79,7 +79,7 @@ class HydrantViewModel(private val repository: HydrantRepository, private val in
         start { try { val h=repository.get(org.id,id);if(stamp==generation)mutableState.value=old.copy(selected=h,loading=false,conflict=false,error=null) }
         catch(e: CancellationException){throw e}catch(e: Exception){if(stamp==generation)mutableState.value=old.copy(error=reason(e))} }
     }
-    fun back() { if(!state.value.mutating && !state.value.loading)mutableState.value=state.value.copy(selected=null,form=null,reviewDraft=null,error=null,conflict=false,confirmDeactivate=false) }
+    fun back() { if(!state.value.mutating && !state.value.loading)mutableState.value=state.value.copy(selected=null,form=null,reviewDraft=null,error=null,conflict=false,confirmDeactivate=false,reloadId=null) }
     fun add() { if(state.value.writable && !state.value.loading && !state.value.mutating)mutableState.value=state.value.copy(form=HydrantForm(UUID.randomUUID().toString()),reviewDraft=null,error=null,conflict=false) }
     fun edit() { val s=state.value; if(s.manages && s.writable && !s.loading && !s.mutating) s.selected?.let { mutableState.value=s.copy(form=HydrantForm.from(it),error=null,conflict=false) } }
     fun changeForm(form: HydrantForm) { if(!state.value.mutating && form.id==state.value.form?.id) mutableState.value=state.value.copy(form=form,error=null) }
@@ -129,7 +129,7 @@ class HydrantViewModel(private val repository: HydrantRepository, private val in
                 if(error==RegistryError.CONFLICT && old.selected!=null) {
                     try { val latest=repository.get(org.id,old.selected.id)
                         if(stamp==generation)mutableState.value=old.copy(selected=latest,form=null,reviewDraft=old.form,mutating=false,conflict=true,error=null)
-                    }catch(c: CancellationException){throw c}catch(f: Exception){if(stamp==generation)mutableState.value=old.copy(selected=null,form=null,reviewDraft=old.form,mutating=false,conflict=true,error=reason(f))}
+                    }catch(c: CancellationException){throw c}catch(f: Exception){if(stamp==generation)mutableState.value=old.copy(selected=null,form=null,reviewDraft=old.form,mutating=false,conflict=true,error=reason(f),reloadId=old.selected.id)}
                 } else if(error==RegistryError.FORBIDDEN || error==RegistryError.EXPIRED || error==RegistryError.UNAVAILABLE) {
                     mutableState.value=old.copy(rows=emptyList(),selected=null,form=null,reviewDraft=null,types=emptyList(),organization=null,mutating=false,error=error)
                 } else mutableState.value=old.copy(mutating=false,error=error)

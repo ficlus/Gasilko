@@ -37,4 +37,21 @@ class HydrantContractTest {
     @Test fun networkMappedWithoutLeakingException()=runTest{val w=Wire().apply{fail=true};try{OnlineHydrantRepository(w).list("a",false);fail()}catch(e:RegistryFailure){assertEquals(RegistryError.NETWORK,e.reason);assertNull(e.message)}}
     @Test fun missingDetailMapsUnavailable()=runTest{try{OnlineHydrantRepository(Wire()).get("a","missing");fail()}catch(e:RegistryFailure){assertEquals(RegistryError.UNAVAILABLE,e.reason)}}
     @Test fun scalarAndArrayRpcResponsesDecode(){assertEquals(decodeHydrant(record),decodeHydrant(JsonArray(listOf(record))))}
+    @Test fun membershipsAndOrganizationsPageWithoutMixingRosters()=runTest {
+        val calls=mutableListOf<Triple<String,Map<String,String?>,String?>>()
+        val wire=object: RegistryTransport {
+            override fun actor()="me"
+            override suspend fun rpc(name:String,arguments:JsonObject)=JsonNull
+            override suspend fun rows(table:String,filters:Map<String,String?>,after:String?):JsonArray {
+                calls.add(Triple(table,filters,after))
+                return JsonArray((if(after==null)0..99 else 100..100).map { n -> val id=n.toString().padStart(3,'0')
+                    if(table=="user_organizations")buildJsonObject{put("organization_id",id);put("role","FIREFIGHTER")}
+                    else buildJsonObject{put("id",id);put("name",id);put("active",true)}
+                })
+            }
+        }
+        assertEquals(101,OnlineHydrantRepository(wire).organizations().size)
+        assertEquals(listOf(null,"099"),calls.filter{it.first=="user_organizations"}.map{it.third})
+        assertTrue(calls.filter{it.first=="user_organizations"}.all{it.second==mapOf("user_id" to "me")})
+    }
 }
