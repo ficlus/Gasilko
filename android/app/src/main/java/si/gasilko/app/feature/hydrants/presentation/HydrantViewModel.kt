@@ -27,16 +27,19 @@ class HydrantViewModel(private val repository: HydrantRepository, private val in
     fun clear() { generation++; job?.cancel(); mutableState.value=RegistryState() }
     private fun start(block: suspend ()->Unit) { job=scope.launch { block() } }
     private fun reason(e: Exception) = (e as? RegistryFailure)?.reason ?: RegistryError.SERVER
-    fun refresh() {
+    fun refresh() = load(refreshOnline=true)
+    private fun load(refreshOnline: Boolean) {
         if(state.value.loading || state.value.mutating) return
         val old=state.value; val stamp=generation
         mutableState.value=old.copy(loading=true,error=null)
         start {
             try {
+                if(refreshOnline)repository.refreshOrganizations()
                 val organizations=repository.organizations()
                 val org=organizations.find { it.id==old.organization?.id } ?: organizations.firstOrNull()
                 val same=org?.id==old.organization?.id
                 val query=if(org==null)HydrantQuery() else (if(same)old.query else HydrantQuery()).copy(organization=org.id).normalized(org.role)
+                if(refreshOnline && org!=null)repository.refresh(org.id)
                 val types=org?.let { repository.types(it.id) }.orEmpty()
                 val rows=org?.let { repository.list(query) }.orEmpty()
                 var detail: Hydrant?=null; var unavailable: RegistryError?=null
@@ -67,7 +70,7 @@ class HydrantViewModel(private val repository: HydrantRepository, private val in
     fun changeFilters(value: HydrantQuery) { val s=state.value;val org=s.organization?:return
         if(!s.loading && !s.mutating && s.selected==null && s.form==null)mutableState.value=s.copy(filterDraft=value.copy(organization=org.id,search=value.search.take(200),active=if(s.manages)value.active else ActiveFilter.ACTIVE)) }
     fun applyFilters() { val s=state.value;if(s.loading || s.mutating || s.selected!=null || s.form!=null)return
-        mutableState.value=s.copy(query=s.filterDraft.normalized(s.organization?.role?:RegistryRole.FIREFIGHTER),rows=emptyList(),more=false);refresh() }
+        mutableState.value=s.copy(query=s.filterDraft.normalized(s.organization?.role?:RegistryRole.FIREFIGHTER),rows=emptyList(),more=false);load(refreshOnline=false) }
     fun clearFilters() {changeFilters(HydrantQuery());applyFilters()}
     fun loadMore() {
         val old=state.value;val org=old.organization?:return
@@ -126,13 +129,14 @@ class HydrantViewModel(private val repository: HydrantRepository, private val in
                 if(stamp!=generation)return@start
                 mutableState.value=old.copy(selected=result,rows=old.rows.map { if(it.id==result.id)result else it }.filter { old.query.matches(it) },form=null,reviewDraft=null,mutating=false,conflict=false,error=null)
                 // A failed refresh must never turn an acknowledged mutation into an apparent failed submit.
-                refresh()
+                load(refreshOnline=false)
             }catch(e: CancellationException){throw e}
             catch(e: Exception){
                 if(stamp!=generation)return@start
                 val error=reason(e)
                 if(error==RegistryError.CONFLICT && old.selected!=null) {
-                    try { val latest=repository.get(org.id,old.selected.id)
+                    try { repository.refreshDetail(org.id,old.selected.id)
+                        val latest=repository.get(org.id,old.selected.id)
                         if(stamp==generation)mutableState.value=old.copy(selected=latest,
                             rows=old.rows.map { if(it.id==latest.id)latest else it }.filter { old.query.matches(it) },
                             form=null,reviewDraft=old.form,mutating=false,conflict=true,error=null)

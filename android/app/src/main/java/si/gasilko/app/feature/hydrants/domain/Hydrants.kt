@@ -22,6 +22,7 @@ data class Hydrant(
     val address: String? = null, val description: String? = null, val notes: String? = null,
     val interval: Int? = null, val active: Boolean = true, val version: Long = 1,
     val createdBy: String = "",
+    val createdAt: String? = null, val updatedAt: String? = null, val updatedBy: String? = null,
 )
 data class HydrantFields(val type: String, val latitude: Double?, val longitude: Double?,
     val address: String?, val description: String?, val notes: String?, val interval: Int?,
@@ -56,8 +57,11 @@ data class HydrantForm(
             h.address.orEmpty(), h.description.orEmpty(), h.notes.orEmpty(), h.interval?.toString().orEmpty(), h.status, h.version)
     }
 }
-/** UI-facing boundary. M3 can replace this online implementation with Room + sync. */
+/** UI reads use Room. Explicit refresh is temporary online hydration, not synchronization. */
 interface HydrantRepository {
+    suspend fun refreshOrganizations() {}
+    suspend fun refresh(organization: String) {}
+    suspend fun refreshDetail(organization: String, id: String) {}
     suspend fun organizations(): List<RegistryOrganization>
     suspend fun types(organization: String): List<HydrantType>
     suspend fun list(query: HydrantQuery, after: String? = null): List<Hydrant>

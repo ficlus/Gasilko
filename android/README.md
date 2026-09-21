@@ -1,5 +1,21 @@
 # Android foundation
 
+## M3.1 local registry database
+
+```text
+Compose → ViewModel → HydrantRepository → Room
+                                          ↑
+                                temporary online refresh
+```
+
+`RoomHydrantRepository` now supplies all normal organization/type/list/detail reads. Initial load, organization switch and the existing Refresh action explicitly hydrate the selected organization's complete authorized server snapshot through `OnlineHydrantRepository`; UI reads then query Room. Applying filters and loading more use only Room. Each query is organization-scoped and caches are partitioned by account. Search and the existing screens remain unchanged.
+
+Refresh fetches all pages before transactional replacement; a failed refresh preserves the previous database contents while the existing UI displays an error. The existing Auth gate still applies: this milestone does not unlock offline sign-in or implement the 30-day offline authorization policy. Existing mutations remain online and cache their acknowledged server result before returning; the existing conflict review explicitly reloads the server detail into Room. Forms remain memory-only.
+
+[Database details](core/database/README.md) describe schema, metadata and refresh. Six real Room instrumentation cases cover field/UUID/code/version persistence, organization/account isolation, search/filter/cursor behavior, local reads after hydration, failed later-page refresh preservation and acknowledged online writes. A ViewModel unit case ensures filter application does not refresh online. Run `./gradlew testDebugUnitTest lintDebug assembleDebug` and, with an API 26+ device, `./gradlew connectedDebugAndroidTest`.
+
+M3.2 adds offline writes and a pending queue; M3.3 adds the real sync engine. No queues, workers, retries or new conflict handling are introduced here. The historical M2 notes below describe the existing UI and online write behavior; their online-only read architecture is superseded by this section.
+
 ## M2.5 search and filters
 
 The registry now uses domain `HydrantQuery` through `HydrantRepository.list(query,after)`. Search/type/status/active draft and applied state live in the ViewModel. Expand Filters, then explicitly Search or Clear; no requests occur per keystroke. Organization changes reset the whole query; active/inactive/all is available only to MANAGER/ADMIN. Applied filters reconcile successful/conflicting mutations and reload bounded results. The older M2.3 include-inactive checkbox is superseded. [Shared search semantics and M3 replacement contract](../docs/HYDRANT_SEARCH.md) document literals, case, type visibility, pagination and tests. Distance/nearby → M4; inspection due/overdue → M5.

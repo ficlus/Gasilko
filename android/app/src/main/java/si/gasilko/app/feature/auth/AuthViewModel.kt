@@ -15,7 +15,7 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
     fun google() { viewModelScope.launch { repository.google() } }
     fun googleCallback(url: String) { viewModelScope.launch { repository.googleCallback(si.gasilko.app.core.auth.OAuthCallback.code(url, si.gasilko.app.BuildConfig.AUTH_REDIRECT_SCHEME)) } }
     val state = repository.state
-    val hydrants = gateway?.let { si.gasilko.app.feature.hydrants.presentation.HydrantViewModel(it.hydrantRepository(), viewModelScope) }
+    val hydrants = gateway?.let { si.gasilko.app.feature.hydrants.presentation.HydrantViewModel(it.hydrantRepository(application), viewModelScope) }
     init { viewModelScope.launch { state.collect {
         if(it.route != si.gasilko.app.core.auth.AuthRoute.ACTIVE && it.route != si.gasilko.app.core.auth.AuthRoute.LOADING) hydrants?.clear()
     } } }
