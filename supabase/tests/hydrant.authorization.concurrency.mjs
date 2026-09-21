@@ -44,7 +44,7 @@ try{
     insert into public.user_organizations(user_id,organization_id,role) values('${ff}','${org}','FIREFIGHTER'),('${manager}','${org}','MANAGER'),('${admin}','${org}','ADMIN');
     insert into public.hydrant_types(id,organization_id,code,name) values('${type}','${org}','LOCAL','Local');`);
   let results=await Promise.all([start(tx(as(ff,create(0)))).done,start(tx(as(ff,create(0)))).done]);
-  check(results.filter(r=>r.ok).length===1 && results.some(r=>/duplicate key/.test(r.error)),'same UUID concurrent create has one safe winner');
+  check(results.filter(r=>r.ok).length===1 && results.some(r=>/duplicate key|Previously assigned hydrant UUID cannot be recreated/.test(r.error)),'same UUID concurrent create has one safe winner');
   check(sql(`select count(*) from public.hydrants where id='${hydrants[0]}'`)==='1' && auditCount()==='1','duplicate create leaves one hydrant and one audit');
   check(sql(`select last_value from private.hydrant_code_counters where organization_id='${org}'`)==='1','duplicate create does not consume another committed code');
   results=await Promise.all([start(tx(as(ff,create(1)))).done,start(tx(as(manager,create(2)))).done]);
