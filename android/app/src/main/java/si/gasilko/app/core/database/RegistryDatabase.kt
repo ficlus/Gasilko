@@ -2,6 +2,8 @@ package si.gasilko.app.core.database
 
 import android.content.Context
 import androidx.room.*
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import si.gasilko.app.feature.hydrants.domain.*
 import java.util.Locale
 
@@ -28,9 +30,16 @@ data class HydrantEntity(
 
 @Dao
 interface RegistryDao {
+    // Append only: no replace, update or deletion API before a sync engine can acknowledge work.
+    @Insert suspend fun enqueue(change: PendingHydrantChange)
+    @Query("SELECT * FROM pending_hydrant_changes WHERE account = :account AND organization = :organization ORDER BY sequence")
+    suspend fun pendingChanges(account: String, organization: String): List<PendingHydrantChange>
+    @Query("SELECT DISTINCT entityId FROM pending_hydrant_changes WHERE account = :account AND organization = :organization AND state != 'SYNCED'")
+    suspend fun pendingHydrantIds(account: String, organization: String): List<String>
     @Upsert suspend fun upsertOrganizations(rows: List<OrganizationEntity>)
     @Upsert suspend fun upsertTypes(rows: List<TypeEntity>)
     @Upsert suspend fun upsertHydrants(rows: List<HydrantEntity>)
+    @Insert suspend fun insertHydrant(row: HydrantEntity)
     @Query("SELECT * FROM organizations WHERE account = :account ORDER BY id")
     suspend fun organizations(account: String): List<OrganizationEntity>
     @Query("SELECT * FROM hydrant_types WHERE account = :account AND scope = :organization ORDER BY id")
@@ -47,20 +56,39 @@ interface RegistryDao {
         status: HydrantStatus?, active: Boolean?, after: String?): List<HydrantEntity>
     @Query("DELETE FROM organizations WHERE account = :account")
     suspend fun removeOrganizations(account: String)
-    @Query("DELETE FROM hydrants WHERE account = :account AND organization = :organization")
+    @Query("""DELETE FROM hydrants WHERE account = :account AND organization = :organization
+        AND id NOT IN (SELECT entityId FROM pending_hydrant_changes
+            WHERE account = :account AND organization = :organization AND state != 'SYNCED')""")
     suspend fun removeHydrants(account: String, organization: String)
     @Query("DELETE FROM hydrant_types WHERE account = :account AND scope = :organization")
     suspend fun removeTypes(account: String, organization: String)
 }
 
-@Database(entities = [OrganizationEntity::class, TypeEntity::class, HydrantEntity::class], version = 1, exportSchema = true)
+@Entity(tableName = "pending_hydrant_changes")
+data class PendingHydrantChange(
+    @PrimaryKey(autoGenerate = true) val sequence: Long = 0,
+    val operationId: String, val account: String, val organization: String, val entityId: String,
+    val operation: String, val payload: String, val baseVersion: Long?, val createdAt: Long,
+    val state: String = "PENDING",
+)
+
+@Database(entities = [OrganizationEntity::class, TypeEntity::class, HydrantEntity::class, PendingHydrantChange::class], version = 2, exportSchema = true)
 abstract class RegistryDatabase : RoomDatabase() {
     abstract fun registry(): RegistryDao
     companion object {
+        val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""CREATE TABLE IF NOT EXISTS pending_hydrant_changes (
+                    sequence INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                    operationId TEXT NOT NULL, account TEXT NOT NULL, organization TEXT NOT NULL,
+                    entityId TEXT NOT NULL, operation TEXT NOT NULL, payload TEXT NOT NULL,
+                    baseVersion INTEGER, createdAt INTEGER NOT NULL, state TEXT NOT NULL)""")
+            }
+        }
         @Volatile private var instance: RegistryDatabase? = null
         fun open(context: Context): RegistryDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(context.applicationContext, RegistryDatabase::class.java,
-                "hydrant-registry.db").build().also { instance = it }
+                "hydrant-registry.db").addMigrations(MIGRATION_1_2).build().also { instance = it }
         }
     }
 }
