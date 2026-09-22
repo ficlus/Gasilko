@@ -23,6 +23,10 @@ android {
         fun quoted(value: String) = "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "").replace("\r", "") + "\""
         buildConfigField("String", "SUPABASE_URL", quoted(authUrl))
         buildConfigField("String", "SUPABASE_PUBLISHABLE_KEY", quoted(authKey))
+        // Public demo for the foundation; configure an approved provider for deployment.
+        val mapStyle = providers.environmentVariable("ANDROID_MAP_STYLE_URL")
+            .orElse("https://demotiles.maplibre.org/style.json").get()
+        buildConfigField("String", "MAP_STYLE_URL", quoted(mapStyle))
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
@@ -32,6 +36,8 @@ android {
 kotlin { jvmToolchain(17) }
 kapt { arguments { arg("room.schemaLocation", "$projectDir/schemas") } }
 dependencies {
+    // OpenGL intentionally provides broad device compatibility; no Vulkan/multi-backend.
+    implementation("org.maplibre.gl:android-sdk-opengl:13.6.1")
     implementation(platform("io.github.jan-tennert.supabase:bom:3.6.0"))
     implementation("io.github.jan-tennert.supabase:auth-kt")
     implementation("io.github.jan-tennert.supabase:postgrest-kt")

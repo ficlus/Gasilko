@@ -143,4 +143,9 @@
     <string name="h_keep_local">Ohrani lokalno (KEEP_LOCAL)</string>
     <string name="auth_cached_authorization">Dostop brez povezave · uporabljate predhodno preverjena, shranjena dovoljenja.</string>
     <string name="auth_offline_expired">Dovoljenja za dostop brez povezave so potekla ali jih ni mogoče varno potrditi. Povežite se z internetom in ponovno preverite račun ter članstva za dostop do registra.</string>
+    <string name="map_title">Zemljevid</string>
+    <string name="map_loading">Nalaganje zemljevida …</string>
+    <string name="map_error">Zemljevida ni mogoče naložiti. Preverite internetno povezavo in poskusite znova.</string>
+    <string name="map_unconfigured">Zemljevid ni na voljo. Skrbnik mora nastaviti veljaven naslov sloga zemljevida.</string>
+    <string name="map_retry">Poskusi znova</string>
 </resources>

@@ -66,6 +66,11 @@ fun HydrantScreen(model: HydrantViewModel, requestAccess: ()->Unit = {}, signOut
     var showConflicts by remember(state.organization?.id) { mutableStateOf(false) }
     var conflictSequence by remember(state.organization?.id) { mutableStateOf<Long?>(null) }
     LaunchedEffect(model) { model.refresh() }
+    var showMap by remember(state.organization?.id) { mutableStateOf(false) }
+    if(showMap) {
+        si.gasilko.app.feature.map.MapScreen(onBack={showMap=false})
+        return
+    }
     val busy=state.loading || state.mutating
     var showFilters by remember { mutableStateOf(false) }
     val keyboard=LocalSoftwareKeyboardController.current
@@ -75,6 +80,7 @@ fun HydrantScreen(model: HydrantViewModel, requestAccess: ()->Unit = {}, signOut
         Choice(stringResource(R.string.h_organization),state.organization?.name ?: stringResource(R.string.h_select_organization),
             state.organizations.map { it.id to it.name },!busy && state.form==null && state.organizations.size>1,"organization",model::switchOrganization)
         FlowRow(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+            TextButton(onClick={showMap=true},enabled=!busy && state.form==null && state.organization!=null){Text(stringResource(R.string.map_title))}
             TextButton(onClick=model::refresh,enabled=!busy,modifier=Modifier.testTag("refresh")){Text(stringResource(R.string.h_refresh))}
             TextButton(onClick=requestAccess,enabled=!busy && state.form==null){Text(stringResource(R.string.access_request_access))}
             TextButton(onClick=signOut,enabled=!state.mutating){Text(stringResource(R.string.auth_sign_out))}
