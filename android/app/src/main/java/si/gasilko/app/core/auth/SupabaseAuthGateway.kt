@@ -24,8 +24,25 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import si.gasilko.app.BuildConfig
 import java.net.URI
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import si.gasilko.app.feature.hydrants.domain.*
+import si.gasilko.app.feature.hydrants.data.*
 
-class SupabaseAuthGateway(private val client: SupabaseClient, scope: CoroutineScope) : AuthGateway {
+class SupabaseAuthGateway(private val client: SupabaseClient, scope: CoroutineScope, context: Context) : AuthGateway {
+    private val offline = OfflineAuthorization(context.applicationContext)
+    private fun account() = client.auth.currentUserOrNull()?.id ?: throw AuthFailure(AuthMessage.EXPIRED)
+    override fun accountId() = client.auth.currentUserOrNull()?.id
+    private fun unavailable(e: Exception) = e is java.io.IOException || e is io.ktor.client.plugins.HttpRequestTimeoutException ||
+        (e is RestException && e.statusCode >= 500) || (e is RegistryFailure && e.reason in listOf(RegistryError.NETWORK, RegistryError.SERVER))
+    override suspend fun invalidateAuthorization() { authorization.withLock { offline.clear() } }
+    override suspend fun authorizationNotice(): AuthMessage {
+        val remaining = offline.read(account()).second
+        return when { remaining <= OfflineAuthorization.DAY -> AuthMessage.OFFLINE_ONE_DAY
+            remaining <= 7 * OfflineAuthorization.DAY -> AuthMessage.OFFLINE_SEVEN_DAYS
+            else -> AuthMessage.NONE }
+    }
+    override suspend fun authorizationRemainingMs() = offline.read(account()).second
     override val sessions = client.auth.sessionStatus.map { status -> when (status) {
         is SessionStatus.Initializing -> SessionSignal.LOADING
         is SessionStatus.NotAuthenticated -> SessionSignal.UNAUTHENTICATED
@@ -45,7 +62,7 @@ class SupabaseAuthGateway(private val client: SupabaseClient, scope: CoroutineSc
             else -> if (e.statusCode == 401 || e.statusCode == 403) AuthMessage.EXPIRED else AuthMessage.ERROR
         })
     } catch (_: Exception) { throw AuthFailure(AuthMessage.ERROR) }
-    override suspend fun startGoogle() = request { client.auth.awaitInitialization(); client.auth.signInWith(Google); Unit }
+    override suspend fun startGoogle() = request { invalidateAuthorization(); client.auth.awaitInitialization(); client.auth.signInWith(Google); Unit }
     override suspend fun completeGoogle(code: String) = request { client.auth.awaitInitialization(); client.auth.exchangeCodeForSession(code); Unit }
     fun accessGateway() = si.gasilko.app.core.access.SupabaseAccessGateway(client)
     fun hydrantRepository(context: Context): si.gasilko.app.feature.hydrants.domain.HydrantRepository {
@@ -56,7 +73,24 @@ class SupabaseAuthGateway(private val client: SupabaseClient, scope: CoroutineSc
         }
         return si.gasilko.app.feature.hydrants.data.RoomHydrantRepository(
             si.gasilko.app.core.database.RegistryDatabase.open(context), online, transport::actor,
-            scheduler::select, scheduler::enqueue)
+            scheduler::select, scheduler::enqueue,
+            authorizedOrganizations = { expected ->
+                try {
+                    if(account() != expected) throw AuthFailure(AuthMessage.EXPIRED)
+                    offline.read(expected).first
+                } catch(_: AuthFailure) { throw RegistryFailure(RegistryError.EXPIRED) }
+            }, refreshAuthorization = {
+                try {
+                    if(verifyOnline() != "ACTIVE") throw RegistryFailure(RegistryError.FORBIDDEN)
+                    offline.read(account()).first
+                } catch(e: CancellationException) { throw e }
+                catch(e: Exception) {
+                    throw RegistryFailure(when { unavailable(e) -> RegistryError.NETWORK
+                        e is RegistryFailure -> e.reason
+                        e is AuthFailure -> RegistryError.EXPIRED
+                        else -> RegistryError.FORBIDDEN })
+                }
+            })
     }
     suspend fun synchronizeHydrants(context: Context, account: String, organization: String) {
         client.auth.awaitInitialization()
@@ -67,29 +101,51 @@ class SupabaseAuthGateway(private val client: SupabaseClient, scope: CoroutineSc
                 throw si.gasilko.app.feature.hydrants.domain.RegistryFailure(si.gasilko.app.feature.hydrants.domain.RegistryError.EXPIRED)
         }
         checkContext()
-        if(verifiedAccountStatus() != "ACTIVE")
+        if(request { verifyOnline() } != "ACTIVE")
             throw si.gasilko.app.feature.hydrants.domain.RegistryFailure(si.gasilko.app.feature.hydrants.domain.RegistryError.FORBIDDEN)
         si.gasilko.app.feature.hydrants.data.HydrantSyncEngine(
             si.gasilko.app.core.database.RegistryDatabase.open(context),
             si.gasilko.app.feature.hydrants.data.OnlineHydrantRepository(transport), account, checkContext).sync(organization)
     }
     override suspend fun signIn(email: String, password: String) = request {
+        invalidateAuthorization()
         client.auth.signInWith(Email) { this.email = email; this.password = password }; Unit
     }
     override suspend fun signUp(email: String, password: String, displayName: String, language: String): Boolean = request {
+        invalidateAuthorization()
         client.auth.signUpWith(Email) { this.email = email; this.password = password
             data = buildJsonObject { put("display_name", displayName); put("preferred_language", language) }
         }
         client.auth.currentSessionOrNull() == null
     }
-    override suspend fun verifiedAccountStatus(): String? = request {
+    private suspend fun verifyOnline(): String? = authorization.withLock {
         client.auth.awaitInitialization()
-        if (client.auth.sessionStatus.value is SessionStatus.RefreshFailure) throw AuthFailure(AuthMessage.ERROR)
-        if (client.auth.currentSessionOrNull() == null) throw AuthFailure(AuthMessage.EXPIRED)
-        client.auth.retrieveUserForCurrentSession()
-        client.postgrest.rpc("get_my_account_status").decodeAs<String?>()
+        val expected = account()
+        try {
+            client.auth.retrieveUserForCurrentSession()
+            val status = client.postgrest.rpc("get_my_account_status").decodeAs<String?>()
+            if(status != "ACTIVE") { offline.clear(); return@withLock status }
+            val organizations = OnlineHydrantRepository(SupabaseRegistryTransport(client)).organizations()
+            if(account() != expected) throw AuthFailure(AuthMessage.EXPIRED)
+            offline.save(expected, organizations)
+            status
+        } catch(e: CancellationException) { throw e }
+        catch(e: Exception) {
+            if(!unavailable(e)) offline.clear()
+            throw e
+        }
+    }
+    override suspend fun verifiedAccountStatus(): String? {
+        try { return verifyOnline() }
+        catch(e: CancellationException) { throw e }
+        catch(e: Exception) {
+            if(unavailable(e)) { offline.read(account()); return "ACTIVE" }
+            if(e is AuthFailure) throw e
+            throw AuthFailure(AuthMessage.ERROR)
+        }
     }
     override suspend fun signOut() = request {
+        invalidateAuthorization()
         if (client.auth.sessionStatus.value is SessionStatus.RefreshFailure) throw AuthFailure(AuthMessage.ERROR)
         client.auth.signOut(); Unit
     }
@@ -97,6 +153,7 @@ class SupabaseAuthGateway(private val client: SupabaseClient, scope: CoroutineSc
     // Releasing a gateway must not close the client while the other caller is using it.
     fun close() { }
     companion object {
+        private val authorization = Mutex()
         private var sharedClient: SupabaseClient? = null
         @Synchronized
         fun create(context: Context, scope: CoroutineScope): SupabaseAuthGateway? {
@@ -116,7 +173,7 @@ class SupabaseAuthGateway(private val client: SupabaseClient, scope: CoroutineSc
                 }
                 install(Postgrest)
             }.also { sharedClient = it }
-            return SupabaseAuthGateway(client, scope)
+            return SupabaseAuthGateway(client, scope, context.applicationContext)
         }
     }
 }

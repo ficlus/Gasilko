@@ -123,4 +123,6 @@
     <string name="h_inactive_only">Nur inaktive</string>
     <string name="h_clear_filters">Filter zurücksetzen</string>
     <string name="h_no_matches">Keine Hydranten entsprechen den Filtern.</string>
+    <string name="auth_offline_seven_days">Der Offline-Zugriff läuft in höchstens 7 Tagen ab. Stellen Sie eine Verbindung her und bestätigen Sie Ihren Zugriff erneut.</string>
+    <string name="auth_offline_one_day">Der Offline-Zugriff läuft in höchstens 1 Tag ab. Stellen Sie eine Verbindung her und bestätigen Sie Ihren Zugriff erneut.</string>
 </resources>

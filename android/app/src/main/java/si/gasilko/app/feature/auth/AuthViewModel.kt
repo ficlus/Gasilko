@@ -16,8 +16,14 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
     fun googleCallback(url: String) { viewModelScope.launch { repository.googleCallback(si.gasilko.app.core.auth.OAuthCallback.code(url, si.gasilko.app.BuildConfig.AUTH_REDIRECT_SCHEME)) } }
     val state = repository.state
     val hydrants = gateway?.let { si.gasilko.app.feature.hydrants.presentation.HydrantViewModel(it.hydrantRepository(application), viewModelScope) }
+    private var registryAccount: String? = null
     init { viewModelScope.launch { state.collect {
-        if(it.route != si.gasilko.app.core.auth.AuthRoute.ACTIVE && it.route != si.gasilko.app.core.auth.AuthRoute.LOADING) hydrants?.clear()
+        if(it.route == si.gasilko.app.core.auth.AuthRoute.ACTIVE && it.account != registryAccount) {
+            hydrants?.clear(); registryAccount = it.account
+        }
+        if(it.route != si.gasilko.app.core.auth.AuthRoute.ACTIVE && it.route != si.gasilko.app.core.auth.AuthRoute.LOADING) {
+            hydrants?.clear(); registryAccount = null
+        }
     } } }
     fun refresh() { viewModelScope.launch { repository.refresh() } }
     fun signIn(email: String, password: String) { viewModelScope.launch { repository.signIn(email, password) } }
