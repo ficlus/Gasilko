@@ -27,6 +27,12 @@ class HydrantViewModel(private val repository: HydrantRepository, private val in
     fun clear() { generation++; job?.cancel(); mutableState.value=RegistryState() }
     private fun start(block: suspend ()->Unit) { job=scope.launch { block() } }
     private fun reason(e: Exception) = (e as? RegistryFailure)?.reason ?: RegistryError.SERVER
+    private suspend fun hydrate(action: suspend () -> Unit): RegistryError? = try {
+        action(); null
+    } catch(e: RegistryFailure) {
+        if(e.reason != RegistryError.NETWORK) throw e
+        e.reason // Keep cached rows usable, while displaying the existing network notice.
+    }
     fun refresh() = load(refreshOnline=true)
     private fun load(refreshOnline: Boolean) {
         if(state.value.loading || state.value.mutating) return
@@ -34,12 +40,12 @@ class HydrantViewModel(private val repository: HydrantRepository, private val in
         mutableState.value=old.copy(loading=true,error=null)
         start {
             try {
-                if(refreshOnline)repository.refreshOrganizations()
+                var refreshError=if(refreshOnline)hydrate { repository.refreshOrganizations() } else null
                 val organizations=repository.organizations()
                 val org=organizations.find { it.id==old.organization?.id } ?: organizations.firstOrNull()
                 val same=org?.id==old.organization?.id
                 val query=if(org==null)HydrantQuery() else (if(same)old.query else HydrantQuery()).copy(organization=org.id).normalized(org.role)
-                if(refreshOnline && org!=null)repository.refresh(org.id)
+                if(refreshOnline && refreshError==null && org!=null)refreshError=hydrate { repository.refresh(org.id) }
                 val types=org?.let { repository.types(it.id) }.orEmpty()
                 val rows=org?.let { repository.list(query) }.orEmpty()
                 var detail: Hydrant?=null; var unavailable: RegistryError?=null
@@ -50,7 +56,7 @@ class HydrantViewModel(private val repository: HydrantRepository, private val in
                 val keepForm=same && (old.form?.baseVersion==null || org?.role?.manages==true)
                 mutableState.value=old.copy(organizations=organizations,organization=org,types=types,rows=rows,
                     selected=detail,form=old.form.takeIf { keepForm },reviewDraft=old.reviewDraft.takeIf { same },
-                    query=query,filterDraft=query,loading=false,more=rows.size==100,error=unavailable,reloadId=null)
+                    query=query,filterDraft=query,loading=false,more=rows.size==100,error=unavailable?:refreshError,reloadId=null)
             } catch(e: CancellationException) { throw e }
             catch(e: Exception) { if(stamp==generation) {
                 val error=reason(e)
