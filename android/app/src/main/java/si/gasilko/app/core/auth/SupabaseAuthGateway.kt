@@ -49,12 +49,29 @@ class SupabaseAuthGateway(private val client: SupabaseClient, scope: CoroutineSc
     override suspend fun completeGoogle(code: String) = request { client.auth.awaitInitialization(); client.auth.exchangeCodeForSession(code); Unit }
     fun accessGateway() = si.gasilko.app.core.access.SupabaseAccessGateway(client)
     fun hydrantRepository(context: Context): si.gasilko.app.feature.hydrants.domain.HydrantRepository {
+        val scheduler = si.gasilko.app.core.sync.HydrantSyncScheduler(context)
         val transport = si.gasilko.app.feature.hydrants.data.SupabaseRegistryTransport(client)
         val online = si.gasilko.app.feature.hydrants.data.OnlineHydrantRepository(transport) { operation, reason ->
             android.util.Log.w("HydrantRegistry", "$operation: ${reason.name}")
         }
         return si.gasilko.app.feature.hydrants.data.RoomHydrantRepository(
-            si.gasilko.app.core.database.RegistryDatabase.open(context), online, transport::actor)
+            si.gasilko.app.core.database.RegistryDatabase.open(context), online, transport::actor,
+            scheduler::select, scheduler::enqueue)
+    }
+    suspend fun synchronizeHydrants(context: Context, account: String, organization: String) {
+        client.auth.awaitInitialization()
+        val scheduler = si.gasilko.app.core.sync.HydrantSyncScheduler(context)
+        val transport = si.gasilko.app.feature.hydrants.data.SupabaseRegistryTransport(client)
+        val checkContext = {
+            if(transport.actor() != account || !scheduler.selected(account, organization))
+                throw si.gasilko.app.feature.hydrants.domain.RegistryFailure(si.gasilko.app.feature.hydrants.domain.RegistryError.EXPIRED)
+        }
+        checkContext()
+        if(verifiedAccountStatus() != "ACTIVE")
+            throw si.gasilko.app.feature.hydrants.domain.RegistryFailure(si.gasilko.app.feature.hydrants.domain.RegistryError.FORBIDDEN)
+        si.gasilko.app.feature.hydrants.data.HydrantSyncEngine(
+            si.gasilko.app.core.database.RegistryDatabase.open(context),
+            si.gasilko.app.feature.hydrants.data.OnlineHydrantRepository(transport), account, checkContext).sync(organization)
     }
     override suspend fun signIn(email: String, password: String) = request {
         client.auth.signInWith(Email) { this.email = email; this.password = password }; Unit
@@ -76,14 +93,18 @@ class SupabaseAuthGateway(private val client: SupabaseClient, scope: CoroutineSc
         if (client.auth.sessionStatus.value is SessionStatus.RefreshFailure) throw AuthFailure(AuthMessage.ERROR)
         client.auth.signOut(); Unit
     }
-    fun close() { CoroutineScope(Dispatchers.IO).launch { client.close() } }
+    // UI and default WorkManager share one application-lifetime client/token refresher.
+    // Releasing a gateway must not close the client while the other caller is using it.
+    fun close() { }
     companion object {
+        private var sharedClient: SupabaseClient? = null
+        @Synchronized
         fun create(context: Context, scope: CoroutineScope): SupabaseAuthGateway? {
             val url = BuildConfig.SUPABASE_URL; val key = BuildConfig.SUPABASE_PUBLISHABLE_KEY
             if (url.isBlank() || !key.startsWith("sb_publishable_")) return null
             val uri = try { URI(url) } catch (_: Exception) { return null }
             if (uri.scheme != "https" || uri.host.isNullOrBlank()) return null
-            val client = createSupabaseClient(url, key) {
+            val client = sharedClient ?: createSupabaseClient(url, key) {
                 defaultLogLevel = LogLevel.NONE
                 install(Auth) {
                     val encrypted = KeystoreSessionManager(context.applicationContext)
@@ -94,7 +115,7 @@ class SupabaseAuthGateway(private val client: SupabaseClient, scope: CoroutineSc
                     host = "auth-callback"
                 }
                 install(Postgrest)
-            }
+            }.also { sharedClient = it }
             return SupabaseAuthGateway(client, scope)
         }
     }

@@ -30,12 +30,22 @@ data class HydrantEntity(
 
 @Dao
 interface RegistryDao {
-    // Append only: no replace, update or deletion API before a sync engine can acknowledge work.
+    // Payload/history stay immutable; only the sync engine records acknowledgement or conflict.
     @Insert suspend fun enqueue(change: PendingHydrantChange)
     @Query("SELECT * FROM pending_hydrant_changes WHERE account = :account AND organization = :organization ORDER BY sequence")
     suspend fun pendingChanges(account: String, organization: String): List<PendingHydrantChange>
     @Query("SELECT DISTINCT entityId FROM pending_hydrant_changes WHERE account = :account AND organization = :organization AND state != 'SYNCED'")
     suspend fun pendingHydrantIds(account: String, organization: String): List<String>
+    @Query("SELECT * FROM pending_hydrant_changes WHERE account = :account AND organization = :organization AND state != 'SYNCED' ORDER BY sequence LIMIT 1")
+    suspend fun nextChange(account: String, organization: String): PendingHydrantChange?
+    @Query("SELECT * FROM pending_hydrant_changes WHERE account = :account AND organization = :organization AND entityId = :id AND state != 'SYNCED' ORDER BY sequence")
+    suspend fun remainingChanges(account: String, organization: String, id: String): List<PendingHydrantChange>
+    @Query("SELECT acknowledgedVersion FROM pending_hydrant_changes WHERE account = :account AND organization = :organization AND entityId = :id AND sequence < :before AND state = 'SYNCED' ORDER BY sequence DESC LIMIT 1")
+    suspend fun acknowledgedVersion(account: String, organization: String, id: String, before: Long): Long?
+    @Query("UPDATE pending_hydrant_changes SET state = 'SYNCED', acknowledgedVersion = :version WHERE account = :account AND organization = :organization AND sequence = :sequence AND state = 'PENDING'")
+    suspend fun acknowledge(account: String, organization: String, sequence: Long, version: Long): Int
+    @Query("UPDATE pending_hydrant_changes SET state = 'CONFLICT' WHERE account = :account AND organization = :organization AND sequence = :sequence AND state = 'PENDING'")
+    suspend fun conflict(account: String, organization: String, sequence: Long)
     @Upsert suspend fun upsertOrganizations(rows: List<OrganizationEntity>)
     @Upsert suspend fun upsertTypes(rows: List<TypeEntity>)
     @Upsert suspend fun upsertHydrants(rows: List<HydrantEntity>)
@@ -70,12 +80,18 @@ data class PendingHydrantChange(
     val operationId: String, val account: String, val organization: String, val entityId: String,
     val operation: String, val payload: String, val baseVersion: Long?, val createdAt: Long,
     val state: String = "PENDING",
+    val acknowledgedVersion: Long? = null,
 )
 
-@Database(entities = [OrganizationEntity::class, TypeEntity::class, HydrantEntity::class, PendingHydrantChange::class], version = 2, exportSchema = true)
+@Database(entities = [OrganizationEntity::class, TypeEntity::class, HydrantEntity::class, PendingHydrantChange::class], version = 3, exportSchema = true)
 abstract class RegistryDatabase : RoomDatabase() {
     abstract fun registry(): RegistryDao
     companion object {
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE pending_hydrant_changes ADD COLUMN acknowledgedVersion INTEGER")
+            }
+        }
         val MIGRATION_1_2 = object : Migration(1, 2) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("""CREATE TABLE IF NOT EXISTS pending_hydrant_changes (
@@ -88,7 +104,7 @@ abstract class RegistryDatabase : RoomDatabase() {
         @Volatile private var instance: RegistryDatabase? = null
         fun open(context: Context): RegistryDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(context.applicationContext, RegistryDatabase::class.java,
-                "hydrant-registry.db").addMigrations(MIGRATION_1_2).build().also { instance = it }
+                "hydrant-registry.db").addMigrations(MIGRATION_1_2, MIGRATION_2_3).build().also { instance = it }
         }
     }
 }

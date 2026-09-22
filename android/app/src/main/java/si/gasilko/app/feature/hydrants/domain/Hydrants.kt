@@ -59,6 +59,8 @@ data class HydrantForm(
 }
 /** UI reads use Room. Explicit refresh is temporary online hydration, not synchronization. */
 interface HydrantRepository {
+    fun setActiveOrganization(organization: String?) {}
+    fun requestSync(organization: String) {}
     suspend fun refreshOrganizations() {}
     suspend fun refresh(organization: String) {}
     suspend fun refreshDetail(organization: String, id: String) {}

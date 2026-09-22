@@ -24,7 +24,7 @@ class HydrantViewModel(private val repository: HydrantRepository, private val in
     val state = mutableState.asStateFlow()
     private var job: Job? = null
     private var generation = 0
-    fun clear() { generation++; job?.cancel(); mutableState.value=RegistryState() }
+    fun clear() { generation++; job?.cancel(); repository.setActiveOrganization(null); mutableState.value=RegistryState() }
     private fun start(block: suspend ()->Unit) { job=scope.launch { block() } }
     private fun reason(e: Exception) = (e as? RegistryFailure)?.reason ?: RegistryError.SERVER
     private suspend fun hydrate(action: suspend () -> Unit): RegistryError? = try {
@@ -53,6 +53,8 @@ class HydrantViewModel(private val repository: HydrantRepository, private val in
                 if(same && detailId!=null && org!=null) try { detail=repository.get(org.id,detailId) }
                     catch(e: RegistryFailure) { if(e.reason!=RegistryError.UNAVAILABLE) throw e; unavailable=e.reason }
                 if(stamp!=generation)return@start
+                repository.setActiveOrganization(org?.takeIf { it.active }?.id)
+                if(refreshOnline && org?.active == true)repository.requestSync(org.id)
                 val keepForm=same && (old.form?.baseVersion==null || org?.role?.manages==true)
                 mutableState.value=old.copy(organizations=organizations,organization=org,types=types,rows=rows,
                     selected=detail,form=old.form.takeIf { keepForm },reviewDraft=old.reviewDraft.takeIf { same },
@@ -60,6 +62,7 @@ class HydrantViewModel(private val repository: HydrantRepository, private val in
             } catch(e: CancellationException) { throw e }
             catch(e: Exception) { if(stamp==generation) {
                 val error=reason(e)
+                if(error==RegistryError.EXPIRED || error==RegistryError.FORBIDDEN)repository.setActiveOrganization(null)
                 mutableState.value=if(error==RegistryError.EXPIRED || error==RegistryError.FORBIDDEN)
                     RegistryState(error=error)
                 else old.copy(loading=false,rows=emptyList(),types=emptyList(),error=error)
@@ -70,6 +73,7 @@ class HydrantViewModel(private val repository: HydrantRepository, private val in
         if(state.value.mutating || state.value.form!=null || state.value.loading) return
         val org=state.value.organizations.find { it.id==id } ?: return
         generation++; job?.cancel()
+        repository.setActiveOrganization(null)
         mutableState.value=RegistryState(organizations=state.value.organizations,organization=org)
         refresh()
     }
