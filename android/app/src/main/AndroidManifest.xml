@@ -1,4 +1,7 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools">
+    <!-- MapLibre bundles location support; M4.1 only renders the base map. -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" tools:node="remove"/>
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" tools:node="remove"/>
     <uses-permission android:name="android.permission.INTERNET"/>
     <application android:allowBackup="false" android:label="@string/app_name" android:supportsRtl="true" android:theme="@style/Theme.Gasilko" android:localeConfig="@xml/locales_config">
         <activity android:launchMode="singleTask" android:name=".MainActivity" android:exported="true">
