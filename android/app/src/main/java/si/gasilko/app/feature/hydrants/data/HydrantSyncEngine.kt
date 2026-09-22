@@ -99,7 +99,7 @@ internal fun Hydrant.snapshot(): String = buildJsonObject {
 internal suspend fun ensureConflict(database: RegistryDatabase, operation: PendingHydrantChange) {
     database.withTransaction {
         val dao = database.registry()
-        dao.conflict(operation.account, operation.organization, operation.sequence)
+        if(operation.state == "PENDING") dao.conflict(operation.account, operation.organization, operation.sequence)
         if(dao.conflictInfo(operation.account, operation.organization, operation.sequence) == null) {
             val local = dao.get(operation.account, operation.organization, operation.entityId)?.value
                 ?: throw RegistryFailure(RegistryError.UNAVAILABLE)

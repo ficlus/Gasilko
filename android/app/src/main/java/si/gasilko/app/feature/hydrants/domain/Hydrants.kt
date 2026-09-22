@@ -1,5 +1,12 @@
 package si.gasilko.app.feature.hydrants.domain
 
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOf
+
+enum class SyncPhase { SYNCHRONIZED, PENDING, SYNCING, RETRY, CONFLICT }
+data class RegistrySyncState(val organization: String = "", val phase: SyncPhase = SyncPhase.PENDING,
+    val pendingIds: Set<String> = emptySet(), val conflicts: List<HydrantConflict> = emptyList())
+
 enum class RegistryRole { FIREFIGHTER, MANAGER, ADMIN;
     val manages: Boolean get() = this != FIREFIGHTER
 }
@@ -7,7 +14,7 @@ enum class HydrantStatus { WORKING, NOT_WORKING, NEEDS_INSPECTION, UNKNOWN }
 enum class ActiveFilter { ACTIVE, INACTIVE, ALL }
 enum class ConflictResolution { KEEP_SERVER, KEEP_LOCAL }
 data class HydrantConflict(val sequence: Long, val account: String, val organization: String,
-    val operation: String, val payload: String, val local: Hydrant, val server: Hydrant?)
+    val operation: String, val payload: String, val local: Hydrant, val server: Hydrant?, val intent: Hydrant = local)
 data class HydrantQuery(val organization: String = "", val search: String = "", val type: String? = null,
     val status: HydrantStatus? = null, val active: ActiveFilter = ActiveFilter.ACTIVE) {
     fun normalized(role: RegistryRole) = copy(search=search.trim().take(200),active=if(role==RegistryRole.FIREFIGHTER)ActiveFilter.ACTIVE else active)
@@ -62,6 +69,7 @@ data class HydrantForm(
 }
 /** UI reads use Room. Explicit refresh is temporary online hydration, not synchronization. */
 interface HydrantRepository {
+    fun observeSync(organization: String): Flow<RegistrySyncState> = flowOf(RegistrySyncState(organization))
     suspend fun conflicts(organization: String): List<HydrantConflict> = emptyList()
     suspend fun resolveConflict(organization: String, sequence: Long, resolution: ConflictResolution) {
         throw RegistryFailure(RegistryError.UNAVAILABLE)

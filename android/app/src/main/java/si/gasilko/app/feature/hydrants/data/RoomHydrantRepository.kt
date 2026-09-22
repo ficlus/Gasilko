@@ -1,6 +1,7 @@
 package si.gasilko.app.feature.hydrants.data
 
 import androidx.room.withTransaction
+import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.*
@@ -18,9 +19,27 @@ class RoomHydrantRepository(
     private val scheduleSync: (String, String) -> Unit = { _, _ -> },
     private val authorizedOrganizations: (suspend (String) -> List<RegistryOrganization>)? = null,
     private val refreshAuthorization: (suspend () -> List<RegistryOrganization>)? = null,
+    private val observeWork: (String, String) -> Flow<SyncPhase> = { _, _ -> flowOf(SyncPhase.PENDING) },
 ) : HydrantRepository {
     private val dao = database.registry()
     private val changes = Mutex()
+    override fun observeSync(organization: String): Flow<RegistrySyncState> = flow {
+        val account = currentAccount()
+        emitAll(combine(database.invalidationTracker.createFlow("hydrants", "pending_hydrant_changes", "hydrant_conflicts"),
+            observeWork(account, organization)) { _, work ->
+            organization(account, organization)
+            database.withTransaction {
+                val pending = dao.pendingHydrantIds(account, organization).toSet()
+                val conflicts = conflicts(organization)
+                checkAccount(account)
+                RegistrySyncState(organization, when {
+                    conflicts.isNotEmpty() -> SyncPhase.CONFLICT
+                    pending.isEmpty() -> SyncPhase.SYNCHRONIZED
+                    else -> work
+                }, pending, conflicts)
+            }
+        })
+    }
     override fun setActiveOrganization(organization: String?) {
         selectSyncScope(if(organization == null) null else currentAccount(), organization)
     }
@@ -31,8 +50,10 @@ class RoomHydrantRepository(
         return dao.pendingChanges(account, organization).filter { it.state == "CONFLICT" }.map { operation ->
             ensureConflict(database, operation)
             val info = dao.conflictInfo(account, organization, operation.sequence)!!
+            val local = decodeHydrant(Json.parseToJsonElement(info.localState))
             HydrantConflict(operation.sequence, account, organization, operation.operation, operation.payload,
-                decodeHydrant(Json.parseToJsonElement(info.localState)), info.serverState?.let { decodeHydrant(Json.parseToJsonElement(it)) })
+                local, info.serverState?.let { decodeHydrant(Json.parseToJsonElement(it)) },
+                if(operation.operation == "CREATE") local else operation.applyTo(local))
         }.also { checkAccount(account) }
     }
     override suspend fun resolveConflict(organization: String, sequence: Long, resolution: ConflictResolution) {

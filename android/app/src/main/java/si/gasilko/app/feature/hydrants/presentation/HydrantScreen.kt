@@ -28,7 +28,7 @@ fun statusLabel(status: HydrantStatus): Int = when(status) {
 }
 fun errorLabel(error: RegistryError): Int = when(error) {
     RegistryError.NETWORK -> R.string.h_network
-    RegistryError.EXPIRED -> R.string.auth_session_expired
+    RegistryError.EXPIRED -> R.string.auth_offline_expired
     RegistryError.FORBIDDEN -> R.string.h_forbidden
     RegistryError.VALIDATION -> R.string.h_validation
     RegistryError.CONFLICT -> R.string.h_conflict
@@ -61,6 +61,10 @@ private fun Choice(label: String, selected: String, choices: List<Pair<String,St
 @OptIn(ExperimentalLayoutApi::class)
 fun HydrantScreen(model: HydrantViewModel, requestAccess: ()->Unit = {}, signOut: ()->Unit = {}) {
     val state by model.state.collectAsStateWithLifecycle()
+    val observedSync by model.sync.collectAsStateWithLifecycle()
+    val sync = observedSync.takeIf { it.organization == state.organization?.id }
+    var showConflicts by remember(state.organization?.id) { mutableStateOf(false) }
+    var conflictSequence by remember(state.organization?.id) { mutableStateOf<Long?>(null) }
     LaunchedEffect(model) { model.refresh() }
     val busy=state.loading || state.mutating
     var showFilters by remember { mutableStateOf(false) }
@@ -79,6 +83,20 @@ fun HydrantScreen(model: HydrantViewModel, requestAccess: ()->Unit = {}, signOut
         state.error?.let { Text(stringResource(errorLabel(it)),color=MaterialTheme.colorScheme.error,modifier=Modifier.testTag("registry-error")) }
         if(state.conflict)Text(stringResource(if(state.selected!=null)R.string.h_conflict else R.string.h_conflict_reload),modifier=Modifier.testTag("conflict"))
         if(state.organization!=null && !state.writable)Text(stringResource(R.string.h_organization_inactive))
+        if(state.organization != null) {
+            Text(stringResource(when(sync?.phase) {
+                SyncPhase.SYNCHRONIZED -> R.string.h_sync_done
+                SyncPhase.SYNCING -> R.string.h_sync_running
+                SyncPhase.RETRY -> R.string.h_sync_retry
+                SyncPhase.CONFLICT -> R.string.h_sync_conflict
+                else -> R.string.h_sync_pending
+            }))
+            FlowRow(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                TextButton(onClick=model::syncNow, enabled=!busy && state.writable && sync?.phase != SyncPhase.SYNCING) { Text(stringResource(R.string.h_sync_now)) }
+                if(!sync?.conflicts.isNullOrEmpty()) TextButton(onClick={showConflicts=true}, enabled=!busy && state.form==null) { Text(stringResource(R.string.h_sync_review)) }
+            }
+            if(state.selected?.id in sync?.pendingIds.orEmpty()) Text(stringResource(R.string.h_unsynced))
+        }
         when {
             state.form!=null -> HydrantFormContent(state,model,Modifier.weight(1f))
             state.selected!=null -> HydrantDetails(state,model,Modifier.weight(1f))
@@ -111,6 +129,7 @@ fun HydrantScreen(model: HydrantViewModel, requestAccess: ()->Unit = {}, signOut
                                 Text(stringResource(statusLabel(h.status)))
                                 Text(h.address ?: h.description ?: stringResource(R.string.h_coordinates))
                                 if(!h.active)Text(stringResource(R.string.h_inactive))
+                                if(h.id in sync?.pendingIds.orEmpty())Text(stringResource(R.string.h_unsynced))
                             }
                         }
                     }
@@ -119,6 +138,38 @@ fun HydrantScreen(model: HydrantViewModel, requestAccess: ()->Unit = {}, signOut
             }
         }
     } }
+    if(showConflicts && sync != null) {
+        val conflict = sync.conflicts.find { it.sequence == conflictSequence }
+        AlertDialog(onDismissRequest={if(!busy) { showConflicts=false; conflictSequence=null }},
+            title={Text(stringResource(R.string.h_sync_review))},
+            text={Column(Modifier.heightIn(max=440.dp).verticalScroll(rememberScrollState()), verticalArrangement=Arrangement.spacedBy(8.dp)) {
+                state.error?.let { Text(stringResource(errorLabel(it)), color=MaterialTheme.colorScheme.error) }
+                if(conflict == null) {
+                    if(sync.conflicts.isEmpty())Text(stringResource(R.string.h_conflicts_resolved))
+                    sync.conflicts.forEach { item ->
+                        OutlinedButton(onClick={conflictSequence=item.sequence}, enabled=!busy) { Text(item.local.code ?: item.local.id) }
+                    }
+                } else {
+                    Text(conflict.local.id)
+                    Text(stringResource(when(conflict.operation) {
+                        "CREATE" -> R.string.h_add; "UPDATE" -> R.string.h_edit
+                        "CHANGE_STATUS" -> R.string.h_change_status; else -> R.string.h_active_state
+                    }), style=MaterialTheme.typography.titleMedium)
+                    Text(stringResource(R.string.h_conflict_local), style=MaterialTheme.typography.titleMedium)
+                    DetailFields(conflict.local,state.types)
+                    if(conflict.intent != conflict.local) {
+                        Text(stringResource(R.string.h_conflict_intent), style=MaterialTheme.typography.titleMedium)
+                        DetailFields(conflict.intent,state.types)
+                    }
+                    Text(stringResource(R.string.h_conflict_server), style=MaterialTheme.typography.titleMedium)
+                    conflict.server?.let { DetailFields(it,state.types) } ?: Text(stringResource(R.string.h_conflict_server_missing))
+                    Text(stringResource(R.string.h_resolution_notice))
+                    OutlinedButton(onClick={model.resolveConflict(conflict.sequence,ConflictResolution.KEEP_SERVER)}, enabled=!busy && state.writable && conflict.server!=null) { Text(stringResource(R.string.h_keep_server)) }
+                    OutlinedButton(onClick={model.resolveConflict(conflict.sequence,ConflictResolution.KEEP_LOCAL)}, enabled=!busy && state.writable && conflict.server!=null && (state.manages || conflict.operation !in listOf("UPDATE","SET_ACTIVE"))) { Text(stringResource(R.string.h_keep_local)) }
+                    TextButton(onClick={conflictSequence=null}, enabled=!busy) { Text(stringResource(R.string.h_back)) }
+                }
+            }}, confirmButton={TextButton(onClick={showConflicts=false;conflictSequence=null}, enabled=!busy) { Text(stringResource(R.string.h_back)) }})
+    }
     if(state.confirmDeactivate)AlertDialog(onDismissRequest=model::dismissDeactivate,
         title={Text(stringResource(R.string.h_deactivate))},text={Text(stringResource(R.string.h_deactivate_confirm))},
         confirmButton={TextButton(onClick=model::confirmDeactivate,modifier=Modifier.testTag("confirm-deactivate")){Text(stringResource(R.string.h_deactivate))}},
@@ -137,7 +188,7 @@ fun HydrantScreen(model: HydrantViewModel, requestAccess: ()->Unit = {}, signOut
 }
 @Composable private fun HydrantDetails(state: RegistryState,model: HydrantViewModel,modifier: Modifier) {
     val h=state.selected?:return;val enabled=!state.loading && !state.mutating
-    var status by remember(h.id,h.version) { mutableStateOf(h.status) }
+    var status by remember(h.id,h.version,h.status) { mutableStateOf(h.status) }
     Column(modifier.verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(8.dp)) {
         Text(stringResource(R.string.h_details),style=MaterialTheme.typography.titleLarge)
         TextButton(onClick=model::back,enabled=enabled){Text(stringResource(R.string.h_back))}

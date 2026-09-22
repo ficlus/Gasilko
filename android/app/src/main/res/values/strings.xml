@@ -125,4 +125,22 @@
     <string name="h_no_matches">Noben hidrant ne ustreza filtrom.</string>
     <string name="auth_offline_seven_days">Dostop brez povezave poteče v največ 7 dneh. Povežite se in znova preverite dostop.</string>
     <string name="auth_offline_one_day">Dostop brez povezave poteče v največ 1 dnevu. Povežite se in znova preverite dostop.</string>
+    <string name="h_sync_done">Sinhronizirano · brez čakajočih lokalnih sprememb</string>
+    <string name="h_sync_pending">Lokalne spremembe čakajo na sinhronizacijo</string>
+    <string name="h_sync_running">Sinhronizacija poteka</string>
+    <string name="h_sync_retry">Sinhronizacija ni uspela · spremembe so shranjene za ponovni poskus</string>
+    <string name="h_sync_conflict">Spor zahteva vašo odločitev · čakalna vrsta je ustavljena</string>
+    <string name="h_sync_now">Sinhroniziraj zdaj</string>
+    <string name="h_sync_review">Preglej spore</string>
+    <string name="h_unsynced">Nesinhronizirane lokalne spremembe</string>
+    <string name="h_conflicts_resolved">Ni nerešenih sporov.</string>
+    <string name="h_conflict_local">Lokalno stanje ob zaznavi spora</string>
+    <string name="h_conflict_intent">Vrednosti izvirne sporne spremembe</string>
+    <string name="h_conflict_server">Shranjeno stanje strežnika</string>
+    <string name="h_conflict_server_missing">Stanje strežnika še ni na voljo. Zaprite pregled in ob povezavi izberite Sinhroniziraj zdaj.</string>
+    <string name="h_resolution_notice">Odločitev zahteva povezavo in novo preverjanje pravic ter trenutnega stanja strežnika. Ohrani strežnik sprejme trenutno stanje brez novega prenosa. Ohrani lokalno ustvari novo čakajočo operacijo z izvirno lokalno spremembo. Zgodovina in druge čakajoče spremembe se ohranijo.</string>
+    <string name="h_keep_server">Ohrani strežnik (KEEP_SERVER)</string>
+    <string name="h_keep_local">Ohrani lokalno (KEEP_LOCAL)</string>
+    <string name="auth_cached_authorization">Dostop brez povezave · uporabljate predhodno preverjena, shranjena dovoljenja.</string>
+    <string name="auth_offline_expired">Dovoljenja za dostop brez povezave so potekla ali jih ni mogoče varno potrditi. Povežite se z internetom in ponovno preverite račun ter članstva za dostop do registra.</string>
 </resources>

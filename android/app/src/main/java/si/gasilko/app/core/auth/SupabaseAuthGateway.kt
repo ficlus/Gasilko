@@ -33,9 +33,10 @@ class SupabaseAuthGateway(private val client: SupabaseClient, scope: CoroutineSc
     private val offline = OfflineAuthorization(context.applicationContext)
     private fun account() = client.auth.currentUserOrNull()?.id ?: throw AuthFailure(AuthMessage.EXPIRED)
     override fun accountId() = client.auth.currentUserOrNull()?.id
+    override fun usingOfflineAuthorization() = offlineAccount != null && offlineAccount == accountId()
     private fun unavailable(e: Exception) = e is java.io.IOException || e is io.ktor.client.plugins.HttpRequestTimeoutException ||
         (e is RestException && e.statusCode >= 500) || (e is RegistryFailure && e.reason in listOf(RegistryError.NETWORK, RegistryError.SERVER))
-    override suspend fun invalidateAuthorization() { authorization.withLock { offline.clear() } }
+    override suspend fun invalidateAuthorization() { authorization.withLock { offlineAccount = null; offline.clear() } }
     override suspend fun authorizationNotice(): AuthMessage {
         val remaining = offline.read(account()).second
         return when { remaining <= OfflineAuthorization.DAY -> AuthMessage.OFFLINE_ONE_DAY
@@ -90,7 +91,7 @@ class SupabaseAuthGateway(private val client: SupabaseClient, scope: CoroutineSc
                         e is AuthFailure -> RegistryError.EXPIRED
                         else -> RegistryError.FORBIDDEN })
                 }
-            })
+            }, observeWork = scheduler::observe)
     }
     suspend fun synchronizeHydrants(context: Context, account: String, organization: String) {
         client.auth.awaitInitialization()
@@ -124,14 +125,16 @@ class SupabaseAuthGateway(private val client: SupabaseClient, scope: CoroutineSc
         try {
             client.auth.retrieveUserForCurrentSession()
             val status = client.postgrest.rpc("get_my_account_status").decodeAs<String?>()
-            if(status != "ACTIVE") { offline.clear(); return@withLock status }
+            if(status != "ACTIVE") { offlineAccount = null; offline.clear(); return@withLock status }
             val organizations = OnlineHydrantRepository(SupabaseRegistryTransport(client)).organizations()
             if(account() != expected) throw AuthFailure(AuthMessage.EXPIRED)
             offline.save(expected, organizations)
+            offlineAccount = null
             status
         } catch(e: CancellationException) { throw e }
         catch(e: Exception) {
-            if(!unavailable(e)) offline.clear()
+            if(!unavailable(e)) { offlineAccount = null; offline.clear() }
+            else offlineAccount = expected
             throw e
         }
     }
@@ -154,6 +157,7 @@ class SupabaseAuthGateway(private val client: SupabaseClient, scope: CoroutineSc
     fun close() { }
     companion object {
         private val authorization = Mutex()
+        @Volatile private var offlineAccount: String? = null
         private var sharedClient: SupabaseClient? = null
         @Synchronized
         fun create(context: Context, scope: CoroutineScope): SupabaseAuthGateway? {

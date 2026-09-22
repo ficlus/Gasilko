@@ -25,6 +25,8 @@ fun AuthScreen(model: AuthViewModel = viewModel()) {
     var requests by remember { mutableStateOf(false) }
     LaunchedEffect(state.route) { if(state.route==AuthRoute.UNAUTHENTICATED || state.route==AuthRoute.ACTIVE) requests=false }
     Column {
+    if(state.route == AuthRoute.ACTIVE && state.offline)
+        Text(stringResource(R.string.auth_cached_authorization), Modifier.padding(horizontal=16.dp, vertical=8.dp))
     if(state.route == AuthRoute.ACTIVE && state.message in listOf(AuthMessage.OFFLINE_SEVEN_DAYS, AuthMessage.OFFLINE_ONE_DAY))
         Text(stringResource(if(state.message == AuthMessage.OFFLINE_ONE_DAY) R.string.auth_offline_one_day else R.string.auth_offline_seven_days), Modifier.padding(16.dp))
     Box(Modifier.weight(1f)) {
@@ -85,6 +87,7 @@ fun AuthContent(state: AuthState, signIn: (String,String)->Unit, signUp: (String
             AuthMessage.WEAK_PASSWORD -> R.string.auth_weak_password
             AuthMessage.PROFILE_UNAVAILABLE -> R.string.auth_profile_unavailable
             AuthMessage.EXPIRED -> R.string.auth_session_expired
+            AuthMessage.OFFLINE_EXPIRED -> R.string.auth_offline_expired
             AuthMessage.CONFIGURATION -> R.string.auth_configuration
             else -> R.string.auth_auth_error
         }))
