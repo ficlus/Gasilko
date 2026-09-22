@@ -23,14 +23,14 @@ class OfflineAuthorization(private val context: Context) {
     }
     suspend fun read(account: String): Pair<List<RegistryOrganization>, Long> {
         try {
-            val snapshot = Json.parseToJsonElement(secure.loadAuthorization() ?: throw AuthFailure(AuthMessage.EXPIRED)).jsonObject
-            if(snapshot.getValue("account").jsonPrimitive.content != account) throw AuthFailure(AuthMessage.EXPIRED)
+            val snapshot = Json.parseToJsonElement(secure.loadAuthorization() ?: throw AuthFailure(AuthMessage.OFFLINE_EXPIRED)).jsonObject
+            if(snapshot.getValue("account").jsonPrimitive.content != account) throw AuthFailure(AuthMessage.OFFLINE_EXPIRED)
             val elapsed = SystemClock.elapsedRealtime() - snapshot.getValue("elapsed").jsonPrimitive.long
             val wall = System.currentTimeMillis() - snapshot.getValue("last_online_verification_at").jsonPrimitive.long
             val remaining = 30 * DAY - maxOf(elapsed, wall)
             // A reboot loses the monotonic anchor; do not trust adjustable wall time alone.
             if(boot() < 0 || snapshot.getValue("boot").jsonPrimitive.int != boot() || elapsed < 0 || wall < 0 || remaining <= 0) {
-                clear(); throw AuthFailure(AuthMessage.EXPIRED)
+                clear(); throw AuthFailure(AuthMessage.OFFLINE_EXPIRED)
             }
             val organizations = snapshot.getValue("organizations").jsonArray.map { it.jsonObject.let { org ->
                 RegistryOrganization(org.getValue("id").jsonPrimitive.content, org.getValue("name").jsonPrimitive.content,
@@ -39,7 +39,7 @@ class OfflineAuthorization(private val context: Context) {
             return organizations to remaining
         } catch(e: CancellationException) { throw e }
         catch(e: AuthFailure) { throw e }
-        catch(_: Exception) { throw AuthFailure(AuthMessage.EXPIRED) }
+        catch(_: Exception) { throw AuthFailure(AuthMessage.OFFLINE_EXPIRED) }
     }
     companion object { const val DAY = 86_400_000L }
 }

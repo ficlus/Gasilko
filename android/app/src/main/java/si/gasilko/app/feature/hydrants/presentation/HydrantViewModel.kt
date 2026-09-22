@@ -3,8 +3,7 @@ package si.gasilko.app.feature.hydrants.presentation
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.*
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.*
 import si.gasilko.app.feature.hydrants.domain.*
 import java.util.UUID
 
@@ -24,7 +23,77 @@ class HydrantViewModel(private val repository: HydrantRepository, private val in
     val state = mutableState.asStateFlow()
     private var job: Job? = null
     private var generation = 0
-    fun clear() { generation++; job?.cancel(); repository.setActiveOrganization(null); mutableState.value=RegistryState() }
+    private val mutableSync = MutableStateFlow(RegistrySyncState())
+    val sync = mutableSync.asStateFlow()
+    init {
+        scope.launch {
+            state.map { Triple(it.organization?.id, it.loading || it.mutating, it.query to it.selected?.id) }
+                .distinctUntilChanged().collectLatest { (organization, busy, _) ->
+                    if(mutableSync.value.organization != organization) mutableSync.value = RegistrySyncState(organization.orEmpty())
+                    if(organization == null || busy) return@collectLatest
+                    val stamp = generation
+                    try {
+                        repository.observeSync(organization).collectLatest { derived ->
+                            val old = state.value
+                            // Re-read the visible pages from Room after acknowledgements/resolutions.
+                            // Drafts remain untouched; their original optimistic version is retained.
+                            val rows = mutableListOf<Hydrant>()
+                            var page: List<Hydrant>
+                            do {
+                                page = repository.list(old.query, rows.lastOrNull()?.id)
+                                rows.addAll(page)
+                            } while(page.size == 100 && rows.size < old.rows.size)
+                            val selected = old.selected?.let { h ->
+                                try { repository.get(organization, h.id) }
+                                catch(e: RegistryFailure) { if(e.reason != RegistryError.UNAVAILABLE) throw e; null }
+                            }
+                            if(stamp == generation && state.value.organization?.id == organization &&
+                                state.value.query == old.query && state.value.selected?.id == old.selected?.id &&
+                                !state.value.loading && !state.value.mutating) {
+                                mutableSync.value = derived
+                                mutableState.value = state.value.copy(rows = rows, more = page.size == 100, selected = selected)
+                            }
+                        }
+                    } catch(e: CancellationException) { throw e }
+                    catch(e: Exception) {
+                        if(stamp == generation) {
+                            val error = reason(e)
+                            if(error in listOf(RegistryError.EXPIRED, RegistryError.FORBIDDEN)) {
+                                clear(); mutableState.value = RegistryState(error = error)
+                            } else mutableState.value = state.value.copy(error = error)
+                        }
+                    }
+                }
+        }
+    }
+    fun clear() { generation++; job?.cancel(); repository.setActiveOrganization(null); mutableSync.value=RegistrySyncState(); mutableState.value=RegistryState() }
+    fun syncNow() {
+        val s = state.value; val org = s.organization ?: return
+        if(!s.writable || s.loading || s.mutating || sync.value.phase == SyncPhase.SYNCING) return
+        try { repository.requestSync(org.id) }
+        catch(e: Exception) { mutableState.value = s.copy(error = reason(e)) }
+    }
+    fun resolveConflict(sequence: Long, resolution: ConflictResolution) {
+        val old = state.value; val org = old.organization ?: return
+        if(old.loading || old.mutating || old.form != null || !old.writable) return
+        val stamp = generation
+        mutableState.value = old.copy(mutating = true, error = null)
+        start {
+            try {
+                repository.resolveConflict(org.id, sequence, resolution)
+                if(stamp == generation) mutableState.value = state.value.copy(mutating = false)
+                // The observer restarts when idle and reads the resolved queue/cache atomically.
+            } catch(e: CancellationException) { throw e }
+            catch(e: Exception) {
+                if(stamp == generation) {
+                    val error = reason(e)
+                    if(error in listOf(RegistryError.EXPIRED, RegistryError.FORBIDDEN)) {
+                        clear(); mutableState.value = RegistryState(error = error)
+                    } else mutableState.value = state.value.copy(mutating = false, error = error)
+                }
+            }
+        }
+    }
     private fun start(block: suspend ()->Unit) { job=scope.launch { block() } }
     private fun reason(e: Exception) = (e as? RegistryFailure)?.reason ?: RegistryError.SERVER
     private suspend fun hydrate(action: suspend () -> Unit): RegistryError? = try {

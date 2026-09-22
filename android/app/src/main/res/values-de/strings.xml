@@ -125,4 +125,22 @@
     <string name="h_no_matches">Keine Hydranten entsprechen den Filtern.</string>
     <string name="auth_offline_seven_days">Der Offline-Zugriff läuft in höchstens 7 Tagen ab. Stellen Sie eine Verbindung her und bestätigen Sie Ihren Zugriff erneut.</string>
     <string name="auth_offline_one_day">Der Offline-Zugriff läuft in höchstens 1 Tag ab. Stellen Sie eine Verbindung her und bestätigen Sie Ihren Zugriff erneut.</string>
+    <string name="h_sync_done">Synchronisiert · keine ausstehenden lokalen Änderungen</string>
+    <string name="h_sync_pending">Lokale Änderungen warten auf Synchronisierung</string>
+    <string name="h_sync_running">Synchronisierung läuft</string>
+    <string name="h_sync_retry">Synchronisierung fehlgeschlagen · Änderungen bleiben für einen erneuten Versuch gespeichert</string>
+    <string name="h_sync_conflict">Konflikt erfordert Ihre Entscheidung · Warteschlange angehalten</string>
+    <string name="h_sync_now">Jetzt synchronisieren</string>
+    <string name="h_sync_review">Konflikte prüfen</string>
+    <string name="h_unsynced">Nicht synchronisierte lokale Änderungen</string>
+    <string name="h_conflicts_resolved">Keine ungelösten Konflikte.</string>
+    <string name="h_conflict_local">Lokaler Stand bei Erkennung des Konflikts</string>
+    <string name="h_conflict_intent">Werte der ursprünglichen widersprüchlichen Änderung</string>
+    <string name="h_conflict_server">Gespeicherter Serverstand</string>
+    <string name="h_conflict_server_missing">Serverstand noch nicht verfügbar. Schließen Sie die Ansicht und wählen Sie bei bestehender Verbindung Jetzt synchronisieren.</string>
+    <string name="h_resolution_notice">Die Entscheidung erfordert eine Verbindung sowie eine erneute Prüfung der Berechtigungen und des aktuellen Serverstands. Server behalten übernimmt den aktuellen Stand ohne neuen Upload. Lokal behalten erstellt einen neuen ausstehenden Vorgang mit der ursprünglichen lokalen Änderung. Verlauf und weitere ausstehende Änderungen bleiben erhalten.</string>
+    <string name="h_keep_server">Server behalten (KEEP_SERVER)</string>
+    <string name="h_keep_local">Lokal behalten (KEEP_LOCAL)</string>
+    <string name="auth_cached_authorization">Offline-Zugriff · zuvor online geprüfte, gespeicherte Berechtigungen werden verwendet.</string>
+    <string name="auth_offline_expired">Die Offline-Berechtigungen sind abgelaufen oder können nicht sicher bestätigt werden. Stellen Sie eine Internetverbindung her und prüfen Sie Konto und Mitgliedschaften erneut, um das Register zu öffnen.</string>
 </resources>

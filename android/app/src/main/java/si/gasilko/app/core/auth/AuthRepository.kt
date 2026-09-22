@@ -14,11 +14,12 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 
 enum class AuthRoute { LOADING, UNAUTHENTICATED, ACTIVE, PENDING_APPROVAL, SUSPENDED, REJECTED, ERROR }
-enum class AuthMessage { NONE, INVALID_CREDENTIALS, CONFIRM_EMAIL, SIGNUP_NOTICE, WEAK_PASSWORD, ERROR, PROFILE_UNAVAILABLE, EXPIRED, CONFIGURATION, OFFLINE_SEVEN_DAYS, OFFLINE_ONE_DAY }
-data class AuthState(val route: AuthRoute = AuthRoute.LOADING, val message: AuthMessage = AuthMessage.NONE, val account: String? = null)
+enum class AuthMessage { NONE, INVALID_CREDENTIALS, CONFIRM_EMAIL, SIGNUP_NOTICE, WEAK_PASSWORD, ERROR, PROFILE_UNAVAILABLE, EXPIRED, CONFIGURATION, OFFLINE_SEVEN_DAYS, OFFLINE_ONE_DAY, OFFLINE_EXPIRED }
+data class AuthState(val route: AuthRoute = AuthRoute.LOADING, val message: AuthMessage = AuthMessage.NONE, val account: String? = null, val offline: Boolean = false)
 enum class SessionSignal { LOADING, AUTHENTICATED, UNAUTHENTICATED, UNAVAILABLE }
 class AuthFailure(val reason: AuthMessage) : Exception()
 interface AuthGateway {
+    fun usingOfflineAuthorization(): Boolean = false
     fun accountId(): String? = null
     val sessions: StateFlow<SessionSignal>
     suspend fun startGoogle() { throw AuthFailure(AuthMessage.ERROR) }
@@ -60,11 +61,11 @@ class AuthRepository(private val gateway: AuthGateway?, private val scope: Corou
                     try {
                         val remaining = gateway?.authorizationRemainingMs() ?: break
                         val notice = gateway?.authorizationNotice() ?: AuthMessage.NONE
-                        if(state.value.route == AuthRoute.ACTIVE) mutableState.value = state.value.copy(message = notice)
+                        if(state.value.route == AuthRoute.ACTIVE) mutableState.value = state.value.copy(message = notice, offline = gateway?.usingOfflineAuthorization() == true)
                         delay(remaining.coerceIn(1, 60_000))
                     } catch(e: CancellationException) { throw e }
                     catch(_: Exception) {
-                        mutableState.value = AuthState(AuthRoute.ERROR, AuthMessage.EXPIRED)
+                        mutableState.value = AuthState(AuthRoute.ERROR, AuthMessage.OFFLINE_EXPIRED)
                         break
                     }
                 }
@@ -75,7 +76,7 @@ class AuthRepository(private val gateway: AuthGateway?, private val scope: Corou
         mutableState.value = AuthState()
         try {
             val route = accountRoute(gateway?.verifiedAccountStatus())
-            mutableState.value = AuthState(route, if (route == AuthRoute.ERROR) AuthMessage.PROFILE_UNAVAILABLE else AuthMessage.NONE, gateway?.accountId())
+            mutableState.value = AuthState(route, if (route == AuthRoute.ERROR) AuthMessage.PROFILE_UNAVAILABLE else AuthMessage.NONE, gateway?.accountId(), gateway?.usingOfflineAuthorization() == true)
         } catch (e: CancellationException) { throw e
         } catch (e: AuthFailure) {
             mutableState.value = AuthState(if (e.reason == AuthMessage.EXPIRED) AuthRoute.UNAUTHENTICATED else AuthRoute.ERROR, e.reason)
