@@ -145,7 +145,7 @@
     <string name="auth_offline_expired">Die Offline-Berechtigungen sind abgelaufen oder können nicht sicher bestätigt werden. Stellen Sie eine Internetverbindung her und prüfen Sie Konto und Mitgliedschaften erneut, um das Register zu öffnen.</string>
     <string name="map_title">Karte</string>
     <string name="map_loading">Karte wird geladen …</string>
-    <string name="map_error">Die Karte konnte nicht geladen werden. Prüfen Sie die Internetverbindung und versuchen Sie es erneut.</string>
+    <string name="map_error">Die Basiskarte konnte nicht geladen werden. Lokale Hydranten bleiben verfügbar. Prüfen Sie die Verbindung und versuchen Sie es erneut.</string>
     <string name="map_unconfigured">Karte nicht verfügbar. Die Administration muss eine gültige Kartenstil-Adresse konfigurieren.</string>
     <string name="map_retry">Erneut versuchen</string>
 </resources>

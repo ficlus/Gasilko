@@ -23,6 +23,17 @@ class RoomHydrantRepository(
 ) : HydrantRepository {
     private val dao = database.registry()
     private val changes = Mutex()
+    override fun observeMap(query: HydrantQuery): Flow<List<Hydrant>> = flow {
+        val account = currentAccount()
+        emitAll(database.invalidationTracker.createFlow("hydrants", "organizations").map {
+            val org = organization(account, query.organization)
+            if(!org.active) throw RegistryFailure(RegistryError.FORBIDDEN)
+            val q = query.normalized(org.role)
+            dao.list(account, q.organization, HydrantEntity.fold(q.search), q.type, q.status,
+                when(q.active) { ActiveFilter.ALL -> null; ActiveFilter.ACTIVE -> true; ActiveFilter.INACTIVE -> false },
+                after = null, limit = -1).map { it.value }.also { checkAccount(account) }
+        }.distinctUntilChanged())
+    }
     override fun observeSync(organization: String): Flow<RegistrySyncState> = flow {
         val account = currentAccount()
         emitAll(combine(database.invalidationTracker.createFlow("hydrants", "pending_hydrant_changes", "hydrant_conflicts"),
