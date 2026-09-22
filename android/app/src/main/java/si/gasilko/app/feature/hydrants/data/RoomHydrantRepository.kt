@@ -14,9 +14,15 @@ class RoomHydrantRepository(
     private val database: RegistryDatabase,
     private val online: HydrantRepository,
     private val currentAccount: () -> String,
+    private val selectSyncScope: (String?, String?) -> Unit = { _, _ -> },
+    private val scheduleSync: (String, String) -> Unit = { _, _ -> },
 ) : HydrantRepository {
     private val dao = database.registry()
     private val changes = Mutex()
+    override fun setActiveOrganization(organization: String?) {
+        selectSyncScope(if(organization == null) null else currentAccount(), organization)
+    }
+    override fun requestSync(organization: String) { scheduleSync(currentAccount(), organization) }
     private fun checkAccount(account: String) {
         if (currentAccount() != account) throw RegistryFailure(RegistryError.EXPIRED)
     }
@@ -56,7 +62,7 @@ class RoomHydrantRepository(
             dao.upsertOrganizations(rows.map { OrganizationEntity(account, it) })
         }
     }
-    override suspend fun refresh(organization: String) = changes.withLock {
+    override suspend fun refresh(organization: String) = hydrantRemoteAccess.withLock { changes.withLock {
         val account = currentAccount()
         val org = organization(account, organization)
         val types = online.types(organization)
@@ -79,11 +85,11 @@ class RoomHydrantRepository(
             dao.upsertTypes(types.map { TypeEntity(account, organization, it) })
             dao.upsertHydrants(rows.filterNot { it.id in pending }.map { HydrantEntity.from(account, it) })
         }
-    }
-    override suspend fun refreshDetail(organization: String, id: String) = changes.withLock {
+    } }
+    override suspend fun refreshDetail(organization: String, id: String) = hydrantRemoteAccess.withLock { changes.withLock detail@{
         val account = currentAccount()
         organization(account, organization)
-        if(id in dao.pendingHydrantIds(account, organization)) return@withLock
+        if(id in dao.pendingHydrantIds(account, organization)) return@detail
         val row = online.get(organization, id)
         checkAccount(account)
         require(row.organization == organization && row.id == id)
@@ -91,12 +97,12 @@ class RoomHydrantRepository(
             if(id !in dao.pendingHydrantIds(account, organization))
                 dao.upsertHydrants(listOf(HydrantEntity.from(account, row)))
         }
-    }
+    } }
 
     private suspend fun localWrite(organization: String, id: String, operation: String, version: Long?,
         payload: JsonObject, change: (Hydrant?, String, String) -> Hydrant): Hydrant = changes.withLock {
         val account = currentAccount()
-        database.withTransaction {
+        val result = database.withTransaction {
             val org = organization(account, organization)
             if(!org.active || (operation in listOf("UPDATE", "SET_ACTIVE") && !org.role.manages))
                 throw RegistryFailure(RegistryError.FORBIDDEN)
@@ -139,6 +145,10 @@ class RoomHydrantRepository(
             checkAccount(account)
             row
         }
+        // A scheduling failure cannot turn an already committed local write into a failed save.
+        try { scheduleSync(account, organization) }
+        catch(_: Exception) { android.util.Log.w("HydrantSync", "schedule failed; queue retained") }
+        result
     }
     override suspend fun create(organization: String, id: String, fields: HydrantFields): Hydrant {
         if(runCatching { UUID.fromString(id).toString() }.getOrNull() != id)
