@@ -4,6 +4,7 @@ import android.content.ComponentCallbacks2
 import android.content.Context
 import android.content.res.Configuration
 import android.os.Bundle
+import android.graphics.RectF
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
@@ -11,6 +12,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -21,21 +23,58 @@ import org.maplibre.android.MapLibre
 import org.maplibre.android.camera.CameraPosition
 import org.maplibre.android.geometry.LatLng
 import org.maplibre.android.maps.MapView
+import org.maplibre.android.maps.MapLibreMap
+import org.maplibre.android.maps.Style
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import si.gasilko.app.feature.hydrants.domain.*
+import si.gasilko.app.feature.hydrants.presentation.statusLabel
+import si.gasilko.app.feature.hydrants.presentation.errorLabel
 import si.gasilko.app.BuildConfig
 import si.gasilko.app.R
 import java.net.URI
 
-/** Base-map UI only. Future hydrant layers must consume the existing Room repository. */
+/** Rendering only: all hydrants are supplied by the existing local repository/ViewModel. */
 @Composable
-fun MapScreen(onBack: () -> Unit, styleUrl: String = BuildConfig.MAP_STYLE_URL) {
+@OptIn(ExperimentalLayoutApi::class)
+fun MapScreen(onBack: () -> Unit, hydrants: List<Hydrant>, onOpenHydrant: (String) -> Unit,
+    dataLoading: Boolean = false, dataError: RegistryError? = null, styleUrl: String = BuildConfig.MAP_STYLE_URL) {
     val lifecycle = LocalLifecycleOwner.current.lifecycle
-    var attempt by remember { mutableIntStateOf(0) }
+    var attempt by rememberSaveable { mutableIntStateOf(0) }
+    var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
+    val selected = hydrants.find { it.id == selectedId && HydrantMapLayers.valid(it) }
+    val data by produceState(HydrantMapLayers.EMPTY, hydrants) {
+        value = withContext(Dispatchers.Default) { HydrantMapLayers.data(hydrants) }
+    }
+    val visibleData = if(hydrants.isEmpty()) HydrantMapLayers.EMPTY else data
+    val currentData by rememberUpdatedState(visibleData)
+    val currentRows by rememberUpdatedState(hydrants)
+    val currentSelection by rememberUpdatedState(selected?.id)
+    LaunchedEffect(hydrants, dataLoading) { if(!dataLoading && selected == null) selectedId=null }
     BackHandler(onBack=onBack)
     Scaffold { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
             Row(Modifier.padding(horizontal=16.dp), horizontalArrangement=Arrangement.spacedBy(16.dp)) {
                 TextButton(onClick=onBack) { Text(stringResource(R.string.h_back)) }
                 Text(stringResource(R.string.map_title), Modifier.padding(top=12.dp), style=MaterialTheme.typography.titleLarge)
+            }
+            FlowRow(Modifier.padding(horizontal=16.dp), horizontalArrangement=Arrangement.spacedBy(12.dp)) {
+                HydrantStatus.entries.forEach { status ->
+                    Text("● " + stringResource(statusLabel(status)), color=Color(HydrantMapLayers.color(status)), style=MaterialTheme.typography.labelSmall)
+                }
+            }
+            if(dataLoading)LinearProgressIndicator(Modifier.fillMaxWidth())
+            dataError?.let { Text(stringResource(errorLabel(it)), Modifier.padding(horizontal=16.dp), color=MaterialTheme.colorScheme.error) }
+            selected?.let { h ->
+                Row(Modifier.padding(horizontal=16.dp), horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                    Column(Modifier.weight(1f)) {
+                        Text(h.code ?: stringResource(R.string.h_pending_code))
+                        if(h.code == null)Text(h.id, style=MaterialTheme.typography.labelSmall)
+                        Text(stringResource(statusLabel(h.status)))
+                        if(!h.active)Text(stringResource(R.string.h_inactive))
+                    }
+                    TextButton(onClick={onOpenHydrant(h.id)}) { Text(stringResource(R.string.h_details)) }
+                }
             }
             key(styleUrl, attempt) {
                 val saved = rememberSaveable(saver=Saver<SavedMap, Bundle>(
@@ -51,20 +90,50 @@ fun MapScreen(onBack: () -> Unit, styleUrl: String = BuildConfig.MAP_STYLE_URL) 
                         MapLibre.getInstance(context.applicationContext)
                         LifecycleMapView(context, lifecycle, saved.bundle).apply {
                             saved.view=this
-                            addOnDidFailLoadingMapListener { _ ->
-                                if(!released) { failed=true; loading=false }
+                            var readyMap: MapLibreMap? = null
+                            var fallback = false
+                            fun install(style: Style) {
+                                if(!released) { hydrantLayers=HydrantMapLayers(style); hydrantLayers?.update(currentData,currentSelection) }
                             }
+                            val fail: () -> Unit = {
+                                if(!released) {
+                                    failed=true; loading=false
+                                    if(!fallback && readyMap != null) {
+                                        fallback=true
+                                        // Finish the SDK failure dispatch before replacing its style callback.
+                                        post { if(!released) {
+                                            hydrantLayers=null
+                                            readyMap?.setStyle(Style.Builder().fromJson(HydrantMapLayers.OFFLINE_STYLE)) { install(it) }
+                                        } }
+                                    }
+                                }
+                            }
+                            addOnDidFailLoadingMapListener { _ -> fail() }
                             if(!released) getMapAsync { map ->
                                 if(!released) {
+                                    readyMap=map
                                     if(saved.bundle == null) map.cameraPosition = CameraPosition.Builder().target(LatLng(46.15, 14.95)).zoom(6.0).build()
+                                    map.addOnMapClickListener { point ->
+                                        if(released) false else {
+                                            val pixel=map.projection.toScreenLocation(point)
+                                            val radius=12f * resources.displayMetrics.density
+                                            val hits=map.queryRenderedFeatures(pixel, *HydrantMapLayers.layerIds).ifEmpty {
+                                                map.queryRenderedFeatures(RectF(pixel.x-radius,pixel.y-radius,pixel.x+radius,pixel.y+radius), *HydrantMapLayers.layerIds)
+                                            }
+                                            val id=hits
+                                                .mapNotNull { it.getStringProperty("uuid") }.sorted().firstOrNull()
+                                            selectedId=id?.takeIf { uuid -> currentRows.any { it.id==uuid && HydrantMapLayers.valid(it) } }
+                                            selectedId != null
+                                        }
+                                    }
                                     // Keep MapLibre's attribution controls and source attribution visible.
                                     try {
-                                        map.setStyle(styleUrl) { if(!released) { loading=false; failed=false } }
-                                    } catch(_: RuntimeException) { failed=true; loading=false }
+                                        map.setStyle(styleUrl) { if(!released) { install(it); loading=false; failed=false } }
+                                    } catch(_: RuntimeException) { fail() }
                                 }
                             }
                         }
-                    }, onReset=null, onRelease={
+                    }, update={ if(!it.released) it.hydrantLayers?.update(visibleData, selected?.id) }, onReset=null, onRelease={
                         saved.bundle=saved.snapshot(); saved.view=null; it.release()
                     })
                 } else Spacer(Modifier.weight(1f))
@@ -92,6 +161,7 @@ private class SavedMap(var bundle: Bundle? = null) {
 
 /** Owns the native view for exactly one Compose AndroidView attachment. */
 private class LifecycleMapView(context: Context, private val lifecycle: Lifecycle, saved: Bundle?) : MapView(context) {
+    var hydrantLayers: HydrantMapLayers? = null
     var released = false
         private set
     private var started = false
@@ -122,6 +192,7 @@ private class LifecycleMapView(context: Context, private val lifecycle: Lifecycl
     fun release() {
         if(released) return
         released=true
+        hydrantLayers=null
         lifecycle.removeObserver(observer)
         context.applicationContext.unregisterComponentCallbacks(memory)
         stop()

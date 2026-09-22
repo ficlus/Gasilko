@@ -70,9 +70,9 @@ interface RegistryDao {
         AND (:status IS NULL OR status = :status) AND (:active IS NULL OR active = :active)
         AND (:search = '' OR instr(codeSearch, :search) > 0 OR instr(addressSearch, :search) > 0
             OR instr(descriptionSearch, :search) > 0)
-        ORDER BY id ASC LIMIT 100""")
+        ORDER BY id ASC LIMIT :limit""")
     suspend fun list(account: String, organization: String, search: String, type: String?,
-        status: HydrantStatus?, active: Boolean?, after: String?): List<HydrantEntity>
+        status: HydrantStatus?, active: Boolean?, after: String?, limit: Int = 100): List<HydrantEntity>
     @Query("DELETE FROM organizations WHERE account = :account")
     suspend fun removeOrganizations(account: String)
     @Query("""DELETE FROM hydrants WHERE account = :account AND organization = :organization

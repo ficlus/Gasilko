@@ -7,6 +7,8 @@ import kotlinx.coroutines.flow.*
 import si.gasilko.app.feature.hydrants.domain.*
 import java.util.UUID
 
+data class MapHydrantsState(val rows: List<Hydrant> = emptyList(), val loading: Boolean = false, val error: RegistryError? = null)
+
 data class RegistryState(
     val organizations: List<RegistryOrganization> = emptyList(), val organization: RegistryOrganization? = null,
     val rows: List<Hydrant> = emptyList(), val types: List<HydrantType> = emptyList(), val selected: Hydrant? = null,
@@ -21,6 +23,13 @@ class HydrantViewModel(private val repository: HydrantRepository, private val in
     private val scope get() = injectedScope ?: viewModelScope
     private val mutableState = MutableStateFlow(RegistryState())
     val state = mutableState.asStateFlow()
+    fun mapHydrants(query: HydrantQuery): Flow<MapHydrantsState> = repository.observeMap(query)
+        .map { MapHydrantsState(rows = it) }
+        .onStart { emit(MapHydrantsState(loading = true)) }
+        .catch { e ->
+            if(e is CancellationException) throw e
+            emit(MapHydrantsState(error = (e as? RegistryFailure)?.reason ?: RegistryError.SERVER))
+        }
     private var job: Job? = null
     private var generation = 0
     private val mutableSync = MutableStateFlow(RegistrySyncState())
