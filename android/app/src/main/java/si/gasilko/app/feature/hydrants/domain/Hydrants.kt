@@ -5,6 +5,9 @@ enum class RegistryRole { FIREFIGHTER, MANAGER, ADMIN;
 }
 enum class HydrantStatus { WORKING, NOT_WORKING, NEEDS_INSPECTION, UNKNOWN }
 enum class ActiveFilter { ACTIVE, INACTIVE, ALL }
+enum class ConflictResolution { KEEP_SERVER, KEEP_LOCAL }
+data class HydrantConflict(val sequence: Long, val account: String, val organization: String,
+    val operation: String, val payload: String, val local: Hydrant, val server: Hydrant?)
 data class HydrantQuery(val organization: String = "", val search: String = "", val type: String? = null,
     val status: HydrantStatus? = null, val active: ActiveFilter = ActiveFilter.ACTIVE) {
     fun normalized(role: RegistryRole) = copy(search=search.trim().take(200),active=if(role==RegistryRole.FIREFIGHTER)ActiveFilter.ACTIVE else active)
@@ -59,6 +62,10 @@ data class HydrantForm(
 }
 /** UI reads use Room. Explicit refresh is temporary online hydration, not synchronization. */
 interface HydrantRepository {
+    suspend fun conflicts(organization: String): List<HydrantConflict> = emptyList()
+    suspend fun resolveConflict(organization: String, sequence: Long, resolution: ConflictResolution) {
+        throw RegistryFailure(RegistryError.UNAVAILABLE)
+    }
     fun setActiveOrganization(organization: String?) {}
     fun requestSync(organization: String) {}
     suspend fun refreshOrganizations() {}

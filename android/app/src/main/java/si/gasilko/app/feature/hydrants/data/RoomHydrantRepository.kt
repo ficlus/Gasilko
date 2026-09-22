@@ -16,6 +16,8 @@ class RoomHydrantRepository(
     private val currentAccount: () -> String,
     private val selectSyncScope: (String?, String?) -> Unit = { _, _ -> },
     private val scheduleSync: (String, String) -> Unit = { _, _ -> },
+    private val authorizedOrganizations: (suspend (String) -> List<RegistryOrganization>)? = null,
+    private val refreshAuthorization: (suspend () -> List<RegistryOrganization>)? = null,
 ) : HydrantRepository {
     private val dao = database.registry()
     private val changes = Mutex()
@@ -23,15 +25,58 @@ class RoomHydrantRepository(
         selectSyncScope(if(organization == null) null else currentAccount(), organization)
     }
     override fun requestSync(organization: String) { scheduleSync(currentAccount(), organization) }
+    override suspend fun conflicts(organization: String): List<HydrantConflict> {
+        val account = currentAccount()
+        organization(account, organization)
+        return dao.pendingChanges(account, organization).filter { it.state == "CONFLICT" }.map { operation ->
+            ensureConflict(database, operation)
+            val info = dao.conflictInfo(account, organization, operation.sequence)!!
+            HydrantConflict(operation.sequence, account, organization, operation.operation, operation.payload,
+                decodeHydrant(Json.parseToJsonElement(info.localState)), info.serverState?.let { decodeHydrant(Json.parseToJsonElement(it)) })
+        }.also { checkAccount(account) }
+    }
+    override suspend fun resolveConflict(organization: String, sequence: Long, resolution: ConflictResolution) {
+        hydrantRemoteAccess.withLock { changes.withLock {
+            val account = currentAccount()
+            organization(account, organization)
+            val org = (refreshAuthorization?.invoke() ?: online.organizations()).find { it.id == organization && it.active }
+                ?: throw RegistryFailure(RegistryError.FORBIDDEN)
+            val operation = dao.pendingChanges(account, organization).find { it.sequence == sequence && it.state == "CONFLICT" }
+                ?: throw RegistryFailure(RegistryError.UNAVAILABLE)
+            if(resolution == ConflictResolution.KEEP_LOCAL && operation.operation in listOf("UPDATE", "SET_ACTIVE") && !org.role.manages)
+                throw RegistryFailure(RegistryError.FORBIDDEN)
+            val server = online.get(organization, operation.entityId)
+            require(server.organization == organization && server.id == operation.entityId)
+            checkAccount(account)
+            ensureConflict(database, operation)
+            database.withTransaction {
+                val now = System.currentTimeMillis()
+                dao.captureServer(account, organization, sequence, server.snapshot())
+                val replacement = if(resolution == ConflictResolution.KEEP_LOCAL) dao.enqueue(operation.copy(
+                    sequence = 0, operationId = UUID.randomUUID().toString(), baseVersion = server.version,
+                    createdAt = now, state = "PENDING", acknowledgedVersion = null,
+                    orderSequence = operation.orderSequence ?: operation.sequence)) else null
+                check(dao.resolve(account, organization, sequence, resolution.name, now, server.snapshot(), server.version, replacement) == 1)
+                check(dao.resolveOperation(account, organization, sequence) == 1)
+                var visible = server
+                dao.remainingChanges(account, organization, server.id).forEach { visible = it.applyTo(visible) }
+                dao.upsertHydrants(listOf(HydrantEntity.from(account, visible)))
+                checkAccount(account)
+            }
+            try { scheduleSync(account, organization) }
+            catch(_: Exception) { android.util.Log.w("HydrantSync", "schedule failed; resolution retained") }
+        } }
+    }
     private fun checkAccount(account: String) {
         if (currentAccount() != account) throw RegistryFailure(RegistryError.EXPIRED)
     }
-    private suspend fun organization(account: String, id: String) = dao.organizations(account)
-        .firstOrNull { it.value.id == id }?.value ?: throw RegistryFailure(RegistryError.FORBIDDEN)
+    private suspend fun organization(account: String, id: String) =
+        (authorizedOrganizations?.invoke(account) ?: dao.organizations(account).map { it.value })
+            .firstOrNull { it.id == id } ?: throw RegistryFailure(RegistryError.FORBIDDEN)
 
     override suspend fun organizations(): List<RegistryOrganization> {
         val account = currentAccount()
-        return dao.organizations(account).map { it.value }.also { checkAccount(account) }
+        return (authorizedOrganizations?.invoke(account) ?: dao.organizations(account).map { it.value }).also { checkAccount(account) }
     }
     override suspend fun types(organization: String): List<HydrantType> {
         val account = currentAccount()
@@ -55,7 +100,7 @@ class RoomHydrantRepository(
     }
     override suspend fun refreshOrganizations() = changes.withLock {
         val account = currentAccount()
-        val rows = online.organizations()
+        val rows = refreshAuthorization?.invoke() ?: online.organizations()
         checkAccount(account)
         database.withTransaction {
             dao.removeOrganizations(account)

@@ -48,6 +48,7 @@ class HydrantSyncWorker(context: Context, parameters: WorkerParameters) : Corout
             Result.success()
         } catch(e: CancellationException) { throw e }
         catch(e: RegistryFailure) {
+            if(e.reason == RegistryError.FORBIDDEN) gateway.invalidateAuthorization()
             when(e.reason) {
                 RegistryError.NETWORK, RegistryError.SERVER -> Result.retry()
                 else -> Result.failure() // History remains; fresh authorization/manual action may reschedule.

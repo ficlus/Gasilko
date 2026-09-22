@@ -123,4 +123,6 @@
     <string name="h_inactive_only">Samo neaktivni</string>
     <string name="h_clear_filters">Počisti filtre</string>
     <string name="h_no_matches">Noben hidrant ne ustreza filtrom.</string>
+    <string name="auth_offline_seven_days">Dostop brez povezave poteče v največ 7 dneh. Povežite se in znova preverite dostop.</string>
+    <string name="auth_offline_one_day">Dostop brez povezave poteče v največ 1 dnevu. Povežite se in znova preverite dostop.</string>
 </resources>

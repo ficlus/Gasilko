@@ -31,21 +31,30 @@ data class HydrantEntity(
 @Dao
 interface RegistryDao {
     // Payload/history stay immutable; only the sync engine records acknowledgement or conflict.
-    @Insert suspend fun enqueue(change: PendingHydrantChange)
+    @Insert suspend fun enqueue(change: PendingHydrantChange): Long
     @Query("SELECT * FROM pending_hydrant_changes WHERE account = :account AND organization = :organization ORDER BY sequence")
     suspend fun pendingChanges(account: String, organization: String): List<PendingHydrantChange>
-    @Query("SELECT DISTINCT entityId FROM pending_hydrant_changes WHERE account = :account AND organization = :organization AND state != 'SYNCED'")
+    @Query("SELECT DISTINCT entityId FROM pending_hydrant_changes WHERE account = :account AND organization = :organization AND state NOT IN ('SYNCED','RESOLVED')")
     suspend fun pendingHydrantIds(account: String, organization: String): List<String>
-    @Query("SELECT * FROM pending_hydrant_changes WHERE account = :account AND organization = :organization AND state != 'SYNCED' ORDER BY sequence LIMIT 1")
+    @Query("SELECT * FROM pending_hydrant_changes WHERE account = :account AND organization = :organization AND state NOT IN ('SYNCED','RESOLVED') ORDER BY COALESCE(orderSequence, sequence), sequence LIMIT 1")
     suspend fun nextChange(account: String, organization: String): PendingHydrantChange?
-    @Query("SELECT * FROM pending_hydrant_changes WHERE account = :account AND organization = :organization AND entityId = :id AND state != 'SYNCED' ORDER BY sequence")
+    @Query("SELECT * FROM pending_hydrant_changes WHERE account = :account AND organization = :organization AND entityId = :id AND state NOT IN ('SYNCED','RESOLVED') ORDER BY COALESCE(orderSequence, sequence), sequence")
     suspend fun remainingChanges(account: String, organization: String, id: String): List<PendingHydrantChange>
-    @Query("SELECT acknowledgedVersion FROM pending_hydrant_changes WHERE account = :account AND organization = :organization AND entityId = :id AND sequence < :before AND state = 'SYNCED' ORDER BY sequence DESC LIMIT 1")
+    @Query("SELECT acknowledgedVersion FROM pending_hydrant_changes WHERE account = :account AND organization = :organization AND entityId = :id AND COALESCE(orderSequence, sequence) < :before AND state = 'SYNCED' ORDER BY COALESCE(orderSequence, sequence) DESC, sequence DESC LIMIT 1")
     suspend fun acknowledgedVersion(account: String, organization: String, id: String, before: Long): Long?
     @Query("UPDATE pending_hydrant_changes SET state = 'SYNCED', acknowledgedVersion = :version WHERE account = :account AND organization = :organization AND sequence = :sequence AND state = 'PENDING'")
     suspend fun acknowledge(account: String, organization: String, sequence: Long, version: Long): Int
     @Query("UPDATE pending_hydrant_changes SET state = 'CONFLICT' WHERE account = :account AND organization = :organization AND sequence = :sequence AND state = 'PENDING'")
     suspend fun conflict(account: String, organization: String, sequence: Long)
+    @Insert(onConflict = OnConflictStrategy.IGNORE) suspend fun captureConflict(conflict: HydrantConflictEntity)
+    @Query("SELECT * FROM hydrant_conflicts WHERE account = :account AND organization = :organization AND sequence = :sequence")
+    suspend fun conflictInfo(account: String, organization: String, sequence: Long): HydrantConflictEntity?
+    @Query("UPDATE hydrant_conflicts SET serverState = :server WHERE account = :account AND organization = :organization AND sequence = :sequence AND serverState IS NULL AND resolution IS NULL")
+    suspend fun captureServer(account: String, organization: String, sequence: Long, server: String)
+    @Query("UPDATE hydrant_conflicts SET resolution = :strategy, resolvedAt = :time, resolvedBy = :account, resolutionServerState = :server, resolutionVersion = :version, replacementSequence = :replacement WHERE account = :account AND organization = :organization AND sequence = :sequence AND resolution IS NULL")
+    suspend fun resolve(account: String, organization: String, sequence: Long, strategy: String, time: Long, server: String, version: Long, replacement: Long?): Int
+    @Query("UPDATE pending_hydrant_changes SET state = 'RESOLVED' WHERE account = :account AND organization = :organization AND sequence = :sequence AND state = 'CONFLICT'")
+    suspend fun resolveOperation(account: String, organization: String, sequence: Long): Int
     @Upsert suspend fun upsertOrganizations(rows: List<OrganizationEntity>)
     @Upsert suspend fun upsertTypes(rows: List<TypeEntity>)
     @Upsert suspend fun upsertHydrants(rows: List<HydrantEntity>)
@@ -68,7 +77,7 @@ interface RegistryDao {
     suspend fun removeOrganizations(account: String)
     @Query("""DELETE FROM hydrants WHERE account = :account AND organization = :organization
         AND id NOT IN (SELECT entityId FROM pending_hydrant_changes
-            WHERE account = :account AND organization = :organization AND state != 'SYNCED')""")
+            WHERE account = :account AND organization = :organization AND state NOT IN ('SYNCED','RESOLVED'))""")
     suspend fun removeHydrants(account: String, organization: String)
     @Query("DELETE FROM hydrant_types WHERE account = :account AND scope = :organization")
     suspend fun removeTypes(account: String, organization: String)
@@ -81,12 +90,32 @@ data class PendingHydrantChange(
     val operation: String, val payload: String, val baseVersion: Long?, val createdAt: Long,
     val state: String = "PENDING",
     val acknowledgedVersion: Long? = null,
+    val orderSequence: Long? = null,
 )
 
-@Database(entities = [OrganizationEntity::class, TypeEntity::class, HydrantEntity::class, PendingHydrantChange::class], version = 3, exportSchema = true)
+@Entity(tableName = "hydrant_conflicts")
+data class HydrantConflictEntity(
+    @PrimaryKey val sequence: Long, val logicalSequence: Long, val account: String, val organization: String,
+    val entityId: String, val localState: String, val serverState: String? = null, val detectedAt: Long,
+    val resolution: String? = null, val resolvedAt: Long? = null, val resolvedBy: String? = null,
+    val resolutionServerState: String? = null, val resolutionVersion: Long? = null, val replacementSequence: Long? = null,
+)
+
+@Database(entities = [OrganizationEntity::class, TypeEntity::class, HydrantEntity::class, PendingHydrantChange::class, HydrantConflictEntity::class], version = 4, exportSchema = true)
 abstract class RegistryDatabase : RoomDatabase() {
     abstract fun registry(): RegistryDao
     companion object {
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE pending_hydrant_changes ADD COLUMN orderSequence INTEGER")
+                db.execSQL("""CREATE TABLE IF NOT EXISTS hydrant_conflicts (
+                    sequence INTEGER NOT NULL PRIMARY KEY, logicalSequence INTEGER NOT NULL,
+                    account TEXT NOT NULL, organization TEXT NOT NULL, entityId TEXT NOT NULL,
+                    localState TEXT NOT NULL, serverState TEXT, detectedAt INTEGER NOT NULL,
+                    resolution TEXT, resolvedAt INTEGER, resolvedBy TEXT, resolutionServerState TEXT,
+                    resolutionVersion INTEGER, replacementSequence INTEGER)""")
+            }
+        }
         val MIGRATION_2_3 = object : Migration(2, 3) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE pending_hydrant_changes ADD COLUMN acknowledgedVersion INTEGER")
@@ -104,7 +133,7 @@ abstract class RegistryDatabase : RoomDatabase() {
         @Volatile private var instance: RegistryDatabase? = null
         fun open(context: Context): RegistryDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(context.applicationContext, RegistryDatabase::class.java,
-                "hydrant-registry.db").addMigrations(MIGRATION_1_2, MIGRATION_2_3).build().also { instance = it }
+                "hydrant-registry.db").addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4).build().also { instance = it }
         }
     }
 }
