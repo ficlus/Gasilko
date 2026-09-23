@@ -148,4 +148,19 @@
     <string name="map_error">Osnovnega zemljevida ni mogoče naložiti. Lokalni hidranti so še vedno na voljo. Preverite povezavo in poskusite znova.</string>
     <string name="map_unconfigured">Zemljevid ni na voljo. Skrbnik mora nastaviti veljaven naslov sloga zemljevida.</string>
     <string name="map_retry">Poskusi znova</string>
+    <string name="map_my_location">Moja lokacija</string>
+    <string name="map_nearby">Bližnji hidranti</string>
+    <string name="map_location_denied">Dostop do lokacije ni dovoljen. Zemljevid in register lahko uporabljate brez njega.</string>
+    <string name="map_location_permanent">Dovoljenje za lokacijo je blokirano. Omogočite ga v nastavitvah aplikacije; register ostane na voljo.</string>
+    <string name="map_location_searching">Pridobivanje trenutne lokacije …</string>
+    <string name="map_location_disabled">Lokacija je izklopljena ali ustrezen ponudnik ni na voljo. Preverite nastavitve lokacije.</string>
+    <string name="map_location_stale">Zadnja lokacija je prestara. Čakamo na novo meritev; razdalje trenutno niso na voljo.</string>
+    <string name="map_location_unavailable">Trenutna lokacija ni na voljo. Preverite signal in nastavitve lokacije.</string>
+    <string name="map_location_settings">Nastavitve lokacije</string>
+    <string name="map_location_accuracy">Lokacija na voljo · natančnost približno ±%1$s m</string>
+    <string name="map_location_approximate">Približna lokacija · natančnost približno ±%1$s m. Razdalje so ocene.</string>
+    <string name="map_nearby_notice">Zračne razdalje do lokalnih hidrantov v izbrani organizaciji z veljavnimi filtri.</string>
+    <string name="map_nearby_empty">Ni ustreznih lokalnih hidrantov s koordinatami.</string>
+    <string name="map_distance_m">%1$s m</string>
+    <string name="map_distance_km">%1$s km</string>
 </resources>

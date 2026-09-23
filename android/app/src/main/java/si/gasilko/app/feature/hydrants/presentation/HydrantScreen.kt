@@ -10,6 +10,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -67,13 +68,13 @@ fun HydrantScreen(model: HydrantViewModel, requestAccess: ()->Unit = {}, signOut
     var showConflicts by remember(state.organization?.id) { mutableStateOf(false) }
     var conflictSequence by remember(state.organization?.id) { mutableStateOf<Long?>(null) }
     LaunchedEffect(model) { model.refresh() }
-    var showMap by remember(state.organization?.id) { mutableStateOf(false) }
-    var mapDetail by remember(state.organization?.id) { mutableStateOf(false) }
+    var showMap by rememberSaveable(state.organization?.id) { mutableStateOf(false) }
+    var mapDetail by rememberSaveable(state.organization?.id) { mutableStateOf(false) }
     val mapState = key(state.organization?.id) { rememberSaveableStateHolder() }
     LaunchedEffect(mapDetail,state.selected?.id,state.loading,state.form) {
         if(mapDetail && !state.loading && state.selected==null && state.form==null)mapDetail=false
     }
-    if(showMap && !mapDetail) {
+    if(showMap && !mapDetail && state.writable) {
         val mapFlow = remember(model,state.query) { model.mapHydrants(state.query) }
         val mapData by mapFlow.collectAsStateWithLifecycle(initialValue=MapHydrantsState(loading=true))
         mapState.SaveableStateProvider("map") {

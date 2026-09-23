@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.res.Configuration
 import android.os.Bundle
 import android.graphics.RectF
+import android.location.Location
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
@@ -21,6 +22,10 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import org.maplibre.android.MapLibre
 import org.maplibre.android.camera.CameraPosition
+import org.maplibre.android.camera.CameraUpdateFactory
+import org.maplibre.android.location.LocationComponentActivationOptions
+import org.maplibre.android.location.modes.CameraMode
+import org.maplibre.android.location.modes.RenderMode
 import org.maplibre.android.geometry.LatLng
 import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.MapLibreMap
@@ -30,6 +35,7 @@ import kotlinx.coroutines.withContext
 import si.gasilko.app.feature.hydrants.domain.*
 import si.gasilko.app.feature.hydrants.presentation.statusLabel
 import si.gasilko.app.feature.hydrants.presentation.errorLabel
+import si.gasilko.app.feature.map.domain.GeoPoint
 import si.gasilko.app.BuildConfig
 import si.gasilko.app.R
 import java.net.URI
@@ -42,6 +48,10 @@ fun MapScreen(onBack: () -> Unit, hydrants: List<Hydrant>, onOpenHydrant: (Strin
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     var attempt by rememberSaveable { mutableIntStateOf(0) }
     var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
+    var location by remember { mutableStateOf<Location?>(null) }
+    var centerRequested by rememberSaveable { mutableStateOf(false) }
+    var focus by remember { mutableStateOf<GeoPoint?>(null) }
+    val currentLocation by rememberUpdatedState(location)
     val selected = hydrants.find { it.id == selectedId && HydrantMapLayers.valid(it) }
     val data by produceState(HydrantMapLayers.EMPTY, hydrants) {
         value = withContext(Dispatchers.Default) { HydrantMapLayers.data(hydrants) }
@@ -64,6 +74,8 @@ fun MapScreen(onBack: () -> Unit, hydrants: List<Hydrant>, onOpenHydrant: (Strin
                 }
             }
             if(dataLoading)LinearProgressIndicator(Modifier.fillMaxWidth())
+            LocationControls(hydrants, onLocation={location=it}, onCenter={centerRequested=true;focus=null},
+                onSelect={ h -> selectedId=h.id;centerRequested=false;focus=GeoPoint(h.latitude!!,h.longitude!!) })
             dataError?.let { Text(stringResource(errorLabel(it)), Modifier.padding(horizontal=16.dp), color=MaterialTheme.colorScheme.error) }
             selected?.let { h ->
                 Row(Modifier.padding(horizontal=16.dp), horizontalArrangement=Arrangement.spacedBy(8.dp)) {
@@ -93,7 +105,10 @@ fun MapScreen(onBack: () -> Unit, hydrants: List<Hydrant>, onOpenHydrant: (Strin
                             var readyMap: MapLibreMap? = null
                             var fallback = false
                             fun install(style: Style) {
-                                if(!released) { hydrantLayers=HydrantMapLayers(style); hydrantLayers?.update(currentData,currentSelection) }
+                                if(!released) {
+                                    hydrantLayers=HydrantMapLayers(style); hydrantLayers?.update(currentData,currentSelection)
+                                    updateLocation(currentLocation)
+                                }
                             }
                             val fail: () -> Unit = {
                                 if(!released) {
@@ -112,6 +127,10 @@ fun MapScreen(onBack: () -> Unit, hydrants: List<Hydrant>, onOpenHydrant: (Strin
                             if(!released) getMapAsync { map ->
                                 if(!released) {
                                     readyMap=map
+                                    nativeMap=map
+                                    map.addOnCameraMoveStartedListener { reason ->
+                                        if(reason == MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE) { centerRequested=false;focus=null }
+                                    }
                                     if(saved.bundle == null) map.cameraPosition = CameraPosition.Builder().target(LatLng(46.15, 14.95)).zoom(6.0).build()
                                     map.addOnMapClickListener { point ->
                                         if(released) false else {
@@ -133,7 +152,15 @@ fun MapScreen(onBack: () -> Unit, hydrants: List<Hydrant>, onOpenHydrant: (Strin
                                 }
                             }
                         }
-                    }, update={ if(!it.released) it.hydrantLayers?.update(visibleData, selected?.id) }, onReset=null, onRelease={
+                    }, update={ view -> if(!view.released) {
+                        view.hydrantLayers?.update(visibleData, selected?.id)
+                        view.updateLocation(location)
+                        val target=focus ?: location?.takeIf { centerRequested }?.let { GeoPoint(it.latitude,it.longitude) }
+                        view.nativeMap?.let { map -> if(target!=null && map.style!=null) {
+                            centerRequested=false;focus=null
+                            map.moveCamera(CameraUpdateFactory.newLatLngZoom(LatLng(target.latitude,target.longitude),maxOf(map.cameraPosition.zoom,15.0)))
+                        } }
+                    } }, onReset=null, onRelease={
                         saved.bundle=saved.snapshot(); saved.view=null; it.release()
                     })
                 } else Spacer(Modifier.weight(1f))
@@ -161,7 +188,27 @@ private class SavedMap(var bundle: Bundle? = null) {
 
 /** Owns the native view for exactly one Compose AndroidView attachment. */
 private class LifecycleMapView(context: Context, private val lifecycle: Lifecycle, saved: Bundle?) : MapView(context) {
+    var nativeMap: MapLibreMap? = null
     var hydrantLayers: HydrantMapLayers? = null
+    fun updateLocation(fix: Location?) {
+        if(released) return
+        val map=nativeMap ?: return
+        val component=map.locationComponent
+        if(fix == null || !hasLocationPermission(context)) {
+            if(component.isLocationComponentActivated) component.isLocationComponentEnabled=false
+            return
+        }
+        val style=map.style ?: return
+        try {
+            if(!component.isLocationComponentActivated) {
+                component.activateLocationComponent(LocationComponentActivationOptions.builder(context,style).useDefaultLocationEngine(false).build())
+                component.cameraMode=CameraMode.NONE
+                component.renderMode=RenderMode.NORMAL
+            }
+            component.isLocationComponentEnabled=true
+            component.forceLocationUpdate(fix)
+        } catch(_: SecurityException) { if(component.isLocationComponentActivated) component.isLocationComponentEnabled=false }
+    }
     var released = false
         private set
     private var started = false
@@ -192,6 +239,7 @@ private class LifecycleMapView(context: Context, private val lifecycle: Lifecycl
     fun release() {
         if(released) return
         released=true
+        nativeMap=null
         hydrantLayers=null
         lifecycle.removeObserver(observer)
         context.applicationContext.unregisterComponentCallbacks(memory)
