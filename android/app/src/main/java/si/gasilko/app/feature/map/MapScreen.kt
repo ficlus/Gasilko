@@ -27,6 +27,7 @@ import org.maplibre.android.location.LocationComponentActivationOptions
 import org.maplibre.android.location.modes.CameraMode
 import org.maplibre.android.location.modes.RenderMode
 import org.maplibre.android.geometry.LatLng
+import org.maplibre.android.geometry.LatLngBounds
 import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.MapLibreMap
 import org.maplibre.android.maps.Style
@@ -47,6 +48,8 @@ fun MapScreen(onBack: () -> Unit, hydrants: List<Hydrant>, onOpenHydrant: (Strin
     dataLoading: Boolean = false, dataError: RegistryError? = null, styleUrl: String = BuildConfig.MAP_STYLE_URL) {
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     var attempt by rememberSaveable { mutableIntStateOf(0) }
+    var displayedStyle by rememberSaveable(styleUrl) { mutableStateOf(styleUrl) }
+    var regionBounds by remember { mutableStateOf<LatLngBounds?>(null) }
     var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
     var location by remember { mutableStateOf<Location?>(null) }
     var centerRequested by rememberSaveable { mutableStateOf(false) }
@@ -88,14 +91,22 @@ fun MapScreen(onBack: () -> Unit, hydrants: List<Hydrant>, onOpenHydrant: (Strin
                     TextButton(onClick={onOpenHydrant(h.id)}) { Text(stringResource(R.string.h_details)) }
                 }
             }
-            key(styleUrl, attempt) {
+            key(displayedStyle, attempt) {
                 val saved = rememberSaveable(saver=Saver<SavedMap, Bundle>(
                     save={it.snapshot()}, restore={SavedMap(it)})) { SavedMap() }
                 var loading by remember { mutableStateOf(true) }
                 var failed by remember { mutableStateOf(false) }
-                val valid = remember(styleUrl) {
-                    runCatching { URI(styleUrl).let { it.scheme == "https" && !it.host.isNullOrBlank() && it.userInfo == null } }.getOrDefault(false)
+                val valid = remember(displayedStyle) {
+                    runCatching { URI(displayedStyle).let { it.scheme == "https" && !it.host.isNullOrBlank() && it.userInfo == null } }.getOrDefault(false)
                 }
+                OfflineMapControls(displayedStyle, visibleBounds={
+                    if(loading || failed || !valid) null else saved.view?.takeIf { !it.released && it.width>0 && it.height>0 }
+                        ?.nativeMap?.projection?.visibleRegion?.latLngBounds
+                }, onShow={ region ->
+                    regionBounds=region.definition.bounds
+                    displayedStyle=region.definition.styleURL ?: styleUrl
+                    centerRequested=false;focus=null;attempt++
+                })
                 if(valid) {
                     // Factory creates one native view per entry/retry; ordinary recomposition only updates it.
                     AndroidView(modifier=Modifier.weight(1f).fillMaxWidth(), factory={ context ->
@@ -147,7 +158,7 @@ fun MapScreen(onBack: () -> Unit, hydrants: List<Hydrant>, onOpenHydrant: (Strin
                                     }
                                     // Keep MapLibre's attribution controls and source attribution visible.
                                     try {
-                                        map.setStyle(styleUrl) { if(!released) { install(it); loading=false; failed=false } }
+                                        map.setStyle(displayedStyle) { if(!released) { install(it); loading=false; failed=false } }
                                     } catch(_: RuntimeException) { fail() }
                                 }
                             }
@@ -155,6 +166,12 @@ fun MapScreen(onBack: () -> Unit, hydrants: List<Hydrant>, onOpenHydrant: (Strin
                     }, update={ view -> if(!view.released) {
                         view.hydrantLayers?.update(visibleData, selected?.id)
                         view.updateLocation(location)
+                        regionBounds?.let { bounds -> view.nativeMap?.let { map -> if(map.style!=null && !loading) {
+                            regionBounds=null
+                            map.moveCamera(CameraUpdateFactory.newLatLngBounds(bounds,32))
+                            map.moveCamera(CameraUpdateFactory.zoomTo(map.cameraPosition.zoom.coerceIn(
+                                OfflineMapPolicy.MIN_ZOOM.toDouble(),OfflineMapPolicy.MAX_ZOOM.toDouble())))
+                        } } }
                         val target=focus ?: location?.takeIf { centerRequested }?.let { GeoPoint(it.latitude,it.longitude) }
                         view.nativeMap?.let { map -> if(target!=null && map.style!=null) {
                             centerRequested=false;focus=null
