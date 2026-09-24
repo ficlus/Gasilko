@@ -148,4 +148,19 @@
     <string name="map_error">Die Basiskarte konnte nicht geladen werden. Lokale Hydranten bleiben verfügbar. Prüfen Sie die Verbindung und versuchen Sie es erneut.</string>
     <string name="map_unconfigured">Karte nicht verfügbar. Die Administration muss eine gültige Kartenstil-Adresse konfigurieren.</string>
     <string name="map_retry">Erneut versuchen</string>
+    <string name="map_my_location">Mein Standort</string>
+    <string name="map_nearby">Hydranten in der Nähe</string>
+    <string name="map_location_denied">Standortzugriff nicht erlaubt. Karte und Register bleiben ohne Standort nutzbar.</string>
+    <string name="map_location_permanent">Die Standortberechtigung ist blockiert. Aktivieren Sie sie in den App-Einstellungen; das Register bleibt verfügbar.</string>
+    <string name="map_location_searching">Aktueller Standort wird ermittelt …</string>
+    <string name="map_location_disabled">Standort ist deaktiviert oder kein geeigneter Anbieter verfügbar. Prüfen Sie die Standorteinstellungen.</string>
+    <string name="map_location_stale">Der letzte Standort ist veraltet. Wir warten auf eine neue Messung; Entfernungen sind derzeit nicht verfügbar.</string>
+    <string name="map_location_unavailable">Aktueller Standort nicht verfügbar. Prüfen Sie Empfang und Standorteinstellungen.</string>
+    <string name="map_location_settings">Standorteinstellungen</string>
+    <string name="map_location_accuracy">Standort verfügbar · Genauigkeit etwa ±%1$s m</string>
+    <string name="map_location_approximate">Ungefährer Standort · Genauigkeit etwa ±%1$s m. Entfernungen sind Schätzwerte.</string>
+    <string name="map_nearby_notice">Luftlinienentfernungen zu lokalen Hydranten der gewählten Organisation mit den angewendeten Filtern.</string>
+    <string name="map_nearby_empty">Keine passenden lokalen Hydranten mit Koordinaten.</string>
+    <string name="map_distance_m">%1$s m</string>
+    <string name="map_distance_km">%1$s km</string>
 </resources>

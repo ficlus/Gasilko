@@ -6,6 +6,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
@@ -23,6 +25,18 @@ fun AuthScreen(model: AuthViewModel = viewModel()) {
     val state by model.state.collectAsStateWithLifecycle()
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { model.refresh() }
     var requests by remember { mutableStateOf(false) }
+    // A permission/settings round trip re-verifies authorization. Retain navigation only,
+    // while the protected screen and its location callbacks remain disposed during verification.
+    val registryScreens=rememberSaveableStateHolder()
+    var registryAccount by rememberSaveable { mutableStateOf<String?>(null) }
+    LaunchedEffect(state.route,state.account) {
+        if(state.route==AuthRoute.ACTIVE) {
+            if(registryAccount!=state.account) registryAccount?.let { registryScreens.removeState(it) }
+            registryAccount=state.account
+        } else if(state.route!=AuthRoute.LOADING) {
+            registryAccount?.let { registryScreens.removeState(it) };registryAccount=null
+        }
+    }
     LaunchedEffect(state.route) { if(state.route==AuthRoute.UNAUTHENTICATED || state.route==AuthRoute.ACTIVE) requests=false }
     Column {
     if(state.route == AuthRoute.ACTIVE && state.offline)
@@ -31,7 +45,9 @@ fun AuthScreen(model: AuthViewModel = viewModel()) {
         Text(stringResource(if(state.message == AuthMessage.OFFLINE_ONE_DAY) R.string.auth_offline_one_day else R.string.auth_offline_seven_days), Modifier.padding(16.dp))
     Box(Modifier.weight(1f)) {
     if(requests && state.route in listOf(AuthRoute.ACTIVE,AuthRoute.PENDING_APPROVAL)) AccessScreen(model.access,{requests=false},{requests=false;model.signOut()},model::refresh)
-    else if(state.route == AuthRoute.ACTIVE && model.hydrants != null) si.gasilko.app.feature.hydrants.presentation.HydrantScreen(model.hydrants,{requests=true},model::signOut)
+    else if(state.route == AuthRoute.ACTIVE && model.hydrants != null) registryScreens.SaveableStateProvider(state.account ?: "registry") {
+        si.gasilko.app.feature.hydrants.presentation.HydrantScreen(model.hydrants,{requests=true},model::signOut)
+    }
     else AuthContent(state, model::signIn, model::signUp, model::refresh, model::signOut, model::google, {requests=true})
     } }
 }
