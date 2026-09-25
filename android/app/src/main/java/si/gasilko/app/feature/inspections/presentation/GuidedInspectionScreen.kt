@@ -31,9 +31,20 @@ enum class GuidedAnswer(val label: Int) {
     YES(R.string.guided_yes), NO(R.string.guided_no), NOT_CHECKED(R.string.guided_not_checked),
 }
 
+@Composable
+internal fun InspectionCheckOptions(check: GuidedCheck, selected: GuidedAnswer?, enabled: Boolean,
+    answer: (GuidedAnswer)->Unit) {
+    Text(stringResource(check.question),style=MaterialTheme.typography.titleLarge)
+    val choices=if(check==GuidedCheck.VISIBLE_DAMAGE)listOf(GuidedAnswer.NO,GuidedAnswer.YES,GuidedAnswer.NOT_CHECKED)
+        else GuidedAnswer.entries.toList()
+    Column(Modifier.selectableGroup(),verticalArrangement=Arrangement.spacedBy(8.dp)) {
+        choices.forEach { value -> InspectionOption(stringResource(value.label),selected==value,enabled) { answer(value) } }
+    }
+}
+
 /** Fixed order and a single formatter for the MVP notes bridge. Enum keys remain
  * the answer state; the rendered summary is frozen with the event on confirmation. */
-object GuidedNotesFormatter {
+object InspectionNotesFormatter {
     fun format(resources: Resources, answers: Map<GuidedCheck, GuidedAnswer>, notes: String): String {
         val summary=GuidedCheck.entries.joinToString("\n") { check ->
             "${resources.getString(check.label)}: ${resources.getString(answers.getValue(check).label)}"
@@ -43,7 +54,7 @@ object GuidedNotesFormatter {
 }
 
 @Composable
-private fun GuidedOption(label: String, selected: Boolean, enabled: Boolean, choose: () -> Unit) {
+internal fun InspectionOption(label: String, selected: Boolean, enabled: Boolean, choose: () -> Unit) {
     Surface(shape=MaterialTheme.shapes.medium,
         color=if(selected)MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceVariant) {
         Row(Modifier.fillMaxWidth().heightIn(min=64.dp).selectable(selected=selected,enabled=enabled,
@@ -72,17 +83,12 @@ fun GuidedInspectionScreen(draft: InspectionDraft, hydrantLabel: String, busy: B
                 Text(if(review)stringResource(R.string.guided_review) else stringResource(R.string.guided_progress,draft.step+1,5))
                 if(draft.step<4) {
                     val check=GuidedCheck.entries[draft.step]
-                    Text(stringResource(check.question),style=MaterialTheme.typography.titleLarge)
-                    val choices=if(check==GuidedCheck.VISIBLE_DAMAGE)listOf(GuidedAnswer.NO,GuidedAnswer.YES,GuidedAnswer.NOT_CHECKED)
-                        else GuidedAnswer.entries.toList()
-                    Column(Modifier.selectableGroup(),verticalArrangement=Arrangement.spacedBy(8.dp)) {
-                        choices.forEach { value -> GuidedOption(stringResource(value.label),draft.answers[check]==value,editable) { answer(check,value) } }
-                    }
+                    InspectionCheckOptions(check,draft.answers[check],editable) { answer(check,it) }
                 } else if(!review) {
                     Text(stringResource(R.string.inspection_choose_result),style=MaterialTheme.typography.titleLarge)
                     Text(stringResource(R.string.guided_result_notice))
                     Column(Modifier.selectableGroup(),verticalArrangement=Arrangement.spacedBy(8.dp)) {
-                        InspectionResult.entries.forEach { value -> GuidedOption(stringResource(inspectionResultLabel(value)),draft.result==value,editable) { change(value,draft.notes) } }
+                        InspectionResult.entries.forEach { value -> InspectionOption(stringResource(inspectionResultLabel(value)),draft.result==value,editable) { change(value,draft.notes) } }
                     }
                 } else {
                     GuidedCheck.entries.forEach { check ->
@@ -104,7 +110,7 @@ fun GuidedInspectionScreen(draft: InspectionDraft, hydrantLabel: String, busy: B
                 }
                 if(review) {
                     Text(stringResource(R.string.inspection_complete_notice))
-                    Button(onClick={complete(draft.completion?.notes ?: GuidedNotesFormatter.format(resources,draft.answers,draft.notes))},
+                    Button(onClick={complete(draft.completion?.notes ?: InspectionNotesFormatter.format(resources,draft.answers,draft.notes))},
                         enabled=!busy && draft.result!=null && GuidedCheck.entries.all { it in draft.answers },
                         modifier=Modifier.fillMaxWidth().heightIn(min=56.dp)) {
                         Text(stringResource(if(draft.completion==null)R.string.inspection_complete else R.string.inspection_retry))
