@@ -5,6 +5,7 @@ import androidx.room.*
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import si.gasilko.app.feature.hydrants.domain.*
+import si.gasilko.app.feature.inspections.domain.Inspection
 import java.util.Locale
 
 // Account is a cache partition; the server UUID remains the domain identity.
@@ -30,6 +31,16 @@ data class HydrantEntity(
 
 @Dao
 interface RegistryDao {
+    @Insert suspend fun insertInspection(row: InspectionEntity)
+    @Insert(onConflict = OnConflictStrategy.IGNORE) suspend fun cacheInspections(rows: List<InspectionEntity>)
+    @Query("SELECT * FROM inspections WHERE account = :account AND organization = :organization AND id = :id")
+    suspend fun inspection(account: String, organization: String, id: String): InspectionEntity?
+    @Query("SELECT * FROM inspections WHERE account = :account AND organization = :organization AND hydrantId = :hydrantId ORDER BY completedAt DESC, id DESC")
+    suspend fun inspectionHistory(account: String, organization: String, hydrantId: String): List<InspectionEntity>
+    // Completed content is immutable. Only authoritative receipt metadata changes after acknowledgement.
+    @Query("UPDATE inspections SET createdAt = :createdAt, hydrantVersionBefore = :before, hydrantVersionAfter = :after, acknowledgedAt = :time WHERE account = :account AND organization = :organization AND id = :id AND inspectorId = :account")
+    suspend fun acknowledgeInspection(account: String, organization: String, id: String, createdAt: Long,
+        before: Long, after: Long, time: Long): Int
     // Payload/history stay immutable; only the sync engine records acknowledgement or conflict.
     @Insert suspend fun enqueue(change: PendingHydrantChange): Long
     @Query("SELECT * FROM pending_hydrant_changes WHERE account = :account AND organization = :organization ORDER BY sequence")
@@ -43,7 +54,7 @@ interface RegistryDao {
     @Query("SELECT acknowledgedVersion FROM pending_hydrant_changes WHERE account = :account AND organization = :organization AND entityId = :id AND COALESCE(orderSequence, sequence) < :before AND state = 'SYNCED' ORDER BY COALESCE(orderSequence, sequence) DESC, sequence DESC LIMIT 1")
     suspend fun acknowledgedVersion(account: String, organization: String, id: String, before: Long): Long?
     @Query("UPDATE pending_hydrant_changes SET state = 'SYNCED', acknowledgedVersion = :version WHERE account = :account AND organization = :organization AND sequence = :sequence AND state = 'PENDING'")
-    suspend fun acknowledge(account: String, organization: String, sequence: Long, version: Long): Int
+    suspend fun acknowledge(account: String, organization: String, sequence: Long, version: Long?): Int
     @Query("UPDATE pending_hydrant_changes SET state = 'CONFLICT' WHERE account = :account AND organization = :organization AND sequence = :sequence AND state = 'PENDING'")
     suspend fun conflict(account: String, organization: String, sequence: Long)
     @Insert(onConflict = OnConflictStrategy.IGNORE) suspend fun captureConflict(conflict: HydrantConflictEntity)
@@ -93,6 +104,10 @@ data class PendingHydrantChange(
     val orderSequence: Long? = null,
 )
 
+@Entity(tableName = "inspections", primaryKeys = ["account", "id"],
+    indices = [Index(value = ["account", "organization", "hydrantId", "completedAt", "id"])])
+data class InspectionEntity(val account: String, @Embedded val value: Inspection, val acknowledgedAt: Long? = null)
+
 @Entity(tableName = "hydrant_conflicts")
 data class HydrantConflictEntity(
     @PrimaryKey val sequence: Long, val logicalSequence: Long, val account: String, val organization: String,
@@ -101,10 +116,22 @@ data class HydrantConflictEntity(
     val resolutionServerState: String? = null, val resolutionVersion: Long? = null, val replacementSequence: Long? = null,
 )
 
-@Database(entities = [OrganizationEntity::class, TypeEntity::class, HydrantEntity::class, PendingHydrantChange::class, HydrantConflictEntity::class], version = 4, exportSchema = true)
+@Database(entities = [OrganizationEntity::class, TypeEntity::class, HydrantEntity::class, PendingHydrantChange::class, HydrantConflictEntity::class, InspectionEntity::class], version = 5, exportSchema = true)
 abstract class RegistryDatabase : RoomDatabase() {
     abstract fun registry(): RegistryDao
     companion object {
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""CREATE TABLE IF NOT EXISTS inspections (
+                    account TEXT NOT NULL, id TEXT NOT NULL, hydrantId TEXT NOT NULL,
+                    organization TEXT NOT NULL, inspectorId TEXT NOT NULL, mode TEXT NOT NULL,
+                    result TEXT NOT NULL, startedAt INTEGER NOT NULL, completedAt INTEGER NOT NULL,
+                    notes TEXT, pressureBar REAL, flowLMin REAL, createdAt INTEGER NOT NULL,
+                    hydrantVersionBefore INTEGER, hydrantVersionAfter INTEGER, acknowledgedAt INTEGER,
+                    PRIMARY KEY(account,id))""")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_inspections_account_organization_hydrantId_completedAt_id ON inspections(account,organization,hydrantId,completedAt,id)")
+            }
+        }
         val MIGRATION_3_4 = object : Migration(3, 4) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE pending_hydrant_changes ADD COLUMN orderSequence INTEGER")
@@ -133,7 +160,7 @@ abstract class RegistryDatabase : RoomDatabase() {
         @Volatile private var instance: RegistryDatabase? = null
         fun open(context: Context): RegistryDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(context.applicationContext, RegistryDatabase::class.java,
-                "hydrant-registry.db").addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4).build().also { instance = it }
+                "hydrant-registry.db").addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5).build().also { instance = it }
         }
     }
 }
