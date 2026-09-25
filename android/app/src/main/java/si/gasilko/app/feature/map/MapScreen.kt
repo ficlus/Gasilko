@@ -8,6 +8,8 @@ import android.graphics.RectF
 import android.location.Location
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.Saver
@@ -15,6 +17,9 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
@@ -32,6 +37,7 @@ import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.MapLibreMap
 import org.maplibre.android.maps.Style
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import si.gasilko.app.feature.hydrants.domain.*
 import si.gasilko.app.feature.hydrants.presentation.statusLabel
@@ -54,76 +60,111 @@ fun MapScreen(onBack: () -> Unit, hydrants: List<Hydrant>, onOpenHydrant: (Strin
     var location by remember { mutableStateOf<Location?>(null) }
     var centerRequested by rememberSaveable { mutableStateOf(false) }
     var focus by remember { mutableStateOf<GeoPoint?>(null) }
+    // Keep the camera outside the native-view retry key.
+    val saved = rememberSaveable(saver=Saver<SavedMap, Bundle>(
+        save={it.snapshot()}, restore={SavedMap(it)})) { SavedMap() }
+    var loading by remember(displayedStyle,attempt) { mutableStateOf(true) }
+    var failed by remember(displayedStyle,attempt) { mutableStateOf(false) }
+    var renderReady by remember(displayedStyle,attempt) { mutableStateOf(false) }
+    val valid = remember(displayedStyle) {
+        runCatching { URI(displayedStyle).let { it.scheme == "https" && !it.host.isNullOrBlank() && it.userInfo == null } }.getOrDefault(false)
+    }
+    fun cancelFocus() { centerRequested=false;focus=null;regionBounds=null }
+    fun retry() { saved.bundle=saved.snapshot();attempt++ }
+    fun back() { cancelFocus();onBack() }
+    LaunchedEffect(centerRequested) { if(centerRequested) { delay(30_000);centerRequested=false } }
     val currentLocation by rememberUpdatedState(location)
     val selected = hydrants.find { it.id == selectedId && HydrantMapLayers.valid(it) }
-    val data by produceState(HydrantMapLayers.EMPTY, hydrants) {
-        value = withContext(Dispatchers.Default) { HydrantMapLayers.data(hydrants) }
+    val validCount = remember(hydrants) { hydrants.count(HydrantMapLayers::valid) }
+    val data by produceState<Pair<List<Hydrant>?,String>>(null to HydrantMapLayers.EMPTY, hydrants) {
+        value = hydrants to withContext(Dispatchers.Default) { HydrantMapLayers.data(hydrants) }
     }
-    val visibleData = if(hydrants.isEmpty()) HydrantMapLayers.EMPTY else data
+    // Never retain old features while a new scoped/filter result is being serialized.
+    val visibleData = if(data.first == hydrants) data.second else HydrantMapLayers.EMPTY
     val currentData by rememberUpdatedState(visibleData)
     val currentRows by rememberUpdatedState(hydrants)
     val currentSelection by rememberUpdatedState(selected?.id)
     LaunchedEffect(hydrants, dataLoading) { if(!dataLoading && selected == null) selectedId=null }
-    BackHandler(onBack=onBack)
+    BackHandler(onBack=::back)
     Scaffold { padding ->
-        Column(Modifier.fillMaxSize().padding(padding)) {
+        BoxWithConstraints(Modifier.fillMaxSize().padding(padding)) {
+        val headerHeight=maxHeight*0.5f
+        Column(Modifier.fillMaxSize()) {
+            Column(Modifier.heightIn(max=headerHeight).verticalScroll(rememberScrollState())) {
             Row(Modifier.padding(horizontal=16.dp), horizontalArrangement=Arrangement.spacedBy(16.dp)) {
-                TextButton(onClick=onBack) { Text(stringResource(R.string.h_back)) }
+                TextButton(onClick=::back) { Text(stringResource(R.string.h_back)) }
                 Text(stringResource(R.string.map_title), Modifier.padding(top=12.dp), style=MaterialTheme.typography.titleLarge)
             }
             FlowRow(Modifier.padding(horizontal=16.dp), horizontalArrangement=Arrangement.spacedBy(12.dp)) {
                 HydrantStatus.entries.forEach { status ->
-                    Text("● " + stringResource(statusLabel(status)), color=Color(HydrantMapLayers.color(status)), style=MaterialTheme.typography.labelSmall)
+                    Row(horizontalArrangement=Arrangement.spacedBy(4.dp)) {
+                        Text("●",Modifier.clearAndSetSemantics {},color=Color(HydrantMapLayers.color(status)))
+                        Text(stringResource(statusLabel(status)),style=MaterialTheme.typography.labelSmall)
+                    }
                 }
             }
             if(dataLoading)LinearProgressIndicator(Modifier.fillMaxWidth())
-            LocationControls(hydrants, onLocation={location=it}, onCenter={centerRequested=true;focus=null},
-                onSelect={ h -> selectedId=h.id;centerRequested=false;focus=GeoPoint(h.latitude!!,h.longitude!!) })
+            LocationControls(hydrants, onLocation={location=it}, onCenter={cancelFocus();centerRequested=true},
+                dataLoading=dataLoading,
+                onUnavailable={centerRequested=false},
+                onSelect={ h -> selectedId=h.id;cancelFocus();focus=GeoPoint(h.latitude!!,h.longitude!!) },
+                additionalActions={ OfflineMapControls(displayedStyle, visibleBounds={
+                    if(loading || failed || !valid) null else saved.view?.takeIf { !it.released && it.width>0 && it.height>0 }
+                        ?.nativeMap?.projection?.visibleRegion?.latLngBounds
+                }, onShow={ region ->
+                    cancelFocus();regionBounds=region.definition.bounds
+                    saved.bundle=saved.snapshot()
+                    displayedStyle=region.definition.styleURL ?: styleUrl
+                    attempt++
+                }) })
             dataError?.let { Text(stringResource(errorLabel(it)), Modifier.padding(horizontal=16.dp), color=MaterialTheme.colorScheme.error) }
+            if(!dataLoading && dataError==null) {
+                val notice=when { hydrants.isEmpty()->R.string.map_empty;validCount==0->R.string.map_no_coordinates
+                    validCount<hydrants.size->R.string.map_missing_coordinates;else->null }
+                notice?.let { Text(stringResource(it,hydrants.size-validCount),Modifier.padding(horizontal=16.dp),style=MaterialTheme.typography.bodySmall) }
+            }
             selected?.let { h ->
-                Row(Modifier.padding(horizontal=16.dp), horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-                    Column(Modifier.weight(1f)) {
+                Column(Modifier.padding(horizontal=16.dp)) {
+                    Column {
+                        Text(stringResource(R.string.map_selected),Modifier.semantics { heading() },style=MaterialTheme.typography.labelSmall)
                         Text(h.code ?: stringResource(R.string.h_pending_code))
                         if(h.code == null)Text(h.id, style=MaterialTheme.typography.labelSmall)
                         Text(stringResource(statusLabel(h.status)))
                         if(!h.active)Text(stringResource(R.string.h_inactive))
                     }
-                    TextButton(onClick={onOpenHydrant(h.id)}) { Text(stringResource(R.string.h_details)) }
+                    FlowRow(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                        TextButton(onClick={cancelFocus();onOpenHydrant(h.id)}) { Text(stringResource(R.string.h_details)) }
+                        TextButton(onClick={selectedId=null;cancelFocus()}) { Text(stringResource(R.string.map_clear_selection)) }
+                    }
                 }
             }
+            if(loading)LinearProgressIndicator(Modifier.fillMaxWidth())
+            if(loading)Text(stringResource(R.string.map_loading),Modifier.padding(horizontal=16.dp))
+            if(failed || !valid) {
+                Text(stringResource(if(valid) R.string.map_error else R.string.map_unconfigured),Modifier.padding(horizontal=16.dp))
+                TextButton(onClick=::retry,modifier=Modifier.padding(horizontal=16.dp)) { Text(stringResource(R.string.map_retry)) }
+            }
+            }
             key(displayedStyle, attempt) {
-                val saved = rememberSaveable(saver=Saver<SavedMap, Bundle>(
-                    save={it.snapshot()}, restore={SavedMap(it)})) { SavedMap() }
-                var loading by remember { mutableStateOf(true) }
-                var failed by remember { mutableStateOf(false) }
-                val valid = remember(displayedStyle) {
-                    runCatching { URI(displayedStyle).let { it.scheme == "https" && !it.host.isNullOrBlank() && it.userInfo == null } }.getOrDefault(false)
-                }
-                OfflineMapControls(displayedStyle, visibleBounds={
-                    if(loading || failed || !valid) null else saved.view?.takeIf { !it.released && it.width>0 && it.height>0 }
-                        ?.nativeMap?.projection?.visibleRegion?.latLngBounds
-                }, onShow={ region ->
-                    regionBounds=region.definition.bounds
-                    displayedStyle=region.definition.styleURL ?: styleUrl
-                    centerRequested=false;focus=null;attempt++
-                })
-                if(valid) {
                     // Factory creates one native view per entry/retry; ordinary recomposition only updates it.
                     AndroidView(modifier=Modifier.weight(1f).fillMaxWidth(), factory={ context ->
                         MapLibre.getInstance(context.applicationContext)
                         LifecycleMapView(context, lifecycle, saved.bundle).apply {
                             saved.view=this
+                            beforeRelease={if(saved.view===this) saved.bundle=saved.snapshot()}
+                            contentDescription=context.getString(R.string.map_canvas)
                             var readyMap: MapLibreMap? = null
                             var fallback = false
                             fun install(style: Style) {
                                 if(!released) {
                                     hydrantLayers=HydrantMapLayers(style); hydrantLayers?.update(currentData,currentSelection)
                                     updateLocation(currentLocation)
+                                    renderReady=true
                                 }
                             }
                             val fail: () -> Unit = {
-                                if(!released) {
-                                    failed=true; loading=false
+                                if(!released && !fallback) {
+                                    failed=true; loading=false;renderReady=false;hydrantLayers=null
                                     if(!fallback && readyMap != null) {
                                         fallback=true
                                         // Finish the SDK failure dispatch before replacing its style callback.
@@ -140,25 +181,31 @@ fun MapScreen(onBack: () -> Unit, hydrants: List<Hydrant>, onOpenHydrant: (Strin
                                     readyMap=map
                                     nativeMap=map
                                     map.addOnCameraMoveStartedListener { reason ->
-                                        if(reason == MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE) { centerRequested=false;focus=null }
+                                        if(reason == MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE) cancelFocus()
                                     }
                                     if(saved.bundle == null) map.cameraPosition = CameraPosition.Builder().target(LatLng(46.15, 14.95)).zoom(6.0).build()
                                     map.addOnMapClickListener { point ->
-                                        if(released) false else {
+                                        if(released || hydrantLayers==null) false else {
                                             val pixel=map.projection.toScreenLocation(point)
                                             val radius=12f * resources.displayMetrics.density
                                             val hits=map.queryRenderedFeatures(pixel, *HydrantMapLayers.layerIds).ifEmpty {
                                                 map.queryRenderedFeatures(RectF(pixel.x-radius,pixel.y-radius,pixel.x+radius,pixel.y+radius), *HydrantMapLayers.layerIds)
                                             }
-                                            val id=hits
-                                                .mapNotNull { it.getStringProperty("uuid") }.sorted().firstOrNull()
-                                            selectedId=id?.takeIf { uuid -> currentRows.any { it.id==uuid && HydrantMapLayers.valid(it) } }
+                                            val id=hits.mapNotNull { it.getStringProperty("uuid") }.distinct()
+                                                .filter { uuid -> currentRows.any { it.id==uuid && HydrantMapLayers.valid(it) } }
+                                                .minWithOrNull(compareBy<String> { uuid ->
+                                                    val h=currentRows.first { it.id==uuid }
+                                                    val p=map.projection.toScreenLocation(LatLng(h.latitude!!,h.longitude!!))
+                                                    (p.x-pixel.x)*(p.x-pixel.x)+(p.y-pixel.y)*(p.y-pixel.y)
+                                                }.thenBy { it })
+                                            cancelFocus();selectedId=id
                                             selectedId != null
                                         }
                                     }
                                     // Keep MapLibre's attribution controls and source attribution visible.
                                     try {
-                                        map.setStyle(displayedStyle) { if(!released) { install(it); loading=false; failed=false } }
+                                        if(valid) map.setStyle(displayedStyle) { if(!released && !fallback) { install(it); loading=false; failed=false } }
+                                        else fail()
                                     } catch(_: RuntimeException) { fail() }
                                 }
                             }
@@ -166,30 +213,23 @@ fun MapScreen(onBack: () -> Unit, hydrants: List<Hydrant>, onOpenHydrant: (Strin
                     }, update={ view -> if(!view.released) {
                         view.hydrantLayers?.update(visibleData, selected?.id)
                         view.updateLocation(location)
-                        regionBounds?.let { bounds -> view.nativeMap?.let { map -> if(map.style!=null && !loading) {
+                        regionBounds?.let { bounds -> view.nativeMap?.let { map -> if(renderReady) {
                             regionBounds=null
                             map.moveCamera(CameraUpdateFactory.newLatLngBounds(bounds,32))
                             map.moveCamera(CameraUpdateFactory.zoomTo(map.cameraPosition.zoom.coerceIn(
                                 OfflineMapPolicy.MIN_ZOOM.toDouble(),OfflineMapPolicy.MAX_ZOOM.toDouble())))
                         } } }
-                        val target=focus ?: location?.takeIf { centerRequested }?.let { GeoPoint(it.latitude,it.longitude) }
-                        view.nativeMap?.let { map -> if(target!=null && map.style!=null) {
+                        val target=focus ?: location?.takeIf { centerRequested && freshLocation(it) }?.let { GeoPoint(it.latitude,it.longitude) }
+                        view.nativeMap?.let { map -> if(target!=null && renderReady) {
                             centerRequested=false;focus=null
                             map.moveCamera(CameraUpdateFactory.newLatLngZoom(LatLng(target.latitude,target.longitude),maxOf(map.cameraPosition.zoom,15.0)))
                         } }
                     } }, onReset=null, onRelease={
-                        saved.bundle=saved.snapshot(); saved.view=null; it.release()
+                        if(saved.view===it) { saved.bundle=saved.snapshot();saved.view=null }
+                        it.release()
                     })
-                } else Spacer(Modifier.weight(1f))
-                if(loading && valid) {
-                    LinearProgressIndicator(Modifier.fillMaxWidth())
-                    Text(stringResource(R.string.map_loading), Modifier.padding(16.dp))
-                }
-                if(failed || !valid) {
-                    Text(stringResource(if(valid) R.string.map_error else R.string.map_unconfigured), Modifier.padding(horizontal=16.dp))
-                    TextButton(onClick={attempt++}, modifier=Modifier.padding(horizontal=16.dp)) { Text(stringResource(R.string.map_retry)) }
-                }
             }
+        }
         }
     }
 }
@@ -207,23 +247,32 @@ private class SavedMap(var bundle: Bundle? = null) {
 private class LifecycleMapView(context: Context, private val lifecycle: Lifecycle, saved: Bundle?) : MapView(context) {
     var nativeMap: MapLibreMap? = null
     var hydrantLayers: HydrantMapLayers? = null
+    var beforeRelease: (() -> Unit)? = null
+    private var lastLocation: Location? = null
+    private var locationStyle: Style? = null
     fun updateLocation(fix: Location?) {
         if(released) return
         val map=nativeMap ?: return
         val component=map.locationComponent
-        if(fix == null || !hasLocationPermission(context)) {
-            if(component.isLocationComponentActivated) component.isLocationComponentEnabled=false
+        if(fix == null || !freshLocation(fix) || !hasLocationPermission(context)) {
+            lastLocation=null
+            if(component.isLocationComponentActivated && component.isLocationComponentEnabled) component.isLocationComponentEnabled=false
             return
         }
         val style=map.style ?: return
+        if(locationStyle !== style) { locationStyle=style;lastLocation=null }
         try {
             if(!component.isLocationComponentActivated) {
                 component.activateLocationComponent(LocationComponentActivationOptions.builder(context,style).useDefaultLocationEngine(false).build())
                 component.cameraMode=CameraMode.NONE
                 component.renderMode=RenderMode.NORMAL
             }
-            component.isLocationComponentEnabled=true
-            component.forceLocationUpdate(fix)
+            if(!component.isLocationComponentEnabled) component.isLocationComponentEnabled=true
+            val old=lastLocation
+            if(old==null || old.elapsedRealtimeNanos!=fix.elapsedRealtimeNanos || old.latitude!=fix.latitude ||
+                old.longitude!=fix.longitude || old.accuracy!=fix.accuracy) {
+                component.forceLocationUpdate(fix);lastLocation=Location(fix)
+            }
         } catch(_: SecurityException) { if(component.isLocationComponentActivated) component.isLocationComponentEnabled=false }
     }
     var released = false
@@ -255,7 +304,9 @@ private class LifecycleMapView(context: Context, private val lifecycle: Lifecycl
     private fun stop() { pause(); if(started) { onStop(); started=false } }
     fun release() {
         if(released) return
+        beforeRelease?.invoke();beforeRelease=null
         released=true
+        lastLocation=null;locationStyle=null
         nativeMap=null
         hydrantLayers=null
         lifecycle.removeObserver(observer)

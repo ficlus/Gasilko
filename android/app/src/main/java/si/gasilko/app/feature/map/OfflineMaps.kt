@@ -72,6 +72,7 @@ internal class OfflineMaps private constructor(context: Context) {
     private fun observe(region: OfflineRegion) {
         if(mutable.value.regions.any { it.id==region.id && it.deleting }) return
         val epoch=generation
+        var observedStatus=false
         fun live() = clients>0 && epoch==generation && handles[region.id]===region &&
             mutable.value.regions.any { it.id==region.id && !it.deleting }
         fun acceptStatus(value: OfflineRegionStatus) {
@@ -83,15 +84,16 @@ internal class OfflineMaps private constructor(context: Context) {
                 failed=if(value.isComplete) false else it.failed || exceeds) }
         }
         region.setObserver(object : OfflineRegion.OfflineRegionObserver {
-            override fun onStatusChanged(status: OfflineRegionStatus) { acceptStatus(status) }
+            override fun onStatusChanged(status: OfflineRegionStatus) { observedStatus=true;acceptStatus(status) }
             override fun onError(error: OfflineRegionError) { if(live()) fail(region) }
             override fun mapboxTileCountLimitExceeded(limit: Long) { if(live()) fail(region) }
         })
         region.getStatus(object : OfflineRegion.OfflineRegionStatusCallback {
             override fun onStatus(status: OfflineRegionStatus?) {
+                if(observedStatus) return // A newer observer event supersedes this initial snapshot.
                 if(status!=null) acceptStatus(status) else if(live()) fail(region)
             }
-            override fun onError(error: String?) { if(live()) fail(region) }
+            override fun onError(error: String?) { if(!observedStatus && live()) fail(region) }
         })
     }
     private fun fail(region: OfflineRegion) {
@@ -105,6 +107,7 @@ internal class OfflineMaps private constructor(context: Context) {
             OfflineMapPolicy.sameArea(it.definition.bounds,bounds) }
         if(duplicate) { mutable.value=mutable.value.copy(error=true); return }
         mutable.value=mutable.value.copy(busy=true,error=false)
+        val epoch=generation
         val definition=OfflineTilePyramidRegionDefinition(style,bounds,OfflineMapPolicy.MIN_ZOOM.toDouble(),
             OfflineMapPolicy.MAX_ZOOM.toDouble(),pixelRatio)
         val metadata=JSONObject().put("owner","gasilko-offline-v1").put("name",name.trim().take(80)).toString().toByteArray(Charsets.UTF_8)
@@ -113,7 +116,10 @@ internal class OfflineMaps private constructor(context: Context) {
                 handles[offlineRegion.id]=offlineRegion
                 mutable.value=mutable.value.copy(busy=false,regions=mutable.value.regions+
                     OfflineMapRegion(offlineRegion.id,name.trim().take(80),definition))
-                if(clients>0) { observe(offlineRegion); start(offlineRegion.id) }
+                if(clients>0) {
+                    observe(offlineRegion)
+                    if(epoch==generation) start(offlineRegion.id)
+                }
                 // Otherwise the SDK-created region stays inactive until an explicit resume.
             }
             override fun onError(error: String) { mutable.value=mutable.value.copy(busy=false,error=true) }

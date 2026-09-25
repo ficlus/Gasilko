@@ -146,7 +146,7 @@
     <string name="map_title">Karte</string>
     <string name="map_loading">Karte wird geladen …</string>
     <string name="map_error">Die Basiskarte konnte nicht geladen werden. Lokale Hydranten bleiben verfügbar. Prüfen Sie die Verbindung und versuchen Sie es erneut.</string>
-    <string name="map_unconfigured">Karte nicht verfügbar. Die Administration muss eine gültige Kartenstil-Adresse konfigurieren.</string>
+    <string name="map_unconfigured">Basiskarte nicht konfiguriert. Lokale Hydranten bleiben verfügbar; die Administration muss eine gültige Kartenstil-Adresse einstellen.</string>
     <string name="map_retry">Erneut versuchen</string>
     <string name="map_my_location">Mein Standort</string>
     <string name="map_nearby">Hydranten in der Nähe</string>
@@ -189,4 +189,11 @@
     <string name="offline_resume">Fortsetzen / erneut versuchen</string>
     <string name="offline_delete">Gebiet löschen</string>
     <string name="offline_delete_confirm">Karte „%1$s“ von diesem Gerät löschen? Hydranten und Synchronisierungsdaten bleiben erhalten.</string>
+    <string name="map_empty">Keine Hydranten für die aktuelle Organisation und Filter.</string>
+    <string name="map_no_coordinates">Lokale Hydranten haben keine gültigen Koordinaten. Sie bleiben im Register verfügbar.</string>
+    <string name="map_missing_coordinates">Ohne gültige Koordinaten: %1$d. Diese Hydranten bleiben im Register verfügbar.</string>
+    <string name="map_selected">Ausgewählter Hydrant</string>
+    <string name="map_clear_selection">Auswahl aufheben</string>
+    <string name="map_canvas">Karte der lokalen Hydranten. Details sind auch im Register verfügbar.</string>
+    <string name="offline_active_downloads">Offline-Karten · Downloads: %1$d</string>
 </resources>

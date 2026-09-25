@@ -42,8 +42,11 @@ private tailrec fun Context.activity(): Activity? = when(this) {
 
 /** Permission prompts happen only inside the two user actions below. Precise fixes stay in memory. */
 @Composable
+@OptIn(ExperimentalLayoutApi::class)
 internal fun LocationControls(hydrants: List<Hydrant>, onLocation: (Location?) -> Unit,
-    onCenter: () -> Unit, onSelect: (Hydrant) -> Unit) {
+    onCenter: () -> Unit, onSelect: (Hydrant) -> Unit, onUnavailable: () -> Unit,
+    dataLoading: Boolean = false,
+    additionalActions: @Composable () -> Unit = {}) {
     val context=LocalContext.current
     val lifecycle=LocalLifecycleOwner.current.lifecycle
     var enabled by remember { mutableStateOf(hasLocationPermission(context)) }
@@ -56,6 +59,7 @@ internal fun LocationControls(hydrants: List<Hydrant>, onLocation: (Location?) -
     val launcher=rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
         enabled=hasLocationPermission(context)
         denied=!enabled
+        if(!enabled) onUnavailable()
         permanent=!enabled && result.isNotEmpty() && context.activity()?.let { activity ->
             !activity.shouldShowRequestPermissionRationale(Manifest.permission.ACCESS_COARSE_LOCATION) &&
                 !activity.shouldShowRequestPermissionRationale(Manifest.permission.ACCESS_FINE_LOCATION)
@@ -71,6 +75,7 @@ internal fun LocationControls(hydrants: List<Hydrant>, onLocation: (Location?) -
                 foregroundLocations(context.applicationContext).collect { value ->
                     location=value
                     updateLocation(value.fix)
+                    if(value.notice==LocationNotice.DENIED) { denied=true;enabled=false;onUnavailable() }
                 }
             } catch(e: CancellationException) { throw e }
             catch(_: Exception) { location=LocationState(notice=LocationNotice.UNAVAILABLE); updateLocation(null) }
@@ -81,18 +86,24 @@ internal fun LocationControls(hydrants: List<Hydrant>, onLocation: (Location?) -
     fun request() {
         if(hasLocationPermission(context)) { enabled=true; refresh++; return }
         if(!permanent) launcher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+        else onUnavailable()
     }
-    val fix=location.fix
+    val fix=location.fix?.takeIf(::freshLocation)
     val point=fix?.let { GeoPoint(it.latitude,it.longitude) }
     // Include both input identities so an in-flight calculation can never show an old scope/fix.
     val calculated by produceState(Triple<List<Hydrant>?, GeoPoint?, List<NearbyHydrant>>(null,null,emptyList()), hydrants, point, showNearby) {
         value=Triple(hydrants,point,if(showNearby && point!=null) withContext(Dispatchers.Default) { NearbyHydrants.ordered(point,hydrants) } else emptyList())
     }
-    val nearby=calculated.third.takeIf { calculated.first === hydrants && calculated.second == point }.orEmpty()
+    val nearby=calculated.third.takeIf { !dataLoading && calculated.first == hydrants && calculated.second == point }.orEmpty()
+    LaunchedEffect(denied,permanent,location.notice) {
+        if(denied || permanent || location.notice in listOf(LocationNotice.DENIED,LocationNotice.DISABLED,
+                LocationNotice.UNAVAILABLE,LocationNotice.STALE)) onUnavailable()
+    }
     Column(Modifier.padding(horizontal=16.dp)) {
-        Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+        FlowRow(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
             TextButton(onClick={onCenter();request()}) { Text(stringResource(R.string.map_my_location)) }
             TextButton(onClick={showNearby=true;request()}) { Text(stringResource(R.string.map_nearby)) }
+            additionalActions()
         }
         val message=when {
             permanent -> R.string.map_location_permanent
@@ -117,11 +128,14 @@ internal fun LocationControls(hydrants: List<Hydrant>, onLocation: (Location?) -
             text={Column {
                 Text(stringResource(R.string.map_nearby_notice))
                 if(fix==null)Text(stringResource(message ?: R.string.map_location_searching))
-                else if(calculated.first !== hydrants || calculated.second != point)LinearProgressIndicator(Modifier.fillMaxWidth())
+                else if(dataLoading || calculated.first != hydrants || calculated.second != point)LinearProgressIndicator(Modifier.fillMaxWidth())
                 else if(nearby.isEmpty())Text(stringResource(R.string.map_nearby_empty))
                 LazyColumn(Modifier.heightIn(max=300.dp)) {
                     items(nearby,key={it.hydrant.id}) { item ->
-                        TextButton(onClick={onSelect(item.hydrant);showNearby=false}) {
+                        TextButton(onClick={
+                            if(fix!=null && freshLocation(fix)) { onSelect(item.hydrant);showNearby=false }
+                            else { location=LocationState(notice=LocationNotice.STALE);updateLocation(null) }
+                        }) {
                             Column(Modifier.fillMaxWidth()) {
                                 Text(item.hydrant.code ?: (stringResource(R.string.h_pending_code)+" · "+item.hydrant.id))
                                 Text(stringResource(statusLabel(item.hydrant.status)))

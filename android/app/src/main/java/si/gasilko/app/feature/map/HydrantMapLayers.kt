@@ -16,6 +16,7 @@ internal class HydrantMapLayers(style: Style) {
     private val selection = CircleLayer("gasilko-hydrant-selection", SOURCE).withProperties(
         circleRadius(12f), circleColor(Color.TRANSPARENT), circleStrokeColor(Color.BLACK), circleStrokeWidth(2f))
     private var lastData: String? = null
+    private var lastSelection: String? = null
     init {
         style.addSource(source)
         HydrantStatus.entries.forEach { status ->
@@ -28,7 +29,10 @@ internal class HydrantMapLayers(style: Style) {
     }
     fun update(data: String, selected: String?) {
         if(lastData != data) { source.setGeoJson(data); lastData=data }
-        selection.setFilter(eq(get("uuid"), literal(selected.orEmpty())))
+        if(lastSelection != selected) {
+            selection.setFilter(eq(get("uuid"), literal(selected.orEmpty())))
+            lastSelection=selected
+        }
     }
     companion object {
         private const val SOURCE = "gasilko-hydrants"

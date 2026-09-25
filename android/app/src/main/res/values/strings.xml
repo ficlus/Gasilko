@@ -146,7 +146,7 @@
     <string name="map_title">Zemljevid</string>
     <string name="map_loading">Nalaganje zemljevida …</string>
     <string name="map_error">Osnovnega zemljevida ni mogoče naložiti. Lokalni hidranti so še vedno na voljo. Preverite povezavo in poskusite znova.</string>
-    <string name="map_unconfigured">Zemljevid ni na voljo. Skrbnik mora nastaviti veljaven naslov sloga zemljevida.</string>
+    <string name="map_unconfigured">Osnovni zemljevid ni nastavljen. Lokalni hidranti ostanejo na voljo; skrbnik mora nastaviti veljaven naslov sloga.</string>
     <string name="map_retry">Poskusi znova</string>
     <string name="map_my_location">Moja lokacija</string>
     <string name="map_nearby">Bližnji hidranti</string>
@@ -189,4 +189,11 @@
     <string name="offline_resume">Nadaljuj / ponovi</string>
     <string name="offline_delete">Izbriši območje</string>
     <string name="offline_delete_confirm">Izbrišem zemljevid »%1$s« s te naprave? Hidranti in podatki za sinhronizacijo ostanejo ohranjeni.</string>
+    <string name="map_empty">Ni hidrantov za trenutno organizacijo in filtre.</string>
+    <string name="map_no_coordinates">Lokalni hidranti nimajo veljavnih koordinat. Poiščete jih lahko v registru.</string>
+    <string name="map_missing_coordinates">Brez veljavnih koordinat: %1$d. Ti hidranti ostanejo na voljo v registru.</string>
+    <string name="map_selected">Izbrani hidrant</string>
+    <string name="map_clear_selection">Počisti izbor</string>
+    <string name="map_canvas">Zemljevid lokalnih hidrantov. Podrobnosti so na voljo tudi v registru.</string>
+    <string name="offline_active_downloads">Zemljevidi brez povezave · prenosi: %1$d</string>
 </resources>
