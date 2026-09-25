@@ -20,6 +20,9 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import si.gasilko.app.R
 import si.gasilko.app.feature.hydrants.domain.*
+import si.gasilko.app.feature.inspections.presentation.*
+import java.text.DateFormat
+import java.util.Date
 
 fun activeLabel(active: ActiveFilter): Int = when(active) { ActiveFilter.ACTIVE->R.string.h_active_only; ActiveFilter.INACTIVE->R.string.h_inactive_only; ActiveFilter.ALL->R.string.h_all }
 fun statusLabel(status: HydrantStatus): Int = when(status) {
@@ -71,6 +74,11 @@ fun HydrantScreen(model: HydrantViewModel, requestAccess: ()->Unit = {}, signOut
     var showMap by rememberSaveable(state.organization?.id) { mutableStateOf(false) }
     var mapDetail by rememberSaveable(state.organization?.id) { mutableStateOf(false) }
     val mapState = key(state.organization?.id) { rememberSaveableStateHolder() }
+    state.quickInspection?.let { draft ->
+        QuickInspectionScreen(draft,state.selected?.code ?: stringResource(R.string.h_pending_code),
+            state.mutating,state.error,model::changeQuickInspection,model::completeQuickInspection,model::cancelQuickInspection)
+        return
+    }
     LaunchedEffect(mapDetail,state.selected?.id,state.loading,state.form) {
         if(mapDetail && !state.loading && state.selected==null && state.form==null)mapDetail=false
     }
@@ -215,6 +223,12 @@ fun HydrantScreen(model: HydrantViewModel, requestAccess: ()->Unit = {}, signOut
     Column(modifier.verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(8.dp)) {
         Text(stringResource(R.string.h_details),style=MaterialTheme.typography.titleLarge)
         TextButton(onClick=model::back,enabled=enabled){Text(stringResource(R.string.h_back))}
+        if(state.inspectionSaved)Text(stringResource(R.string.inspection_saved),color=MaterialTheme.colorScheme.primary)
+        if(state.writable && (h.active || state.manages)) {
+            Button(onClick=model::startQuickInspection,enabled=enabled,modifier=Modifier.fillMaxWidth().heightIn(min=56.dp)) {
+                Text(stringResource(R.string.inspection_start_quick))
+            }
+        }
         DetailFields(h,state.types)
         if(state.reviewDraft!=null && state.manages)Button(onClick=model::reviewDraft,enabled=enabled,modifier=Modifier.testTag("review-draft")){Text(stringResource(R.string.h_review_draft))}
         if(state.writable && (h.active || state.manages)) {
@@ -224,6 +238,21 @@ fun HydrantScreen(model: HydrantViewModel, requestAccess: ()->Unit = {}, signOut
         if(state.manages && state.writable) {
             Button(onClick=model::edit,enabled=enabled,modifier=Modifier.testTag("edit")){Text(stringResource(R.string.h_edit))}
             OutlinedButton(onClick=model::requestActive,enabled=enabled,modifier=Modifier.testTag("set-active")){Text(stringResource(if(h.active)R.string.h_deactivate else R.string.h_reactivate))}
+        }
+        val historyFlow=remember(model,h.organization,h.id) { model.inspectionHistory(h.organization,h.id) }
+        key(model,h.organization,h.id) {
+            val history by historyFlow.collectAsStateWithLifecycle(initialValue=InspectionHistoryState())
+            Text(stringResource(R.string.inspection_local_history),style=MaterialTheme.typography.titleMedium)
+            history.error?.let { Text(stringResource(errorLabel(it)),color=MaterialTheme.colorScheme.error) }
+            if(history.rows.isEmpty() && history.error==null)Text(stringResource(R.string.inspection_history_empty))
+            // Compact local preview; full history and online-history controls belong to M5.6.
+            history.rows.take(5).forEach { inspection ->
+                HorizontalDivider()
+                Text(DateFormat.getDateTimeInstance(DateFormat.SHORT,DateFormat.SHORT).format(Date(inspection.completedAt)))
+                Text(stringResource(inspectionModeLabel(inspection.mode)))
+                Text(stringResource(inspectionResultLabel(inspection.result)))
+                inspection.notes?.takeIf { it.isNotBlank() }?.let { Text(it) }
+            }
         }
         Spacer(Modifier.height(16.dp))
     }
