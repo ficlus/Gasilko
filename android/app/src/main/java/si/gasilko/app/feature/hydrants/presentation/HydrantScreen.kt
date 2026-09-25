@@ -21,6 +21,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import si.gasilko.app.R
 import si.gasilko.app.feature.hydrants.domain.*
 import si.gasilko.app.feature.inspections.presentation.*
+import si.gasilko.app.feature.inspections.domain.InspectionMode
 import java.text.DateFormat
 import java.util.Date
 
@@ -74,9 +75,12 @@ fun HydrantScreen(model: HydrantViewModel, requestAccess: ()->Unit = {}, signOut
     var showMap by rememberSaveable(state.organization?.id) { mutableStateOf(false) }
     var mapDetail by rememberSaveable(state.organization?.id) { mutableStateOf(false) }
     val mapState = key(state.organization?.id) { rememberSaveableStateHolder() }
-    state.quickInspection?.let { draft ->
-        QuickInspectionScreen(draft,state.selected?.code ?: stringResource(R.string.h_pending_code),
-            state.mutating,state.error,model::changeQuickInspection,model::completeQuickInspection,model::cancelQuickInspection)
+    state.inspectionDraft?.let { draft ->
+        val label=state.selected?.code ?: stringResource(R.string.h_pending_code)
+        if(draft.mode==InspectionMode.GUIDED)GuidedInspectionScreen(draft,label,state.mutating,state.error,
+            model::answerGuided,model::changeInspection,model::moveGuided,model::completeInspection,model::cancelInspection)
+        else QuickInspectionScreen(draft,label,state.mutating,state.error,model::changeInspection,
+            {model.completeInspection()},model::cancelInspection)
         return
     }
     LaunchedEffect(mapDetail,state.selected?.id,state.loading,state.form) {
@@ -225,8 +229,11 @@ fun HydrantScreen(model: HydrantViewModel, requestAccess: ()->Unit = {}, signOut
         TextButton(onClick=model::back,enabled=enabled){Text(stringResource(R.string.h_back))}
         if(state.inspectionSaved)Text(stringResource(R.string.inspection_saved),color=MaterialTheme.colorScheme.primary)
         if(state.writable && (h.active || state.manages)) {
-            Button(onClick=model::startQuickInspection,enabled=enabled,modifier=Modifier.fillMaxWidth().heightIn(min=56.dp)) {
+            Button(onClick={model.startInspection(InspectionMode.QUICK)},enabled=enabled,modifier=Modifier.fillMaxWidth().heightIn(min=56.dp)) {
                 Text(stringResource(R.string.inspection_start_quick))
+            }
+            OutlinedButton(onClick={model.startInspection(InspectionMode.GUIDED)},enabled=enabled,modifier=Modifier.fillMaxWidth().heightIn(min=56.dp)) {
+                Text(stringResource(R.string.inspection_start_guided))
             }
         }
         DetailFields(h,state.types)

@@ -214,4 +214,20 @@
     <string name="inspection_retry_notice">Der erneute Versuch verwendet dieselbe Prüfung und die bestätigten Daten.</string>
     <string name="inspection_local_history">Letzte 5 lokal gespeicherte Prüfungen</string>
     <string name="inspection_history_empty">Auf diesem Gerät sind noch keine Prüfungen dieses Hydranten gespeichert.</string>
+    <string name="inspection_start_guided">Geführte Prüfung starten</string>
+    <string name="guided_accessibility">Zugänglichkeit</string>
+    <string name="guided_accessibility_question">Ist der Hydrant zugänglich?</string>
+    <string name="guided_damage">Sichtbare Schäden</string>
+    <string name="guided_damage_question">Sind sichtbare Schäden vorhanden?</string>
+    <string name="guided_identification">Hydrantenkennzeichnung</string>
+    <string name="guided_identification_question">Ist die Kennzeichnung lesbar?</string>
+    <string name="guided_operation">Funktion</string>
+    <string name="guided_operation_question">Ist der Hydrant funktionsfähig?</string>
+    <string name="guided_yes">Ja</string>
+    <string name="guided_no">Nein</string>
+    <string name="guided_not_checked">Nicht geprüft</string>
+    <string name="guided_next">Weiter</string>
+    <string name="guided_review">Übersicht</string>
+    <string name="guided_progress">%1$d / %2$d</string>
+    <string name="guided_result_notice">Wählen Sie das endgültige Ergebnis selbst anhand Ihrer Prüffeststellungen.</string>
 </resources>

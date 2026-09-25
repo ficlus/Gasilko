@@ -214,4 +214,20 @@
     <string name="inspection_retry_notice">Ponovni poskus uporabi isti pregled in potrjene podatke.</string>
     <string name="inspection_local_history">Zadnjih 5 lokalno shranjenih pregledov</string>
     <string name="inspection_history_empty">V napravi še ni shranjenih pregledov tega hidranta.</string>
+    <string name="inspection_start_guided">Začni vodeni pregled</string>
+    <string name="guided_accessibility">Dostopnost</string>
+    <string name="guided_accessibility_question">Ali je hidrant dostopen?</string>
+    <string name="guided_damage">Vidne poškodbe</string>
+    <string name="guided_damage_question">Ali so prisotne vidne poškodbe?</string>
+    <string name="guided_identification">Oznaka hidranta</string>
+    <string name="guided_identification_question">Ali je oznaka hidranta čitljiva?</string>
+    <string name="guided_operation">Delovanje</string>
+    <string name="guided_operation_question">Ali hidrant deluje?</string>
+    <string name="guided_yes">Da</string>
+    <string name="guided_no">Ne</string>
+    <string name="guided_not_checked">Ni preverjeno</string>
+    <string name="guided_next">Naprej</string>
+    <string name="guided_review">Pregled odgovorov</string>
+    <string name="guided_progress">%1$d / %2$d</string>
+    <string name="guided_result_notice">Končni rezultat izberite sami glede na ugotovitve pregleda.</string>
 </resources>
