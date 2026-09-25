@@ -27,6 +27,10 @@ android {
         val mapStyle = providers.environmentVariable("ANDROID_MAP_STYLE_URL")
             .orElse("https://demotiles.maplibre.org/style.json").get()
         buildConfigField("String", "MAP_STYLE_URL", quoted(mapStyle))
+        // Set to the EXACT style URL only after verifying all sources, fonts, sprites and
+        // provider terms support MapLibre offline downloads. Empty disables downloads.
+        buildConfigField("String", "OFFLINE_MAP_STYLE_URL", quoted(
+            providers.environmentVariable("ANDROID_OFFLINE_MAP_STYLE_URL").orElse("").get()))
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
