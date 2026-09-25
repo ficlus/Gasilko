@@ -34,7 +34,6 @@ class HydrantViewModel(private val repository: HydrantRepository, private val in
                 emit(InspectionHistoryState(error=(e as? RegistryFailure)?.reason ?: RegistryError.SERVER))
             }
     fun startInspection(mode: InspectionMode) {
-        if(mode !in listOf(InspectionMode.QUICK,InspectionMode.GUIDED))return
         val s=state.value; val h=s.selected ?: return; val org=s.organization ?: return
         if(s.loading || s.mutating || s.form!=null || s.inspectionDraft!=null || !s.writable || (!h.active && !s.manages))return
         mutableState.value=s.copy(inspectionDraft=InspectionDraft(UUID.randomUUID().toString(),org.id,h.id,System.currentTimeMillis(),mode=mode),
@@ -48,9 +47,10 @@ class HydrantViewModel(private val repository: HydrantRepository, private val in
     fun cancelInspection() {
         if(!state.value.mutating)mutableState.value=state.value.copy(inspectionDraft=null,error=null)
     }
-    fun answerGuided(check: GuidedCheck, answer: GuidedAnswer) {
+    fun answerInspectionCheck(check: GuidedCheck, answer: GuidedAnswer) {
         val s=state.value;val draft=s.inspectionDraft ?: return
-        if(!s.mutating && draft.completion==null && draft.mode==InspectionMode.GUIDED && GuidedCheck.entries.getOrNull(draft.step)==check)
+        if(!s.mutating && draft.completion==null && (draft.mode==InspectionMode.CLASSIC ||
+                (draft.mode==InspectionMode.GUIDED && GuidedCheck.entries.getOrNull(draft.step)==check)))
             mutableState.value=s.copy(inspectionDraft=draft.copy(answers=draft.answers+(check to answer)),error=null)
     }
     fun moveGuided(forward: Boolean) {
@@ -60,15 +60,16 @@ class HydrantViewModel(private val repository: HydrantRepository, private val in
         if(forward && !answered)return
         mutableState.value=s.copy(inspectionDraft=draft.copy(step=(draft.step+if(forward)1 else -1).coerceIn(0,5)),error=null)
     }
-    fun completeInspection(guidedNotes: String? = null) {
+    fun completeInspection(checkNotes: String? = null) {
         val s=state.value; val draft=s.inspectionDraft ?: return; val result=draft.result ?: return
         if(s.loading || s.mutating || !s.writable || s.organization?.id!=draft.organization || s.selected?.id!=draft.hydrantId)return
-        if(draft.mode==InspectionMode.GUIDED && (draft.step!=5 || GuidedCheck.entries.any { it !in draft.answers } || guidedNotes==null))return
+        if(draft.mode==InspectionMode.GUIDED && draft.step!=5)return
+        if(draft.mode!=InspectionMode.QUICK && (GuidedCheck.entries.any { it !in draft.answers } || checkNotes==null))return
         // Freeze the full event on first confirmation, including completion time. An
         // uncertain local outcome must retry the same immutable event, not just its UUID.
         val input=draft.completion ?: InspectionCompletion(draft.mode,result,draft.startedAt,
             maxOf(draft.startedAt,System.currentTimeMillis()),
-            notes=if(draft.mode==InspectionMode.GUIDED)guidedNotes else draft.notes.takeIf { it.isNotBlank() },id=draft.id)
+            notes=if(draft.mode!=InspectionMode.QUICK)checkNotes else draft.notes.takeIf { it.isNotBlank() },id=draft.id)
         val stamp=generation
         mutableState.value=s.copy(inspectionDraft=draft.copy(completion=input),mutating=true,error=null)
         start {

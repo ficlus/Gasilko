@@ -230,4 +230,6 @@
     <string name="guided_review">Übersicht</string>
     <string name="guided_progress">%1$d / %2$d</string>
     <string name="guided_result_notice">Wählen Sie das endgültige Ergebnis selbst anhand Ihrer Prüffeststellungen.</string>
+    <string name="inspection_start_classic">Klassische Prüfung starten</string>
+    <string name="inspection_checks_required">Bitte beantworten Sie alle vier Fragen und wählen Sie das Prüfergebnis.</string>
 </resources>

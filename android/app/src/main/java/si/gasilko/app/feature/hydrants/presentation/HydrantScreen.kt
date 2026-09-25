@@ -78,7 +78,9 @@ fun HydrantScreen(model: HydrantViewModel, requestAccess: ()->Unit = {}, signOut
     state.inspectionDraft?.let { draft ->
         val label=state.selected?.code ?: stringResource(R.string.h_pending_code)
         if(draft.mode==InspectionMode.GUIDED)GuidedInspectionScreen(draft,label,state.mutating,state.error,
-            model::answerGuided,model::changeInspection,model::moveGuided,model::completeInspection,model::cancelInspection)
+            model::answerInspectionCheck,model::changeInspection,model::moveGuided,model::completeInspection,model::cancelInspection)
+        else if(draft.mode==InspectionMode.CLASSIC)ClassicInspectionScreen(draft,label,state.mutating,state.error,
+            model::answerInspectionCheck,model::changeInspection,model::completeInspection,model::cancelInspection)
         else QuickInspectionScreen(draft,label,state.mutating,state.error,model::changeInspection,
             {model.completeInspection()},model::cancelInspection)
         return
@@ -234,6 +236,9 @@ fun HydrantScreen(model: HydrantViewModel, requestAccess: ()->Unit = {}, signOut
             }
             OutlinedButton(onClick={model.startInspection(InspectionMode.GUIDED)},enabled=enabled,modifier=Modifier.fillMaxWidth().heightIn(min=56.dp)) {
                 Text(stringResource(R.string.inspection_start_guided))
+            }
+            OutlinedButton(onClick={model.startInspection(InspectionMode.CLASSIC)},enabled=enabled,modifier=Modifier.fillMaxWidth().heightIn(min=56.dp)) {
+                Text(stringResource(R.string.inspection_start_classic))
             }
         }
         DetailFields(h,state.types)

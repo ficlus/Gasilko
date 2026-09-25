@@ -157,4 +157,6 @@
     <string name="guided_review">Pregled odgovorov</string>
     <string name="guided_progress">%1$d / %2$d</string>
     <string name="guided_result_notice">Končni rezultat izberite sami glede na ugotovitve pregleda.</string>
+    <string name="inspection_start_classic">Začni klasični pregled</string>
+    <string name="inspection_checks_required">Odgovorite na vsa štiri vprašanja in izberite rezultat pregleda.</string>
 </resources>
