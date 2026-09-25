@@ -123,4 +123,22 @@
     <string name="h_inactive_only">Samo neaktivni</string>
     <string name="h_clear_filters">Počisti filtre</string>
     <string name="h_no_matches">Noben hidrant ne ustreza filtrom.</string>
+    <string name="inspection_quick">Hitri pregled</string>
+    <string name="inspection_guided">Vodeni pregled</string>
+    <string name="inspection_classic">Klasični pregled</string>
+    <string name="inspection_start_quick">Začni hitri pregled</string>
+    <string name="inspection_choose_result">Izberite rezultat pregleda</string>
+    <string name="inspection_pass">Brezhiben</string>
+    <string name="inspection_issues">Pomanjkljivosti</string>
+    <string name="inspection_fail">Ne deluje</string>
+    <string name="inspection_not_inspected">Ni pregledan</string>
+    <string name="inspection_notes">Opombe (neobvezno)</string>
+    <string name="inspection_complete">Potrdi in zaključi pregled</string>
+    <string name="inspection_complete_notice">S potrditvijo se pregled trajno shrani v napravo. Sinhronizacija sledi, ko je na voljo povezava.</string>
+    <string name="inspection_saved">Pregled je shranjen v napravi.</string>
+    <string name="inspection_save_failed">Shranjevanja pregleda ni bilo mogoče potrditi. Poskusite znova.</string>
+    <string name="inspection_retry">Ponovi shranjevanje</string>
+    <string name="inspection_retry_notice">Ponovni poskus uporabi isti pregled in potrjene podatke.</string>
+    <string name="inspection_local_history">Zadnjih 5 lokalno shranjenih pregledov</string>
+    <string name="inspection_history_empty">V napravi še ni shranjenih pregledov tega hidranta.</string>
 </resources>

@@ -196,4 +196,22 @@
     <string name="map_clear_selection">Auswahl aufheben</string>
     <string name="map_canvas">Karte der lokalen Hydranten. Details sind auch im Register verfügbar.</string>
     <string name="offline_active_downloads">Offline-Karten · Downloads: %1$d</string>
+    <string name="inspection_quick">Schnellprüfung</string>
+    <string name="inspection_guided">Geführte Prüfung</string>
+    <string name="inspection_classic">Klassische Prüfung</string>
+    <string name="inspection_start_quick">Schnellprüfung starten</string>
+    <string name="inspection_choose_result">Prüfergebnis auswählen</string>
+    <string name="inspection_pass">In Ordnung</string>
+    <string name="inspection_issues">Mängel festgestellt</string>
+    <string name="inspection_fail">Nicht funktionsfähig</string>
+    <string name="inspection_not_inspected">Nicht geprüft</string>
+    <string name="inspection_notes">Notizen (optional)</string>
+    <string name="inspection_complete">Prüfung bestätigen und abschließen</string>
+    <string name="inspection_complete_notice">Mit der Bestätigung wird die Prüfung dauerhaft auf diesem Gerät gespeichert. Die Synchronisierung erfolgt, sobald eine Verbindung verfügbar ist.</string>
+    <string name="inspection_saved">Prüfung auf diesem Gerät gespeichert.</string>
+    <string name="inspection_save_failed">Das Speichern der Prüfung konnte nicht bestätigt werden. Bitte erneut versuchen.</string>
+    <string name="inspection_retry">Speichern erneut versuchen</string>
+    <string name="inspection_retry_notice">Der erneute Versuch verwendet dieselbe Prüfung und die bestätigten Daten.</string>
+    <string name="inspection_local_history">Letzte 5 lokal gespeicherte Prüfungen</string>
+    <string name="inspection_history_empty">Auf diesem Gerät sind noch keine Prüfungen dieses Hydranten gespeichert.</string>
 </resources>
