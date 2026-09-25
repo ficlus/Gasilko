@@ -76,7 +76,11 @@ fun HydrantScreen(model: HydrantViewModel, requestAccess: ()->Unit = {}, signOut
     }
     if(showMap && !mapDetail && state.writable) {
         val mapFlow = remember(model,state.query) { model.mapHydrants(state.query) }
-        val mapData by mapFlow.collectAsStateWithLifecycle(initialValue=MapHydrantsState(loading=true))
+        // A new scope/filter must not display the previous collector's last emission.
+        val mapData = key(model,state.query) {
+            val observed by mapFlow.collectAsStateWithLifecycle(initialValue=MapHydrantsState(loading=true))
+            observed
+        }
         mapState.SaveableStateProvider("map") {
             si.gasilko.app.feature.map.MapScreen(onBack={showMap=false}, hydrants=mapData.rows,
                 dataLoading=mapData.loading, dataError=mapData.error ?: state.error,

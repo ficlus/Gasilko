@@ -17,6 +17,9 @@ import si.gasilko.app.feature.map.domain.GeoPoint
 
 internal enum class LocationNotice { SEARCHING, UNAVAILABLE, STALE, DISABLED, DENIED }
 internal data class LocationState(val fix: Location? = null, val notice: LocationNotice? = null)
+internal fun freshLocation(fix: Location): Boolean =
+    GeoPoint(fix.latitude,fix.longitude).valid && fix.hasAccuracy() && fix.accuracy.isFinite() && fix.accuracy>=0 &&
+        SystemClock.elapsedRealtimeNanos()-fix.elapsedRealtimeNanos in 0..120_000_000_000L
 internal fun hasLocationPermission(context: Context) =
     context.checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
         context.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
@@ -31,19 +34,20 @@ internal fun foregroundLocations(context: Context) = callbackFlow {
     val providers = mutableListOf<String>()
     fun publish() {
         if(!hasLocationPermission(context)) { latest=null; trySend(LocationState(notice=LocationNotice.DENIED)); close(); return }
-        val enabled = providers.any { manager.isProviderEnabled(it) }
+        val enabled = try { providers.any { manager.isProviderEnabled(it) } }
+            catch(_: SecurityException) { latest=null;trySend(LocationState(notice=LocationNotice.DENIED));close();return }
         val fix = latest
-        val age = fix?.let { (SystemClock.elapsedRealtimeNanos() - it.elapsedRealtimeNanos) / 1_000_000 }
         when {
             !enabled -> { latest=null; trySend(LocationState(notice=LocationNotice.DISABLED)) }
-            fix != null && age != null && age in 0..120_000 -> trySend(LocationState(Location(fix)))
+            fix != null && freshLocation(fix) -> trySend(LocationState(Location(fix)))
             fix != null -> trySend(LocationState(notice=LocationNotice.STALE))
             else -> trySend(LocationState(notice=if(SystemClock.elapsedRealtime()-began < 30_000) LocationNotice.SEARCHING else LocationNotice.UNAVAILABLE))
         }
     }
     val listener = object : LocationListener {
         override fun onLocationChanged(location: Location) {
-            if(!GeoPoint(location.latitude,location.longitude).valid || !location.hasAccuracy() || !location.accuracy.isFinite() || location.accuracy < 0) return
+            // A future timestamp must not replace the last fix and suppress subsequent valid fixes.
+            if(!freshLocation(location)) return
             if(latest == null || location.elapsedRealtimeNanos > latest!!.elapsedRealtimeNanos) latest=Location(location)
             publish()
         }
@@ -64,9 +68,9 @@ internal fun foregroundLocations(context: Context) = callbackFlow {
         }
         publish()
     } catch(_: SecurityException) {
-        latest=null; trySend(LocationState(notice=LocationNotice.DENIED))
+        latest=null; trySend(LocationState(notice=LocationNotice.DENIED));close()
     } catch(_: IllegalArgumentException) {
-        latest=null; trySend(LocationState(notice=LocationNotice.UNAVAILABLE))
+        latest=null; trySend(LocationState(notice=LocationNotice.UNAVAILABLE));close()
     }
     val expiry = launch {
         while(true) { delay(5_000); publish() }

@@ -6,6 +6,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -27,7 +28,11 @@ internal fun OfflineMapControls(style: String, visibleBounds: ()->LatLngBounds?,
     val maps=remember { OfflineMaps.get(context) }
     val state by maps.state.collectAsStateWithLifecycle()
     var open by rememberSaveable { mutableStateOf(false) }
-    var bounds by remember { mutableStateOf<LatLngBounds?>(null) }
+    var bounds by rememberSaveable(stateSaver=listSaver<LatLngBounds?,Double>(
+        save={ b -> b?.let { listOf(it.latitudeNorth,it.longitudeEast,it.latitudeSouth,it.longitudeWest) }.orEmpty() },
+        restore={ if(it.size==4) runCatching { LatLngBounds.from(it[0],it[1],it[2],it[3]) }.getOrNull() else null })) {
+        mutableStateOf<LatLngBounds?>(null)
+    }
     var name by rememberSaveable { mutableStateOf("") }
     var deleting by remember { mutableStateOf<Long?>(null) }
     DisposableEffect(maps,lifecycle) {
@@ -43,10 +48,9 @@ internal fun OfflineMapControls(style: String, visibleBounds: ()->LatLngBounds?,
         lifecycle.addObserver(observer)
         onDispose { lifecycle.removeObserver(observer);stop() }
     }
-    TextButton(onClick={ bounds=visibleBounds();open=true },modifier=Modifier.padding(horizontal=16.dp)) {
-        Text(stringResource(R.string.offline_maps))
+    TextButton(onClick={ bounds=visibleBounds();open=true }) {
         val active=state.regions.count { it.downloading }
-        if(active>0) Text(" · $active")
+        Text(if(active>0) stringResource(R.string.offline_active_downloads,active) else stringResource(R.string.offline_maps))
     }
     if(!open) return
     val supported=OfflineMapPolicy.supported(style)
@@ -73,7 +77,7 @@ internal fun OfflineMapControls(style: String, visibleBounds: ()->LatLngBounds?,
                 Text(stringResource(R.string.offline_error))
                 TextButton(onClick=maps::reload) { Text(stringResource(R.string.map_retry)) }
             }
-            if(!state.busy && state.regions.isEmpty())Text(stringResource(R.string.offline_empty))
+            if(!state.busy && !state.error && state.regions.isEmpty())Text(stringResource(R.string.offline_empty))
             state.regions.forEach { row ->
                 HorizontalDivider()
                 Text(row.name,style=MaterialTheme.typography.titleSmall)
@@ -90,6 +94,7 @@ internal fun OfflineMapControls(style: String, visibleBounds: ()->LatLngBounds?,
                     else -> R.string.offline_paused
                 }))
                 if(overLimit && !complete)Text(stringResource(R.string.offline_size_limit))
+                if(row.downloading && status==null)LinearProgressIndicator(Modifier.fillMaxWidth())
                 if(status!=null) {
                     val number=NumberFormat.getNumberInstance().apply { maximumFractionDigits=1 }
                     Text(stringResource(R.string.offline_size,number.format(status.completedResourceSize/1048576.0)))
