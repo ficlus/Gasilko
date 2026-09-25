@@ -19,10 +19,12 @@ import si.gasilko.app.feature.hydrants.presentation.errorLabel
 import si.gasilko.app.feature.inspections.domain.*
 
 /** Unconfirmed form state lives in the existing account-scoped registry ViewModel. */
-data class QuickInspectionDraft(
+data class InspectionDraft(
     val id: String, val organization: String, val hydrantId: String, val startedAt: Long,
     val result: InspectionResult? = null, val notes: String = "",
     val completion: InspectionCompletion? = null,
+    val mode: InspectionMode = InspectionMode.QUICK,
+    val step: Int = 0, val answers: Map<GuidedCheck, GuidedAnswer> = emptyMap(),
 )
 
 fun inspectionResultLabel(result: InspectionResult): Int = when(result) {
@@ -38,7 +40,7 @@ fun inspectionModeLabel(mode: InspectionMode): Int = when(mode) {
 }
 
 @Composable
-fun QuickInspectionScreen(draft: QuickInspectionDraft, hydrantLabel: String, busy: Boolean,
+fun QuickInspectionScreen(draft: InspectionDraft, hydrantLabel: String, busy: Boolean,
     error: RegistryError?, change: (InspectionResult?, String) -> Unit, complete: () -> Unit, cancel: () -> Unit) {
     val editable=!busy && draft.completion==null
     BackHandler { if(!busy)cancel() }

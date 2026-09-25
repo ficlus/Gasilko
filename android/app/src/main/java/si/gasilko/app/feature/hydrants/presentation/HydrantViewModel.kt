@@ -6,7 +6,7 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import si.gasilko.app.feature.hydrants.domain.*
 import si.gasilko.app.feature.inspections.domain.*
-import si.gasilko.app.feature.inspections.presentation.QuickInspectionDraft
+import si.gasilko.app.feature.inspections.presentation.*
 import java.util.UUID
 
 data class MapHydrantsState(val rows: List<Hydrant> = emptyList(), val loading: Boolean = false, val error: RegistryError? = null)
@@ -20,7 +20,7 @@ data class RegistryState(
     val query: HydrantQuery = HydrantQuery(), val filterDraft: HydrantQuery = HydrantQuery(),
     val more: Boolean = false, val error: RegistryError? = null, val conflict: Boolean = false,
     val confirmDeactivate: Boolean = false, val reloadId: String? = null,
-    val quickInspection: QuickInspectionDraft? = null, val inspectionSaved: Boolean = false,
+    val inspectionDraft: InspectionDraft? = null, val inspectionSaved: Boolean = false,
 ) { val manages get() = organization?.role?.manages == true; val writable get() = organization?.active == true }
 
 class HydrantViewModel(private val repository: HydrantRepository, private val injectedScope: CoroutineScope? = null): ViewModel() {
@@ -33,36 +33,51 @@ class HydrantViewModel(private val repository: HydrantRepository, private val in
                 if(e is CancellationException) throw e
                 emit(InspectionHistoryState(error=(e as? RegistryFailure)?.reason ?: RegistryError.SERVER))
             }
-    fun startQuickInspection() {
+    fun startInspection(mode: InspectionMode) {
+        if(mode !in listOf(InspectionMode.QUICK,InspectionMode.GUIDED))return
         val s=state.value; val h=s.selected ?: return; val org=s.organization ?: return
-        if(s.loading || s.mutating || s.form!=null || s.quickInspection!=null || !s.writable || (!h.active && !s.manages))return
-        mutableState.value=s.copy(quickInspection=QuickInspectionDraft(UUID.randomUUID().toString(),org.id,h.id,System.currentTimeMillis()),
+        if(s.loading || s.mutating || s.form!=null || s.inspectionDraft!=null || !s.writable || (!h.active && !s.manages))return
+        mutableState.value=s.copy(inspectionDraft=InspectionDraft(UUID.randomUUID().toString(),org.id,h.id,System.currentTimeMillis(),mode=mode),
             inspectionSaved=false,error=null)
     }
-    fun changeQuickInspection(result: InspectionResult?, notes: String) {
-        val s=state.value; val draft=s.quickInspection ?: return
+    fun changeInspection(result: InspectionResult?, notes: String) {
+        val s=state.value; val draft=s.inspectionDraft ?: return
         if(!s.mutating && draft.completion==null)
-            mutableState.value=s.copy(quickInspection=draft.copy(result=result,notes=notes),error=null)
+            mutableState.value=s.copy(inspectionDraft=draft.copy(result=result,notes=notes),error=null)
     }
-    fun cancelQuickInspection() {
-        if(!state.value.mutating)mutableState.value=state.value.copy(quickInspection=null,error=null)
+    fun cancelInspection() {
+        if(!state.value.mutating)mutableState.value=state.value.copy(inspectionDraft=null,error=null)
     }
-    fun completeQuickInspection() {
-        val s=state.value; val draft=s.quickInspection ?: return; val result=draft.result ?: return
+    fun answerGuided(check: GuidedCheck, answer: GuidedAnswer) {
+        val s=state.value;val draft=s.inspectionDraft ?: return
+        if(!s.mutating && draft.completion==null && draft.mode==InspectionMode.GUIDED && GuidedCheck.entries.getOrNull(draft.step)==check)
+            mutableState.value=s.copy(inspectionDraft=draft.copy(answers=draft.answers+(check to answer)),error=null)
+    }
+    fun moveGuided(forward: Boolean) {
+        val s=state.value;val draft=s.inspectionDraft ?: return
+        if(s.mutating || draft.completion!=null || draft.mode!=InspectionMode.GUIDED)return
+        val answered=if(draft.step<4)draft.answers.containsKey(GuidedCheck.entries[draft.step]) else draft.result!=null
+        if(forward && !answered)return
+        mutableState.value=s.copy(inspectionDraft=draft.copy(step=(draft.step+if(forward)1 else -1).coerceIn(0,5)),error=null)
+    }
+    fun completeInspection(guidedNotes: String? = null) {
+        val s=state.value; val draft=s.inspectionDraft ?: return; val result=draft.result ?: return
         if(s.loading || s.mutating || !s.writable || s.organization?.id!=draft.organization || s.selected?.id!=draft.hydrantId)return
+        if(draft.mode==InspectionMode.GUIDED && (draft.step!=5 || GuidedCheck.entries.any { it !in draft.answers } || guidedNotes==null))return
         // Freeze the full event on first confirmation, including completion time. An
         // uncertain local outcome must retry the same immutable event, not just its UUID.
-        val input=draft.completion ?: InspectionCompletion(InspectionMode.QUICK,result,draft.startedAt,
-            maxOf(draft.startedAt,System.currentTimeMillis()),notes=draft.notes.takeIf { it.isNotBlank() },id=draft.id)
+        val input=draft.completion ?: InspectionCompletion(draft.mode,result,draft.startedAt,
+            maxOf(draft.startedAt,System.currentTimeMillis()),
+            notes=if(draft.mode==InspectionMode.GUIDED)guidedNotes else draft.notes.takeIf { it.isNotBlank() },id=draft.id)
         val stamp=generation
-        mutableState.value=s.copy(quickInspection=draft.copy(completion=input),mutating=true,error=null)
+        mutableState.value=s.copy(inspectionDraft=draft.copy(completion=input),mutating=true,error=null)
         start {
             try {
                 val saved=repository.completeInspection(draft.organization,draft.hydrantId,input)
                 if(stamp!=generation)return@start
                 mutableState.value=state.value.copy(selected=saved.hydrant,
                     rows=state.value.rows.map { if(it.id==saved.hydrant.id)saved.hydrant else it }.filter { s.query.matches(it) },
-                    quickInspection=null,inspectionSaved=true,mutating=false,error=null)
+                    inspectionDraft=null,inspectionSaved=true,mutating=false,error=null)
                 // Existing Room/sync observation updates the detail and list afterwards.
             } catch(e: CancellationException) { throw e }
             catch(e: Exception) {
@@ -163,7 +178,7 @@ class HydrantViewModel(private val repository: HydrantRepository, private val in
         if(e.reason != RegistryError.NETWORK) throw e
         e.reason // Keep cached rows usable, while displaying the existing network notice.
     }
-    fun refresh() { if(state.value.quickInspection==null)load(refreshOnline=true) }
+    fun refresh() { if(state.value.inspectionDraft==null)load(refreshOnline=true) }
     private fun load(refreshOnline: Boolean) {
         if(state.value.loading || state.value.mutating) return
         val old=state.value; val stamp=generation
@@ -200,7 +215,7 @@ class HydrantViewModel(private val repository: HydrantRepository, private val in
         }
     }
     fun switchOrganization(id: String) {
-        if(state.value.mutating || state.value.form!=null || state.value.quickInspection!=null || state.value.loading) return
+        if(state.value.mutating || state.value.form!=null || state.value.inspectionDraft!=null || state.value.loading) return
         val org=state.value.organizations.find { it.id==id } ?: return
         generation++; job?.cancel()
         repository.setActiveOrganization(null)
@@ -227,7 +242,7 @@ class HydrantViewModel(private val repository: HydrantRepository, private val in
         start { try { val h=repository.get(org.id,id);if(stamp==generation)mutableState.value=old.copy(selected=h,loading=false,conflict=false,error=null,inspectionSaved=false) }
         catch(e: CancellationException){throw e}catch(e: Exception){if(stamp==generation)mutableState.value=old.copy(error=reason(e))} }
     }
-    fun back() { if(!state.value.mutating && !state.value.loading)mutableState.value=state.value.copy(selected=null,form=null,reviewDraft=null,error=null,conflict=false,confirmDeactivate=false,reloadId=null,quickInspection=null,inspectionSaved=false) }
+    fun back() { if(!state.value.mutating && !state.value.loading)mutableState.value=state.value.copy(selected=null,form=null,reviewDraft=null,error=null,conflict=false,confirmDeactivate=false,reloadId=null,inspectionDraft=null,inspectionSaved=false) }
     fun add() { if(state.value.writable && !state.value.loading && !state.value.mutating)mutableState.value=state.value.copy(form=HydrantForm(UUID.randomUUID().toString()),reviewDraft=null,error=null,conflict=false) }
     fun edit() { val s=state.value; if(s.manages && s.writable && !s.loading && !s.mutating) s.selected?.let { mutableState.value=s.copy(form=HydrantForm.from(it),error=null,conflict=false) } }
     fun changeForm(form: HydrantForm) { if(!state.value.mutating && form.id==state.value.form?.id) mutableState.value=state.value.copy(form=form,error=null) }
