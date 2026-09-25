@@ -9,6 +9,8 @@ import java.time.Instant
 import java.util.UUID
 import si.gasilko.app.core.database.*
 import si.gasilko.app.feature.hydrants.domain.*
+import si.gasilko.app.feature.inspections.domain.*
+import si.gasilko.app.feature.inspections.data.*
 
 /** Local reads/writes with an append-only queue; explicit hydration never replaces pending work. */
 class RoomHydrantRepository(
@@ -23,6 +25,70 @@ class RoomHydrantRepository(
 ) : HydrantRepository {
     private val dao = database.registry()
     private val changes = Mutex()
+    override fun observeInspections(organization: String, hydrantId: String): Flow<List<Inspection>> = flow {
+        val account=currentAccount()
+        emitAll(database.invalidationTracker.createFlow("inspections","hydrants","organizations").map {
+            get(organization,hydrantId) // Reuse cached authorization and inactive-hydrant role gates.
+            dao.inspectionHistory(account,organization,hydrantId).map { it.value }.also { checkAccount(account) }
+        }.distinctUntilChanged())
+    }
+    override suspend fun listInspections(organization: String, hydrantId: String, after: String?): List<Inspection> {
+        val account=currentAccount()
+        get(organization,hydrantId)
+        return dao.inspectionHistory(account,organization,hydrantId).map { it.value }
+            .filter { after==null || it.id>after }.sortedBy { it.id }.take(100).also { checkAccount(account) }
+    }
+    override suspend fun refreshInspections(organization: String, hydrantId: String) = hydrantRemoteAccess.withLock { changes.withLock history@{
+        val account=currentAccount()
+        val local=get(organization,hydrantId)
+        if(local.version==0L) return@history // Parent hydrant has not reached the server yet.
+        val rows=mutableListOf<Inspection>()
+        var after: String?=null
+        do {
+            val page=online.listInspections(organization,hydrantId,after)
+            require(page.all { it.organization==organization && it.hydrantId==hydrantId && (after==null || it.id>after!!) })
+            rows.addAll(page);after=page.lastOrNull()?.id
+        } while(page.size==100)
+        checkAccount(account)
+        database.withTransaction {
+            // Never replace a local event or delete history on a partial/empty refresh.
+            dao.cacheInspections(rows.map { InspectionEntity(account,it,System.currentTimeMillis()) })
+            checkAccount(account)
+        }
+    } }
+    override suspend fun completeInspection(organization: String, hydrantId: String, input: InspectionCompletion): InspectionWrite = changes.withLock {
+        input.validate()
+        val account=currentAccount()
+        val result=database.withTransaction {
+            val org=organization(account,organization)
+            if(!org.active) throw RegistryFailure(RegistryError.FORBIDDEN)
+            val prior=dao.get(account,organization,hydrantId)?.value ?: throw RegistryFailure(RegistryError.UNAVAILABLE)
+            if(!prior.active && !org.role.manages) throw RegistryFailure(RegistryError.FORBIDDEN)
+            val existing=dao.inspection(account,organization,input.id)?.value
+            if(existing!=null) {
+                if(existing.hydrantId!=hydrantId || existing.inspectorId!=account || !existing.completion().sameEvent(input))
+                    throw RegistryFailure(RegistryError.VALIDATION)
+                checkAccount(account)
+                return@withTransaction InspectionWrite(existing,prior)
+            }
+            val now=System.currentTimeMillis()
+            val inspection=Inspection(input.id,hydrantId,organization,account,input.mode,input.result,
+                input.startedAt,input.completedAt,input.notes,input.pressureBar,input.flowLMin,now)
+            val visible=input.result.hydrantStatus?.let { prior.copy(status=it,updatedBy=account,updatedAt=Instant.ofEpochMilli(now).toString()) } ?: prior
+            dao.insertInspection(InspectionEntity(account,inspection))
+            dao.upsertHydrants(listOf(HydrantEntity.from(account,visible)))
+            // Same ordered queue and parent UUID: protects the hydrant during refresh and
+            // queues a never-synced parent's CREATE before this immutable inspection event.
+            dao.enqueue(PendingHydrantChange(operationId=input.id,account=account,organization=organization,
+                entityId=hydrantId,operation=CREATE_INSPECTION,payload=input.payload().toString(),
+                baseVersion=prior.version.takeIf { it>0 },createdAt=now))
+            checkAccount(account)
+            InspectionWrite(inspection,visible)
+        }
+        try { scheduleSync(account,organization) }
+        catch(_: Exception) { android.util.Log.w("HydrantSync","schedule failed; inspection retained") }
+        result
+    }
     override fun observeMap(query: HydrantQuery): Flow<List<Hydrant>> = flow {
         val account = currentAccount()
         emitAll(database.invalidationTracker.createFlow("hydrants", "organizations").map {

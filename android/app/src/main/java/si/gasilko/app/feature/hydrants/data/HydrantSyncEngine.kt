@@ -8,6 +8,8 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.*
 import si.gasilko.app.core.database.*
 import si.gasilko.app.feature.hydrants.domain.*
+import si.gasilko.app.feature.inspections.domain.*
+import si.gasilko.app.feature.inspections.data.*
 
 // The app uses default, single-process WorkManager. Also serialize refreshes so a stale
 // pre-upload snapshot cannot replace a newly acknowledged row. Local writes remain independent.
@@ -39,9 +41,21 @@ class HydrantSyncEngine(
             val acknowledged = dao.acknowledgedVersion(account, organization, operation.entityId, operation.orderSequence ?: operation.sequence)
             val version = maxOf(operation.baseVersion ?: 0, acknowledged ?: 0)
             val payload = Json.parseToJsonElement(operation.payload).jsonObject
+            var inspection: Inspection? = null
             checkContext()
             val server = try {
                 when(operation.operation) {
+                    CREATE_INSPECTION -> {
+                        val input=payload.inspectionCompletion()
+                        require(input.id==operation.operationId)
+                        val accepted=online.completeInspection(organization,operation.entityId,input)
+                        val event=accepted.inspection
+                        require(event.id==input.id && event.organization==organization && event.hydrantId==operation.entityId &&
+                            event.inspectorId==account && event.completion().sameEvent(input) &&
+                            event.hydrantVersionBefore!=null && event.hydrantVersionAfter!=null)
+                        inspection=event
+                        accepted.hydrant
+                    }
                     "CREATE" -> online.create(organization, operation.entityId, payload.fields())
                     "UPDATE" -> online.update(organization, operation.entityId, payload.fields(), version)
                     "CHANGE_STATUS" -> online.changeStatus(organization, operation.entityId,
@@ -51,7 +65,7 @@ class HydrantSyncEngine(
                     else -> throw RegistryFailure(RegistryError.VALIDATION)
                 }
             } catch(e: RegistryFailure) {
-                if(e.reason != RegistryError.CONFLICT) throw e // PENDING survives failures/cancellation.
+                if(e.reason != RegistryError.CONFLICT || operation.operation==CREATE_INSPECTION) throw e // Immutable events stay PENDING on failure.
                 captureConflict(database, online, operation, checkContext)
                 break
             }
@@ -59,7 +73,20 @@ class HydrantSyncEngine(
             // Atomic acknowledgement + cache update. Later local edits can arrive during upload;
             // replay their immutable payloads over authoritative metadata instead of erasing them.
             database.withTransaction {
-                check(dao.acknowledge(account, organization, operation.sequence, server.version) == 1)
+                val event=inspection
+                // Inspection acceptance does not require a stale client's hydrant version.
+                // Chain only our own version step. A retry after another server edit must
+                // not silently rebase subsequent master changes onto that external edit.
+                val chainVersion=if(event==null || (event.hydrantVersionBefore==version && event.hydrantVersionAfter==server.version))
+                    server.version else null
+                if(event!=null) {
+                    val local=dao.inspection(account,organization,event.id)?.value
+                        ?: throw RegistryFailure(RegistryError.UNAVAILABLE)
+                    require(local.completion().sameEvent(event.completion()) && local.inspectorId==account && local.hydrantId==server.id)
+                    check(dao.acknowledgeInspection(account,organization,event.id,event.createdAt,
+                        event.hydrantVersionBefore!!,event.hydrantVersionAfter!!,System.currentTimeMillis())==1)
+                }
+                check(dao.acknowledge(account, organization, operation.sequence, chainVersion) == 1)
                 var visible = server
                 dao.remainingChanges(account, organization, server.id)
                     .forEach { visible = it.applyTo(visible) }
@@ -80,6 +107,7 @@ private fun JsonObject.fields() = HydrantFields(
 internal fun PendingHydrantChange.applyTo(row: Hydrant): Hydrant {
     val p = Json.parseToJsonElement(payload).jsonObject
     return when(operation) {
+        CREATE_INSPECTION -> p.inspectionCompletion().result.hydrantStatus?.let { row.copy(status=it) } ?: row
         "UPDATE" -> p.fields().let { row.copy(type = it.type, latitude = it.latitude, longitude = it.longitude,
             address = it.address, description = it.description, notes = it.notes, interval = it.interval) }
         "CHANGE_STATUS" -> row.copy(status = HydrantStatus.valueOf(p.getValue("status").jsonPrimitive.content))

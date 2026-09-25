@@ -10,6 +10,8 @@ import io.github.jan.supabase.postgrest.query.Order
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.*
 import si.gasilko.app.feature.hydrants.domain.*
+import si.gasilko.app.feature.inspections.domain.*
+import si.gasilko.app.feature.inspections.data.*
 import java.io.IOException
 
 interface RegistryTransport {
@@ -50,6 +52,20 @@ fun decodeHydrant(value: JsonElement): Hydrant {
         row.text("created_at"),row.text("updated_at"),row.text("updated_by"))
 }
 class OnlineHydrantRepository(private val wire: RegistryTransport, private val diagnostic: (String,RegistryError)->Unit = {_,_->}): HydrantRepository {
+    override suspend fun completeInspection(organization: String, hydrantId: String, input: InspectionCompletion) = request("inspection_complete") {
+        input.validate()
+        val p=input.payload()
+        val response=wire.rpc("complete_inspection",buildJsonObject {
+            put("organization",organization);put("hydrant_id",hydrantId);put("inspection_id",input.id)
+            put("inspection_mode",input.mode.name);put("inspection_result",input.result.name)
+            put("inspection_started_at",p.getValue("started_at"));put("inspection_completed_at",p.getValue("completed_at"))
+            put("inspection_notes",input.notes);put("pressure_bar",input.pressureBar);put("flow_l_min",input.flowLMin)
+        }).jsonObject
+        InspectionWrite(decodeInspection(response.getValue("inspection")),decodeHydrant(response.getValue("hydrant")))
+    }
+    override suspend fun listInspections(organization: String, hydrantId: String, after: String?) = request("inspection_history") {
+        wire.rows("inspections",mapOf("organization_id" to organization,"hydrant_id" to hydrantId),after).map(::decodeInspection)
+    }
     private suspend fun <T> request(operation: String, block: suspend ()->T): T = try { block() }
     catch(e: CancellationException) { throw e }
     catch(e: Exception) {
