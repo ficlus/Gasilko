@@ -25,6 +25,28 @@ class RoomHydrantRepository(
 ) : HydrantRepository {
     private val dao = database.registry()
     private val changes = Mutex()
+    override fun observeInspectionHistory(organization: String, hydrantId: String): Flow<List<InspectionHistoryEntry>> = flow {
+        val account=currentAccount()
+        emitAll(combine(database.invalidationTracker.createFlow("inspections","pending_hydrant_changes","hydrants","organizations"),
+            observeWork(account,organization)) { _, work ->
+            get(organization,hydrantId)
+            database.withTransaction {
+                val queue=dao.pendingChanges(account,organization)
+                val blocked=queue.any { it.state in listOf("CONFLICT","ATTENTION") }
+                val operations=queue.filter { it.operation==CREATE_INSPECTION && it.entityId==hydrantId }.associateBy { it.operationId }
+                dao.inspectionHistory(account,organization,hydrantId).map { row ->
+                    val op=operations[row.value.id]
+                    val status=when {
+                        row.syncIssue!=null || op?.state=="ATTENTION" -> InspectionSyncState.ATTENTION
+                        op!=null && op.state!="SYNCED" -> if(blocked || work==SyncPhase.RETRY)InspectionSyncState.ATTENTION else InspectionSyncState.PENDING
+                        row.acknowledgedAt!=null && (op==null || op.state=="SYNCED") -> InspectionSyncState.SYNCED
+                        else -> InspectionSyncState.ATTENTION // Missing acknowledgement/queue is never success.
+                    }
+                    InspectionHistoryEntry(row.value,status,row.syncIssue!=null)
+                }.also { checkAccount(account) }
+            }
+        }.distinctUntilChanged())
+    }
     override fun observeInspections(organization: String, hydrantId: String): Flow<List<Inspection>> = flow {
         val account=currentAccount()
         emitAll(database.invalidationTracker.createFlow("inspections","hydrants","organizations").map {
@@ -50,11 +72,41 @@ class RoomHydrantRepository(
             rows.addAll(page);after=page.lastOrNull()?.id
         } while(page.size==100)
         checkAccount(account)
+        // A GET receipt may acknowledge only the current queue head. Fetch the current
+        // hydrant too so status/version convergence uses the exact same path as upload.
+        val head=dao.nextChange(account,organization)
+        val serverHydrant=if(head?.operation==CREATE_INSPECTION && head.state=="PENDING" &&
+            rows.any { it.id==head.operationId && head.matchesServer(it) })online.get(organization,hydrantId) else null
+        checkAccount(account)
         database.withTransaction {
-            // Never replace a local event or delete history on a partial/empty refresh.
-            dao.cacheInspections(rows.map { InspectionEntity(account,it,System.currentTimeMillis()) })
+            val operations=dao.pendingChanges(account,organization).filter { it.operation==CREATE_INSPECTION }.associateBy { it.operationId }
+            rows.forEach { event ->
+                // UUID is canonical within the account partition, even if a corrupt
+                // local event claims another hydrant/organization. Never overwrite it.
+                val cached=dao.inspectionIdentity(account,event.id)
+                if(cached!=null && cached.value.organization!=organization)
+                    throw RegistryFailure(RegistryError.VALIDATION) // Never read into UI or mutate another organization's collision.
+                val op=operations[event.id]
+                if(cached==null) {
+                    dao.cacheInspections(listOf(InspectionEntity(account,event,System.currentTimeMillis())))
+                } else if(!cached.matchesServer(event) || (op!=null && !op.matchesServer(event))) {
+                    recordInspectionIssue(database,account,organization,event.id,"SERVER_EVENT_MISMATCH")
+                }
+                // Matching pending events retain their frozen data until ordered ACK.
+                // Matching acknowledged events already contain the immutable server data.
+            }
+            if(serverHydrant!=null)while(true) {
+                val next=dao.nextChange(account,organization) ?: break
+                if(next.operation!=CREATE_INSPECTION || next.state!="PENDING" || next.entityId!=hydrantId)break
+                val event=rows.find { it.id==next.operationId } ?: break
+                if(!acknowledgeHydrantOperation(database,next,serverHydrant,event) { checkAccount(account) })break
+            }
             checkAccount(account)
         }
+        // Continue any earlier/later work through the existing ordered worker, never
+        // upload from the history refresh or bypass a blocked operation.
+        try { scheduleSync(account,organization) }
+        catch(_: Exception) { android.util.Log.w("HydrantSync","schedule failed; history retained") }
     } }
     override suspend fun completeInspection(organization: String, hydrantId: String, input: InspectionCompletion): InspectionWrite = changes.withLock {
         input.validate()
@@ -102,7 +154,7 @@ class RoomHydrantRepository(
     }
     override fun observeSync(organization: String): Flow<RegistrySyncState> = flow {
         val account = currentAccount()
-        emitAll(combine(database.invalidationTracker.createFlow("hydrants", "pending_hydrant_changes", "hydrant_conflicts"),
+        emitAll(combine(database.invalidationTracker.createFlow("hydrants", "pending_hydrant_changes", "hydrant_conflicts", "inspections"),
             observeWork(account, organization)) { _, work ->
             organization(account, organization)
             database.withTransaction {
@@ -111,7 +163,9 @@ class RoomHydrantRepository(
                 checkAccount(account)
                 RegistrySyncState(organization, when {
                     conflicts.isNotEmpty() -> SyncPhase.CONFLICT
+                    dao.hasInspectionIssues(account,organization) -> SyncPhase.RETRY
                     pending.isEmpty() -> SyncPhase.SYNCHRONIZED
+                    dao.pendingChanges(account,organization).any { it.state=="ATTENTION" } -> SyncPhase.RETRY
                     else -> work
                 }, pending, conflicts)
             }

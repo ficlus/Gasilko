@@ -249,4 +249,13 @@
     <string name="inspection_current">Aktuell</string>
     <string name="inspection_due_soon">Bald fällig</string>
     <string name="inspection_overdue">Überfällig</string>
+    <string name="inspection_history_title">Prüfverlauf</string>
+    <string name="inspection_inspector_unknown">Prüfer: unbekannter Prüfer</string>
+    <string name="inspection_synced">Synchronisiert</string>
+    <string name="inspection_pending">Wartet auf Synchronisierung</string>
+    <string name="inspection_attention">Aktion erforderlich</string>
+    <string name="inspection_immutable_issue">Der Server hat die Prüfung abgelehnt oder abweichende unveränderliche Daten zurückgegeben. Die lokale Prüfung bleibt erhalten. Ein Administrator muss die Abweichung prüfen; ein erneuter Versuch überschreibt sie nicht automatisch.</string>
+    <string name="inspection_retry_queue">Die Synchronisierung wartet auf einen erneuten Versuch oder die Klärung eines früheren Vorgangs. Synchronisieren Sie erneut oder prüfen Sie die Konflikte im Register.</string>
+    <string name="inspection_refresh_failed">Der Prüfverlauf konnte nicht aktualisiert werden. Lokal gespeicherte Prüfungen bleiben verfügbar.</string>
+    <string name="inspection_queue_conflict">Ein früherer Konflikt blockiert die Warteschlange. Kehren Sie zum Register zurück und öffnen Sie die Konfliktübersicht.</string>
 </resources>

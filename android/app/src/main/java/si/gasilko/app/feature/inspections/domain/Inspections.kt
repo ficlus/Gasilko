@@ -2,6 +2,7 @@ package si.gasilko.app.feature.inspections.domain
 
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import si.gasilko.app.feature.hydrants.domain.*
 import java.math.BigDecimal
 import java.util.UUID
@@ -47,7 +48,12 @@ data class Inspection(
 }
 /** Local writes return local state; only the sync engine treats the online result as acknowledgement. */
 data class InspectionWrite(val inspection: Inspection, val hydrant: Hydrant)
+enum class InspectionSyncState { SYNCED, PENDING, ATTENTION }
+data class InspectionHistoryEntry(val inspection: Inspection, val state: InspectionSyncState,
+    val durableIssue: Boolean = false)
 interface InspectionRepository {
+    fun observeInspectionHistory(organization: String, hydrantId: String): Flow<List<InspectionHistoryEntry>> =
+        observeInspections(organization,hydrantId).map { rows -> rows.map { InspectionHistoryEntry(it,InspectionSyncState.PENDING) } }
     fun observeInspections(organization: String, hydrantId: String): Flow<List<Inspection>> = flowOf(emptyList())
     suspend fun completeInspection(organization: String, hydrantId: String, input: InspectionCompletion): InspectionWrite {
         throw RegistryFailure(RegistryError.UNAVAILABLE)

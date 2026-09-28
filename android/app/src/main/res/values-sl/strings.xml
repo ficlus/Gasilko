@@ -176,4 +176,13 @@
     <string name="inspection_current">Veljavno</string>
     <string name="inspection_due_soon">Kmalu za pregled</string>
     <string name="inspection_overdue">Pregled zapadel</string>
+    <string name="inspection_history_title">Zgodovina pregledov</string>
+    <string name="inspection_inspector_unknown">Izvajalec: neznan izvajalec pregleda</string>
+    <string name="inspection_synced">Sinhronizirano</string>
+    <string name="inspection_pending">Čaka na sinhronizacijo</string>
+    <string name="inspection_attention">Potrebna pozornost</string>
+    <string name="inspection_immutable_issue">Strežnik je pregled zavrnil ali vrnil drugačne nespremenljive podatke. Lokalni pregled je ohranjen. Skrbnik mora preveriti neskladje; ponovni poskus ga ne bo samodejno prepisal.</string>
+    <string name="inspection_retry_queue">Sinhronizacija čaka na ponovni poskus ali rešitev predhodne operacije. Uporabite sinhronizacijo ali preverite konflikte v registru.</string>
+    <string name="inspection_refresh_failed">Zgodovine ni bilo mogoče osvežiti. Lokalno shranjeni pregledi ostanejo na voljo.</string>
+    <string name="inspection_queue_conflict">Predhodni konflikt blokira vrsto. Vrnite se v register in odprite pregled konfliktov.</string>
 </resources>
