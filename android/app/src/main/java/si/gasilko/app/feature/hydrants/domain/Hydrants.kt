@@ -68,7 +68,7 @@ data class HydrantForm(
     }
 }
 /** UI reads use Room. Explicit refresh is temporary online hydration, not synchronization. */
-interface HydrantRepository : si.gasilko.app.feature.inspections.domain.InspectionRepository {
+interface HydrantRepository : si.gasilko.app.feature.inspections.domain.InspectionRepository, si.gasilko.app.feature.photos.domain.PhotoRepository {
     fun observeMap(query: HydrantQuery): Flow<List<Hydrant>> = flowOf(emptyList())
     fun observeSync(organization: String): Flow<RegistrySyncState> = flowOf(RegistrySyncState(organization))
     suspend fun conflicts(organization: String): List<HydrantConflict> = emptyList()

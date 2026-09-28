@@ -59,7 +59,7 @@ interface RegistryDao {
     suspend fun nextChange(account: String, organization: String): PendingHydrantChange?
     @Query("SELECT * FROM pending_hydrant_changes WHERE account = :account AND organization = :organization AND entityId = :id AND state NOT IN ('SYNCED','RESOLVED') ORDER BY COALESCE(orderSequence, sequence), sequence")
     suspend fun remainingChanges(account: String, organization: String, id: String): List<PendingHydrantChange>
-    @Query("SELECT acknowledgedVersion FROM pending_hydrant_changes WHERE account = :account AND organization = :organization AND entityId = :id AND COALESCE(orderSequence, sequence) < :before AND state = 'SYNCED' ORDER BY COALESCE(orderSequence, sequence) DESC, sequence DESC LIMIT 1")
+    @Query("SELECT acknowledgedVersion FROM pending_hydrant_changes WHERE account = :account AND organization = :organization AND entityId = :id AND operation != 'UPLOAD_PHOTO' AND COALESCE(orderSequence, sequence) < :before AND state = 'SYNCED' ORDER BY COALESCE(orderSequence, sequence) DESC, sequence DESC LIMIT 1")
     suspend fun acknowledgedVersion(account: String, organization: String, id: String, before: Long): Long?
     @Query("UPDATE pending_hydrant_changes SET state = 'SYNCED', acknowledgedVersion = :version WHERE account = :account AND organization = :organization AND sequence = :sequence AND state = 'PENDING'")
     suspend fun acknowledge(account: String, organization: String, sequence: Long, version: Long?): Int
@@ -125,10 +125,22 @@ data class HydrantConflictEntity(
     val resolutionServerState: String? = null, val resolutionVersion: Long? = null, val replacementSequence: Long? = null,
 )
 
-@Database(entities = [OrganizationEntity::class, TypeEntity::class, HydrantEntity::class, PendingHydrantChange::class, HydrantConflictEntity::class, InspectionEntity::class], version = 7, exportSchema = true)
+@Database(entities = [OrganizationEntity::class, TypeEntity::class, HydrantEntity::class, PendingHydrantChange::class, HydrantConflictEntity::class, InspectionEntity::class, PhotoEntity::class], version = 8, exportSchema = true)
 abstract class RegistryDatabase : RoomDatabase() {
     abstract fun registry(): RegistryDao
+    abstract fun photos(): PhotoDao
     companion object {
+        val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""CREATE TABLE IF NOT EXISTS photos (
+                    account TEXT NOT NULL,id TEXT NOT NULL,organization TEXT NOT NULL,hydrantId TEXT NOT NULL,
+                    inspectionId TEXT,category TEXT NOT NULL,storagePath TEXT NOT NULL,mimeType TEXT NOT NULL,
+                    byteSize INTEGER NOT NULL,sha256 TEXT NOT NULL,capturedAt INTEGER NOT NULL,createdBy TEXT NOT NULL,
+                    createdAt INTEGER NOT NULL,active INTEGER NOT NULL,uploadedAt INTEGER,localPath TEXT,syncIssue TEXT,
+                    PRIMARY KEY(account,id))""")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_photos_account_organization_hydrantId_inspectionId ON photos(account,organization,hydrantId,inspectionId)")
+            }
+        }
         val MIGRATION_6_7 = object : Migration(6, 7) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 // Error evidence is needed even for imported events with no local queue row.
@@ -180,7 +192,7 @@ abstract class RegistryDatabase : RoomDatabase() {
         @Volatile private var instance: RegistryDatabase? = null
         fun open(context: Context): RegistryDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(context.applicationContext, RegistryDatabase::class.java,
-                "hydrant-registry.db").addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7).build().also { instance = it }
+                "hydrant-registry.db").addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8).build().also { instance = it }
         }
     }
 }

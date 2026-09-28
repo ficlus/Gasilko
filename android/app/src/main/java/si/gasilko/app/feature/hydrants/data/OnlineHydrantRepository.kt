@@ -13,13 +13,22 @@ import si.gasilko.app.feature.hydrants.domain.*
 import si.gasilko.app.feature.inspections.domain.*
 import si.gasilko.app.feature.inspections.data.*
 import java.io.IOException
+import io.github.jan.supabase.storage.storage
+import io.ktor.http.ContentType
+import si.gasilko.app.feature.photos.domain.*
+import si.gasilko.app.feature.photos.data.*
 
 interface RegistryTransport {
     fun actor(): String
     suspend fun rows(table: String, filters: Map<String,String?>, after: String? = null): JsonArray
     suspend fun rpc(name: String, arguments: JsonObject): JsonElement
+    suspend fun uploadPhoto(path: String, mime: String, bytes: ByteArray) { throw RegistryFailure(RegistryError.UNAVAILABLE) }
 }
 class SupabaseRegistryTransport(private val client: SupabaseClient): RegistryTransport {
+    override suspend fun uploadPhoto(path: String, mime: String, bytes: ByteArray) {
+        // Verified against supabase-kt 3.6.0 BucketApi/UploadOptionBuilder. Never upsert evidence.
+        client.storage.from(PHOTO_BUCKET).upload(path,bytes) { upsert=false;contentType=ContentType.parse(mime) }
+    }
     override fun actor() = client.auth.currentUserOrNull()?.id ?: throw RegistryFailure(RegistryError.EXPIRED)
     override suspend fun rows(table: String, filters: Map<String,String?>, after: String?) = client.from(table).select {
         filter { filters.forEach { (key,value) -> if(value == null) exact(key,null) else eq(key,value) }; if(after != null) gt(if(table == "user_organizations") "organization_id" else "id",after) }
@@ -52,6 +61,20 @@ fun decodeHydrant(value: JsonElement): Hydrant {
         row.text("created_at"),row.text("updated_at"),row.text("updated_by"))
 }
 class OnlineHydrantRepository(private val wire: RegistryTransport, private val diagnostic: (String,RegistryError)->Unit = {_,_->}): HydrantRepository {
+    override suspend fun reservePhoto(photo: Photo) = request("photo_reserve") {
+        photo.validate()
+        decodePhoto(wire.rpc("reserve_photo",buildJsonObject { put("photo",photo.payload()) }))
+    }
+    override suspend fun confirmPhoto(photo: Photo) = request("photo_confirm") {
+        decodePhoto(wire.rpc("confirm_photo",buildJsonObject { put("organization",photo.organization);put("photo_id",photo.id) }))
+    }
+    override suspend fun uploadPhotoObject(photo: Photo, bytes: ByteArray) = request("photo_upload") {
+        wire.uploadPhoto(photo.storagePath,photo.mimeType,bytes)
+    }
+    override suspend fun listPhotos(organization: String, hydrantId: String, category: PhotoCategory, after: String?) = request("photo_history") {
+        wire.rows(if(category==PhotoCategory.HYDRANT)"hydrant_photos" else "inspection_photos",
+            mapOf("organization_id" to organization,"hydrant_id" to hydrantId),after).map(::decodePhoto)
+    }
     override suspend fun completeInspection(organization: String, hydrantId: String, input: InspectionCompletion) = request("inspection_complete") {
         input.validate()
         val p=input.payload()
@@ -74,6 +97,7 @@ class OnlineHydrantRepository(private val wire: RegistryTransport, private val d
             is PostgrestRestException -> registryError(e.code,e.error,e.statusCode)
             is RestException -> registryError(null,e.error,e.statusCode)
             is IOException -> RegistryError.NETWORK
+            is io.github.jan.supabase.exceptions.HttpRequestException -> RegistryError.NETWORK
             is io.ktor.client.plugins.HttpRequestTimeoutException -> RegistryError.NETWORK
             else -> RegistryError.SERVER
         }
