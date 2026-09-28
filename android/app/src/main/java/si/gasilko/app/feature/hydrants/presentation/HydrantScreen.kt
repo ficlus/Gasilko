@@ -75,10 +75,17 @@ fun HydrantScreen(model: HydrantViewModel, requestAccess: ()->Unit = {}, signOut
     si.gasilko.app.feature.photos.presentation.PhotoAcquisitionHost(model.photos)
     val observedSync by model.sync.collectAsStateWithLifecycle()
     val sync = observedSync.takeIf { it.organization == state.organization?.id }
+    var planQuery by remember(model,model.photoScope,state.organization?.id) { mutableStateOf<HydrantQuery?>(null) }
     var showTeams by remember(model,model.photoScope,state.organization?.id) { mutableStateOf(false) }
     var showConflicts by remember(state.organization?.id) { mutableStateOf(false) }
     var conflictSequence by remember(state.organization?.id) { mutableStateOf<Long?>(null) }
     LaunchedEffect(model) { if(!model.photos.state.value.busy)model.refresh() }
+    if(planQuery!=null && state.manages && state.writable) {
+        key(model,model.photoScope,state.organization!!.id) {
+            si.gasilko.app.feature.plans.PlansScreen(model,planQuery!!) { planQuery=null }
+        }
+        return
+    }
     if(showTeams && state.manages && state.writable) {
         key(model,model.photoScope,state.organization!!.id) {
             si.gasilko.app.feature.teams.TeamsScreen(model,state.organization!!.id) { showTeams=false }
@@ -176,6 +183,8 @@ fun HydrantScreen(model: HydrantViewModel, requestAccess: ()->Unit = {}, signOut
         FlowRow(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
             TextButton(onClick={showMap=true;mapDetail=false},enabled=!busy && state.form==null && state.writable){Text(stringResource(R.string.map_title))}
             TextButton(onClick=model::refresh,enabled=!busy,modifier=Modifier.testTag("refresh")){Text(stringResource(R.string.h_refresh))}
+            if(state.manages && state.writable)TextButton(onClick={planQuery=state.query.copy(organization=state.organization!!.id)},
+                enabled=!busy && state.form==null && state.selected==null) { Text(stringResource(R.string.plans_title)) }
             if(state.manages && state.writable)TextButton(onClick={showTeams=true},enabled=!busy && state.form==null && state.selected==null) {
                 Text(stringResource(R.string.teams_title))
             }

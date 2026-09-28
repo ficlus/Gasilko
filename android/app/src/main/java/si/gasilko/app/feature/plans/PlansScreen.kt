@@ -1,0 +1,213 @@
+package si.gasilko.app.feature.plans
+
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
+import si.gasilko.app.R
+import si.gasilko.app.feature.hydrants.domain.*
+import si.gasilko.app.feature.hydrants.presentation.*
+import si.gasilko.app.feature.teams.TeamData
+import java.util.UUID
+
+data class PlanViewData(val data: PlanData=PlanData(),val teams: TeamData=TeamData(),
+    val candidates: PlanCandidates=PlanCandidates(),val error: RegistryError?=null)
+private data class PlanDraft(val id: String=UUID.randomUUID().toString(),val version: Long=0,val name: String="",
+    val status: PlanStatus=PlanStatus.DRAFT,val mode: SelectionMode=SelectionMode.MANUAL,
+    val teams: Set<String> = emptySet(),val hydrants: Set<String> = emptySet(),val snapshot: String="{}",
+    val latitude: String="",val longitude: String="",val returnToStart: Boolean=false) {
+    val editable get()=status==PlanStatus.DRAFT || status==PlanStatus.PLANNED
+    fun request(status: PlanStatus): PlanSave {
+        fun coordinate(s: String): Double? {
+            if(s.isBlank())return null
+            return s.trim().replace(',','.').toDoubleOrNull()?.takeIf { it.isFinite() }
+                ?: throw RegistryFailure(RegistryError.COORDINATES)
+        }
+        val lat=coordinate(latitude);val lon=coordinate(longitude)
+        if((lat==null)!=(lon==null) || (lat!=null && lat !in -90.0..90.0) || (lon!=null && lon !in -180.0..180.0))
+            throw RegistryFailure(RegistryError.COORDINATES)
+        return PlanSave(id,version,name.trim(),status,mode,snapshot,lat,lon,returnToStart,teams.sorted(),hydrants.sorted())
+    }
+}
+@Composable
+@OptIn(ExperimentalLayoutApi::class)
+fun PlansScreen(model: HydrantViewModel,query: HydrantQuery,back: ()->Unit) {
+    val flow=remember(model,query) { model.planData(query) }
+    val observed by flow.collectAsStateWithLifecycle(initialValue=PlanViewData())
+    val scope=rememberCoroutineScope()
+    var draft by remember { mutableStateOf<PlanDraft?>(null) }
+    var pending by remember { mutableStateOf<PlanSave?>(null) }
+    var busy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<RegistryError?>(null) }
+    var cancel by remember { mutableStateOf(false) }
+    fun refresh(candidates: Boolean=false) {
+        if(busy)return
+        busy=true;error=null
+        scope.launch {
+            try {
+                if(candidates)model.refreshPlanCandidates(query.organization)
+                else { model.refreshPlans(query.organization);draft=null;pending=null }
+            } catch(e: CancellationException) { throw e }
+            catch(e: Exception) { error=(e as? RegistryFailure)?.reason ?: RegistryError.SERVER }
+            finally { busy=false }
+        }
+    }
+    fun submit(status: PlanStatus) {
+        if(busy)return
+        val request=try { pending ?: draft?.request(status) ?: return }
+            catch(e: RegistryFailure) { error=e.reason;return }
+        pending=request;busy=true;error=null
+        scope.launch {
+            try { model.savePlan(query.organization,request);pending=null;draft=null;cancel=false }
+            catch(e: CancellationException) { throw e }
+            catch(e: Exception) {
+                error=(e as? RegistryFailure)?.reason ?: RegistryError.SERVER
+                if(error in listOf(RegistryError.VALIDATION,RegistryError.CONFLICT))pending=null
+            } finally { busy=false }
+        }
+    }
+    fun leave() { if(!busy) { if(draft!=null)draft=null else back() } }
+    BackHandler(onBack=::leave)
+    LaunchedEffect(query.organization) { refresh() }
+    val data=observed.data
+    val d=draft
+    val hasPendingHydrants=observed.candidates.hydrants.any { it.id in (d?.hydrants ?: emptySet()) && it.version==0L }
+    val editable=d?.editable==true && !busy && pending==null
+    Scaffold { padding ->
+        Column(Modifier.fillMaxSize().padding(padding).padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
+            Text(stringResource(R.string.plans_title),style=MaterialTheme.typography.headlineSmall)
+            Text(stringResource(R.string.plans_online_notice))
+            FlowRow {
+                TextButton(onClick=::leave,enabled=!busy) { Text(stringResource(R.string.h_back)) }
+                TextButton(onClick={refresh()},enabled=!busy) { Text(stringResource(R.string.h_refresh)) }
+                if(d==null)TextButton(onClick={draft=PlanDraft(snapshot=planSelectionSnapshot(query,observed.candidates.incomplete))},
+                    enabled=!busy && pending==null) { Text(stringResource(R.string.plans_new)) }
+                if(pending!=null)TextButton(onClick={submit(pending!!.status)},enabled=!busy) { Text(stringResource(R.string.photo_retry)) }
+            }
+            if(busy)LinearProgressIndicator(Modifier.fillMaxWidth())
+            (error ?: observed.error)?.let {
+                Text(stringResource(errorLabel(it)),color=MaterialTheme.colorScheme.error)
+                Text(stringResource(R.string.plans_retry))
+            }
+            LazyColumn(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(8.dp)) {
+                if(d==null) {
+                    if(data.plans.isEmpty())item { Text(stringResource(R.string.plans_empty)) }
+                    items(data.plans,key={it.id}) { p ->
+                        OutlinedButton(onClick={
+                            draft=PlanDraft(p.id,p.version,p.name,PlanStatus.valueOf(p.status),SelectionMode.valueOf(p.selectionMode),
+                                data.teams.filter { it.planId==p.id && it.active }.map { it.teamId }.toSet(),
+                                data.items.filter { it.planId==p.id && it.active }.map { it.hydrantId }.toSet(),p.selectionSnapshot,
+                                p.startLatitude?.toString().orEmpty(),p.startLongitude?.toString().orEmpty(),p.returnToStart)
+                        },enabled=!busy && pending==null,modifier=Modifier.fillMaxWidth()) {
+                            Text(p.name+" · "+stringResource(planStatusLabel(PlanStatus.valueOf(p.status))))
+                        }
+                    }
+                } else {
+                    item {
+                        Text(stringResource(planStatusLabel(d.status)))
+                        OutlinedTextField(d.name,{draft=d.copy(name=it.take(120))},enabled=editable,
+                            label={Text(stringResource(R.string.plans_name))},singleLine=true)
+                        Text(stringResource(R.string.teams_title),style=MaterialTheme.typography.titleMedium)
+                    }
+                    items(observed.teams.teams,key={"team-"+it.id}) { t ->
+                        Row {
+                            Checkbox(t.id in d.teams,{checked->draft=d.copy(teams=if(checked)d.teams+t.id else d.teams-t.id)},enabled=editable)
+                            Text(t.name+" · "+stringResource(if(t.active)R.string.h_active else R.string.h_inactive))
+                        }
+                    }
+                    items((d.teams-observed.teams.teams.map { it.id }.toSet()).sorted(),key={"missing-team-"+it}) { id ->
+                        Row {
+                            Checkbox(true,{draft=d.copy(teams=d.teams-id)},enabled=editable)
+                            Text(stringResource(R.string.plans_uncached,id))
+                        }
+                    }
+                    item {
+                        Text(stringResource(R.string.plans_hydrants),style=MaterialTheme.typography.titleMedium)
+                        Text(stringResource(R.string.plans_frozen))
+                        if(observed.candidates.incomplete)Text(stringResource(R.string.plans_incomplete),color=MaterialTheme.colorScheme.error)
+                        Text(stringResource(R.string.inspection_due_local))
+                        TextButton(onClick={refresh(true)},enabled=editable) { Text(stringResource(R.string.plans_refresh_candidates)) }
+                        SelectionMode.entries.forEach { mode ->
+                            Row {
+                                RadioButton(d.mode==mode,onClick={
+                                    draft=d.copy(mode=mode,hydrants=if(mode==SelectionMode.MANUAL)d.hydrants else observed.candidates.select(mode),
+                                        snapshot=planSelectionSnapshot(query,observed.candidates.incomplete))
+                                },enabled=editable)
+                                Text(stringResource(selectionLabel(mode)))
+                            }
+                        }
+                        if(d.mode!=SelectionMode.MANUAL)TextButton(onClick={
+                            draft=d.copy(hydrants=observed.candidates.select(d.mode),snapshot=planSelectionSnapshot(query,observed.candidates.incomplete))
+                        },enabled=editable) { Text(stringResource(R.string.plans_reselect)) }
+                        Text(stringResource(R.string.plans_count,d.hydrants.size))
+                        if(hasPendingHydrants)Text(stringResource(R.string.plans_pending),color=MaterialTheme.colorScheme.error)
+                    }
+                    val visible=if(d.mode==SelectionMode.MANUAL)observed.candidates.hydrants else observed.candidates.hydrants.filter { it.id in d.hydrants }
+                    items(visible,key={"hydrant-"+it.id}) { h ->
+                        Row {
+                            if(d.mode==SelectionMode.MANUAL)Checkbox(h.id in d.hydrants,{checked->
+                                draft=d.copy(hydrants=if(checked)d.hydrants+h.id else d.hydrants-h.id,
+                                    snapshot=planSelectionSnapshot(query,observed.candidates.incomplete))
+                            },enabled=editable)
+                            Text((h.code ?: stringResource(R.string.h_pending_code))+" · "+h.id.take(8)+
+                                if(h.active)"" else " · "+stringResource(R.string.h_inactive))
+                        }
+                    }
+                    items((d.hydrants-observed.candidates.hydrants.map { it.id }.toSet()).sorted(),key={"missing-hydrant-"+it}) { id ->
+                        Row {
+                            if(d.mode==SelectionMode.MANUAL)Checkbox(true,{draft=d.copy(hydrants=d.hydrants-id)},enabled=editable)
+                            Text(stringResource(R.string.plans_uncached,id))
+                        }
+                    }
+                    item {
+                        Text(stringResource(R.string.plans_start),style=MaterialTheme.typography.titleMedium)
+                        OutlinedTextField(d.latitude,{draft=d.copy(latitude=it)},enabled=editable,
+                            label={Text(stringResource(R.string.h_latitude))},singleLine=true)
+                        OutlinedTextField(d.longitude,{draft=d.copy(longitude=it)},enabled=editable,
+                            label={Text(stringResource(R.string.h_longitude))},singleLine=true)
+                        Row {
+                            Checkbox(d.returnToStart,{draft=d.copy(returnToStart=it)},enabled=editable)
+                            Text(stringResource(R.string.plans_return))
+                        }
+                        if(d.editable)FlowRow {
+                            TextButton(onClick={submit(PlanStatus.DRAFT)},enabled=editable && !hasPendingHydrants && d.name.isNotBlank()) { Text(stringResource(R.string.plans_save_draft)) }
+                            TextButton(onClick={submit(PlanStatus.PLANNED)},enabled=editable && !hasPendingHydrants && d.name.isNotBlank() &&
+                                d.teams.isNotEmpty() && d.hydrants.isNotEmpty() &&
+                                d.teams.all { id->observed.teams.teams.any { it.id==id && it.active } }) {
+                                Text(stringResource(R.string.plans_mark_planned))
+                            }
+                            if(d.version>0)TextButton(onClick={cancel=true},enabled=editable) { Text(stringResource(R.string.plans_cancel)) }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if(cancel)AlertDialog(onDismissRequest={if(!busy)cancel=false},
+        title={Text(stringResource(R.string.plans_cancel))},text={Text(stringResource(R.string.plans_cancel_confirm))},
+        confirmButton={TextButton(onClick={submit(PlanStatus.CANCELLED)},enabled=!busy) { Text(stringResource(R.string.plans_cancel)) }},
+        dismissButton={TextButton(onClick={cancel=false},enabled=!busy) { Text(stringResource(R.string.h_back)) }})
+}
+private fun selectionLabel(mode: SelectionMode)=when(mode) {
+    SelectionMode.MANUAL->R.string.plans_manual
+    SelectionMode.OVERDUE->R.string.inspection_overdue
+    SelectionMode.DUE_SOON_AND_OVERDUE->R.string.plans_due
+    SelectionMode.ALL->R.string.plans_all
+    SelectionMode.CURRENT_FILTER->R.string.plans_filter
+}
+private fun planStatusLabel(status: PlanStatus)=when(status) {
+    PlanStatus.DRAFT->R.string.plans_draft
+    PlanStatus.PLANNED->R.string.plans_planned
+    PlanStatus.ACTIVE->R.string.h_active
+    PlanStatus.COMPLETED->R.string.plans_completed
+    PlanStatus.CANCELLED->R.string.plans_cancelled
+}
+

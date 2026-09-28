@@ -14,6 +14,7 @@ import si.gasilko.app.feature.inspections.data.*
 import si.gasilko.app.feature.photos.domain.*
 import si.gasilko.app.feature.photos.data.*
 import si.gasilko.app.feature.teams.*
+import si.gasilko.app.feature.plans.*
 
 /** Local reads/writes with an append-only queue; explicit hydration never replaces pending work. */
 class RoomHydrantRepository(
@@ -29,6 +30,12 @@ class RoomHydrantRepository(
 ) : HydrantRepository {
     private val dao = database.registry()
     private val changes = Mutex()
+    private val plans by lazy { RoomPlans(database,online,currentAccount,::organization,::refresh) }
+    override fun observePlans(org: String) = plans.observe(org)
+    override fun observePlanCandidates(query: HydrantQuery) = plans.candidates(query)
+    override suspend fun refreshPlans(org: String) = plans.refresh(org)
+    override suspend fun refreshPlanCandidates(org: String) = plans.refreshCandidates(org)
+    override suspend fun savePlan(org: String, change: PlanSave) = plans.save(org,change)
     private val teams by lazy { RoomTeams(database,online,currentAccount,::organization) }
     override fun observeTeamData(organization: String) = teams.observe(organization)
     override suspend fun refreshTeams(organization: String) = teams.refresh(organization)
@@ -319,6 +326,7 @@ class RoomHydrantRepository(
             dao.removeTypes(account, organization)
             dao.upsertTypes(types.map { TypeEntity(account, organization, it) })
             dao.upsertHydrants(rows.filterNot { it.id in pending }.map { HydrantEntity.from(account, it) })
+            database.plans().coverage(listOf(PlanCoverage(account,organization,"",0,System.currentTimeMillis())))
         }
     } }
     override suspend fun refreshDetail(organization: String, id: String) = hydrantRemoteAccess.withLock { changes.withLock detail@{
