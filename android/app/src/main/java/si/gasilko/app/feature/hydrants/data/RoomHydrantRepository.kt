@@ -11,6 +11,8 @@ import si.gasilko.app.core.database.*
 import si.gasilko.app.feature.hydrants.domain.*
 import si.gasilko.app.feature.inspections.domain.*
 import si.gasilko.app.feature.inspections.data.*
+import si.gasilko.app.feature.photos.domain.*
+import si.gasilko.app.feature.photos.data.*
 
 /** Local reads/writes with an append-only queue; explicit hydration never replaces pending work. */
 class RoomHydrantRepository(
@@ -22,9 +24,18 @@ class RoomHydrantRepository(
     private val authorizedOrganizations: (suspend (String) -> List<RegistryOrganization>)? = null,
     private val refreshAuthorization: (suspend () -> List<RegistryOrganization>)? = null,
     private val observeWork: (String, String) -> Flow<SyncPhase> = { _, _ -> flowOf(SyncPhase.PENDING) },
+    private val photoFiles: PhotoFiles? = null,
 ) : HydrantRepository {
     private val dao = database.registry()
     private val changes = Mutex()
+    private val photos by lazy { RoomPhotoStore(database,online,photoFiles,currentAccount,{ org,id ->
+        if(!organization(currentAccount(),org).active)throw RegistryFailure(RegistryError.FORBIDDEN)
+        get(org,id)
+    },changes,scheduleSync,observeWork) }
+    override suspend fun photoFile(organization: String, hydrantId: String, id: String, mimeType: String) = photos.destination(organization,hydrantId,id,mimeType)
+    override suspend fun registerPhoto(organization: String, hydrantId: String, input: LocalPhotoInput) = photos.register(organization,hydrantId,input)
+    override fun observePhotos(organization: String, hydrantId: String, inspectionId: String?) = photos.observe(organization,hydrantId,inspectionId)
+    override suspend fun refreshPhotos(organization: String, hydrantId: String) = photos.refresh(organization,hydrantId)
     override fun observeInspectionHistory(organization: String, hydrantId: String): Flow<List<InspectionHistoryEntry>> = flow {
         val account=currentAccount()
         emitAll(combine(database.invalidationTracker.createFlow("inspections","pending_hydrant_changes","hydrants","organizations"),
@@ -154,7 +165,7 @@ class RoomHydrantRepository(
     }
     override fun observeSync(organization: String): Flow<RegistrySyncState> = flow {
         val account = currentAccount()
-        emitAll(combine(database.invalidationTracker.createFlow("hydrants", "pending_hydrant_changes", "hydrant_conflicts", "inspections"),
+        emitAll(combine(database.invalidationTracker.createFlow("hydrants", "pending_hydrant_changes", "hydrant_conflicts", "inspections", "photos"),
             observeWork(account, organization)) { _, work ->
             organization(account, organization)
             database.withTransaction {
@@ -163,7 +174,7 @@ class RoomHydrantRepository(
                 checkAccount(account)
                 RegistrySyncState(organization, when {
                     conflicts.isNotEmpty() -> SyncPhase.CONFLICT
-                    dao.hasInspectionIssues(account,organization) -> SyncPhase.RETRY
+                    dao.hasInspectionIssues(account,organization) || database.photos().hasIssues(account,organization) -> SyncPhase.RETRY
                     pending.isEmpty() -> SyncPhase.SYNCHRONIZED
                     dao.pendingChanges(account,organization).any { it.state=="ATTENTION" } -> SyncPhase.RETRY
                     else -> work

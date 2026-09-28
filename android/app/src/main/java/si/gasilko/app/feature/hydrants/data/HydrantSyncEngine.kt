@@ -10,6 +10,9 @@ import si.gasilko.app.core.database.*
 import si.gasilko.app.feature.hydrants.domain.*
 import si.gasilko.app.feature.inspections.domain.*
 import si.gasilko.app.feature.inspections.data.*
+import si.gasilko.app.feature.photos.domain.UPLOAD_PHOTO
+import si.gasilko.app.feature.photos.data.PhotoFiles
+import si.gasilko.app.feature.photos.data.uploadQueuedPhoto
 
 // The app uses default, single-process WorkManager. Also serialize refreshes so a stale
 // pre-upload snapshot cannot replace a newly acknowledged row. Local writes remain independent.
@@ -21,6 +24,7 @@ class HydrantSyncEngine(
     private val online: HydrantRepository,
     private val account: String,
     private val checkContext: () -> Unit,
+    private val photoFiles: PhotoFiles? = null,
 ) {
     suspend fun sync(organization: String) = hydrantRemoteAccess.withLock {
         checkContext()
@@ -36,6 +40,10 @@ class HydrantSyncEngine(
                 break // Filling missing server metadata is not a resolution.
             }
             if(operation.state != "PENDING") break
+            if(operation.operation==UPLOAD_PHOTO) {
+                uploadQueuedPhoto(database,online,photoFiles,operation,checkContext)
+                continue
+            }
             if(operation.operation in listOf("UPDATE", "SET_ACTIVE") && !org.role.manages)
                 throw RegistryFailure(RegistryError.FORBIDDEN)
             val acknowledged = dao.acknowledgedVersion(account, organization, operation.entityId, operation.orderSequence ?: operation.sequence)
@@ -91,6 +99,7 @@ private fun JsonObject.fields() = HydrantFields(
 internal fun PendingHydrantChange.applyTo(row: Hydrant): Hydrant {
     val p = Json.parseToJsonElement(payload).jsonObject
     return when(operation) {
+        UPLOAD_PHOTO -> row // Attachment has no hydrant master/status effect during replay.
         CREATE_INSPECTION -> p.inspectionCompletion().result.hydrantStatus?.let { row.copy(status=it) } ?: row
         "UPDATE" -> p.fields().let { row.copy(type = it.type, latitude = it.latitude, longitude = it.longitude,
             address = it.address, description = it.description, notes = it.notes, interval = it.interval) }

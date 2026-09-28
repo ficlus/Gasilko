@@ -11,6 +11,8 @@ import io.github.jan.supabase.auth.providers.builtin.Email
 import io.github.jan.supabase.auth.status.SessionStatus
 import io.github.jan.supabase.exceptions.RestException
 import io.github.jan.supabase.postgrest.Postgrest
+import io.github.jan.supabase.storage.Storage
+import si.gasilko.app.feature.photos.data.PhotoFiles
 import io.github.jan.supabase.postgrest.postgrest
 import io.github.jan.supabase.logging.LogLevel
 import kotlinx.coroutines.CancellationException
@@ -91,7 +93,7 @@ class SupabaseAuthGateway(private val client: SupabaseClient, scope: CoroutineSc
                         e is AuthFailure -> RegistryError.EXPIRED
                         else -> RegistryError.FORBIDDEN })
                 }
-            }, observeWork = scheduler::observe)
+            }, observeWork = scheduler::observe, photoFiles = PhotoFiles(context))
     }
     suspend fun synchronizeHydrants(context: Context, account: String, organization: String) {
         client.auth.awaitInitialization()
@@ -106,7 +108,7 @@ class SupabaseAuthGateway(private val client: SupabaseClient, scope: CoroutineSc
             throw si.gasilko.app.feature.hydrants.domain.RegistryFailure(si.gasilko.app.feature.hydrants.domain.RegistryError.FORBIDDEN)
         si.gasilko.app.feature.hydrants.data.HydrantSyncEngine(
             si.gasilko.app.core.database.RegistryDatabase.open(context),
-            si.gasilko.app.feature.hydrants.data.OnlineHydrantRepository(transport), account, checkContext).sync(organization)
+            si.gasilko.app.feature.hydrants.data.OnlineHydrantRepository(transport), account, checkContext, PhotoFiles(context)).sync(organization)
     }
     override suspend fun signIn(email: String, password: String) = request {
         invalidateAuthorization()
@@ -176,6 +178,7 @@ class SupabaseAuthGateway(private val client: SupabaseClient, scope: CoroutineSc
                     host = "auth-callback"
                 }
                 install(Postgrest)
+                install(Storage)
             }.also { sharedClient = it }
             return SupabaseAuthGateway(client, scope, context.applicationContext)
         }
