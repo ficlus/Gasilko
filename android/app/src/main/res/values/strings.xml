@@ -284,4 +284,17 @@
     <string name="h_use_location">Uporabi mojo lokacijo</string>
     <string name="h_coordinate_accuracy">Natančnost: %1$.0f m</string>
     <string name="h_location_low_accuracy">Natančnost lokacije je nizka. Preverite koordinate; lahko nadaljujete.</string>
+    <string name="teams_title">Ekipe</string>
+    <string name="teams_new">Nova ekipa</string>
+    <string name="teams_name">Ime ekipe</string>
+    <string name="teams_members">Člani</string>
+    <string name="teams_add_member">Dodaj člana</string>
+    <string name="teams_remove_member">Odstrani člana</string>
+    <string name="teams_rename">Preimenuj ekipo</string>
+    <string name="teams_empty">Ni ekip</string>
+    <string name="teams_online_notice">Shranjene ekipe so na voljo brez povezave. Za spremembe je potrebna spletna povezava.</string>
+    <string name="teams_last_member">Ekipa potrebuje vsaj enega aktivnega člana. Pred odstranitvijo zadnjega dodajte drugega.</string>
+    <string name="teams_no_candidates">Ni razpoložljivih članov. Osvežite podatke organizacije.</string>
+    <string name="teams_member_unknown">Član brez imena</string>
+    <string name="teams_retry_notice">Spremembe morda niso potrjene. Poskusite znova z isto zahtevo ali osvežite podatke; shranjene ekipe ostanejo na voljo.</string>
 </resources>

@@ -125,11 +125,27 @@ data class HydrantConflictEntity(
     val resolutionServerState: String? = null, val resolutionVersion: Long? = null, val replacementSequence: Long? = null,
 )
 
-@Database(entities = [OrganizationEntity::class, TypeEntity::class, HydrantEntity::class, PendingHydrantChange::class, HydrantConflictEntity::class, InspectionEntity::class, PhotoEntity::class], version = 8, exportSchema = true)
+@Database(entities = [OrganizationEntity::class, TypeEntity::class, HydrantEntity::class, PendingHydrantChange::class, HydrantConflictEntity::class, InspectionEntity::class, PhotoEntity::class, TeamEntity::class, TeamMemberEntity::class, TeamPersonEntity::class], version = 9, exportSchema = true)
 abstract class RegistryDatabase : RoomDatabase() {
     abstract fun registry(): RegistryDao
     abstract fun photos(): PhotoDao
+    abstract fun teams(): TeamDao
     companion object {
+        val MIGRATION_8_9 = object : Migration(8,9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""CREATE TABLE IF NOT EXISTS inspection_teams (
+                    account TEXT NOT NULL,organization TEXT NOT NULL,id TEXT NOT NULL,name TEXT NOT NULL,
+                    active INTEGER NOT NULL,createdBy TEXT NOT NULL,createdAt TEXT NOT NULL,updatedAt TEXT NOT NULL,
+                    PRIMARY KEY(account,organization,id))""")
+                db.execSQL("""CREATE TABLE IF NOT EXISTS inspection_team_members (
+                    account TEXT NOT NULL,organization TEXT NOT NULL,teamId TEXT NOT NULL,userId TEXT NOT NULL,
+                    active INTEGER NOT NULL,addedBy TEXT NOT NULL,createdAt TEXT NOT NULL,updatedAt TEXT NOT NULL,displayName TEXT,
+                    PRIMARY KEY(account,organization,teamId,userId))""")
+                db.execSQL("""CREATE TABLE IF NOT EXISTS team_people (
+                    account TEXT NOT NULL,organization TEXT NOT NULL,id TEXT NOT NULL,displayName TEXT,
+                    PRIMARY KEY(account,organization,id))""")
+            }
+        }
         val MIGRATION_7_8 = object : Migration(7, 8) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("""CREATE TABLE IF NOT EXISTS photos (
@@ -192,7 +208,7 @@ abstract class RegistryDatabase : RoomDatabase() {
         @Volatile private var instance: RegistryDatabase? = null
         fun open(context: Context): RegistryDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(context.applicationContext, RegistryDatabase::class.java,
-                "hydrant-registry.db").addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8).build().also { instance = it }
+                "hydrant-registry.db").addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9).build().also { instance = it }
         }
     }
 }

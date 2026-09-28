@@ -17,6 +17,7 @@ import io.github.jan.supabase.storage.storage
 import io.ktor.http.ContentType
 import si.gasilko.app.feature.photos.domain.*
 import si.gasilko.app.feature.photos.data.*
+import si.gasilko.app.feature.teams.*
 
 interface RegistryTransport {
     suspend fun downloadPhoto(path: String): ByteArray = throw RegistryFailure(RegistryError.UNAVAILABLE)
@@ -63,6 +64,12 @@ fun decodeHydrant(value: JsonElement): Hydrant {
         row.text("created_at"),row.text("updated_at"),row.text("updated_by"))
 }
 class OnlineHydrantRepository(private val wire: RegistryTransport, private val diagnostic: (String,RegistryError)->Unit = {_,_->}): HydrantRepository {
+    override suspend fun readTeams(organization: String) = request("teams_read") {
+        decodeTeams(wire.rpc("read_inspection_teams",buildJsonObject { put("organization",organization) }))
+    }
+    override suspend fun changeTeam(organization: String, change: TeamChange) = request("teams_write") {
+        decodeTeams(wire.rpc("manage_inspection_team",change.payload(organization)))
+    }
     override suspend fun downloadPhotoObject(photo: Photo) = request("photo_download") {
         photo.validate()
         wire.downloadPhoto(photo.storagePath)

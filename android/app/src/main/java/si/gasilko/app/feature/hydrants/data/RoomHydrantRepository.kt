@@ -13,6 +13,7 @@ import si.gasilko.app.feature.inspections.domain.*
 import si.gasilko.app.feature.inspections.data.*
 import si.gasilko.app.feature.photos.domain.*
 import si.gasilko.app.feature.photos.data.*
+import si.gasilko.app.feature.teams.*
 
 /** Local reads/writes with an append-only queue; explicit hydration never replaces pending work. */
 class RoomHydrantRepository(
@@ -28,6 +29,10 @@ class RoomHydrantRepository(
 ) : HydrantRepository {
     private val dao = database.registry()
     private val changes = Mutex()
+    private val teams by lazy { RoomTeams(database,online,currentAccount,::organization) }
+    override fun observeTeamData(organization: String) = teams.observe(organization)
+    override suspend fun refreshTeams(organization: String) = teams.refresh(organization)
+    override suspend fun changeTeam(organization: String, change: TeamChange) = teams.change(organization,change)
     private val photos by lazy { RoomPhotoStore(database,online,photoFiles,currentAccount,{ org,id ->
         if(!organization(currentAccount(),org).active)throw RegistryFailure(RegistryError.FORBIDDEN)
         get(org,id)
