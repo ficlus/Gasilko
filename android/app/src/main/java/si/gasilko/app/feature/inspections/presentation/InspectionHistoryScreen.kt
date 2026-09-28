@@ -18,7 +18,7 @@ import java.text.DateFormat
 import java.util.Date
 
 @Composable
-fun InspectionHistoryItem(entry: InspectionHistoryEntry) {
+fun InspectionHistoryItem(entry: InspectionHistoryEntry, photoCount: Int = 0, viewPhotos: (String)->Unit = {}) {
     val inspection=entry.inspection
     Text(DateFormat.getDateTimeInstance(DateFormat.SHORT,DateFormat.SHORT).format(Date(inspection.completedAt)))
     Text(stringResource(inspectionModeLabel(inspection.mode)),style=MaterialTheme.typography.titleMedium)
@@ -33,12 +33,17 @@ fun InspectionHistoryItem(entry: InspectionHistoryEntry) {
     else if(entry.state==InspectionSyncState.ATTENTION)Text(stringResource(R.string.inspection_retry_queue))
     InspectionMeasurementValues(inspection.pressureBar,inspection.flowLMin)
     inspection.notes?.takeIf { it.isNotBlank() }?.let { Text(it) }
+    if(inspection.mode!=InspectionMode.QUICK) {
+        Text(stringResource(R.string.photo_count,photoCount))
+        TextButton(onClick={viewPhotos(inspection.id)}) { Text(stringResource(R.string.inspection_view_photos)) }
+    }
 }
 
 @Composable
 @OptIn(ExperimentalLayoutApi::class)
 fun InspectionHistoryScreen(hydrantLabel: String, history: InspectionHistoryState, refreshing: Boolean,
-    refreshError: RegistryError?, phase: SyncPhase?, refresh: ()->Unit, sync: ()->Unit, back: ()->Unit) {
+    refreshError: RegistryError?, phase: SyncPhase?, refresh: ()->Unit, sync: ()->Unit, back: ()->Unit,
+    photoCounts: Map<String,Int> = emptyMap(), viewPhotos: (String)->Unit = {}) {
     BackHandler(onBack=back)
     Scaffold { padding ->
         Column(Modifier.fillMaxSize().padding(padding).padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
@@ -61,7 +66,7 @@ fun InspectionHistoryScreen(hydrantLabel: String, history: InspectionHistoryStat
                 if(history.loaded && history.entries.isEmpty())item { Text(stringResource(R.string.inspection_history_empty)) }
                 items(history.entries,key={it.inspection.id}) { entry ->
                     OutlinedCard(Modifier.fillMaxWidth()) {
-                        Column(Modifier.padding(12.dp),verticalArrangement=Arrangement.spacedBy(6.dp)) { InspectionHistoryItem(entry) }
+                        Column(Modifier.padding(12.dp),verticalArrangement=Arrangement.spacedBy(6.dp)) { InspectionHistoryItem(entry,photoCounts[entry.inspection.id] ?: 0,viewPhotos) }
                     }
                 }
             }

@@ -204,4 +204,8 @@
     <string name="photo_missing_local">Potrebna pozornost: lokalna datoteka še nesinhronizirane fotografije manjka.</string>
     <string name="photo_corrupt">Fotografije ni mogoče prikazati, ker je datoteka poškodovana ali neveljavna.</string>
     <string name="photo_access_denied">Dostop do fotografije ni dovoljen. Potrebno je spletno preverjanje dostopa.</string>
+    <string name="inspection_photos">Fotografije pregleda</string>
+    <string name="inspection_photos_staged">Fotografije se shranijo ob zaključku pregleda.</string>
+    <string name="inspection_view_photos">Ogled fotografij</string>
+    <string name="photo_remove_staged">Odstrani</string>
 </resources>

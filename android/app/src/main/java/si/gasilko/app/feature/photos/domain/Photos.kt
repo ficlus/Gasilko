@@ -47,7 +47,7 @@ fun photoStoragePath(organization: String, hydrant: String, id: String, inspecti
 
 interface PhotoRepository {
     /** Authorized presentation file; never an upload source for remotely cached images. */
-    suspend fun displayPhoto(organization: String, hydrantId: String, id: String): String =
+    suspend fun displayPhoto(organization: String, hydrantId: String, id: String, inspectionId: String? = null): String =
         throw RegistryFailure(RegistryError.UNAVAILABLE)
     suspend fun downloadPhotoObject(photo: Photo): ByteArray = throw RegistryFailure(RegistryError.UNAVAILABLE)
     /** M6.2 writes an optimized, closed file here before registration. Never rewrite registered files. */

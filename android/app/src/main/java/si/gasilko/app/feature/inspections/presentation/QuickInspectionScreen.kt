@@ -26,6 +26,7 @@ data class InspectionDraft(
     val mode: InspectionMode = InspectionMode.QUICK,
     val step: Int = 0, val answers: Map<GuidedCheck, GuidedAnswer> = emptyMap(),
     val pressure: String = "", val flow: String = "",
+    val photos: List<si.gasilko.app.feature.photos.domain.LocalPhotoInput> = emptyList(),
 )
 
 fun inspectionResultLabel(result: InspectionResult): Int = when(result) {

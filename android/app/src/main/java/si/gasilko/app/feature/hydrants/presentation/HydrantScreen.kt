@@ -83,22 +83,30 @@ fun HydrantScreen(model: HydrantViewModel, requestAccess: ()->Unit = {}, signOut
     val mapState = key(state.organization?.id) { rememberSaveableStateHolder() }
     val historyHydrant=state.selected
     var gallery by remember(model,model.photoScope,state.organization?.id,historyHydrant?.id) { mutableStateOf(false) }
+    var galleryInspection by remember(model,model.photoScope,state.organization?.id,historyHydrant?.id) { mutableStateOf<String?>(null) }
     var viewedPhoto by remember(model,model.photoScope,state.organization?.id,historyHydrant?.id) { mutableStateOf<String?>(null) }
     val photoFlow=remember(model,model.photoScope,state.organization?.id,historyHydrant?.id) {
         historyHydrant?.let { model.photoEntries(it.organization,it.id) }
             ?: kotlinx.coroutines.flow.flowOf(PhotoGalleryState())
     }
-    val galleryState=key(model,model.photoScope,state.organization?.id,historyHydrant?.id) {
+    val allPhotos=key(model,model.photoScope,state.organization?.id,historyHydrant?.id) {
         photoFlow.collectAsStateWithLifecycle(initialValue=PhotoGalleryState()).value
     }
+    val permanentPhotos=allPhotos.copy(entries=allPhotos.entries.filter { it.photo.category==si.gasilko.app.feature.photos.domain.PhotoCategory.HYDRANT })
+    val galleryState=if(galleryInspection==null)permanentPhotos else allPhotos.copy(entries=allPhotos.entries.filter {
+        it.photo.category==si.gasilko.app.feature.photos.domain.PhotoCategory.INSPECTION && it.photo.inspectionId==galleryInspection
+    })
+    val photoCounts=allPhotos.entries.filter { it.photo.category==si.gasilko.app.feature.photos.domain.PhotoCategory.INSPECTION }
+        .mapNotNull { it.photo.inspectionId }.groupingBy { it }.eachCount()
+    val openInspectionPhotos: (String)->Unit = { galleryInspection=it;viewedPhoto=null;gallery=true }
     if(historyHydrant!=null && (gallery || viewedPhoto!=null)) {
-        key(model,model.photoScope,historyHydrant.organization,historyHydrant.id) {
+        key(model,model.photoScope,historyHydrant.organization,historyHydrant.id,galleryInspection) {
             if(viewedPhoto!=null)PhotoViewer(model,galleryState.entries.find { it.photo.id==viewedPhoto }) { viewedPhoto=null }
             else PhotoGalleryScreen(model,historyHydrant.organization,historyHydrant.id,
                 historyHydrant.code ?: stringResource(R.string.h_pending_code),galleryState,
                 state.loading || state.mutating || photoState.busy,
-                state.writable && (historyHydrant.active || state.manages),sync?.phase,
-                {viewedPhoto=it},{gallery=false})
+                galleryInspection==null && state.writable && (historyHydrant.active || state.manages),sync?.phase,
+                {viewedPhoto=it},{gallery=false;galleryInspection=null},galleryInspection)
         }
         return
     }
@@ -108,16 +116,22 @@ fun HydrantScreen(model: HydrantViewModel, requestAccess: ()->Unit = {}, signOut
         key(model,h.organization,h.id) {
             val history by historyFlow.collectAsStateWithLifecycle(initialValue=InspectionHistoryState())
             InspectionHistoryScreen(h.code ?: stringResource(R.string.h_pending_code),history,state.historyRefreshing,
-                state.historyError,sync?.phase,model::refreshHistory,model::syncNow,model::closeHistory)
+                state.historyError,sync?.phase,model::refreshHistory,model::syncNow,model::closeHistory,photoCounts,openInspectionPhotos)
         }
         return
     }
     state.inspectionDraft?.let { draft ->
         val label=state.selected?.code ?: stringResource(R.string.h_pending_code)
-        if(draft.mode==InspectionMode.GUIDED)GuidedInspectionScreen(draft,label,state.mutating,state.error,
-            model::answerInspectionCheck,model::changeInspection,model::moveGuided,model::completeInspection,model::cancelInspection,model::changeMeasurements)
-        else if(draft.mode==InspectionMode.CLASSIC)ClassicInspectionScreen(draft,label,state.mutating,state.error,
-            model::answerInspectionCheck,model::changeInspection,model::completeInspection,model::cancelInspection,model::changeMeasurements)
+        val context=LocalContext.current
+        val inspectionBusy=state.mutating || photoState.busy
+        val stagedPhotos: @Composable ()->Unit = {
+            StagedInspectionPhotos(draft.photos,!inspectionBusy && draft.completion==null,
+                {model.addInspectionPhoto(context)},model::removeInspectionPhoto)
+        }
+        if(draft.mode==InspectionMode.GUIDED)GuidedInspectionScreen(draft,label,inspectionBusy,state.error,
+            model::answerInspectionCheck,model::changeInspection,model::moveGuided,model::completeInspection,model::cancelInspection,model::changeMeasurements,stagedPhotos)
+        else if(draft.mode==InspectionMode.CLASSIC)ClassicInspectionScreen(draft,label,inspectionBusy,state.error,
+            model::answerInspectionCheck,model::changeInspection,model::completeInspection,model::cancelInspection,model::changeMeasurements,stagedPhotos)
         else QuickInspectionScreen(draft,label,state.mutating,state.error,model::changeInspection,
             {model.completeInspection()},model::cancelInspection)
         return
@@ -173,7 +187,8 @@ fun HydrantScreen(model: HydrantViewModel, requestAccess: ()->Unit = {}, signOut
         }
         when {
             state.form!=null -> HydrantFormContent(state,model,Modifier.weight(1f))
-            state.selected!=null -> HydrantDetails(state,model,Modifier.weight(1f),galleryState,{gallery=true},{viewedPhoto=it})
+            state.selected!=null -> HydrantDetails(state,model,Modifier.weight(1f),permanentPhotos,
+                {galleryInspection=null;gallery=true},{galleryInspection=null;viewedPhoto=it},photoCounts,openInspectionPhotos)
             else -> {
                 if(state.organization!=null) {
                     Button(onClick=model::add,enabled=!busy && state.writable,modifier=Modifier.testTag("add")){Text(stringResource(R.string.h_add))}
@@ -261,7 +276,8 @@ fun HydrantScreen(model: HydrantViewModel, requestAccess: ()->Unit = {}, signOut
     Field(R.string.h_active_state,stringResource(if(h.active)R.string.h_active else R.string.h_inactive));Field(R.string.h_version,h.version.toString())
 }
 @Composable private fun HydrantDetails(state: RegistryState,model: HydrantViewModel,modifier: Modifier,
-    gallery: PhotoGalleryState, openGallery: ()->Unit, openPhoto: (String)->Unit) {
+    gallery: PhotoGalleryState, openGallery: ()->Unit, openPhoto: (String)->Unit,
+    photoCounts: Map<String,Int>, openInspectionPhotos: (String)->Unit) {
     val photoState by model.photos.state.collectAsStateWithLifecycle()
     val context=LocalContext.current
     val h=state.selected?:return;val enabled=!state.loading && !state.mutating && !photoState.busy
@@ -310,7 +326,7 @@ fun HydrantScreen(model: HydrantViewModel, requestAccess: ()->Unit = {}, signOut
             // Compact local preview; full history and online-history controls belong to M5.6.
             history.entries.take(5).forEach { entry ->
                 HorizontalDivider()
-                InspectionHistoryItem(entry)
+                InspectionHistoryItem(entry,photoCounts[entry.inspection.id] ?: 0,openInspectionPhotos)
             }
         }
         Spacer(Modifier.height(16.dp))

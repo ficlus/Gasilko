@@ -277,4 +277,8 @@
     <string name="photo_missing_local">Aktion erforderlich: Die lokale Datei des noch nicht synchronisierten Fotos fehlt.</string>
     <string name="photo_corrupt">Die Fotodatei ist beschädigt oder ungültig und kann nicht angezeigt werden.</string>
     <string name="photo_access_denied">Kein Zugriff auf das Foto. Eine Online-Prüfung der Berechtigung ist erforderlich.</string>
+    <string name="inspection_photos">Prüfungsfotos</string>
+    <string name="inspection_photos_staged">Fotos werden beim Abschluss der Prüfung gespeichert.</string>
+    <string name="inspection_view_photos">Fotos ansehen</string>
+    <string name="photo_remove_staged">Entfernen</string>
 </resources>

@@ -40,7 +40,7 @@ class HydrantViewModel(private val repository: HydrantRepository, private val in
         val stamp=generation
         return repository.observePhotos(org,hydrant).map {
             if(!photoScopeCurrent(org,hydrant,stamp))throw CancellationException()
-            PhotoGalleryState(it.filter { entry -> entry.photo.active && entry.photo.category==PhotoCategory.HYDRANT }
+            PhotoGalleryState(it.filter { entry -> entry.photo.active }
                 .sortedWith(compareByDescending<PhotoEntry> { entry -> entry.photo.capturedAt }.thenByDescending { entry -> entry.photo.id }),loaded=true)
         }.catch { e ->
             if(e is CancellationException)throw e
@@ -65,14 +65,43 @@ class HydrantViewModel(private val repository: HydrantRepository, private val in
             throw e
         }
     }
-    suspend fun photoImage(org: String, hydrant: String, id: String) =
-        photoRead(org,hydrant) { repository.displayPhoto(org,hydrant,id) }
+    suspend fun photoImage(org: String, hydrant: String, id: String, inspectionId: String? = null) =
+        photoRead(org,hydrant) { repository.displayPhoto(org,hydrant,id,inspectionId) }
     suspend fun refreshPhotoMetadata(org: String, hydrant: String) =
         photoRead(org,hydrant) { repository.refreshPhotos(org,hydrant) }
     val photos: si.gasilko.app.feature.photos.presentation.PhotoAcquisition by lazy { si.gasilko.app.feature.photos.presentation.PhotoAcquisition(repository,scope,
         { org,id,stamp -> val s=state.value
             stamp==generation && s.organization?.id==org && s.selected?.id==id && s.writable && (s.selected?.active==true || s.manages)
-        }, { error -> clear();mutableState.value=RegistryState(error=error) }) }
+        }, { error -> clear();mutableState.value=RegistryState(error=error) },
+        { org,id,stamp,input ->
+            val s=state.value;val draft=s.inspectionDraft
+            if(!photoScopeCurrent(org,id,stamp) || draft==null || draft.id!=input.inspectionId ||
+                draft.mode==InspectionMode.QUICK || draft.completion!=null || s.mutating)
+                throw RegistryFailure(RegistryError.FORBIDDEN)
+            mutableState.value=s.copy(inspectionDraft=draft.copy(photos=(draft.photos+input).distinctBy { it.id }))
+        }) }
+    fun addInspectionPhoto(context: android.content.Context) {
+        val s=state.value;val draft=s.inspectionDraft ?: return
+        if(!s.loading && !s.mutating && s.writable && draft.completion==null && draft.mode!=InspectionMode.QUICK)
+            photos.begin(context,draft.organization,draft.hydrantId,generation,draft.id)
+    }
+    private fun discardStaged(draft: InspectionDraft, inputs: List<LocalPhotoInput> = draft.photos) {
+        scope.launch(start=CoroutineStart.UNDISPATCHED) {
+            withContext(NonCancellable) {
+                inputs.forEach {
+                    try { repository.discardUnregisteredPhoto(draft.organization,draft.hydrantId,it) }
+                    catch(_: Exception) { android.util.Log.w("PhotoCapture","staged ownership cleanup deferred") }
+                }
+            }
+        }
+    }
+    fun removeInspectionPhoto(id: String) {
+        val s=state.value;val draft=s.inspectionDraft ?: return
+        if(s.mutating || photos.state.value.busy || draft.completion!=null)return
+        val input=draft.photos.find { it.id==id } ?: return
+        mutableState.value=s.copy(inspectionDraft=draft.copy(photos=draft.photos.filterNot { it.id==id }))
+        discardStaged(draft,listOf(input))
+    }
     fun addPhoto(context: android.content.Context) {
         val s=state.value;val h=s.selected ?: return;val org=s.organization ?: return
         if(!s.loading && !s.mutating && s.writable && (h.active || s.manages) && s.inspectionDraft==null)
@@ -106,6 +135,7 @@ class HydrantViewModel(private val repository: HydrantRepository, private val in
         historyJob=scope.launch {
             try {
                 repository.refreshInspections(org.id,h.id)
+                repository.refreshPhotos(org.id,h.id)
                 if(stamp==generation && state.value.selected?.id==h.id)
                     mutableState.value=state.value.copy(historyRefreshing=false)
             } catch(e: CancellationException) { throw e }
@@ -137,7 +167,11 @@ class HydrantViewModel(private val repository: HydrantRepository, private val in
             mutableState.value=s.copy(inspectionDraft=draft.copy(result=result,notes=notes),error=null)
     }
     fun cancelInspection() {
-        if(!state.value.mutating)mutableState.value=state.value.copy(inspectionDraft=null,error=null)
+        if(!state.value.mutating && !photos.state.value.busy) {
+            state.value.inspectionDraft?.let { discardStaged(it) }
+            photos.clear()
+            mutableState.value=state.value.copy(inspectionDraft=null,error=null)
+        }
     }
     fun answerInspectionCheck(check: GuidedCheck, answer: GuidedAnswer) {
         val s=state.value;val draft=s.inspectionDraft ?: return
@@ -147,15 +181,15 @@ class HydrantViewModel(private val repository: HydrantRepository, private val in
     }
     fun moveGuided(forward: Boolean) {
         val s=state.value;val draft=s.inspectionDraft ?: return
-        if(s.mutating || draft.completion!=null || draft.mode!=InspectionMode.GUIDED)return
-        val answered=when { draft.step<4 -> draft.answers.containsKey(GuidedCheck.entries[draft.step]); draft.step==4 -> draft.measurementsValid(); else -> draft.result!=null }
+        if(s.mutating || photos.state.value.busy || draft.completion!=null || draft.mode!=InspectionMode.GUIDED)return
+        val answered=when { draft.step<4 -> draft.answers.containsKey(GuidedCheck.entries[draft.step]); draft.step==4 -> draft.measurementsValid(); draft.step==5 -> true; else -> draft.result!=null }
         if(forward && !answered)return
-        mutableState.value=s.copy(inspectionDraft=draft.copy(step=(draft.step+if(forward)1 else -1).coerceIn(0,6)),error=null)
+        mutableState.value=s.copy(inspectionDraft=draft.copy(step=(draft.step+if(forward)1 else -1).coerceIn(0,7)),error=null)
     }
     fun completeInspection(checkNotes: String? = null) {
         val s=state.value; val draft=s.inspectionDraft ?: return; val result=draft.result ?: return
-        if(s.loading || s.mutating || !s.writable || s.organization?.id!=draft.organization || s.selected?.id!=draft.hydrantId)return
-        if(draft.mode==InspectionMode.GUIDED && draft.step!=6)return
+        if(s.loading || s.mutating || photos.state.value.busy || !s.writable || s.organization?.id!=draft.organization || s.selected?.id!=draft.hydrantId)return
+        if(draft.mode==InspectionMode.GUIDED && draft.step!=7)return
         if(draft.mode!=InspectionMode.QUICK && (GuidedCheck.entries.any { it !in draft.answers } || checkNotes==null))return
         if(draft.mode!=InspectionMode.QUICK && !draft.measurementsValid())return
         // Freeze the full event on first confirmation, including completion time. An
@@ -169,7 +203,8 @@ class HydrantViewModel(private val repository: HydrantRepository, private val in
         mutableState.value=s.copy(inspectionDraft=draft.copy(completion=input),mutating=true,error=null)
         start {
             try {
-                val saved=repository.completeInspection(draft.organization,draft.hydrantId,input)
+                val saved=if(draft.mode==InspectionMode.QUICK)repository.completeInspection(draft.organization,draft.hydrantId,input)
+                    else repository.completeInspectionWithPhotos(draft.organization,draft.hydrantId,input,draft.photos)
                 if(stamp!=generation)return@start
                 mutableState.value=state.value.copy(selected=saved.hydrant,
                     rows=state.value.rows.map { if(it.id==saved.hydrant.id)saved.hydrant else it }.filter { s.query.matches(it) },
@@ -241,7 +276,7 @@ class HydrantViewModel(private val repository: HydrantRepository, private val in
                 }
         }
     }
-    fun clear() { generation++; photos.clear(); job?.cancel(); historyJob?.cancel(); repository.setActiveOrganization(null); mutableSync.value=RegistrySyncState(); mutableState.value=RegistryState() }
+    fun clear() { state.value.inspectionDraft?.let { discardStaged(it) }; generation++; photos.clear(); job?.cancel(); historyJob?.cancel(); repository.setActiveOrganization(null); mutableSync.value=RegistrySyncState(); mutableState.value=RegistryState() }
     fun syncNow() {
         val s = state.value; val org = s.organization ?: return
         if(!s.writable || s.loading || s.mutating || sync.value.phase == SyncPhase.SYNCING) return
@@ -316,7 +351,7 @@ class HydrantViewModel(private val repository: HydrantRepository, private val in
     fun switchOrganization(id: String) {
         if(state.value.mutating || state.value.form!=null || state.value.inspectionDraft!=null || state.value.loading) return
         val org=state.value.organizations.find { it.id==id } ?: return
-        generation++; photos.clear(); job?.cancel();historyJob?.cancel()
+        state.value.inspectionDraft?.let { discardStaged(it) }; generation++; photos.clear(); job?.cancel();historyJob?.cancel()
         repository.setActiveOrganization(null)
         mutableState.value=RegistryState(organizations=state.value.organizations,organization=org)
         refresh()
