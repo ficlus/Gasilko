@@ -17,11 +17,14 @@ internal class RoomPhotoStore(
     private val work: (String,String)->Flow<SyncPhase>,
 ) {
     private fun check(expected: String) { if(account()!=expected)throw RegistryFailure(RegistryError.EXPIRED) }
-    suspend fun display(org: String, hydrant: String, id: String): String {
+    suspend fun display(org: String, hydrant: String, id: String, inspection: String?): String {
         val actor=account();access(org,hydrant);check(actor)
         val row=db.photos().identity(actor,id) ?: throw RegistryFailure(RegistryError.UNAVAILABLE)
         val photo=row.value
-        if(photo.organization!=org || photo.hydrantId!=hydrant || !photo.active || photo.category!=PhotoCategory.HYDRANT)
+        if(photo.organization!=org || photo.hydrantId!=hydrant || !photo.active || photo.inspectionId!=inspection ||
+            photo.category!=(if(inspection==null)PhotoCategory.HYDRANT else PhotoCategory.INSPECTION))
+            throw RegistryFailure(RegistryError.UNAVAILABLE)
+        if(inspection!=null && db.registry().inspection(actor,org,inspection)?.value?.hydrantId!=hydrant)
             throw RegistryFailure(RegistryError.UNAVAILABLE)
         val storage=files ?: throw RegistryFailure(RegistryError.UNAVAILABLE)
         val local=row.localPath
@@ -34,7 +37,11 @@ internal class RoomPhotoStore(
                 throw PhotoImageFailure(PhotoImageError.CORRUPT)
             local
         } else {
-            if(photo.uploadedAt==null)throw PhotoImageFailure(PhotoImageError.MISSING_LOCAL)
+            if(photo.uploadedAt==null) {
+                // Viewing cannot block the worker's lost-ACK recovery: the server may
+                // already hold this object even when the local source has disappeared.
+                throw PhotoImageFailure(PhotoImageError.MISSING_LOCAL)
+            }
             storage.displayCache.file(actor,photo) {
                 access(org,hydrant);check(actor)
                 online.downloadPhotoObject(photo).also { access(org,hydrant);check(actor) }
@@ -66,12 +73,17 @@ internal class RoomPhotoStore(
         return (files ?: throw RegistryFailure(RegistryError.UNAVAILABLE)).prepare(actor,org,hydrant,id,mime).also { check(actor) }
     }
     suspend fun register(org: String, hydrant: String, input: LocalPhotoInput): Photo = changes.withLock {
+        val actor=account()
+        registerInTransaction(org,hydrant,input).also { check(actor);scheduleSafely(actor,org) }
+    }
+    /** Caller holds the shared write lock; nested Room transactions join the parent's commit. */
+    suspend fun registerInTransaction(org: String, hydrant: String, input: LocalPhotoInput, createdAt: Long? = null): Photo {
         val actor=account();access(org,hydrant)
         val result=db.withTransaction {
             val parent=access(org,hydrant)
             // Ownership cleanup cannot delete a file between validation and Room insertion.
             val bytes=(files ?: throw RegistryFailure(RegistryError.UNAVAILABLE)).read(actor,org,hydrant,input.id,input.mimeType,input.localPath)
-            val now=System.currentTimeMillis()
+            val now=createdAt ?: System.currentTimeMillis()
             val photo=Photo(input.id,org,hydrant,input.inspectionId,input.category,
                 photoStoragePath(org,hydrant,input.id,input.inspectionId,input.mimeType),input.mimeType,bytes.size.toLong(),
                 bytes.photoHash(),input.capturedAt,actor,now).also { it.validate() }
@@ -96,8 +108,7 @@ internal class RoomPhotoStore(
             check(actor)
             photo
         }
-        scheduleSafely(actor,org)
-        result
+        return result
     }
     fun observe(org: String, hydrant: String, inspection: String?): Flow<List<PhotoEntry>> = flow {
         val actor=account()

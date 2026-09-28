@@ -49,6 +49,12 @@ internal class PhotoDisplayCache(context: Context) {
         if(bytes.size.toLong()!=photo.byteSize || bytes.size.toLong() !in 1..MAX_PHOTO_BYTES || bytes.photoHash()!=photo.sha256)return false
         val bounds=BitmapFactory.Options().apply { inJustDecodeBounds=true }
         BitmapFactory.decodeByteArray(bytes,0,bytes.size,bounds)
-        return bounds.outMimeType==photo.mimeType && bounds.outWidth in 1..1920 && bounds.outHeight in 1..1920
+        if(bounds.outMimeType!=photo.mimeType || bounds.outWidth !in 1..1920 || bounds.outHeight !in 1..1920)return false
+        // A readable header alone does not prove the image body can be displayed.
+        // Invalid replaceable cache files are evicted and downloaded again.
+        val decoded=BitmapFactory.decodeByteArray(bytes,0,bytes.size,BitmapFactory.Options().apply { inSampleSize=4 })
+            ?: return false
+        decoded.recycle()
+        return true
     }
 }

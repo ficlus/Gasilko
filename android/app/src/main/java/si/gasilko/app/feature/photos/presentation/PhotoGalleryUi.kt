@@ -52,7 +52,7 @@ fun PhotoPreview(model: HydrantViewModel, state: PhotoGalleryState, enabled: Boo
 @OptIn(ExperimentalLayoutApi::class)
 fun PhotoGalleryScreen(model: HydrantViewModel, organization: String, hydrant: String, label: String,
     state: PhotoGalleryState, busy: Boolean, canAdd: Boolean, phase: SyncPhase?,
-    openPhoto: (String)->Unit, back: ()->Unit) {
+    openPhoto: (String)->Unit, back: ()->Unit, inspectionId: String? = null) {
     val context=LocalContext.current
     val scope=rememberCoroutineScope()
     var refreshing by remember { mutableStateOf(false) }
@@ -60,7 +60,7 @@ fun PhotoGalleryScreen(model: HydrantViewModel, organization: String, hydrant: S
     BackHandler { if(!busy)back() }
     Surface(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize().safeDrawingPadding().padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
-            Text(stringResource(R.string.photo_all),style=MaterialTheme.typography.headlineSmall)
+            Text(stringResource(if(inspectionId==null)R.string.photo_all else R.string.inspection_photos),style=MaterialTheme.typography.headlineSmall)
             Text(label)
             FlowRow(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
                 TextButton(back,enabled=!busy) { Text(stringResource(R.string.h_back)) }
@@ -73,8 +73,10 @@ fun PhotoGalleryScreen(model: HydrantViewModel, organization: String, hydrant: S
                         finally { refreshing=false }
                     }
                 },enabled=!refreshing && !busy) { Text(stringResource(R.string.h_refresh)) }
-                if(canAdd) {
+                if(model.state.value.writable) {
                     TextButton(onClick=model::syncNow,enabled=!busy && phase!=SyncPhase.SYNCING) { Text(stringResource(R.string.h_sync_now)) }
+                }
+                if(canAdd && inspectionId==null) {
                     TextButton(onClick={model.addPhoto(context)},enabled=!busy) { Text(stringResource(R.string.photo_add)) }
                 }
             }
@@ -130,7 +132,7 @@ private fun PhotoImage(model: HydrantViewModel, entry: PhotoEntry, modifier: Mod
     var retry by remember(photo.id) { mutableIntStateOf(0) }
     val file by produceState(ImageFile(),model,model.photoScope,photo,entry.localPath,retry) {
         value=ImageFile()
-        try { value=ImageFile(path=model.photoImage(photo.organization,photo.hydrantId,photo.id)) }
+        try { value=ImageFile(path=model.photoImage(photo.organization,photo.hydrantId,photo.id,photo.inspectionId)) }
         catch(e: CancellationException) { throw e }
         catch(e: PhotoImageFailure) {
             value=ImageFile(error=if(e.reason==PhotoImageError.MISSING_LOCAL)R.string.photo_missing_local else R.string.photo_corrupt)

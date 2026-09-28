@@ -18,10 +18,11 @@ data class PhotoAcquisitionState(val step: PhotoStep=PhotoStep.IDLE, val id: Str
 
 /** Owned by the existing hydrant ViewModel; retained across Activity recreation, never uploads. */
 class PhotoAcquisition(private val repository: HydrantRepository, private val scope: CoroutineScope,
-    private val validScope: (String,String,Int)->Boolean, private val authorizationFailed: (RegistryError)->Unit) {
+    private val validScope: (String,String,Int)->Boolean, private val authorizationFailed: (RegistryError)->Unit,
+    private val stage: (String,String,Int,LocalPhotoInput)->Unit = { _,_,_,_ -> throw RegistryFailure(RegistryError.UNAVAILABLE) }) {
     private data class Request(val app: Context, val id: String, val organization: String, val hydrant: String,
-        val generation: Int, val capturedAt: Long, var path: String?=null, var finalized: Boolean=false) {
-        fun input() = path?.let { LocalPhotoInput(id,PhotoCategory.HYDRANT,null,"image/jpeg",capturedAt,it) }
+        val generation: Int, val capturedAt: Long, val inspectionId: String?, var path: String?=null, var finalized: Boolean=false) {
+        fun input() = path?.let { LocalPhotoInput(id,if(inspectionId==null)PhotoCategory.HYDRANT else PhotoCategory.INSPECTION,inspectionId,"image/jpeg",capturedAt,it) }
     }
     private val mutable=MutableStateFlow(PhotoAcquisitionState())
     val state=mutable.asStateFlow()
@@ -31,9 +32,9 @@ class PhotoAcquisition(private val repository: HydrantRepository, private val sc
         if(request!==r)throw CancellationException()
         if(!validScope(r.organization,r.hydrant,r.generation))throw RegistryFailure(RegistryError.FORBIDDEN)
     }
-    fun begin(context: Context, organization: String, hydrant: String, generation: Int) {
+    fun begin(context: Context, organization: String, hydrant: String, generation: Int, inspectionId: String? = null) {
         if(state.value.busy)return
-        val r=Request(context.applicationContext,UUID.randomUUID().toString(),organization,hydrant,generation,System.currentTimeMillis())
+        val r=Request(context.applicationContext,UUID.randomUUID().toString(),organization,hydrant,generation,System.currentTimeMillis(),inspectionId)
         request=r;mutable.value=PhotoAcquisitionState(PhotoStep.CHOOSE,r.id)
     }
     fun choose(camera: Boolean) {
@@ -91,10 +92,11 @@ class PhotoAcquisition(private val repository: HydrantRepository, private val sc
                 }
                 check(r)
                 registering=true
-                repository.registerPhoto(r.organization,r.hydrant,input)
+                if(r.inspectionId==null)repository.registerPhoto(r.organization,r.hydrant,input)
+                else stage(r.organization,r.hydrant,r.generation,input)
                 check(r)
                 mutable.value=PhotoAcquisitionState(PhotoStep.SAVED,r.id)
-                request=null // Room owns the finalized file; it is never acquisition cleanup.
+                request=null // Ownership transferred to Room or the in-memory inspection session.
             } catch(e: CancellationException) {
                 withContext(NonCancellable) { discard(r) };throw e
             }

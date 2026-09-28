@@ -37,7 +37,7 @@ class RoomHydrantRepository(
     override suspend fun discardUnregisteredPhoto(organization: String, hydrantId: String, input: LocalPhotoInput) = photos.discard(organization,hydrantId,input)
     override fun observePhotos(organization: String, hydrantId: String, inspectionId: String?) = photos.observe(organization,hydrantId,inspectionId)
     override suspend fun refreshPhotos(organization: String, hydrantId: String) = photos.refresh(organization,hydrantId)
-    override suspend fun displayPhoto(organization: String, hydrantId: String, id: String) = photos.display(organization,hydrantId,id)
+    override suspend fun displayPhoto(organization: String, hydrantId: String, id: String, inspectionId: String?) = photos.display(organization,hydrantId,id,inspectionId)
     override fun observeInspectionHistory(organization: String, hydrantId: String): Flow<List<InspectionHistoryEntry>> = flow {
         val account=currentAccount()
         emitAll(combine(database.invalidationTracker.createFlow("inspections","pending_hydrant_changes","hydrants","organizations"),
@@ -121,7 +121,29 @@ class RoomHydrantRepository(
         try { scheduleSync(account,organization) }
         catch(_: Exception) { android.util.Log.w("HydrantSync","schedule failed; history retained") }
     } }
-    override suspend fun completeInspection(organization: String, hydrantId: String, input: InspectionCompletion): InspectionWrite = changes.withLock {
+    override suspend fun completeInspection(organization: String, hydrantId: String, input: InspectionCompletion): InspectionWrite =
+        completeInspectionWithPhotos(organization,hydrantId,input,emptyList())
+    override suspend fun completeInspectionWithPhotos(organization: String, hydrantId: String, input: InspectionCompletion,
+        photos: List<LocalPhotoInput>): InspectionWrite = changes.withLock {
+        val account=currentAccount()
+        if((input.mode==InspectionMode.QUICK && photos.isNotEmpty()) || photos.map { it.id }.distinct().size!=photos.size ||
+            photos.any { it.category!=PhotoCategory.INSPECTION || it.inspectionId!=input.id })
+            throw RegistryFailure(RegistryError.VALIDATION)
+        val result=database.withTransaction {
+            if(dao.inspection(account,organization,input.id)!=null) {
+                val existing=database.photos().list(account,organization,hydrantId,input.id).map { it.value.id }.toSet()
+                if(existing!=photos.map { it.id }.toSet())throw RegistryFailure(RegistryError.VALIDATION)
+            }
+            val saved=commitInspection(organization,hydrantId,input)
+            photos.forEach { this@RoomHydrantRepository.photos.registerInTransaction(organization,hydrantId,it,input.completedAt) }
+            checkAccount(account)
+            saved
+        }
+        try { scheduleSync(account,organization) }
+        catch(_: Exception) { android.util.Log.w("HydrantSync","schedule failed; inspection retained") }
+        result
+    }
+    private suspend fun commitInspection(organization: String, hydrantId: String, input: InspectionCompletion): InspectionWrite {
         input.validate()
         val account=currentAccount()
         val result=database.withTransaction {
@@ -150,9 +172,7 @@ class RoomHydrantRepository(
             checkAccount(account)
             InspectionWrite(inspection,visible)
         }
-        try { scheduleSync(account,organization) }
-        catch(_: Exception) { android.util.Log.w("HydrantSync","schedule failed; inspection retained") }
-        result
+        return result
     }
     override fun observeMap(query: HydrantQuery): Flow<List<Hydrant>> = flow {
         val account = currentAccount()

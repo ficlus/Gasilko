@@ -52,6 +52,11 @@ enum class InspectionSyncState { SYNCED, PENDING, ATTENTION }
 data class InspectionHistoryEntry(val inspection: Inspection, val state: InspectionSyncState,
     val durableIssue: Boolean = false)
 interface InspectionRepository {
+    suspend fun completeInspectionWithPhotos(organization: String, hydrantId: String, input: InspectionCompletion,
+        photos: List<si.gasilko.app.feature.photos.domain.LocalPhotoInput>): InspectionWrite {
+        if(photos.isNotEmpty())throw RegistryFailure(RegistryError.UNAVAILABLE)
+        return completeInspection(organization,hydrantId,input)
+    }
     fun observeInspectionHistory(organization: String, hydrantId: String): Flow<List<InspectionHistoryEntry>> =
         observeInspections(organization,hydrantId).map { rows -> rows.map { InspectionHistoryEntry(it,InspectionSyncState.PENDING) } }
     fun observeInspections(organization: String, hydrantId: String): Flow<List<Inspection>> = flowOf(emptyList())
