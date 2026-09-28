@@ -40,6 +40,8 @@ android {
 kotlin { jvmToolchain(17) }
 kapt { arguments { arg("room.schemaLocation", "$projectDir/schemas") } }
 dependencies {
+    // Files only: private network retrieval remains behind the authorized repository.
+    implementation("io.coil-kt.coil3:coil-compose:3.4.0")
     // OpenGL intentionally provides broad device compatibility; no Vulkan/multi-backend.
     implementation("org.maplibre.gl:android-sdk-opengl:13.6.1")
     implementation(platform("io.github.jan-tennert.supabase:bom:3.6.0"))

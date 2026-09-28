@@ -269,4 +269,12 @@
     <string name="photo_invalid">Neveljavna ali prevelika fotografija. Izberite sliko JPEG, PNG ali WebP.</string>
     <string name="photo_registration_failed">Shranjevanja fotografije ni bilo mogoče potrditi. Poskusite znova z isto fotografijo.</string>
     <string name="photo_retry">Poskusi znova</string>
+    <string name="photo_count">Fotografije (%1$d)</string>
+    <string name="photo_all">Vse fotografije</string>
+    <string name="photo_empty">Ni fotografij</string>
+    <string name="photo_metadata_failed">Podatkov fotografij ni bilo mogoče osvežiti. Shranjene fotografije ostanejo na voljo.</string>
+    <string name="photo_load_failed">Fotografije ni bilo mogoče naložiti. Preverite povezavo in poskusite znova.</string>
+    <string name="photo_missing_local">Potrebna pozornost: lokalna datoteka še nesinhronizirane fotografije manjka.</string>
+    <string name="photo_corrupt">Fotografije ni mogoče prikazati, ker je datoteka poškodovana ali neveljavna.</string>
+    <string name="photo_access_denied">Dostop do fotografije ni dovoljen. Potrebno je spletno preverjanje dostopa.</string>
 </resources>

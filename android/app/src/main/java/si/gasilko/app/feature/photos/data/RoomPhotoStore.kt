@@ -17,6 +17,35 @@ internal class RoomPhotoStore(
     private val work: (String,String)->Flow<SyncPhase>,
 ) {
     private fun check(expected: String) { if(account()!=expected)throw RegistryFailure(RegistryError.EXPIRED) }
+    suspend fun display(org: String, hydrant: String, id: String): String {
+        val actor=account();access(org,hydrant);check(actor)
+        val row=db.photos().identity(actor,id) ?: throw RegistryFailure(RegistryError.UNAVAILABLE)
+        val photo=row.value
+        if(photo.organization!=org || photo.hydrantId!=hydrant || !photo.active || photo.category!=PhotoCategory.HYDRANT)
+            throw RegistryFailure(RegistryError.UNAVAILABLE)
+        val storage=files ?: throw RegistryFailure(RegistryError.UNAVAILABLE)
+        val local=row.localPath
+        val result=if(local!=null && kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                storage.destination(actor,org,hydrant,id,photo.mimeType).isFile
+            }) {
+            val bytes=try { storage.read(actor,org,hydrant,id,photo.mimeType,local) }
+                catch(e: RegistryFailure) { throw PhotoImageFailure(PhotoImageError.CORRUPT) }
+            if(bytes.size.toLong()!=photo.byteSize || kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { bytes.photoHash() }!=photo.sha256)
+                throw PhotoImageFailure(PhotoImageError.CORRUPT)
+            local
+        } else {
+            if(photo.uploadedAt==null)throw PhotoImageFailure(PhotoImageError.MISSING_LOCAL)
+            storage.displayCache.file(actor,photo) {
+                access(org,hydrant);check(actor)
+                online.downloadPhotoObject(photo).also { access(org,hydrant);check(actor) }
+            }
+        }
+        access(org,hydrant);check(actor)
+        val current=db.photos().identity(actor,id)?.value
+        if(current==null || !current.active || !current.sameContent(photo))
+            throw RegistryFailure(RegistryError.UNAVAILABLE)
+        return result
+    }
     private fun scheduleSafely(actor: String, org: String) {
         try { schedule(actor,org) } catch(_: Exception) { android.util.Log.w("HydrantSync","schedule failed; photo retained") }
     }

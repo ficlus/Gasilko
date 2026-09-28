@@ -19,12 +19,14 @@ import si.gasilko.app.feature.photos.domain.*
 import si.gasilko.app.feature.photos.data.*
 
 interface RegistryTransport {
+    suspend fun downloadPhoto(path: String): ByteArray = throw RegistryFailure(RegistryError.UNAVAILABLE)
     fun actor(): String
     suspend fun rows(table: String, filters: Map<String,String?>, after: String? = null): JsonArray
     suspend fun rpc(name: String, arguments: JsonObject): JsonElement
     suspend fun uploadPhoto(path: String, mime: String, bytes: ByteArray) { throw RegistryFailure(RegistryError.UNAVAILABLE) }
 }
 class SupabaseRegistryTransport(private val client: SupabaseClient): RegistryTransport {
+    override suspend fun downloadPhoto(path: String) = client.storage.from(PHOTO_BUCKET).downloadAuthenticated(path)
     override suspend fun uploadPhoto(path: String, mime: String, bytes: ByteArray) {
         // Verified against supabase-kt 3.6.0 BucketApi/UploadOptionBuilder. Never upsert evidence.
         client.storage.from(PHOTO_BUCKET).upload(path,bytes) { upsert=false;contentType=ContentType.parse(mime) }
@@ -61,6 +63,10 @@ fun decodeHydrant(value: JsonElement): Hydrant {
         row.text("created_at"),row.text("updated_at"),row.text("updated_by"))
 }
 class OnlineHydrantRepository(private val wire: RegistryTransport, private val diagnostic: (String,RegistryError)->Unit = {_,_->}): HydrantRepository {
+    override suspend fun downloadPhotoObject(photo: Photo) = request("photo_download") {
+        photo.validate()
+        wire.downloadPhoto(photo.storagePath)
+    }
     override suspend fun reservePhoto(photo: Photo) = request("photo_reserve") {
         photo.validate()
         decodePhoto(wire.rpc("reserve_photo",buildJsonObject { put("photo",photo.payload()) }))

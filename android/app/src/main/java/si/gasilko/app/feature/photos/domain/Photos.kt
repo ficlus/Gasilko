@@ -10,6 +10,8 @@ const val PHOTO_BUCKET = "hydrant-photos"
 const val MAX_PHOTO_BYTES = 5 * 1024 * 1024L
 enum class PhotoCategory { HYDRANT, INSPECTION }
 enum class PhotoSyncState { PENDING, SYNCED, ATTENTION }
+enum class PhotoImageError { MISSING_LOCAL, CORRUPT }
+class PhotoImageFailure(val reason: PhotoImageError): Exception()
 
 data class LocalPhotoInput(val id: String, val category: PhotoCategory, val inspectionId: String?,
     val mimeType: String, val capturedAt: Long, val localPath: String)
@@ -44,6 +46,10 @@ fun photoStoragePath(organization: String, hydrant: String, id: String, inspecti
 }
 
 interface PhotoRepository {
+    /** Authorized presentation file; never an upload source for remotely cached images. */
+    suspend fun displayPhoto(organization: String, hydrantId: String, id: String): String =
+        throw RegistryFailure(RegistryError.UNAVAILABLE)
+    suspend fun downloadPhotoObject(photo: Photo): ByteArray = throw RegistryFailure(RegistryError.UNAVAILABLE)
     /** M6.2 writes an optimized, closed file here before registration. Never rewrite registered files. */
     suspend fun photoFile(organization: String, hydrantId: String, id: String, mimeType: String): String =
         throw RegistryFailure(RegistryError.UNAVAILABLE)

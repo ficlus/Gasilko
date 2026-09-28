@@ -23,6 +23,7 @@ import si.gasilko.app.R
 import si.gasilko.app.feature.hydrants.domain.*
 import si.gasilko.app.feature.inspections.presentation.*
 import si.gasilko.app.feature.inspections.domain.InspectionMode
+import si.gasilko.app.feature.photos.presentation.*
 import si.gasilko.app.feature.inspections.domain.inspectionDue
 import java.time.Instant
 import java.text.DateFormat
@@ -81,6 +82,26 @@ fun HydrantScreen(model: HydrantViewModel, requestAccess: ()->Unit = {}, signOut
     var mapDetail by rememberSaveable(state.organization?.id) { mutableStateOf(false) }
     val mapState = key(state.organization?.id) { rememberSaveableStateHolder() }
     val historyHydrant=state.selected
+    var gallery by remember(model,model.photoScope,state.organization?.id,historyHydrant?.id) { mutableStateOf(false) }
+    var viewedPhoto by remember(model,model.photoScope,state.organization?.id,historyHydrant?.id) { mutableStateOf<String?>(null) }
+    val photoFlow=remember(model,model.photoScope,state.organization?.id,historyHydrant?.id) {
+        historyHydrant?.let { model.photoEntries(it.organization,it.id) }
+            ?: kotlinx.coroutines.flow.flowOf(PhotoGalleryState())
+    }
+    val galleryState=key(model,model.photoScope,state.organization?.id,historyHydrant?.id) {
+        photoFlow.collectAsStateWithLifecycle(initialValue=PhotoGalleryState()).value
+    }
+    if(historyHydrant!=null && (gallery || viewedPhoto!=null)) {
+        key(model,model.photoScope,historyHydrant.organization,historyHydrant.id) {
+            if(viewedPhoto!=null)PhotoViewer(model,galleryState.entries.find { it.photo.id==viewedPhoto }) { viewedPhoto=null }
+            else PhotoGalleryScreen(model,historyHydrant.organization,historyHydrant.id,
+                historyHydrant.code ?: stringResource(R.string.h_pending_code),galleryState,
+                state.loading || state.mutating || photoState.busy,
+                state.writable && (historyHydrant.active || state.manages),sync?.phase,
+                {viewedPhoto=it},{gallery=false})
+        }
+        return
+    }
     if(state.showHistory && historyHydrant!=null) {
         val h=historyHydrant
         val historyFlow=remember(model,h.organization,h.id) { model.inspectionHistory(h.organization,h.id) }
@@ -152,7 +173,7 @@ fun HydrantScreen(model: HydrantViewModel, requestAccess: ()->Unit = {}, signOut
         }
         when {
             state.form!=null -> HydrantFormContent(state,model,Modifier.weight(1f))
-            state.selected!=null -> HydrantDetails(state,model,Modifier.weight(1f))
+            state.selected!=null -> HydrantDetails(state,model,Modifier.weight(1f),galleryState,{gallery=true},{viewedPhoto=it})
             else -> {
                 if(state.organization!=null) {
                     Button(onClick=model::add,enabled=!busy && state.writable,modifier=Modifier.testTag("add")){Text(stringResource(R.string.h_add))}
@@ -239,7 +260,8 @@ fun HydrantScreen(model: HydrantViewModel, requestAccess: ()->Unit = {}, signOut
     Field(R.string.h_interval,h.interval?.toString() ?: stringResource(R.string.h_inherit_interval))
     Field(R.string.h_active_state,stringResource(if(h.active)R.string.h_active else R.string.h_inactive));Field(R.string.h_version,h.version.toString())
 }
-@Composable private fun HydrantDetails(state: RegistryState,model: HydrantViewModel,modifier: Modifier) {
+@Composable private fun HydrantDetails(state: RegistryState,model: HydrantViewModel,modifier: Modifier,
+    gallery: PhotoGalleryState, openGallery: ()->Unit, openPhoto: (String)->Unit) {
     val photoState by model.photos.state.collectAsStateWithLifecycle()
     val context=LocalContext.current
     val h=state.selected?:return;val enabled=!state.loading && !state.mutating && !photoState.busy
@@ -260,7 +282,7 @@ fun HydrantScreen(model: HydrantViewModel, requestAccess: ()->Unit = {}, signOut
             }
         }
         DetailFields(h,state.types)
-        Text(stringResource(R.string.photo_title),style=MaterialTheme.typography.titleMedium)
+        PhotoPreview(model,gallery,enabled,openGallery,openPhoto)
         if(state.writable && (h.active || state.manages)) {
             OutlinedButton(onClick={model.addPhoto(context)},enabled=enabled) { Text(stringResource(R.string.photo_add)) }
         }
