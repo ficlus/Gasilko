@@ -22,6 +22,12 @@ class PhotoFiles(context: Context) {
         if(!file.parentFile!!.isDirectory && !file.parentFile!!.mkdirs())throw RegistryFailure(RegistryError.UNAVAILABLE)
         file.absolutePath
     }
+    internal suspend fun discard(account: String, organization: String, hydrant: String, input: LocalPhotoInput) = withContext(Dispatchers.IO) {
+        val file=destination(account,organization,hydrant,input.id,input.mimeType)
+        if(input.localPath!=file.absolutePath || file.canonicalPath!=File(root.canonicalFile,file.relativeTo(root).path).absolutePath)
+            throw RegistryFailure(RegistryError.VALIDATION)
+        if(file.exists() && !file.delete())throw RegistryFailure(RegistryError.UNAVAILABLE)
+    }
     suspend fun read(account: String, organization: String, hydrant: String, id: String, mime: String, path: String): ByteArray = withContext(Dispatchers.IO) {
         val expected=destination(account,organization,hydrant,id,mime)
         val relative=expected.relativeTo(root).path

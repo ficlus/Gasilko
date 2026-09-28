@@ -34,6 +34,7 @@ class RoomHydrantRepository(
     },changes,scheduleSync,observeWork) }
     override suspend fun photoFile(organization: String, hydrantId: String, id: String, mimeType: String) = photos.destination(organization,hydrantId,id,mimeType)
     override suspend fun registerPhoto(organization: String, hydrantId: String, input: LocalPhotoInput) = photos.register(organization,hydrantId,input)
+    override suspend fun discardUnregisteredPhoto(organization: String, hydrantId: String, input: LocalPhotoInput) = photos.discard(organization,hydrantId,input)
     override fun observePhotos(organization: String, hydrantId: String, inspectionId: String?) = photos.observe(organization,hydrantId,inspectionId)
     override suspend fun refreshPhotos(organization: String, hydrantId: String) = photos.refresh(organization,hydrantId)
     override fun observeInspectionHistory(organization: String, hydrantId: String): Flow<List<InspectionHistoryEntry>> = flow {

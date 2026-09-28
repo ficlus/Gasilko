@@ -20,6 +20,17 @@ internal class RoomPhotoStore(
     private fun scheduleSafely(actor: String, org: String) {
         try { schedule(actor,org) } catch(_: Exception) { android.util.Log.w("HydrantSync","schedule failed; photo retained") }
     }
+    suspend fun discard(org: String, hydrant: String, input: LocalPhotoInput) = changes.withLock {
+        val actor=account();access(org,hydrant)
+        db.withTransaction {
+            check(actor)
+            // Serialize ownership check/deletion with registration, including other repository instances.
+            if(db.photos().identity(actor,input.id)==null) {
+                (files ?: throw RegistryFailure(RegistryError.UNAVAILABLE)).discard(actor,org,hydrant,input)
+                true
+            } else false
+        }
+    }
     suspend fun destination(org: String, hydrant: String, id: String, mime: String): String {
         val actor=account();access(org,hydrant)
         if(db.photos().identity(actor,id)!=null)throw RegistryFailure(RegistryError.VALIDATION)
@@ -27,13 +38,14 @@ internal class RoomPhotoStore(
     }
     suspend fun register(org: String, hydrant: String, input: LocalPhotoInput): Photo = changes.withLock {
         val actor=account();access(org,hydrant)
-        val bytes=(files ?: throw RegistryFailure(RegistryError.UNAVAILABLE)).read(actor,org,hydrant,input.id,input.mimeType,input.localPath)
-        val now=System.currentTimeMillis()
-        val photo=Photo(input.id,org,hydrant,input.inspectionId,input.category,
-            photoStoragePath(org,hydrant,input.id,input.inspectionId,input.mimeType),input.mimeType,bytes.size.toLong(),
-            bytes.photoHash(),input.capturedAt,actor,now).also { it.validate() }
         val result=db.withTransaction {
             val parent=access(org,hydrant)
+            // Ownership cleanup cannot delete a file between validation and Room insertion.
+            val bytes=(files ?: throw RegistryFailure(RegistryError.UNAVAILABLE)).read(actor,org,hydrant,input.id,input.mimeType,input.localPath)
+            val now=System.currentTimeMillis()
+            val photo=Photo(input.id,org,hydrant,input.inspectionId,input.category,
+                photoStoragePath(org,hydrant,input.id,input.inspectionId,input.mimeType),input.mimeType,bytes.size.toLong(),
+                bytes.photoHash(),input.capturedAt,actor,now).also { it.validate() }
             val queue=db.registry().pendingChanges(actor,org)
             if(parent.version==0L && queue.none { it.entityId==hydrant && it.operation=="CREATE" && it.state!="SYNCED" })
                 throw RegistryFailure(RegistryError.VALIDATION)
