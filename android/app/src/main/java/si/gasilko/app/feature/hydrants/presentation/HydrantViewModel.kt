@@ -11,7 +11,9 @@ import java.util.UUID
 import java.time.Instant
 
 data class MapHydrantsState(val rows: List<Hydrant> = emptyList(), val loading: Boolean = false, val error: RegistryError? = null)
-data class InspectionHistoryState(val rows: List<Inspection> = emptyList(), val error: RegistryError? = null, val loaded: Boolean = false)
+data class InspectionHistoryState(val entries: List<InspectionHistoryEntry> = emptyList(), val error: RegistryError? = null, val loaded: Boolean = false) {
+    val rows get() = entries.map { it.inspection }
+}
 
 data class RegistryState(
     val organizations: List<RegistryOrganization> = emptyList(), val organization: RegistryOrganization? = null,
@@ -22,18 +24,63 @@ data class RegistryState(
     val more: Boolean = false, val error: RegistryError? = null, val conflict: Boolean = false,
     val confirmDeactivate: Boolean = false, val reloadId: String? = null,
     val inspectionDraft: InspectionDraft? = null, val inspectionSaved: Boolean = false,
+    val showHistory: Boolean = false, val historyRefreshing: Boolean = false, val historyError: RegistryError? = null,
 ) { val manages get() = organization?.role?.manages == true; val writable get() = organization?.active == true }
 
 class HydrantViewModel(private val repository: HydrantRepository, private val injectedScope: CoroutineScope? = null): ViewModel() {
     private val scope get() = injectedScope ?: viewModelScope
     private val mutableState = MutableStateFlow(RegistryState())
     val state = mutableState.asStateFlow()
+    val photos: si.gasilko.app.feature.photos.presentation.PhotoAcquisition by lazy { si.gasilko.app.feature.photos.presentation.PhotoAcquisition(repository,scope,
+        { org,id,stamp -> val s=state.value
+            stamp==generation && s.organization?.id==org && s.selected?.id==id && s.writable && (s.selected?.active==true || s.manages)
+        }, { error -> clear();mutableState.value=RegistryState(error=error) }) }
+    fun addPhoto(context: android.content.Context) {
+        val s=state.value;val h=s.selected ?: return;val org=s.organization ?: return
+        if(!s.loading && !s.mutating && s.writable && (h.active || s.manages) && s.inspectionDraft==null)
+            photos.begin(context,org.id,h.id,generation)
+    }
     fun inspectionHistory(organization: String, hydrantId: String): Flow<InspectionHistoryState> =
-        repository.observeInspections(organization, hydrantId).map { InspectionHistoryState(rows=it,loaded=true) }
+        repository.observeInspectionHistory(organization, hydrantId).map { InspectionHistoryState(entries=it,loaded=true) }
             .catch { e ->
                 if(e is CancellationException) throw e
-                emit(InspectionHistoryState(error=(e as? RegistryFailure)?.reason ?: RegistryError.SERVER))
+                val error=(e as? RegistryFailure)?.reason ?: RegistryError.SERVER
+                if(error in listOf(RegistryError.EXPIRED,RegistryError.FORBIDDEN)) {
+                    clear();mutableState.value=RegistryState(error=error)
+                }
+                emit(InspectionHistoryState(error=error))
             }
+    private var historyJob: Job? = null
+    fun openHistory() {
+        val s=state.value
+        if(!s.loading && !s.mutating && s.selected!=null && s.inspectionDraft==null)
+            mutableState.value=s.copy(showHistory=true,historyError=null)
+    }
+    fun closeHistory() {
+        historyJob?.cancel()
+        mutableState.value=state.value.copy(showHistory=false,historyRefreshing=false,historyError=null)
+    }
+    fun refreshHistory() {
+        val s=state.value;val h=s.selected ?: return;val org=s.organization ?: return
+        if(s.historyRefreshing || s.mutating || s.loading)return
+        val stamp=generation
+        mutableState.value=s.copy(historyRefreshing=true,historyError=null)
+        historyJob=scope.launch {
+            try {
+                repository.refreshInspections(org.id,h.id)
+                if(stamp==generation && state.value.selected?.id==h.id)
+                    mutableState.value=state.value.copy(historyRefreshing=false)
+            } catch(e: CancellationException) { throw e }
+            catch(e: Exception) {
+                if(stamp==generation && state.value.selected?.id==h.id) {
+                    val error=reason(e)
+                    if(error in listOf(RegistryError.EXPIRED,RegistryError.FORBIDDEN)) {
+                        clear();mutableState.value=RegistryState(error=error)
+                    } else mutableState.value=state.value.copy(historyRefreshing=false,historyError=error)
+                }
+            }
+        }
+    }
     val inspectionClock: Flow<Instant> = flow { while(true) { emit(Instant.now()); delay(60_000) } }
     fun changeMeasurements(pressure: String, flow: String) {
         val s=state.value;val draft=s.inspectionDraft ?: return
@@ -156,7 +203,7 @@ class HydrantViewModel(private val repository: HydrantRepository, private val in
                 }
         }
     }
-    fun clear() { generation++; job?.cancel(); repository.setActiveOrganization(null); mutableSync.value=RegistrySyncState(); mutableState.value=RegistryState() }
+    fun clear() { generation++; photos.clear(); job?.cancel(); historyJob?.cancel(); repository.setActiveOrganization(null); mutableSync.value=RegistrySyncState(); mutableState.value=RegistryState() }
     fun syncNow() {
         val s = state.value; val org = s.organization ?: return
         if(!s.writable || s.loading || s.mutating || sync.value.phase == SyncPhase.SYNCING) return
@@ -231,7 +278,7 @@ class HydrantViewModel(private val repository: HydrantRepository, private val in
     fun switchOrganization(id: String) {
         if(state.value.mutating || state.value.form!=null || state.value.inspectionDraft!=null || state.value.loading) return
         val org=state.value.organizations.find { it.id==id } ?: return
-        generation++; job?.cancel()
+        generation++; photos.clear(); job?.cancel();historyJob?.cancel()
         repository.setActiveOrganization(null)
         mutableState.value=RegistryState(organizations=state.value.organizations,organization=org)
         refresh()
@@ -252,11 +299,15 @@ class HydrantViewModel(private val repository: HydrantRepository, private val in
     fun open(id: String) {
         val old=state.value;val org=old.organization?:return
         if(old.loading || old.mutating)return
-        mutableState.value=old.copy(loading=true,error=null,inspectionSaved=false);val stamp=generation
-        start { try { val h=repository.get(org.id,id);if(stamp==generation)mutableState.value=old.copy(selected=h,loading=false,conflict=false,error=null,inspectionSaved=false) }
+        photos.clear();historyJob?.cancel()
+        mutableState.value=old.copy(loading=true,error=null,inspectionSaved=false,showHistory=false,historyRefreshing=false,historyError=null);val stamp=generation
+        start { try { val h=repository.get(org.id,id);if(stamp==generation)mutableState.value=old.copy(selected=h,loading=false,conflict=false,error=null,inspectionSaved=false,showHistory=false,historyRefreshing=false,historyError=null) }
         catch(e: CancellationException){throw e}catch(e: Exception){if(stamp==generation)mutableState.value=old.copy(error=reason(e))} }
     }
-    fun back() { if(!state.value.mutating && !state.value.loading)mutableState.value=state.value.copy(selected=null,form=null,reviewDraft=null,error=null,conflict=false,confirmDeactivate=false,reloadId=null,inspectionDraft=null,inspectionSaved=false) }
+    fun back() { if(!state.value.mutating && !state.value.loading) {
+        photos.clear();historyJob?.cancel()
+        mutableState.value=state.value.copy(selected=null,form=null,reviewDraft=null,error=null,conflict=false,confirmDeactivate=false,reloadId=null,inspectionDraft=null,inspectionSaved=false,showHistory=false,historyRefreshing=false,historyError=null)
+    } }
     fun add() { if(state.value.writable && !state.value.loading && !state.value.mutating)mutableState.value=state.value.copy(form=HydrantForm(UUID.randomUUID().toString()),reviewDraft=null,error=null,conflict=false) }
     fun edit() { val s=state.value; if(s.manages && s.writable && !s.loading && !s.mutating) s.selected?.let { mutableState.value=s.copy(form=HydrantForm.from(it),error=null,conflict=false) } }
     fun changeForm(form: HydrantForm) { if(!state.value.mutating && form.id==state.value.form?.id) mutableState.value=state.value.copy(form=form,error=null) }

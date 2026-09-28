@@ -14,6 +14,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -69,14 +70,27 @@ private fun Choice(label: String, selected: String, choices: List<Pair<String,St
 @OptIn(ExperimentalLayoutApi::class)
 fun HydrantScreen(model: HydrantViewModel, requestAccess: ()->Unit = {}, signOut: ()->Unit = {}) {
     val state by model.state.collectAsStateWithLifecycle()
+    val photoState by model.photos.state.collectAsStateWithLifecycle()
+    si.gasilko.app.feature.photos.presentation.PhotoAcquisitionHost(model.photos)
     val observedSync by model.sync.collectAsStateWithLifecycle()
     val sync = observedSync.takeIf { it.organization == state.organization?.id }
     var showConflicts by remember(state.organization?.id) { mutableStateOf(false) }
     var conflictSequence by remember(state.organization?.id) { mutableStateOf<Long?>(null) }
-    LaunchedEffect(model) { model.refresh() }
+    LaunchedEffect(model) { if(!model.photos.state.value.busy)model.refresh() }
     var showMap by rememberSaveable(state.organization?.id) { mutableStateOf(false) }
     var mapDetail by rememberSaveable(state.organization?.id) { mutableStateOf(false) }
     val mapState = key(state.organization?.id) { rememberSaveableStateHolder() }
+    val historyHydrant=state.selected
+    if(state.showHistory && historyHydrant!=null) {
+        val h=historyHydrant
+        val historyFlow=remember(model,h.organization,h.id) { model.inspectionHistory(h.organization,h.id) }
+        key(model,h.organization,h.id) {
+            val history by historyFlow.collectAsStateWithLifecycle(initialValue=InspectionHistoryState())
+            InspectionHistoryScreen(h.code ?: stringResource(R.string.h_pending_code),history,state.historyRefreshing,
+                state.historyError,sync?.phase,model::refreshHistory,model::syncNow,model::closeHistory)
+        }
+        return
+    }
     state.inspectionDraft?.let { draft ->
         val label=state.selected?.code ?: stringResource(R.string.h_pending_code)
         if(draft.mode==InspectionMode.GUIDED)GuidedInspectionScreen(draft,label,state.mutating,state.error,
@@ -104,10 +118,10 @@ fun HydrantScreen(model: HydrantViewModel, requestAccess: ()->Unit = {}, signOut
         }
         return
     }
-    val busy=state.loading || state.mutating
+    val busy=state.loading || state.mutating || photoState.busy
     var showFilters by remember { mutableStateOf(false) }
     val keyboard=LocalSoftwareKeyboardController.current
-    BackHandler(state.selected!=null || state.form!=null) { if(state.form!=null)model.cancelForm() else model.back() }
+    BackHandler(state.selected!=null || state.form!=null) { if(!photoState.busy) { if(state.form!=null)model.cancelForm() else model.back() } }
     Scaffold { padding -> Column(Modifier.fillMaxSize().padding(padding).imePadding().padding(horizontal=16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
         Text(stringResource(R.string.h_title),style=MaterialTheme.typography.headlineMedium)
         Choice(stringResource(R.string.h_organization),state.organization?.name ?: stringResource(R.string.h_select_organization),
@@ -116,7 +130,7 @@ fun HydrantScreen(model: HydrantViewModel, requestAccess: ()->Unit = {}, signOut
             TextButton(onClick={showMap=true;mapDetail=false},enabled=!busy && state.form==null && state.writable){Text(stringResource(R.string.map_title))}
             TextButton(onClick=model::refresh,enabled=!busy,modifier=Modifier.testTag("refresh")){Text(stringResource(R.string.h_refresh))}
             TextButton(onClick=requestAccess,enabled=!busy && state.form==null){Text(stringResource(R.string.access_request_access))}
-            TextButton(onClick=signOut,enabled=!state.mutating){Text(stringResource(R.string.auth_sign_out))}
+            TextButton(onClick=signOut,enabled=!state.mutating && !photoState.busy){Text(stringResource(R.string.auth_sign_out))}
         }
         if(busy){LinearProgressIndicator(Modifier.fillMaxWidth());Text(stringResource(if(state.mutating)R.string.h_saving else R.string.auth_loading))}
         state.error?.let { Text(stringResource(errorLabel(it)),color=MaterialTheme.colorScheme.error,modifier=Modifier.testTag("registry-error")) }
@@ -226,7 +240,9 @@ fun HydrantScreen(model: HydrantViewModel, requestAccess: ()->Unit = {}, signOut
     Field(R.string.h_active_state,stringResource(if(h.active)R.string.h_active else R.string.h_inactive));Field(R.string.h_version,h.version.toString())
 }
 @Composable private fun HydrantDetails(state: RegistryState,model: HydrantViewModel,modifier: Modifier) {
-    val h=state.selected?:return;val enabled=!state.loading && !state.mutating
+    val photoState by model.photos.state.collectAsStateWithLifecycle()
+    val context=LocalContext.current
+    val h=state.selected?:return;val enabled=!state.loading && !state.mutating && !photoState.busy
     var status by remember(h.id,h.version,h.status) { mutableStateOf(h.status) }
     Column(modifier.verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(8.dp)) {
         Text(stringResource(R.string.h_details),style=MaterialTheme.typography.titleLarge)
@@ -244,6 +260,12 @@ fun HydrantScreen(model: HydrantViewModel, requestAccess: ()->Unit = {}, signOut
             }
         }
         DetailFields(h,state.types)
+        Text(stringResource(R.string.photo_title),style=MaterialTheme.typography.titleMedium)
+        if(state.writable && (h.active || state.manages)) {
+            OutlinedButton(onClick={model.addPhoto(context)},enabled=enabled) { Text(stringResource(R.string.photo_add)) }
+        }
+        if(photoState.step==si.gasilko.app.feature.photos.presentation.PhotoStep.SAVED)
+            Text(stringResource(R.string.photo_saved_pending),color=MaterialTheme.colorScheme.primary)
         if(state.reviewDraft!=null && state.manages)Button(onClick=model::reviewDraft,enabled=enabled,modifier=Modifier.testTag("review-draft")){Text(stringResource(R.string.h_review_draft))}
         if(state.writable && (h.active || state.manages)) {
             Choice(stringResource(R.string.h_status),stringResource(statusLabel(status)),HydrantStatus.entries.map { it.name to stringResource(statusLabel(it)) },enabled,"status",{status=HydrantStatus.valueOf(it)})
@@ -260,16 +282,13 @@ fun HydrantScreen(model: HydrantViewModel, requestAccess: ()->Unit = {}, signOut
             if(history.loaded && history.error==null)InspectionDueDetails(inspectionDue(history.rows.maxOfOrNull { it.completedAt },
                 h.interval,state.organization?.inspectionIntervalMonths,now))
             Text(stringResource(R.string.inspection_local_history),style=MaterialTheme.typography.titleMedium)
+            TextButton(onClick=model::openHistory,enabled=enabled) { Text(stringResource(R.string.inspection_history_title)) }
             history.error?.let { Text(stringResource(errorLabel(it)),color=MaterialTheme.colorScheme.error) }
             if(history.loaded && history.rows.isEmpty() && history.error==null)Text(stringResource(R.string.inspection_history_empty))
             // Compact local preview; full history and online-history controls belong to M5.6.
-            history.rows.take(5).forEach { inspection ->
+            history.entries.take(5).forEach { entry ->
                 HorizontalDivider()
-                Text(DateFormat.getDateTimeInstance(DateFormat.SHORT,DateFormat.SHORT).format(Date(inspection.completedAt)))
-                Text(stringResource(inspectionModeLabel(inspection.mode)))
-                Text(stringResource(inspectionResultLabel(inspection.result)))
-                InspectionMeasurementValues(inspection.pressureBar,inspection.flowLMin)
-                inspection.notes?.takeIf { it.isNotBlank() }?.let { Text(it) }
+                InspectionHistoryItem(entry)
             }
         }
         Spacer(Modifier.height(16.dp))

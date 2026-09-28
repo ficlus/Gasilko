@@ -249,4 +249,24 @@
     <string name="inspection_current">Veljavno</string>
     <string name="inspection_due_soon">Kmalu za pregled</string>
     <string name="inspection_overdue">Pregled zapadel</string>
+    <string name="inspection_history_title">Zgodovina pregledov</string>
+    <string name="inspection_inspector_unknown">Izvajalec: neznan izvajalec pregleda</string>
+    <string name="inspection_synced">Sinhronizirano</string>
+    <string name="inspection_pending">Čaka na sinhronizacijo</string>
+    <string name="inspection_attention">Potrebna pozornost</string>
+    <string name="inspection_immutable_issue">Strežnik je pregled zavrnil ali vrnil drugačne nespremenljive podatke. Lokalni pregled je ohranjen. Skrbnik mora preveriti neskladje; ponovni poskus ga ne bo samodejno prepisal.</string>
+    <string name="inspection_retry_queue">Sinhronizacija čaka na ponovni poskus ali rešitev predhodne operacije. Uporabite sinhronizacijo ali preverite konflikte v registru.</string>
+    <string name="inspection_refresh_failed">Zgodovine ni bilo mogoče osvežiti. Lokalno shranjeni pregledi ostanejo na voljo.</string>
+    <string name="inspection_queue_conflict">Predhodni konflikt blokira vrsto. Vrnite se v register in odprite pregled konfliktov.</string>
+    <string name="photo_title">Fotografije</string>
+    <string name="photo_add">Dodaj fotografijo</string>
+    <string name="photo_take">Fotografiraj</string>
+    <string name="photo_choose">Izberi fotografijo</string>
+    <string name="photo_preparing">Priprava fotografije …</string>
+    <string name="photo_waiting">Dokončajte zajem ali izbiro fotografije.</string>
+    <string name="photo_saved_pending">Fotografija je shranjena lokalno in pripravljena za sinhronizacijo.</string>
+    <string name="photo_prepare_failed">Fotografije ni bilo mogoče pripraviti. Poskusite znova.</string>
+    <string name="photo_invalid">Neveljavna ali prevelika fotografija. Izberite sliko JPEG, PNG ali WebP.</string>
+    <string name="photo_registration_failed">Shranjevanja fotografije ni bilo mogoče potrditi. Poskusite znova z isto fotografijo.</string>
+    <string name="photo_retry">Poskusi znova</string>
 </resources>
