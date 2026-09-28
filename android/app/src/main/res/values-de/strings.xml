@@ -284,4 +284,17 @@
     <string name="h_use_location">Meinen Standort verwenden</string>
     <string name="h_coordinate_accuracy">Genauigkeit: %1$.0f m</string>
     <string name="h_location_low_accuracy">Die Standortgenauigkeit ist gering. Prüfen Sie die Koordinaten; Sie können fortfahren.</string>
+    <string name="teams_title">Teams</string>
+    <string name="teams_new">Neues Team</string>
+    <string name="teams_name">Teamname</string>
+    <string name="teams_members">Mitglieder</string>
+    <string name="teams_add_member">Mitglied hinzufügen</string>
+    <string name="teams_remove_member">Mitglied entfernen</string>
+    <string name="teams_rename">Team umbenennen</string>
+    <string name="teams_empty">Keine Teams</string>
+    <string name="teams_online_notice">Gespeicherte Teams sind offline verfügbar. Änderungen benötigen eine Internetverbindung.</string>
+    <string name="teams_last_member">Ein Team benötigt mindestens ein aktives Mitglied. Fügen Sie vor dem Entfernen des letzten Mitglieds ein anderes hinzu.</string>
+    <string name="teams_no_candidates">Keine verfügbaren Mitglieder. Aktualisieren Sie die Organisationsdaten.</string>
+    <string name="teams_member_unknown">Mitglied ohne Namen</string>
+    <string name="teams_retry_notice">Änderungen sind möglicherweise nicht bestätigt. Wiederholen Sie dieselbe Anfrage oder aktualisieren Sie die Daten; gespeicherte Teams bleiben verfügbar.</string>
 </resources>

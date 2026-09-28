@@ -9,6 +9,7 @@ import si.gasilko.app.feature.inspections.domain.*
 import si.gasilko.app.feature.inspections.presentation.*
 import si.gasilko.app.feature.photos.domain.*
 import si.gasilko.app.feature.photos.presentation.PhotoGalleryState
+import si.gasilko.app.feature.teams.*
 import java.util.UUID
 import java.time.Instant
 
@@ -33,6 +34,36 @@ class HydrantViewModel(private val repository: HydrantRepository, private val in
     private val scope get() = injectedScope ?: viewModelScope
     private val mutableState = MutableStateFlow(RegistryState())
     val state = mutableState.asStateFlow()
+    private suspend fun <T> teamAccess(org: String, action: suspend ()->T): T {
+        val stamp=generation
+        if(state.value.organization?.id!=org)throw CancellationException()
+        try {
+            val result=action()
+            if(stamp!=generation || state.value.organization?.id!=org)throw CancellationException()
+            return result
+        } catch(e: RegistryFailure) {
+            if(stamp==generation && e.reason in listOf(RegistryError.EXPIRED,RegistryError.FORBIDDEN)) {
+                clear();mutableState.value=RegistryState(error=e.reason)
+            }
+            throw e
+        }
+    }
+    fun teamData(org: String): Flow<TeamViewData> {
+        val stamp=generation
+        return repository.observeTeamData(org).map {
+            if(stamp!=generation || state.value.organization?.id!=org)throw CancellationException()
+            TeamViewData(it)
+        }.catch { e ->
+            if(e is CancellationException)throw e
+            val reason=(e as? RegistryFailure)?.reason ?: RegistryError.SERVER
+            if(stamp==generation && reason in listOf(RegistryError.EXPIRED,RegistryError.FORBIDDEN)) {
+                clear();mutableState.value=RegistryState(error=reason)
+            }
+            emit(TeamViewData(error=reason))
+        }
+    }
+    suspend fun refreshTeams(org: String) = teamAccess(org) { repository.refreshTeams(org) }
+    suspend fun manageTeam(org: String, change: TeamChange) = teamAccess(org) { repository.changeTeam(org,change) }
     val photoScope get() = generation
     private fun photoScopeCurrent(org: String, hydrant: String, stamp: Int) =
         stamp==generation && state.value.organization?.id==org && state.value.selected?.id==hydrant
