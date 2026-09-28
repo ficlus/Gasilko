@@ -281,4 +281,7 @@
     <string name="inspection_photos_staged">Fotos werden beim Abschluss der Prüfung gespeichert.</string>
     <string name="inspection_view_photos">Fotos ansehen</string>
     <string name="photo_remove_staged">Entfernen</string>
+    <string name="h_use_location">Meinen Standort verwenden</string>
+    <string name="h_coordinate_accuracy">Genauigkeit: %1$.0f m</string>
+    <string name="h_location_low_accuracy">Die Standortgenauigkeit ist gering. Prüfen Sie die Koordinaten; Sie können fortfahren.</string>
 </resources>

@@ -40,37 +40,42 @@ private tailrec fun Context.activity(): Activity? = when(this) {
     else -> null
 }
 
-/** Permission prompts happen only inside the two user actions below. Precise fixes stay in memory. */
+/** Permission prompts happen only in user actions. Precise fixes stay in memory. */
 @Composable
 @OptIn(ExperimentalLayoutApi::class)
 internal fun LocationControls(hydrants: List<Hydrant>, onLocation: (Location?) -> Unit,
     onCenter: () -> Unit, onSelect: (Hydrant) -> Unit, onUnavailable: () -> Unit,
     dataLoading: Boolean = false,
+    onUseLocation: ((Location)->Unit)? = null, useLocationLabel: Int = R.string.h_use_location,
+    onUseRequested: ()->Unit = {},
+    locationOnly: Boolean = false, actionEnabled: Boolean = true, requestKey: String = "",
     additionalActions: @Composable () -> Unit = {}) {
     val context=LocalContext.current
     val lifecycle=LocalLifecycleOwner.current.lifecycle
-    var enabled by remember { mutableStateOf(hasLocationPermission(context)) }
+    var useRequested by rememberSaveable(requestKey) { mutableStateOf(false) }
+    var enabled by remember { mutableStateOf(!locationOnly && hasLocationPermission(context)) }
     var denied by rememberSaveable { mutableStateOf(false) }
     var permanent by rememberSaveable { mutableStateOf(false) }
     var showNearby by rememberSaveable { mutableStateOf(false) }
     var location by remember { mutableStateOf(LocationState()) }
     var refresh by remember { mutableIntStateOf(0) }
     val updateLocation by rememberUpdatedState(onLocation)
+    val useLocation by rememberUpdatedState(onUseLocation)
     val launcher=rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
         enabled=hasLocationPermission(context)
         denied=!enabled
-        if(!enabled) onUnavailable()
+        if(!enabled) { useRequested=false;onUnavailable() }
         permanent=!enabled && result.isNotEmpty() && context.activity()?.let { activity ->
             !activity.shouldShowRequestPermissionRationale(Manifest.permission.ACCESS_COARSE_LOCATION) &&
                 !activity.shouldShowRequestPermissionRationale(Manifest.permission.ACCESS_FINE_LOCATION)
         } == true
     }
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
-        enabled=hasLocationPermission(context)
+        enabled=hasLocationPermission(context) && (!locationOnly || useRequested)
         if(enabled) { denied=false; permanent=false }
     }
-    LaunchedEffect(enabled,lifecycle,refresh) {
-        if(enabled) lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+    LaunchedEffect(enabled,lifecycle,refresh,locationOnly && useRequested,locationOnly && actionEnabled) {
+        if(enabled && (!locationOnly || (useRequested && actionEnabled))) lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             try {
                 foregroundLocations(context.applicationContext).collect { value ->
                     location=value
@@ -80,15 +85,30 @@ internal fun LocationControls(hydrants: List<Hydrant>, onLocation: (Location?) -
             } catch(e: CancellationException) { throw e }
             catch(_: Exception) { location=LocationState(notice=LocationNotice.UNAVAILABLE); updateLocation(null) }
             finally { location=location.copy(fix=null); updateLocation(null) }
-        } else { location=LocationState(); updateLocation(null) }
+        } else {
+            location=if(locationOnly)LocationState(notice=location.notice?.takeUnless { it==LocationNotice.SEARCHING }) else LocationState()
+            updateLocation(null)
+        }
     }
     DisposableEffect(Unit) { onDispose { updateLocation(null) } }
     fun request() {
-        if(hasLocationPermission(context)) { enabled=true; refresh++; return }
-        if(!permanent) launcher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
-        else onUnavailable()
+        if(hasLocationPermission(context)) {
+            denied=false;permanent=false;location=LocationState(notice=LocationNotice.SEARCHING)
+            enabled=true;refresh++;return
+        }
+        if(!permanent) {
+            denied=false;location=LocationState(notice=LocationNotice.SEARCHING)
+            launcher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+        } else { useRequested=false;onUnavailable() }
     }
     val fix=location.fix?.takeIf(::freshLocation)
+    LaunchedEffect(fix,useRequested,actionEnabled,requestKey) {
+        if(useRequested && actionEnabled && fix!=null && lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED) &&
+            hasLocationPermission(context) && freshLocation(fix)) {
+            useRequested=false
+            useLocation?.invoke(Location(fix))
+        }
+    }
     val point=fix?.let { GeoPoint(it.latitude,it.longitude) }
     // Include both input identities so an in-flight calculation can never show an old scope/fix.
     val calculated by produceState(Triple<List<Hydrant>?, GeoPoint?, List<NearbyHydrant>>(null,null,emptyList()), hydrants, point, showNearby) {
@@ -97,12 +117,19 @@ internal fun LocationControls(hydrants: List<Hydrant>, onLocation: (Location?) -
     val nearby=calculated.third.takeIf { !dataLoading && calculated.first == hydrants && calculated.second == point }.orEmpty()
     LaunchedEffect(denied,permanent,location.notice) {
         if(denied || permanent || location.notice in listOf(LocationNotice.DENIED,LocationNotice.DISABLED,
-                LocationNotice.UNAVAILABLE,LocationNotice.STALE)) onUnavailable()
+                LocationNotice.UNAVAILABLE,LocationNotice.STALE)) { useRequested=false;onUnavailable() }
     }
     Column(Modifier.padding(horizontal=16.dp)) {
         FlowRow(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-            TextButton(onClick={onCenter();request()}) { Text(stringResource(R.string.map_my_location)) }
-            TextButton(onClick={showNearby=true;request()}) { Text(stringResource(R.string.map_nearby)) }
+            if(!locationOnly) {
+                TextButton(onClick={onCenter();request()}) { Text(stringResource(R.string.map_my_location)) }
+                TextButton(onClick={showNearby=true;request()}) { Text(stringResource(R.string.map_nearby)) }
+            }
+            if(onUseLocation!=null) TextButton(onClick={
+                onUseRequested()
+                if(fix!=null && freshLocation(fix) && hasLocationPermission(context))useLocation?.invoke(Location(fix))
+                else { useRequested=true;request() }
+            },enabled=actionEnabled && !useRequested) { Text(stringResource(useLocationLabel)) }
             additionalActions()
         }
         val message=when {
@@ -115,7 +142,7 @@ internal fun LocationControls(hydrants: List<Hydrant>, onLocation: (Location?) -
             else -> null
         }
         message?.let { Text(stringResource(it),style=MaterialTheme.typography.bodySmall) }
-        if(fix!=null) {
+        if(fix!=null && !locationOnly) {
             Text(stringResource(if(context.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)==PackageManager.PERMISSION_GRANTED)
                 R.string.map_location_accuracy else R.string.map_location_approximate, NumberFormat.getIntegerInstance().format(fix.accuracy)),style=MaterialTheme.typography.bodySmall)
         }
