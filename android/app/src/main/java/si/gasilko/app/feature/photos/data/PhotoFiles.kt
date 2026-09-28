@@ -12,6 +12,7 @@ import java.security.MessageDigest
 
 /** Private, non-cache/non-backup storage. No automatic cleanup, even after acknowledgement. */
 class PhotoFiles(context: Context) {
+    internal val displayCache=PhotoDisplayCache(context)
     private val root=File(context.applicationContext.noBackupFilesDir,"pending-photos")
     fun destination(account: String, organization: String, hydrant: String, id: String, mime: String): File {
         listOf(account,organization,hydrant,id).forEach(::photoUuid)

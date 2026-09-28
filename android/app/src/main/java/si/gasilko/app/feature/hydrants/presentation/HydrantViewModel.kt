@@ -7,6 +7,8 @@ import kotlinx.coroutines.flow.*
 import si.gasilko.app.feature.hydrants.domain.*
 import si.gasilko.app.feature.inspections.domain.*
 import si.gasilko.app.feature.inspections.presentation.*
+import si.gasilko.app.feature.photos.domain.*
+import si.gasilko.app.feature.photos.presentation.PhotoGalleryState
 import java.util.UUID
 import java.time.Instant
 
@@ -31,6 +33,42 @@ class HydrantViewModel(private val repository: HydrantRepository, private val in
     private val scope get() = injectedScope ?: viewModelScope
     private val mutableState = MutableStateFlow(RegistryState())
     val state = mutableState.asStateFlow()
+    val photoScope get() = generation
+    private fun photoScopeCurrent(org: String, hydrant: String, stamp: Int) =
+        stamp==generation && state.value.organization?.id==org && state.value.selected?.id==hydrant
+    fun photoEntries(org: String, hydrant: String): Flow<PhotoGalleryState> {
+        val stamp=generation
+        return repository.observePhotos(org,hydrant).map {
+            if(!photoScopeCurrent(org,hydrant,stamp))throw CancellationException()
+            PhotoGalleryState(it.filter { entry -> entry.photo.active && entry.photo.category==PhotoCategory.HYDRANT }
+                .sortedWith(compareByDescending<PhotoEntry> { entry -> entry.photo.capturedAt }.thenByDescending { entry -> entry.photo.id }),loaded=true)
+        }.catch { e ->
+            if(e is CancellationException)throw e
+            val error=(e as? RegistryFailure)?.reason ?: RegistryError.SERVER
+            if(photoScopeCurrent(org,hydrant,stamp) && error in listOf(RegistryError.EXPIRED,RegistryError.FORBIDDEN)) {
+                clear();mutableState.value=RegistryState(error=error)
+            }
+            emit(PhotoGalleryState(error=error))
+        }
+    }
+    private suspend fun <T> photoRead(org: String, hydrant: String, action: suspend ()->T): T {
+        val stamp=generation
+        if(!photoScopeCurrent(org,hydrant,stamp))throw CancellationException()
+        try {
+            val result=action()
+            if(!photoScopeCurrent(org,hydrant,stamp))throw CancellationException()
+            return result
+        } catch(e: RegistryFailure) {
+            if(photoScopeCurrent(org,hydrant,stamp) && e.reason in listOf(RegistryError.EXPIRED,RegistryError.FORBIDDEN)) {
+                clear();mutableState.value=RegistryState(error=e.reason)
+            }
+            throw e
+        }
+    }
+    suspend fun photoImage(org: String, hydrant: String, id: String) =
+        photoRead(org,hydrant) { repository.displayPhoto(org,hydrant,id) }
+    suspend fun refreshPhotoMetadata(org: String, hydrant: String) =
+        photoRead(org,hydrant) { repository.refreshPhotos(org,hydrant) }
     val photos: si.gasilko.app.feature.photos.presentation.PhotoAcquisition by lazy { si.gasilko.app.feature.photos.presentation.PhotoAcquisition(repository,scope,
         { org,id,stamp -> val s=state.value
             stamp==generation && s.organization?.id==org && s.selected?.id==id && s.writable && (s.selected?.active==true || s.manages)

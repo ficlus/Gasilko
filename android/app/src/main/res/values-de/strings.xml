@@ -269,4 +269,12 @@
     <string name="photo_invalid">Ungültiges oder zu großes Foto. Wählen Sie ein JPEG-, PNG- oder WebP-Bild.</string>
     <string name="photo_registration_failed">Das Speichern des Fotos konnte nicht bestätigt werden. Versuchen Sie es mit demselben Foto erneut.</string>
     <string name="photo_retry">Erneut versuchen</string>
+    <string name="photo_count">Fotos (%1$d)</string>
+    <string name="photo_all">Alle Fotos</string>
+    <string name="photo_empty">Keine Fotos</string>
+    <string name="photo_metadata_failed">Fotodaten konnten nicht aktualisiert werden. Gespeicherte Fotos bleiben verfügbar.</string>
+    <string name="photo_load_failed">Foto konnte nicht geladen werden. Verbindung prüfen und erneut versuchen.</string>
+    <string name="photo_missing_local">Aktion erforderlich: Die lokale Datei des noch nicht synchronisierten Fotos fehlt.</string>
+    <string name="photo_corrupt">Die Fotodatei ist beschädigt oder ungültig und kann nicht angezeigt werden.</string>
+    <string name="photo_access_denied">Kein Zugriff auf das Foto. Eine Online-Prüfung der Berechtigung ist erforderlich.</string>
 </resources>

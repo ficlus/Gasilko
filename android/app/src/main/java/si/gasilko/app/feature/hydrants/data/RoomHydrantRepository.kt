@@ -37,6 +37,7 @@ class RoomHydrantRepository(
     override suspend fun discardUnregisteredPhoto(organization: String, hydrantId: String, input: LocalPhotoInput) = photos.discard(organization,hydrantId,input)
     override fun observePhotos(organization: String, hydrantId: String, inspectionId: String?) = photos.observe(organization,hydrantId,inspectionId)
     override suspend fun refreshPhotos(organization: String, hydrantId: String) = photos.refresh(organization,hydrantId)
+    override suspend fun displayPhoto(organization: String, hydrantId: String, id: String) = photos.display(organization,hydrantId,id)
     override fun observeInspectionHistory(organization: String, hydrantId: String): Flow<List<InspectionHistoryEntry>> = flow {
         val account=currentAccount()
         emitAll(combine(database.invalidationTracker.createFlow("inspections","pending_hydrant_changes","hydrants","organizations"),
