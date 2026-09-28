@@ -208,4 +208,7 @@
     <string name="inspection_photos_staged">Fotografije se shranijo ob zaključku pregleda.</string>
     <string name="inspection_view_photos">Ogled fotografij</string>
     <string name="photo_remove_staged">Odstrani</string>
+    <string name="h_use_location">Uporabi mojo lokacijo</string>
+    <string name="h_coordinate_accuracy">Natančnost: %1$.0f m</string>
+    <string name="h_location_low_accuracy">Natančnost lokacije je nizka. Preverite koordinate; lahko nadaljujete.</string>
 </resources>

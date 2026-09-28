@@ -43,6 +43,7 @@ data class HydrantForm(
     val id: String, val type: String = "", val latitude: String = "", val longitude: String = "",
     val address: String = "", val description: String = "", val notes: String = "", val interval: String = "",
     val status: HydrantStatus = HydrantStatus.UNKNOWN, val baseVersion: Long? = null,
+    val coordinateAccuracy: Float? = null,
 ) {
     fun fields(): HydrantFields {
         if (type.isBlank()) throw RegistryFailure(RegistryError.TYPE)

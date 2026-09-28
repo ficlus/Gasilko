@@ -51,7 +51,8 @@ import java.net.URI
 @Composable
 @OptIn(ExperimentalLayoutApi::class)
 fun MapScreen(onBack: () -> Unit, hydrants: List<Hydrant>, onOpenHydrant: (String) -> Unit,
-    dataLoading: Boolean = false, dataError: RegistryError? = null, styleUrl: String = BuildConfig.MAP_STYLE_URL) {
+    dataLoading: Boolean = false, dataError: RegistryError? = null, styleUrl: String = BuildConfig.MAP_STYLE_URL,
+    onAddHydrant: ((Double,Double,Float?)->Unit)? = null, creationEnabled: Boolean = true) {
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     var attempt by rememberSaveable { mutableIntStateOf(0) }
     var displayedStyle by rememberSaveable(styleUrl) { mutableStateOf(styleUrl) }
@@ -74,6 +75,8 @@ fun MapScreen(onBack: () -> Unit, hydrants: List<Hydrant>, onOpenHydrant: (Strin
     fun back() { cancelFocus();onBack() }
     LaunchedEffect(centerRequested) { if(centerRequested) { delay(30_000);centerRequested=false } }
     val currentLocation by rememberUpdatedState(location)
+    val addHydrant by rememberUpdatedState(onAddHydrant)
+    val canCreate by rememberUpdatedState(creationEnabled)
     val selected = hydrants.find { it.id == selectedId && HydrantMapLayers.valid(it) }
     val validCount = remember(hydrants) { hydrants.count(HydrantMapLayers::valid) }
     val data by produceState<Pair<List<Hydrant>?,String>>(null to HydrantMapLayers.EMPTY, hydrants) {
@@ -106,6 +109,9 @@ fun MapScreen(onBack: () -> Unit, hydrants: List<Hydrant>, onOpenHydrant: (Strin
             if(dataLoading)LinearProgressIndicator(Modifier.fillMaxWidth())
             LocationControls(hydrants, onLocation={location=it}, onCenter={cancelFocus();centerRequested=true},
                 dataLoading=dataLoading,
+                onUseLocation=onAddHydrant?.let { { fix: Location ->
+                    if(canCreate) { cancelFocus();addHydrant?.invoke(fix.latitude,fix.longitude,fix.accuracy) }
+                } },useLocationLabel=R.string.h_add,actionEnabled=creationEnabled,
                 onUnavailable={centerRequested=false},
                 onSelect={ h -> selectedId=h.id;cancelFocus();focus=GeoPoint(h.latitude!!,h.longitude!!) },
                 additionalActions={ OfflineMapControls(displayedStyle, visibleBounds={
@@ -184,6 +190,14 @@ fun MapScreen(onBack: () -> Unit, hydrants: List<Hydrant>, onOpenHydrant: (Strin
                                         if(reason == MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE) cancelFocus()
                                     }
                                     if(saved.bundle == null) map.cameraPosition = CameraPosition.Builder().target(LatLng(46.15, 14.95)).zoom(6.0).build()
+                                    map.addOnMapLongClickListener { point ->
+                                        if(released || !canCreate || addHydrant==null || !GeoPoint(point.latitude,point.longitude).valid)false
+                                        else {
+                                            cancelFocus()
+                                            addHydrant?.invoke(point.latitude,point.longitude,null)
+                                            true
+                                        }
+                                    }
                                     map.addOnMapClickListener { point ->
                                         if(released || hydrantLayers==null) false else {
                                             val pixel=map.projection.toScreenLocation(point)

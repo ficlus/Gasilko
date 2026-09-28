@@ -149,6 +149,11 @@ fun HydrantScreen(model: HydrantViewModel, requestAccess: ()->Unit = {}, signOut
         mapState.SaveableStateProvider("map") {
             si.gasilko.app.feature.map.MapScreen(onBack={showMap=false}, hydrants=mapData.rows,
                 dataLoading=mapData.loading, dataError=mapData.error ?: state.error,
+                creationEnabled=!state.loading && !state.mutating,
+                onAddHydrant={ latitude,longitude,accuracy ->
+                    model.addAt(latitude,longitude,accuracy)
+                    if(model.state.value.form!=null)mapDetail=true
+                },
                 onOpenHydrant={ id -> if(!state.loading && !state.mutating) { model.open(id); mapDetail=true } })
         }
         return
@@ -342,6 +347,17 @@ fun HydrantScreen(model: HydrantViewModel, requestAccess: ()->Unit = {}, signOut
         // Text keyboard keeps minus signs and locale decimal separators available.
         FormText(R.string.h_latitude,form.latitude,enabled,"latitude"){model.changeForm(form.copy(latitude=it))}
         FormText(R.string.h_longitude,form.longitude,enabled,"longitude"){model.changeForm(form.copy(longitude=it))}
+        if(form.baseVersion==null) {
+            si.gasilko.app.feature.map.LocationControls(emptyList(),onLocation={},onCenter={},onSelect={},onUnavailable={},
+                locationOnly=true,actionEnabled=enabled && state.writable,
+                requestKey=form.id+":"+form.latitude+":"+form.longitude,
+                onUseRequested=model::requestFormLocation,
+                onUseLocation={fix -> model.useFormLocation(form,fix.latitude,fix.longitude,fix.accuracy)})
+            form.coordinateAccuracy?.let { accuracy ->
+                Text(stringResource(R.string.h_coordinate_accuracy,accuracy))
+                if(accuracy>50f)Text(stringResource(R.string.h_location_low_accuracy),color=MaterialTheme.colorScheme.error)
+            }
+        }
         FormText(R.string.h_address,form.address,enabled,"address"){model.changeForm(form.copy(address=it))}
         FormText(R.string.h_description,form.description,enabled,"description"){model.changeForm(form.copy(description=it))}
         if(form.baseVersion==null)Choice(stringResource(R.string.h_status),stringResource(statusLabel(form.status)),HydrantStatus.entries.map { it.name to stringResource(statusLabel(it)) },enabled,"create-status",{model.changeForm(form.copy(status=HydrantStatus.valueOf(it)))})

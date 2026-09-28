@@ -382,8 +382,37 @@ class HydrantViewModel(private val repository: HydrantRepository, private val in
         mutableState.value=state.value.copy(selected=null,form=null,reviewDraft=null,error=null,conflict=false,confirmDeactivate=false,reloadId=null,inspectionDraft=null,inspectionSaved=false,showHistory=false,historyRefreshing=false,historyError=null)
     } }
     fun add() { if(state.value.writable && !state.value.loading && !state.value.mutating)mutableState.value=state.value.copy(form=HydrantForm(UUID.randomUUID().toString()),reviewDraft=null,error=null,conflict=false) }
+    fun addAt(latitude: Double, longitude: Double, accuracy: Float?) {
+        val s=state.value
+        if(!s.writable || s.loading || s.mutating || s.form!=null || s.inspectionDraft!=null ||
+            !latitude.isFinite() || !longitude.isFinite() || latitude !in -90.0..90.0 || longitude !in -180.0..180.0)return
+        mutableState.value=s.copy(form=HydrantForm(UUID.randomUUID().toString(),
+            latitude=java.math.BigDecimal.valueOf(latitude).toPlainString(),
+            longitude=java.math.BigDecimal.valueOf(longitude).toPlainString(),
+            coordinateAccuracy=accuracy?.takeIf { it.isFinite() && it>=0 }),reviewDraft=null,error=null,conflict=false)
+    }
+    private var requestedCoordinates: Triple<String,String,String>? = null
+    fun requestFormLocation() {
+        requestedCoordinates=state.value.form?.let { Triple(it.id,it.latitude,it.longitude) }
+    }
+    fun useFormLocation(expected: HydrantForm, latitude: Double, longitude: Double, accuracy: Float?) {
+        val s=state.value;val form=s.form ?: return
+        if(requestedCoordinates!=Triple(form.id,form.latitude,form.longitude))return
+        if(!s.writable || s.loading || s.mutating || form.baseVersion!=null || form.id!=expected.id ||
+            form.latitude!=expected.latitude || form.longitude!=expected.longitude ||
+            !latitude.isFinite() || !longitude.isFinite() || latitude !in -90.0..90.0 || longitude !in -180.0..180.0)return
+        requestedCoordinates=null
+        mutableState.value=s.copy(form=form.copy(latitude=java.math.BigDecimal.valueOf(latitude).toPlainString(),
+            longitude=java.math.BigDecimal.valueOf(longitude).toPlainString(),
+            coordinateAccuracy=accuracy?.takeIf { it.isFinite() && it>=0 }),error=null)
+    }
     fun edit() { val s=state.value; if(s.manages && s.writable && !s.loading && !s.mutating) s.selected?.let { mutableState.value=s.copy(form=HydrantForm.from(it),error=null,conflict=false) } }
-    fun changeForm(form: HydrantForm) { if(!state.value.mutating && form.id==state.value.form?.id) mutableState.value=state.value.copy(form=form,error=null) }
+    fun changeForm(form: HydrantForm) { if(!state.value.mutating && form.id==state.value.form?.id) {
+        val old=state.value.form!!
+        if(form.latitude!=old.latitude || form.longitude!=old.longitude)requestedCoordinates=null
+        mutableState.value=state.value.copy(form=if(form.latitude!=old.latitude || form.longitude!=old.longitude)
+            form.copy(coordinateAccuracy=null) else form,error=null)
+    } }
     fun cancelForm() { if(!state.value.mutating)mutableState.value=state.value.copy(form=null,error=null) }
     fun reviewDraft() { val s=state.value; val draft=s.reviewDraft?:return; val latest=s.selected?:return
         if(s.manages && !s.loading && !s.mutating)mutableState.value=s.copy(form=draft.copy(baseVersion=latest.version),reviewDraft=null) }

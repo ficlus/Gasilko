@@ -24,7 +24,7 @@ internal fun hasLocationPermission(context: Context) =
     context.checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
         context.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
 
-/** Collected only while the map is STARTED. No service, storage, or network/sync integration. */
+/** Collected only by STARTED foreground UI. No service, storage, or network/sync integration. */
 internal fun foregroundLocations(context: Context) = callbackFlow {
     val manager = context.getSystemService(LocationManager::class.java)
     if(manager == null) { trySend(LocationState(notice=LocationNotice.UNAVAILABLE)); close(); return@callbackFlow }
