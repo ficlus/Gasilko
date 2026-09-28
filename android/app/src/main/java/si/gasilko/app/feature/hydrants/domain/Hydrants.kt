@@ -24,7 +24,7 @@ data class HydrantQuery(val organization: String = "", val search: String = "", 
         (status==null || h.status==status) && (active==ActiveFilter.ALL || h.active==(active==ActiveFilter.ACTIVE)) &&
         (search.isBlank() || listOf(h.code,h.address,h.description).any { it?.contains(search.trim(),ignoreCase=true)==true })
 }
-data class RegistryOrganization(val id: String, val name: String, val role: RegistryRole, val active: Boolean = true)
+data class RegistryOrganization(val id: String, val name: String, val role: RegistryRole, val active: Boolean = true, val inspectionIntervalMonths: Int? = null)
 data class HydrantType(val id: String, val organization: String?, val code: String, val name: String, val active: Boolean)
 data class Hydrant(
     val id: String, val organization: String, val code: String?, val type: String,

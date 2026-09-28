@@ -8,9 +8,10 @@ import si.gasilko.app.feature.hydrants.domain.*
 import si.gasilko.app.feature.inspections.domain.*
 import si.gasilko.app.feature.inspections.presentation.*
 import java.util.UUID
+import java.time.Instant
 
 data class MapHydrantsState(val rows: List<Hydrant> = emptyList(), val loading: Boolean = false, val error: RegistryError? = null)
-data class InspectionHistoryState(val rows: List<Inspection> = emptyList(), val error: RegistryError? = null)
+data class InspectionHistoryState(val rows: List<Inspection> = emptyList(), val error: RegistryError? = null, val loaded: Boolean = false)
 
 data class RegistryState(
     val organizations: List<RegistryOrganization> = emptyList(), val organization: RegistryOrganization? = null,
@@ -28,11 +29,17 @@ class HydrantViewModel(private val repository: HydrantRepository, private val in
     private val mutableState = MutableStateFlow(RegistryState())
     val state = mutableState.asStateFlow()
     fun inspectionHistory(organization: String, hydrantId: String): Flow<InspectionHistoryState> =
-        repository.observeInspections(organization, hydrantId).map { InspectionHistoryState(rows=it) }
+        repository.observeInspections(organization, hydrantId).map { InspectionHistoryState(rows=it,loaded=true) }
             .catch { e ->
                 if(e is CancellationException) throw e
                 emit(InspectionHistoryState(error=(e as? RegistryFailure)?.reason ?: RegistryError.SERVER))
             }
+    val inspectionClock: Flow<Instant> = flow { while(true) { emit(Instant.now()); delay(60_000) } }
+    fun changeMeasurements(pressure: String, flow: String) {
+        val s=state.value;val draft=s.inspectionDraft ?: return
+        if(!s.mutating && draft.completion==null && draft.mode!=InspectionMode.QUICK)
+            mutableState.value=s.copy(inspectionDraft=draft.copy(pressure=pressure,flow=flow),error=null)
+    }
     fun startInspection(mode: InspectionMode) {
         val s=state.value; val h=s.selected ?: return; val org=s.organization ?: return
         if(s.loading || s.mutating || s.form!=null || s.inspectionDraft!=null || !s.writable || (!h.active && !s.manages))return
@@ -56,20 +63,23 @@ class HydrantViewModel(private val repository: HydrantRepository, private val in
     fun moveGuided(forward: Boolean) {
         val s=state.value;val draft=s.inspectionDraft ?: return
         if(s.mutating || draft.completion!=null || draft.mode!=InspectionMode.GUIDED)return
-        val answered=if(draft.step<4)draft.answers.containsKey(GuidedCheck.entries[draft.step]) else draft.result!=null
+        val answered=when { draft.step<4 -> draft.answers.containsKey(GuidedCheck.entries[draft.step]); draft.step==4 -> draft.measurementsValid(); else -> draft.result!=null }
         if(forward && !answered)return
-        mutableState.value=s.copy(inspectionDraft=draft.copy(step=(draft.step+if(forward)1 else -1).coerceIn(0,5)),error=null)
+        mutableState.value=s.copy(inspectionDraft=draft.copy(step=(draft.step+if(forward)1 else -1).coerceIn(0,6)),error=null)
     }
     fun completeInspection(checkNotes: String? = null) {
         val s=state.value; val draft=s.inspectionDraft ?: return; val result=draft.result ?: return
         if(s.loading || s.mutating || !s.writable || s.organization?.id!=draft.organization || s.selected?.id!=draft.hydrantId)return
-        if(draft.mode==InspectionMode.GUIDED && draft.step!=5)return
+        if(draft.mode==InspectionMode.GUIDED && draft.step!=6)return
         if(draft.mode!=InspectionMode.QUICK && (GuidedCheck.entries.any { it !in draft.answers } || checkNotes==null))return
+        if(draft.mode!=InspectionMode.QUICK && !draft.measurementsValid())return
         // Freeze the full event on first confirmation, including completion time. An
         // uncertain local outcome must retry the same immutable event, not just its UUID.
         val input=draft.completion ?: InspectionCompletion(draft.mode,result,draft.startedAt,
             maxOf(draft.startedAt,System.currentTimeMillis()),
-            notes=if(draft.mode!=InspectionMode.QUICK)checkNotes else draft.notes.takeIf { it.isNotBlank() },id=draft.id)
+            notes=if(draft.mode!=InspectionMode.QUICK)checkNotes else draft.notes.takeIf { it.isNotBlank() },
+            pressureBar=if(draft.mode==InspectionMode.QUICK)null else parseMeasurement(draft.pressure,"999.99").value,
+            flowLMin=if(draft.mode==InspectionMode.QUICK)null else parseMeasurement(draft.flow,"999999.99").value,id=draft.id)
         val stamp=generation
         mutableState.value=s.copy(inspectionDraft=draft.copy(completion=input),mutating=true,error=null)
         start {
@@ -112,6 +122,8 @@ class HydrantViewModel(private val repository: HydrantRepository, private val in
                     try {
                         repository.observeSync(organization).collectLatest { derived ->
                             val old = state.value
+                            val currentOrganization=repository.organizations().firstOrNull { it.id==organization }
+                                ?: throw RegistryFailure(RegistryError.FORBIDDEN)
                             // Re-read the visible pages from Room after acknowledgements/resolutions.
                             // Drafts remain untouched; their original optimistic version is retained.
                             val rows = mutableListOf<Hydrant>()
@@ -128,7 +140,8 @@ class HydrantViewModel(private val repository: HydrantRepository, private val in
                                 state.value.query == old.query && state.value.selected?.id == old.selected?.id &&
                                 !state.value.loading && !state.value.mutating) {
                                 mutableSync.value = derived
-                                mutableState.value = state.value.copy(rows = rows, more = page.size == 100, selected = selected)
+                                mutableState.value = state.value.copy(rows = rows, more = page.size == 100, selected = selected,
+                                    organization = currentOrganization)
                             }
                         }
                     } catch(e: CancellationException) { throw e }

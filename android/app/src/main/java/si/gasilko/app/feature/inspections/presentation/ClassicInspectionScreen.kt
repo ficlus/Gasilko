@@ -19,7 +19,7 @@ import si.gasilko.app.feature.inspections.domain.InspectionResult
 @Composable
 fun ClassicInspectionScreen(draft: InspectionDraft, hydrantLabel: String, busy: Boolean, error: RegistryError?,
     answer: (GuidedCheck,GuidedAnswer)->Unit, change: (InspectionResult?,String)->Unit,
-    complete: (String)->Unit, cancel: ()->Unit) {
+    complete: (String)->Unit, cancel: ()->Unit, measurements: (String,String)->Unit) {
     val editable=!busy && draft.completion==null
     val resources=LocalContext.current.resources
     val answered=GuidedCheck.entries.all { it in draft.answers } && draft.result!=null
@@ -33,6 +33,7 @@ fun ClassicInspectionScreen(draft: InspectionDraft, hydrantLabel: String, busy: 
                 InspectionCheckOptions(check,draft.answers[check],editable) { answer(check,it) }
                 HorizontalDivider()
             }
+            InspectionMeasurementInputs(draft,editable,measurements)
             Text(stringResource(R.string.inspection_choose_result),style=MaterialTheme.typography.titleLarge)
             Text(stringResource(R.string.guided_result_notice))
             Column(Modifier.selectableGroup(),verticalArrangement=Arrangement.spacedBy(8.dp)) {
@@ -53,7 +54,7 @@ fun ClassicInspectionScreen(draft: InspectionDraft, hydrantLabel: String, busy: 
             }
             if(!answered)Text(stringResource(R.string.inspection_checks_required))
             Button(onClick={complete(draft.completion?.notes ?: InspectionNotesFormatter.format(resources,draft.answers,draft.notes))},
-                enabled=!busy && answered,modifier=Modifier.fillMaxWidth().heightIn(min=56.dp)) {
+                enabled=!busy && answered && draft.measurementsValid(),modifier=Modifier.fillMaxWidth().heightIn(min=56.dp)) {
                 Text(stringResource(if(draft.completion==null)R.string.inspection_complete else R.string.inspection_retry))
             }
             OutlinedButton(onClick=cancel,enabled=!busy,modifier=Modifier.fillMaxWidth().heightIn(min=48.dp)) {

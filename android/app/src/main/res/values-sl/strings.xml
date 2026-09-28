@@ -159,4 +159,21 @@
     <string name="guided_result_notice">Končni rezultat izberite sami glede na ugotovitve pregleda.</string>
     <string name="inspection_start_classic">Začni klasični pregled</string>
     <string name="inspection_checks_required">Odgovorite na vsa štiri vprašanja in izberite rezultat pregleda.</string>
+    <string name="inspection_measurements">Meritve (neobvezno)</string>
+    <string name="inspection_pressure">Tlak (bar)</string>
+    <string name="inspection_flow">Pretok (L/min)</string>
+    <string name="inspection_pressure_invalid">Vnesite tlak od 0 do 999,99 z največ dvema decimalnima mestoma.</string>
+    <string name="inspection_flow_invalid">Vnesite pretok od 0 do 999999,99 z največ dvema decimalnima mestoma.</string>
+    <string name="inspection_pressure_value">Tlak: %1$s bar</string>
+    <string name="inspection_flow_value">Pretok: %1$s L/min</string>
+    <string name="inspection_due_title">Pregledi</string>
+    <string name="inspection_due_local">Izračun temelji na lokalno shranjenih pregledih in nastavitvah.</string>
+    <string name="inspection_last">Zadnji pregled: %1$s</string>
+    <string name="inspection_never">Še ni pregledan</string>
+    <string name="inspection_effective_interval">Interval pregleda (meseci): %1$d</string>
+    <string name="inspection_interval_unknown">Interval organizacije še ni shranjen. Osvežite podatke s povezavo.</string>
+    <string name="inspection_next">Naslednji pregled: %1$s</string>
+    <string name="inspection_current">Veljavno</string>
+    <string name="inspection_due_soon">Kmalu za pregled</string>
+    <string name="inspection_overdue">Pregled zapadel</string>
 </resources>
