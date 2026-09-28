@@ -18,6 +18,7 @@ import io.ktor.http.ContentType
 import si.gasilko.app.feature.photos.domain.*
 import si.gasilko.app.feature.photos.data.*
 import si.gasilko.app.feature.teams.*
+import si.gasilko.app.feature.plans.*
 
 interface RegistryTransport {
     suspend fun downloadPhoto(path: String): ByteArray = throw RegistryFailure(RegistryError.UNAVAILABLE)
@@ -43,7 +44,7 @@ class SupabaseRegistryTransport(private val client: SupabaseClient): RegistryTra
 }
 fun registryError(code: String?, message: String?, http: Int? = null): RegistryError = when {
     http == 401 || code in listOf("PGRST301","PGRST303") -> RegistryError.EXPIRED
-    code == "P0001" && message == "HYDRANT_VERSION_CONFLICT" -> RegistryError.CONFLICT
+    code == "P0001" && message in listOf("HYDRANT_VERSION_CONFLICT","PLAN_VERSION_CONFLICT") -> RegistryError.CONFLICT
     code == "42501" || http == 403 -> RegistryError.FORBIDDEN
     code?.startsWith("22") == true || code?.startsWith("23") == true -> RegistryError.VALIDATION
     else -> RegistryError.SERVER
@@ -64,6 +65,15 @@ fun decodeHydrant(value: JsonElement): Hydrant {
         row.text("created_at"),row.text("updated_at"),row.text("updated_by"))
 }
 class OnlineHydrantRepository(private val wire: RegistryTransport, private val diagnostic: (String,RegistryError)->Unit = {_,_->}): HydrantRepository {
+    override suspend fun readPlans(org: String) = request("plans_read") {
+        decodePlans(wire.rpc("read_inspection_plans",buildJsonObject { put("organization",org) }))
+    }
+    override suspend fun savePlan(org: String, change: PlanSave) = request("plans_write") {
+        decodePlans(wire.rpc("save_inspection_plan",buildJsonObject { put("organization",org);put("request",change.payload()) }))
+    }
+    override suspend fun listPlanInspections(org: String, after: String?) = request("plans_history") {
+        wire.rows("inspections",mapOf("organization_id" to org),after).map(::decodeInspection)
+    }
     override suspend fun readTeams(organization: String) = request("teams_read") {
         decodeTeams(wire.rpc("read_inspection_teams",buildJsonObject { put("organization",organization) }))
     }

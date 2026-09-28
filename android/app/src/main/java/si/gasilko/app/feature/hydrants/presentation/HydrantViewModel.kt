@@ -10,6 +10,7 @@ import si.gasilko.app.feature.inspections.presentation.*
 import si.gasilko.app.feature.photos.domain.*
 import si.gasilko.app.feature.photos.presentation.PhotoGalleryState
 import si.gasilko.app.feature.teams.*
+import si.gasilko.app.feature.plans.*
 import java.util.UUID
 import java.time.Instant
 
@@ -62,6 +63,24 @@ class HydrantViewModel(private val repository: HydrantRepository, private val in
             emit(TeamViewData(error=reason))
         }
     }
+    fun planData(query: HydrantQuery): Flow<PlanViewData> {
+        val stamp=generation
+        return combine(repository.observePlans(query.organization),repository.observeTeamData(query.organization),
+            repository.observePlanCandidates(query)) { data,teams,candidates ->
+            if(stamp!=generation || state.value.organization?.id!=query.organization)throw CancellationException()
+            PlanViewData(data,teams,candidates)
+        }.catch { e ->
+            if(e is CancellationException)throw e
+            val reason=(e as? RegistryFailure)?.reason ?: RegistryError.SERVER
+            if(stamp==generation && reason in listOf(RegistryError.EXPIRED,RegistryError.FORBIDDEN)) {
+                clear();mutableState.value=RegistryState(error=reason)
+            }
+            emit(PlanViewData(error=reason))
+        }
+    }
+    suspend fun refreshPlans(org: String) = teamAccess(org) { repository.refreshTeams(org);repository.refreshPlans(org) }
+    suspend fun refreshPlanCandidates(org: String) = teamAccess(org) { repository.refreshPlanCandidates(org) }
+    suspend fun savePlan(org: String, change: PlanSave) = teamAccess(org) { repository.savePlan(org,change) }
     suspend fun refreshTeams(org: String) = teamAccess(org) { repository.refreshTeams(org) }
     suspend fun manageTeam(org: String, change: TeamChange) = teamAccess(org) { repository.changeTeam(org,change) }
     val photoScope get() = generation
