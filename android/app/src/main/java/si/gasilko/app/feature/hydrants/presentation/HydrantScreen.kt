@@ -77,6 +77,17 @@ fun HydrantScreen(model: HydrantViewModel, requestAccess: ()->Unit = {}, signOut
     var showMap by rememberSaveable(state.organization?.id) { mutableStateOf(false) }
     var mapDetail by rememberSaveable(state.organization?.id) { mutableStateOf(false) }
     val mapState = key(state.organization?.id) { rememberSaveableStateHolder() }
+    val historyHydrant=state.selected
+    if(state.showHistory && historyHydrant!=null) {
+        val h=historyHydrant
+        val historyFlow=remember(model,h.organization,h.id) { model.inspectionHistory(h.organization,h.id) }
+        key(model,h.organization,h.id) {
+            val history by historyFlow.collectAsStateWithLifecycle(initialValue=InspectionHistoryState())
+            InspectionHistoryScreen(h.code ?: stringResource(R.string.h_pending_code),history,state.historyRefreshing,
+                state.historyError,sync?.phase,model::refreshHistory,model::syncNow,model::closeHistory)
+        }
+        return
+    }
     state.inspectionDraft?.let { draft ->
         val label=state.selected?.code ?: stringResource(R.string.h_pending_code)
         if(draft.mode==InspectionMode.GUIDED)GuidedInspectionScreen(draft,label,state.mutating,state.error,
@@ -260,16 +271,13 @@ fun HydrantScreen(model: HydrantViewModel, requestAccess: ()->Unit = {}, signOut
             if(history.loaded && history.error==null)InspectionDueDetails(inspectionDue(history.rows.maxOfOrNull { it.completedAt },
                 h.interval,state.organization?.inspectionIntervalMonths,now))
             Text(stringResource(R.string.inspection_local_history),style=MaterialTheme.typography.titleMedium)
+            TextButton(onClick=model::openHistory,enabled=enabled) { Text(stringResource(R.string.inspection_history_title)) }
             history.error?.let { Text(stringResource(errorLabel(it)),color=MaterialTheme.colorScheme.error) }
             if(history.loaded && history.rows.isEmpty() && history.error==null)Text(stringResource(R.string.inspection_history_empty))
             // Compact local preview; full history and online-history controls belong to M5.6.
-            history.rows.take(5).forEach { inspection ->
+            history.entries.take(5).forEach { entry ->
                 HorizontalDivider()
-                Text(DateFormat.getDateTimeInstance(DateFormat.SHORT,DateFormat.SHORT).format(Date(inspection.completedAt)))
-                Text(stringResource(inspectionModeLabel(inspection.mode)))
-                Text(stringResource(inspectionResultLabel(inspection.result)))
-                InspectionMeasurementValues(inspection.pressureBar,inspection.flowLMin)
-                inspection.notes?.takeIf { it.isNotBlank() }?.let { Text(it) }
+                InspectionHistoryItem(entry)
             }
         }
         Spacer(Modifier.height(16.dp))

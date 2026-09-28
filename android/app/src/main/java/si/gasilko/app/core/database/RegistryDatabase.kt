@@ -35,6 +35,14 @@ interface RegistryDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE) suspend fun cacheInspections(rows: List<InspectionEntity>)
     @Query("SELECT * FROM inspections WHERE account = :account AND organization = :organization AND id = :id")
     suspend fun inspection(account: String, organization: String, id: String): InspectionEntity?
+    @Query("SELECT * FROM inspections WHERE account = :account AND id = :id")
+    suspend fun inspectionIdentity(account: String, id: String): InspectionEntity?
+    @Query("UPDATE inspections SET syncIssue = :issue WHERE account = :account AND organization = :organization AND id = :id AND syncIssue IS NULL")
+    suspend fun inspectionIssue(account: String, organization: String, id: String, issue: String)
+    @Query("SELECT EXISTS(SELECT 1 FROM inspections WHERE account = :account AND organization = :organization AND syncIssue IS NOT NULL)")
+    suspend fun hasInspectionIssues(account: String, organization: String): Boolean
+    @Query("UPDATE pending_hydrant_changes SET state = 'ATTENTION' WHERE account = :account AND organization = :organization AND operationId = :id AND operation = 'CREATE_INSPECTION' AND state = 'PENDING'")
+    suspend fun blockInspection(account: String, organization: String, id: String)
     @Query("SELECT * FROM inspections WHERE account = :account AND organization = :organization AND hydrantId = :hydrantId ORDER BY completedAt DESC, id DESC")
     suspend fun inspectionHistory(account: String, organization: String, hydrantId: String): List<InspectionEntity>
     // Completed content is immutable. Only authoritative receipt metadata changes after acknowledgement.
@@ -106,7 +114,8 @@ data class PendingHydrantChange(
 
 @Entity(tableName = "inspections", primaryKeys = ["account", "id"],
     indices = [Index(value = ["account", "organization", "hydrantId", "completedAt", "id"])])
-data class InspectionEntity(val account: String, @Embedded val value: Inspection, val acknowledgedAt: Long? = null)
+data class InspectionEntity(val account: String, @Embedded val value: Inspection, val acknowledgedAt: Long? = null,
+    val syncIssue: String? = null)
 
 @Entity(tableName = "hydrant_conflicts")
 data class HydrantConflictEntity(
@@ -116,10 +125,16 @@ data class HydrantConflictEntity(
     val resolutionServerState: String? = null, val resolutionVersion: Long? = null, val replacementSequence: Long? = null,
 )
 
-@Database(entities = [OrganizationEntity::class, TypeEntity::class, HydrantEntity::class, PendingHydrantChange::class, HydrantConflictEntity::class, InspectionEntity::class], version = 6, exportSchema = true)
+@Database(entities = [OrganizationEntity::class, TypeEntity::class, HydrantEntity::class, PendingHydrantChange::class, HydrantConflictEntity::class, InspectionEntity::class], version = 7, exportSchema = true)
 abstract class RegistryDatabase : RoomDatabase() {
     abstract fun registry(): RegistryDao
     companion object {
+        val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Error evidence is needed even for imported events with no local queue row.
+                db.execSQL("ALTER TABLE inspections ADD COLUMN syncIssue TEXT")
+            }
+        }
         val MIGRATION_5_6 = object : Migration(5, 6) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE organizations ADD COLUMN inspectionIntervalMonths INTEGER")
@@ -165,7 +180,7 @@ abstract class RegistryDatabase : RoomDatabase() {
         @Volatile private var instance: RegistryDatabase? = null
         fun open(context: Context): RegistryDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(context.applicationContext, RegistryDatabase::class.java,
-                "hydrant-registry.db").addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6).build().also { instance = it }
+                "hydrant-registry.db").addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7).build().also { instance = it }
         }
     }
 }

@@ -47,12 +47,15 @@ class HydrantSyncEngine(
                 when(operation.operation) {
                     CREATE_INSPECTION -> {
                         val input=payload.inspectionCompletion()
-                        require(input.id==operation.operationId)
+                        if(input.id!=operation.operationId)throw RegistryFailure(RegistryError.VALIDATION)
                         val accepted=online.completeInspection(organization,operation.entityId,input)
                         val event=accepted.inspection
-                        require(event.id==input.id && event.organization==organization && event.hydrantId==operation.entityId &&
+                        if(!(event.id==input.id && event.organization==organization && event.hydrantId==operation.entityId &&
                             event.inspectorId==account && event.completion().sameEvent(input) &&
-                            event.hydrantVersionBefore!=null && event.hydrantVersionAfter!=null)
+                            event.hydrantVersionBefore!=null && event.hydrantVersionAfter!=null)) {
+                            recordInspectionIssue(database,account,organization,operation.operationId,"SERVER_EVENT_MISMATCH")
+                            throw RegistryFailure(RegistryError.VALIDATION)
+                        }
                         inspection=event
                         accepted.hydrant
                     }
@@ -65,33 +68,14 @@ class HydrantSyncEngine(
                     else -> throw RegistryFailure(RegistryError.VALIDATION)
                 }
             } catch(e: RegistryFailure) {
-                if(e.reason != RegistryError.CONFLICT || operation.operation==CREATE_INSPECTION) throw e // Immutable events stay PENDING on failure.
+                if(operation.operation==CREATE_INSPECTION && e.reason==RegistryError.VALIDATION)
+                    recordInspectionIssue(database,account,organization,operation.operationId,"SERVER_REJECTED_EVENT")
+                if(e.reason != RegistryError.CONFLICT || operation.operation==CREATE_INSPECTION) throw e // Retryable failures keep PENDING; invalid immutable events stay blocked.
                 captureConflict(database, online, operation, checkContext)
                 break
             }
             require(server.id == operation.entityId && server.organization == organization && server.version > 0)
-            // Atomic acknowledgement + cache update. Later local edits can arrive during upload;
-            // replay their immutable payloads over authoritative metadata instead of erasing them.
-            database.withTransaction {
-                val event=inspection
-                // Inspection acceptance does not require a stale client's hydrant version.
-                // Chain only our own version step. A retry after another server edit must
-                // not silently rebase subsequent master changes onto that external edit.
-                val chainVersion=if(event==null || (event.hydrantVersionBefore==version && event.hydrantVersionAfter==server.version))
-                    server.version else null
-                if(event!=null) {
-                    val local=dao.inspection(account,organization,event.id)?.value
-                        ?: throw RegistryFailure(RegistryError.UNAVAILABLE)
-                    require(local.completion().sameEvent(event.completion()) && local.inspectorId==account && local.hydrantId==server.id)
-                    check(dao.acknowledgeInspection(account,organization,event.id,event.createdAt,
-                        event.hydrantVersionBefore!!,event.hydrantVersionAfter!!,System.currentTimeMillis())==1)
-                }
-                check(dao.acknowledge(account, organization, operation.sequence, chainVersion) == 1)
-                var visible = server
-                dao.remainingChanges(account, organization, server.id)
-                    .forEach { visible = it.applyTo(visible) }
-                dao.upsertHydrants(listOf(HydrantEntity.from(account, visible)))
-            }
+            if(!acknowledgeHydrantOperation(database,operation,server,inspection,checkContext))break
         }
     }
 }
