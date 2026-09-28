@@ -25,6 +25,7 @@ data class InspectionDraft(
     val completion: InspectionCompletion? = null,
     val mode: InspectionMode = InspectionMode.QUICK,
     val step: Int = 0, val answers: Map<GuidedCheck, GuidedAnswer> = emptyMap(),
+    val pressure: String = "", val flow: String = "",
 )
 
 fun inspectionResultLabel(result: InspectionResult): Int = when(result) {

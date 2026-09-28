@@ -20,6 +20,7 @@ import si.gasilko.app.R
 import si.gasilko.app.feature.hydrants.domain.RegistryError
 import si.gasilko.app.feature.hydrants.presentation.errorLabel
 import si.gasilko.app.feature.inspections.domain.InspectionResult
+import si.gasilko.app.feature.inspections.domain.parseMeasurement
 
 enum class GuidedCheck(val label: Int, val question: Int) {
     ACCESSIBILITY(R.string.guided_accessibility,R.string.guided_accessibility_question),
@@ -69,10 +70,10 @@ internal fun InspectionOption(label: String, selected: Boolean, enabled: Boolean
 @Composable
 fun GuidedInspectionScreen(draft: InspectionDraft, hydrantLabel: String, busy: Boolean, error: RegistryError?,
     answer: (GuidedCheck,GuidedAnswer)->Unit, change: (InspectionResult?,String)->Unit,
-    move: (Boolean)->Unit, complete: (String)->Unit, cancel: ()->Unit) {
+    move: (Boolean)->Unit, complete: (String)->Unit, cancel: ()->Unit, measurements: (String,String)->Unit) {
     val editable=!busy && draft.completion==null
     val resources=LocalContext.current.resources
-    val review=draft.step==5
+    val review=draft.step==6
     BackHandler { if(!busy) { if(draft.step==0 || draft.completion!=null)cancel() else move(false) } }
     Scaffold { padding ->
         key(draft.id,draft.step) {
@@ -80,10 +81,12 @@ fun GuidedInspectionScreen(draft: InspectionDraft, hydrantLabel: String, busy: B
                 verticalArrangement=Arrangement.spacedBy(12.dp)) {
                 Text(stringResource(R.string.inspection_guided),style=MaterialTheme.typography.headlineMedium)
                 Text(hydrantLabel,style=MaterialTheme.typography.titleMedium)
-                Text(if(review)stringResource(R.string.guided_review) else stringResource(R.string.guided_progress,draft.step+1,5))
+                Text(if(review)stringResource(R.string.guided_review) else stringResource(R.string.guided_progress,draft.step+1,6))
                 if(draft.step<4) {
                     val check=GuidedCheck.entries[draft.step]
                     InspectionCheckOptions(check,draft.answers[check],editable) { answer(check,it) }
+                } else if(draft.step==4) {
+                    InspectionMeasurementInputs(draft,editable,measurements)
                 } else if(!review) {
                     Text(stringResource(R.string.inspection_choose_result),style=MaterialTheme.typography.titleLarge)
                     Text(stringResource(R.string.guided_result_notice))
@@ -99,8 +102,9 @@ fun GuidedInspectionScreen(draft: InspectionDraft, hydrantLabel: String, busy: B
                         Text(stringResource(R.string.inspection_choose_result),style=MaterialTheme.typography.titleMedium)
                         Text(stringResource(inspectionResultLabel(it)))
                     }
+                    InspectionMeasurementValues(parseMeasurement(draft.pressure,"999.99").value,parseMeasurement(draft.flow,"999999.99").value)
                 }
-                if(draft.step>=4)OutlinedTextField(draft.notes,{change(draft.result,it)},enabled=editable,
+                if(draft.step>=5)OutlinedTextField(draft.notes,{change(draft.result,it)},enabled=editable,
                     label={Text(stringResource(R.string.inspection_notes))},minLines=3,modifier=Modifier.fillMaxWidth())
                 if(busy) { LinearProgressIndicator(Modifier.fillMaxWidth());Text(stringResource(R.string.h_saving)) }
                 error?.let {
@@ -111,14 +115,14 @@ fun GuidedInspectionScreen(draft: InspectionDraft, hydrantLabel: String, busy: B
                 if(review) {
                     Text(stringResource(R.string.inspection_complete_notice))
                     Button(onClick={complete(draft.completion?.notes ?: InspectionNotesFormatter.format(resources,draft.answers,draft.notes))},
-                        enabled=!busy && draft.result!=null && GuidedCheck.entries.all { it in draft.answers },
+                        enabled=!busy && draft.result!=null && draft.measurementsValid() && GuidedCheck.entries.all { it in draft.answers },
                         modifier=Modifier.fillMaxWidth().heightIn(min=56.dp)) {
                         Text(stringResource(if(draft.completion==null)R.string.inspection_complete else R.string.inspection_retry))
                     }
                 } else {
-                    val answered=if(draft.step<4)GuidedCheck.entries[draft.step] in draft.answers else draft.result!=null
+                    val answered=when { draft.step<4 -> GuidedCheck.entries[draft.step] in draft.answers; draft.step==4 -> draft.measurementsValid(); else -> draft.result!=null }
                     Button(onClick={move(true)},enabled=editable && answered,modifier=Modifier.fillMaxWidth().heightIn(min=56.dp)) {
-                        Text(stringResource(if(draft.step==4)R.string.guided_review else R.string.guided_next))
+                        Text(stringResource(if(draft.step==5)R.string.guided_review else R.string.guided_next))
                     }
                 }
                 if(draft.step>0)OutlinedButton(onClick={move(false)},enabled=editable,modifier=Modifier.fillMaxWidth().heightIn(min=48.dp)) {

@@ -95,7 +95,7 @@ class OnlineHydrantRepository(private val wire: RegistryTransport, private val d
         } while(page.size==100)
         val roles=memberships.associate { it.text("organization_id") to RegistryRole.valueOf(it.text("role")!!) }
         all("organizations",emptyMap()).mapNotNull { row -> roles[row.text("id")]?.let {
-            RegistryOrganization(row.text("id")!!,row.text("name")!!,it,row.text("active").toBoolean())
+            RegistryOrganization(row.text("id")!!,row.text("name")!!,it,row.text("active").toBoolean(),row.text("inspection_interval_months")?.toInt())
         } }
     }
     override suspend fun types(organization: String) = request("types") {

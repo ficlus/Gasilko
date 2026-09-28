@@ -17,7 +17,7 @@ class OfflineAuthorization(private val context: Context) {
             put("account", account); put("last_online_verification_at", System.currentTimeMillis())
             put("elapsed", SystemClock.elapsedRealtime()); put("boot", boot())
             put("organizations", JsonArray(organizations.filter { it.active }.map { org -> buildJsonObject {
-                put("id", org.id); put("name", org.name); put("role", org.role.name)
+                put("id", org.id); put("name", org.name); put("role", org.role.name); put("inspection_interval_months",org.inspectionIntervalMonths)
             } }))
         }.toString())
     }
@@ -34,7 +34,7 @@ class OfflineAuthorization(private val context: Context) {
             }
             val organizations = snapshot.getValue("organizations").jsonArray.map { it.jsonObject.let { org ->
                 RegistryOrganization(org.getValue("id").jsonPrimitive.content, org.getValue("name").jsonPrimitive.content,
-                    RegistryRole.valueOf(org.getValue("role").jsonPrimitive.content))
+                    RegistryRole.valueOf(org.getValue("role").jsonPrimitive.content), inspectionIntervalMonths=org["inspection_interval_months"]?.jsonPrimitive?.intOrNull)
             } }
             return organizations to remaining
         } catch(e: CancellationException) { throw e }

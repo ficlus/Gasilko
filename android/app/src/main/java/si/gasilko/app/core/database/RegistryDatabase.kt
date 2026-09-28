@@ -116,10 +116,15 @@ data class HydrantConflictEntity(
     val resolutionServerState: String? = null, val resolutionVersion: Long? = null, val replacementSequence: Long? = null,
 )
 
-@Database(entities = [OrganizationEntity::class, TypeEntity::class, HydrantEntity::class, PendingHydrantChange::class, HydrantConflictEntity::class, InspectionEntity::class], version = 5, exportSchema = true)
+@Database(entities = [OrganizationEntity::class, TypeEntity::class, HydrantEntity::class, PendingHydrantChange::class, HydrantConflictEntity::class, InspectionEntity::class], version = 6, exportSchema = true)
 abstract class RegistryDatabase : RoomDatabase() {
     abstract fun registry(): RegistryDao
     companion object {
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE organizations ADD COLUMN inspectionIntervalMonths INTEGER")
+            }
+        }
         val MIGRATION_4_5 = object : Migration(4, 5) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("""CREATE TABLE IF NOT EXISTS inspections (
@@ -160,7 +165,7 @@ abstract class RegistryDatabase : RoomDatabase() {
         @Volatile private var instance: RegistryDatabase? = null
         fun open(context: Context): RegistryDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(context.applicationContext, RegistryDatabase::class.java,
-                "hydrant-registry.db").addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5).build().also { instance = it }
+                "hydrant-registry.db").addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6).build().also { instance = it }
         }
     }
 }

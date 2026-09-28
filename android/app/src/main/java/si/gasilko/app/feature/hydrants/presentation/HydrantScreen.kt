@@ -22,6 +22,8 @@ import si.gasilko.app.R
 import si.gasilko.app.feature.hydrants.domain.*
 import si.gasilko.app.feature.inspections.presentation.*
 import si.gasilko.app.feature.inspections.domain.InspectionMode
+import si.gasilko.app.feature.inspections.domain.inspectionDue
+import java.time.Instant
 import java.text.DateFormat
 import java.util.Date
 
@@ -78,9 +80,9 @@ fun HydrantScreen(model: HydrantViewModel, requestAccess: ()->Unit = {}, signOut
     state.inspectionDraft?.let { draft ->
         val label=state.selected?.code ?: stringResource(R.string.h_pending_code)
         if(draft.mode==InspectionMode.GUIDED)GuidedInspectionScreen(draft,label,state.mutating,state.error,
-            model::answerInspectionCheck,model::changeInspection,model::moveGuided,model::completeInspection,model::cancelInspection)
+            model::answerInspectionCheck,model::changeInspection,model::moveGuided,model::completeInspection,model::cancelInspection,model::changeMeasurements)
         else if(draft.mode==InspectionMode.CLASSIC)ClassicInspectionScreen(draft,label,state.mutating,state.error,
-            model::answerInspectionCheck,model::changeInspection,model::completeInspection,model::cancelInspection)
+            model::answerInspectionCheck,model::changeInspection,model::completeInspection,model::cancelInspection,model::changeMeasurements)
         else QuickInspectionScreen(draft,label,state.mutating,state.error,model::changeInspection,
             {model.completeInspection()},model::cancelInspection)
         return
@@ -254,15 +256,19 @@ fun HydrantScreen(model: HydrantViewModel, requestAccess: ()->Unit = {}, signOut
         val historyFlow=remember(model,h.organization,h.id) { model.inspectionHistory(h.organization,h.id) }
         key(model,h.organization,h.id) {
             val history by historyFlow.collectAsStateWithLifecycle(initialValue=InspectionHistoryState())
+            val now by model.inspectionClock.collectAsStateWithLifecycle(initialValue=Instant.now())
+            if(history.loaded && history.error==null)InspectionDueDetails(inspectionDue(history.rows.maxOfOrNull { it.completedAt },
+                h.interval,state.organization?.inspectionIntervalMonths,now))
             Text(stringResource(R.string.inspection_local_history),style=MaterialTheme.typography.titleMedium)
             history.error?.let { Text(stringResource(errorLabel(it)),color=MaterialTheme.colorScheme.error) }
-            if(history.rows.isEmpty() && history.error==null)Text(stringResource(R.string.inspection_history_empty))
+            if(history.loaded && history.rows.isEmpty() && history.error==null)Text(stringResource(R.string.inspection_history_empty))
             // Compact local preview; full history and online-history controls belong to M5.6.
             history.rows.take(5).forEach { inspection ->
                 HorizontalDivider()
                 Text(DateFormat.getDateTimeInstance(DateFormat.SHORT,DateFormat.SHORT).format(Date(inspection.completedAt)))
                 Text(stringResource(inspectionModeLabel(inspection.mode)))
                 Text(stringResource(inspectionResultLabel(inspection.result)))
+                InspectionMeasurementValues(inspection.pressureBar,inspection.flowLMin)
                 inspection.notes?.takeIf { it.isNotBlank() }?.let { Text(it) }
             }
         }
