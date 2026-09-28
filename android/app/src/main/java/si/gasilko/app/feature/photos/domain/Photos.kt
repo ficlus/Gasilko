@@ -50,6 +50,10 @@ interface PhotoRepository {
     /** Atomically persists metadata and appends upload to the existing global queue. */
     suspend fun registerPhoto(organization: String, hydrantId: String, input: LocalPhotoInput): Photo =
         throw RegistryFailure(RegistryError.UNAVAILABLE)
+    /** Acquisition cancellation only: repository must prove no Room row owns this file. */
+    suspend fun discardUnregisteredPhoto(organization: String, hydrantId: String, input: LocalPhotoInput): Boolean {
+        throw RegistryFailure(RegistryError.UNAVAILABLE)
+    }
     fun observePhotos(organization: String, hydrantId: String, inspectionId: String? = null): Flow<List<PhotoEntry>> = flowOf(emptyList())
     suspend fun refreshPhotos(organization: String, hydrantId: String) {}
     // Online adapter methods are used only by the existing sync engine/explicit refresh.
