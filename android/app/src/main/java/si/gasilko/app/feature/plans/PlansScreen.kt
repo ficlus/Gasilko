@@ -37,6 +37,11 @@ private data class PlanDraft(val id: String=UUID.randomUUID().toString(),val ver
         return PlanSave(id,version,name.trim(),status,mode,snapshot,lat,lon,returnToStart,teams.sorted(),hydrants.sorted())
     }
 }
+private fun planDraft(p: InspectionPlan, data: PlanData) = PlanDraft(p.id,p.version,p.name,
+    PlanStatus.valueOf(p.status),SelectionMode.valueOf(p.selectionMode),
+    data.teams.filter { it.planId==p.id && it.active }.map { it.teamId }.toSet(),
+    data.items.filter { it.planId==p.id && it.active }.map { it.hydrantId }.toSet(),p.selectionSnapshot,
+    p.startLatitude?.toString().orEmpty(),p.startLongitude?.toString().orEmpty(),p.returnToStart)
 @Composable
 @OptIn(ExperimentalLayoutApi::class)
 fun PlansScreen(model: HydrantViewModel,query: HydrantQuery,back: ()->Unit) {
@@ -45,6 +50,7 @@ fun PlansScreen(model: HydrantViewModel,query: HydrantQuery,back: ()->Unit) {
     val scope=rememberCoroutineScope()
     var draft by remember { mutableStateOf<PlanDraft?>(null) }
     var pending by remember { mutableStateOf<PlanSave?>(null) }
+    var assigning by remember { mutableStateOf<PlanAssignment?>(null) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<RegistryError?>(null) }
     var cancel by remember { mutableStateOf(false) }
@@ -54,14 +60,14 @@ fun PlansScreen(model: HydrantViewModel,query: HydrantQuery,back: ()->Unit) {
         scope.launch {
             try {
                 if(candidates)model.refreshPlanCandidates(query.organization)
-                else { model.refreshPlans(query.organization);draft=null;pending=null }
+                else { model.refreshPlans(query.organization);draft=null;pending=null;assigning=null }
             } catch(e: CancellationException) { throw e }
             catch(e: Exception) { error=(e as? RegistryFailure)?.reason ?: RegistryError.SERVER }
             finally { busy=false }
         }
     }
     fun submit(status: PlanStatus) {
-        if(busy)return
+        if(busy || assigning!=null)return
         val request=try { pending ?: draft?.request(status) ?: return }
             catch(e: RegistryFailure) { error=e.reason;return }
         pending=request;busy=true;error=null
@@ -74,13 +80,38 @@ fun PlansScreen(model: HydrantViewModel,query: HydrantQuery,back: ()->Unit) {
             } finally { busy=false }
         }
     }
+    fun assign() {
+        if(busy || pending!=null)return
+        val current=draft
+        val request=assigning ?: current?.let { PlanAssignment(it.id,it.version) } ?: return
+        assigning=request;busy=true;error=null
+        scope.launch {
+            try {
+                val result=model.assignPlan(query.organization,request)
+                draft=result.plans.find { it.id==request.id }?.let { planDraft(it,result) }
+                assigning=null
+            } catch(e: CancellationException) { throw e }
+            catch(e: Exception) {
+                error=(e as? RegistryFailure)?.reason ?: RegistryError.SERVER
+                if(error in listOf(RegistryError.VALIDATION,RegistryError.CONFLICT))assigning=null
+            } finally { busy=false }
+        }
+    }
     fun leave() { if(!busy) { if(draft!=null)draft=null else back() } }
     BackHandler(onBack=::leave)
     LaunchedEffect(query.organization) { refresh() }
     val data=observed.data
     val d=draft
     val hasPendingHydrants=observed.candidates.hydrants.any { it.id in (d?.hydrants ?: emptySet()) && it.version==0L }
-    val editable=d?.editable==true && !busy && pending==null
+    val editable=d?.editable==true && !busy && pending==null && assigning==null
+    val saved=data.plans.find { it.id==d?.id }
+    val savedDraft=saved?.let { planDraft(it,data) }
+    val unchanged=d!=null && d==savedDraft
+    val savedTeams=data.teams.filter { it.planId==saved?.id && it.active }.map { it.teamId }.toSet()
+    val assignedItems=data.items.filter { it.planId==saved?.id && it.active }
+    val assignmentByHydrant=assignedItems.associateBy { it.hydrantId }
+    val assignedCounts=assignedItems.groupingBy { it.teamId }.eachCount()
+    val unassigned=assignedItems.count { it.teamId==null || it.teamId !in savedTeams }
     Scaffold { padding ->
         Column(Modifier.fillMaxSize().padding(padding).padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
             Text(stringResource(R.string.plans_title),style=MaterialTheme.typography.headlineSmall)
@@ -89,8 +120,9 @@ fun PlansScreen(model: HydrantViewModel,query: HydrantQuery,back: ()->Unit) {
                 TextButton(onClick=::leave,enabled=!busy) { Text(stringResource(R.string.h_back)) }
                 TextButton(onClick={refresh()},enabled=!busy) { Text(stringResource(R.string.h_refresh)) }
                 if(d==null)TextButton(onClick={draft=PlanDraft(snapshot=planSelectionSnapshot(query,observed.candidates.incomplete))},
-                    enabled=!busy && pending==null) { Text(stringResource(R.string.plans_new)) }
+                    enabled=!busy && pending==null && assigning==null) { Text(stringResource(R.string.plans_new)) }
                 if(pending!=null)TextButton(onClick={submit(pending!!.status)},enabled=!busy) { Text(stringResource(R.string.photo_retry)) }
+                if(assigning!=null)TextButton(onClick=::assign,enabled=!busy) { Text(stringResource(R.string.photo_retry)) }
             }
             if(busy)LinearProgressIndicator(Modifier.fillMaxWidth())
             (error ?: observed.error)?.let {
@@ -102,15 +134,29 @@ fun PlansScreen(model: HydrantViewModel,query: HydrantQuery,back: ()->Unit) {
                     if(data.plans.isEmpty())item { Text(stringResource(R.string.plans_empty)) }
                     items(data.plans,key={it.id}) { p ->
                         OutlinedButton(onClick={
-                            draft=PlanDraft(p.id,p.version,p.name,PlanStatus.valueOf(p.status),SelectionMode.valueOf(p.selectionMode),
-                                data.teams.filter { it.planId==p.id && it.active }.map { it.teamId }.toSet(),
-                                data.items.filter { it.planId==p.id && it.active }.map { it.hydrantId }.toSet(),p.selectionSnapshot,
-                                p.startLatitude?.toString().orEmpty(),p.startLongitude?.toString().orEmpty(),p.returnToStart)
-                        },enabled=!busy && pending==null,modifier=Modifier.fillMaxWidth()) {
+                            draft=planDraft(p,data)
+                        },enabled=!busy && pending==null && assigning==null,modifier=Modifier.fillMaxWidth()) {
                             Text(p.name+" · "+stringResource(planStatusLabel(PlanStatus.valueOf(p.status))))
                         }
                     }
                 } else {
+                    item {
+                        Text(stringResource(R.string.plans_assignment_title),style=MaterialTheme.typography.titleMedium)
+                        Text(stringResource(R.string.plans_assignment_note))
+                        if(!unchanged && d.editable)Text(stringResource(R.string.plans_assignment_save_first))
+                        if(saved!=null) {
+                            savedTeams.sorted().forEach { team ->
+                                val name=observed.teams.teams.find { it.id==team }?.name ?: team.take(8)
+                                Text(stringResource(R.string.plans_assignment_count,name,assignedCounts[team] ?: 0))
+                            }
+                            Text(stringResource(R.string.plans_unassigned_count,unassigned))
+                            if(unassigned>0)Text(stringResource(R.string.plans_unassigned_warning),color=MaterialTheme.colorScheme.error)
+                        }
+                        if(d.editable)TextButton(onClick=::assign,enabled=editable && unchanged && assignedItems.isNotEmpty() &&
+                            savedTeams.isNotEmpty() && savedTeams.all { id->observed.teams.teams.any { it.id==id && it.active } }) {
+                            Text(stringResource(R.string.plans_assign))
+                        }
+                    }
                     item {
                         Text(stringResource(planStatusLabel(d.status)))
                         OutlinedTextField(d.name,{draft=d.copy(name=it.take(120))},enabled=editable,
@@ -160,11 +206,21 @@ fun PlansScreen(model: HydrantViewModel,query: HydrantQuery,back: ()->Unit) {
                             Text((h.code ?: stringResource(R.string.h_pending_code))+" · "+h.id.take(8)+
                                 if(h.active)"" else " · "+stringResource(R.string.h_inactive))
                         }
+                        if(saved!=null && assignmentByHydrant.containsKey(h.id)) {
+                            val team=assignmentByHydrant[h.id]?.teamId
+                            Text(if(team==null || team !in savedTeams)stringResource(R.string.plans_unassigned)
+                                else observed.teams.teams.find { it.id==team }?.name ?: team.take(8))
+                        }
                     }
                     items((d.hydrants-observed.candidates.hydrants.map { it.id }.toSet()).sorted(),key={"missing-hydrant-"+it}) { id ->
                         Row {
                             if(d.mode==SelectionMode.MANUAL)Checkbox(true,{draft=d.copy(hydrants=d.hydrants-id)},enabled=editable)
                             Text(stringResource(R.string.plans_uncached,id))
+                        }
+                        if(saved!=null && assignmentByHydrant.containsKey(id)) {
+                            val team=assignmentByHydrant[id]?.teamId
+                            Text(if(team==null || team !in savedTeams)stringResource(R.string.plans_unassigned)
+                                else observed.teams.teams.find { it.id==team }?.name ?: team.take(8))
                         }
                     }
                     item {

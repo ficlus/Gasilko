@@ -68,6 +68,9 @@ class OnlineHydrantRepository(private val wire: RegistryTransport, private val d
     override suspend fun readPlans(org: String) = request("plans_read") {
         decodePlans(wire.rpc("read_inspection_plans",buildJsonObject { put("organization",org) }))
     }
+    override suspend fun assignPlan(org: String, change: PlanAssignment) = request("plans_assign") {
+        decodePlans(wire.rpc("assign_inspection_plan",buildJsonObject { put("organization",org);put("request",change.payload()) }))
+    }
     override suspend fun savePlan(org: String, change: PlanSave) = request("plans_write") {
         decodePlans(wire.rpc("save_inspection_plan",buildJsonObject { put("organization",org);put("request",change.payload()) }))
     }

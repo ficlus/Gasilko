@@ -325,4 +325,12 @@
     <string name="plans_uncached">Ni v lokalnem predpomnilniku: %1$s</string>
     <string name="plans_retry">Pri napaki povezave ponovite isto zahtevo ali osvežite seznam. Pri sočasni spremembi ponovno odprite najnovejši načrt.</string>
     <string name="plans_pending">Pred shranjevanjem načrta sinhronizirajte nove izbrane hidrante.</string>
+    <string name="plans_assign">Razporedi po ekipah</string>
+    <string name="plans_assignment_title">Razporeditev po ekipah</string>
+    <string name="plans_assignment_note">Razporeditev uporablja zadnje sinhronizirane koordinate. Ponovna razporeditev zamenja prejšnjo, izbor hidrantov pa ostane enak.</string>
+    <string name="plans_assignment_save_first">Pred razporeditvijo shranite spremembe in ponovno odprite načrt ali osvežite podatke.</string>
+    <string name="plans_assignment_count">%1$s: %2$d hidrantov</string>
+    <string name="plans_unassigned_count">Nerazporejeni: %1$d</string>
+    <string name="plans_unassigned">Nerazporejen</string>
+    <string name="plans_unassigned_warning">Nerazporejene hidrante preverite. Hidranti brez veljavnih koordinat ostanejo nerazporejeni tudi po izračunu.</string>
 </resources>

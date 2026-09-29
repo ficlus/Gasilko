@@ -125,13 +125,18 @@ data class HydrantConflictEntity(
     val resolutionServerState: String? = null, val resolutionVersion: Long? = null, val replacementSequence: Long? = null,
 )
 
-@Database(entities = [OrganizationEntity::class, TypeEntity::class, HydrantEntity::class, PendingHydrantChange::class, HydrantConflictEntity::class, InspectionEntity::class, PhotoEntity::class, TeamEntity::class, TeamMemberEntity::class, TeamPersonEntity::class, PlanEntity::class, PlanTeamEntity::class, PlanItemEntity::class, PlanCoverage::class], version = 10, exportSchema = true)
+@Database(entities = [OrganizationEntity::class, TypeEntity::class, HydrantEntity::class, PendingHydrantChange::class, HydrantConflictEntity::class, InspectionEntity::class, PhotoEntity::class, TeamEntity::class, TeamMemberEntity::class, TeamPersonEntity::class, PlanEntity::class, PlanTeamEntity::class, PlanItemEntity::class, PlanCoverage::class], version = 11, exportSchema = true)
 abstract class RegistryDatabase : RoomDatabase() {
     abstract fun registry(): RegistryDao
     abstract fun photos(): PhotoDao
     abstract fun teams(): TeamDao
     abstract fun plans(): PlanDao
     companion object {
+        val MIGRATION_10_11 = object : Migration(10,11) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE inspection_plan_items ADD COLUMN teamId TEXT")
+            }
+        }
         val MIGRATION_9_10 = object : Migration(9,10) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("""CREATE TABLE IF NOT EXISTS inspection_plans (
@@ -227,7 +232,7 @@ abstract class RegistryDatabase : RoomDatabase() {
         @Volatile private var instance: RegistryDatabase? = null
         fun open(context: Context): RegistryDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(context.applicationContext, RegistryDatabase::class.java,
-                "hydrant-registry.db").addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10).build().also { instance = it }
+                "hydrant-registry.db").addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11).build().also { instance = it }
         }
     }
 }

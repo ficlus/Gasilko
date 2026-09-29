@@ -80,6 +80,7 @@ class HydrantViewModel(private val repository: HydrantRepository, private val in
     }
     suspend fun refreshPlans(org: String) = teamAccess(org) { repository.refreshTeams(org);repository.refreshPlans(org) }
     suspend fun refreshPlanCandidates(org: String) = teamAccess(org) { repository.refreshPlanCandidates(org) }
+    suspend fun assignPlan(org: String, change: PlanAssignment) = teamAccess(org) { repository.assignPlan(org,change) }
     suspend fun savePlan(org: String, change: PlanSave) = teamAccess(org) { repository.savePlan(org,change) }
     suspend fun refreshTeams(org: String) = teamAccess(org) { repository.refreshTeams(org) }
     suspend fun manageTeam(org: String, change: TeamChange) = teamAccess(org) { repository.changeTeam(org,change) }
