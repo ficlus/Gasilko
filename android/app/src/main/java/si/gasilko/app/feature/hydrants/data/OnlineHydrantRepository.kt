@@ -21,6 +21,7 @@ import si.gasilko.app.feature.teams.*
 import si.gasilko.app.feature.plans.*
 
 interface RegistryTransport {
+    suspend fun routePlan(arguments: JsonObject): JsonElement = throw RegistryFailure(RegistryError.UNAVAILABLE)
     suspend fun downloadPhoto(path: String): ByteArray = throw RegistryFailure(RegistryError.UNAVAILABLE)
     fun actor(): String
     suspend fun rows(table: String, filters: Map<String,String?>, after: String? = null): JsonArray
@@ -28,6 +29,7 @@ interface RegistryTransport {
     suspend fun uploadPhoto(path: String, mime: String, bytes: ByteArray) { throw RegistryFailure(RegistryError.UNAVAILABLE) }
 }
 class SupabaseRegistryTransport(private val client: SupabaseClient): RegistryTransport {
+    override suspend fun routePlan(arguments: JsonObject) = PlanRoutingRemote.calculate(client,arguments)
     override suspend fun downloadPhoto(path: String) = client.storage.from(PHOTO_BUCKET).downloadAuthenticated(path)
     override suspend fun uploadPhoto(path: String, mime: String, bytes: ByteArray) {
         // Verified against supabase-kt 3.6.0 BucketApi/UploadOptionBuilder. Never upsert evidence.
@@ -65,6 +67,9 @@ fun decodeHydrant(value: JsonElement): Hydrant {
         row.text("created_at"),row.text("updated_at"),row.text("updated_by"))
 }
 class OnlineHydrantRepository(private val wire: RegistryTransport, private val diagnostic: (String,RegistryError)->Unit = {_,_->}): HydrantRepository {
+    override suspend fun routePlan(org: String, change: PlanRouting) = request("plans_route") {
+        decodePlans(wire.routePlan(buildJsonObject { put("organization",org);put("request",change.payload()) }))
+    }
     override suspend fun readPlans(org: String) = request("plans_read") {
         decodePlans(wire.rpc("read_inspection_plans",buildJsonObject { put("organization",org) }))
     }

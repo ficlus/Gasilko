@@ -37,6 +37,12 @@ fun statusLabel(status: HydrantStatus): Int = when(status) {
     HydrantStatus.UNKNOWN -> R.string.h_unknown
 }
 fun errorLabel(error: RegistryError): Int = when(error) {
+    RegistryError.ROUTE_ASSIGNMENTS -> R.string.routes_assignments_required
+    RegistryError.ROUTE_COORDINATES -> R.string.routes_coordinates_required
+    RegistryError.ROUTE_UNREACHABLE -> R.string.routes_unreachable
+    RegistryError.ROUTE_LIMIT -> R.string.routes_limit
+    RegistryError.ROUTE_CONFIGURATION -> R.string.routes_configuration
+    RegistryError.ROUTE_PROVIDER -> R.string.routes_provider_error
     RegistryError.NETWORK -> R.string.h_network
     RegistryError.EXPIRED -> R.string.auth_offline_expired
     RegistryError.FORBIDDEN -> R.string.h_forbidden

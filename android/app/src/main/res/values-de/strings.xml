@@ -333,4 +333,23 @@
     <string name="plans_unassigned_count">Nicht zugeordnet: %1$d</string>
     <string name="plans_unassigned">Nicht zugeordnet</string>
     <string name="plans_unassigned_warning">Prüfen Sie die nicht zugeordneten Hydranten. Hydranten ohne gültige Koordinaten bleiben auch nach der Berechnung ohne Zuordnung.</string>
+    <string name="routes_title">Straßenrouten</string>
+    <string name="routes_calculate">Routen berechnen</string>
+    <string name="routes_notice">Die Berechnung benötigt eine Verbindung und verwendet synchronisierte Koordinaten sowie das Pkw-Profil. Gespeicherte Routen sind offline verfügbar. Die Dauer enthält nur Fahrzeiten, keine Prüfzeiten.</string>
+    <string name="routes_no_start">Ohne Startposition beginnt die Route beim Hydranten mit der kleinsten UUID. Die Rückkehr zum Start führt zu diesem Hydranten.</string>
+    <string name="routes_totals">%1$.1f km · ca. %2$d Min.</string>
+    <string name="routes_calculated">Letzte erfolgreiche Berechnung: %1$s · %2$s</string>
+    <string name="routes_stop">%1$d. %2$s · %3$s</string>
+    <string name="routes_map">Route auf der Karte anzeigen</string>
+    <string name="routes_missing">Keine gültige Berechnung vorhanden. Plan speichern, alle Hydranten zuweisen und Routen berechnen.</string>
+    <string name="routes_save_first">Vor der Berechnung Änderungen speichern und den Plan erneut öffnen.</string>
+    <string name="routes_assignments_required">Berechnung fehlgeschlagen. Zuerst alle Hydranten den ausgewählten aktiven Teams zuweisen.</string>
+    <string name="routes_coordinates_required">Berechnung fehlgeschlagen. Jeder ausgewählte Hydrant benötigt gültige synchronisierte Koordinaten.</string>
+    <string name="routes_unreachable">Berechnung fehlgeschlagen. Nicht alle Positionen können einer Straße zugeordnet oder über Straßen verbunden werden. Koordinaten prüfen; Luftlinien werden nicht verwendet.</string>
+    <string name="routes_limit">Berechnung durch Anbieter- oder Größenlimit abgebrochen (höchstens 20 Teams, 500 Hydranten und 100 Positionen pro Team einschließlich Start).</string>
+    <string name="routes_configuration">Die Routenberechnung ist auf dem Server noch nicht eingerichtet. Bitte die Administration kontaktieren.</string>
+    <string name="routes_provider_error">Routenberechnung fehlgeschlagen. Verbindung prüfen und erneut versuchen. Die letzte erfolgreiche Berechnung bleibt gespeichert.</string>
+    <string name="routes_attribution">Routing: GraphHopper · Kartendaten © OpenStreetMap contributors</string>
+    <string name="routes_single_stop">Dieses Team hat einen Hydranten. Ohne Startposition gibt es keine Fahrstrecke zwischen Stopps.</string>
+    <string name="routes_no_road_geometry">Keine Straßengeometrie gespeichert. Straßenanschlusspunkte können zusammenfallen; Route bei Bedarf online neu berechnen.</string>
 </resources>

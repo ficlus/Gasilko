@@ -17,10 +17,13 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -45,15 +48,20 @@ import si.gasilko.app.feature.hydrants.presentation.errorLabel
 import si.gasilko.app.feature.map.domain.GeoPoint
 import si.gasilko.app.BuildConfig
 import si.gasilko.app.R
+import si.gasilko.app.feature.plans.PlanRoute
 import java.net.URI
 
 /** Rendering only: all hydrants are supplied by the existing local repository/ViewModel. */
 @Composable
 @OptIn(ExperimentalLayoutApi::class)
-fun MapScreen(onBack: () -> Unit, hydrants: List<Hydrant>, onOpenHydrant: (String) -> Unit,
+fun MapScreen(onBack: () -> Unit, hydrants: List<Hydrant>, onOpenHydrant: ((String) -> Unit)?,
     dataLoading: Boolean = false, dataError: RegistryError? = null, styleUrl: String = BuildConfig.MAP_STYLE_URL,
-    onAddHydrant: ((Double,Double,Float?)->Unit)? = null, creationEnabled: Boolean = true) {
+    onAddHydrant: ((Double,Double,Float?)->Unit)? = null, creationEnabled: Boolean = true, route: PlanRoute? = null) {
     val lifecycle = LocalLifecycleOwner.current.lifecycle
+    val routeData=remember(route) { route?.let(::routeMapData) }
+    val currentRoute by rememberUpdatedState(routeData)
+    var fittedRoute by rememberSaveable { mutableStateOf<String?>(null) }
+    var mapSize by remember { mutableStateOf(IntSize.Zero) }
     var attempt by rememberSaveable { mutableIntStateOf(0) }
     var displayedStyle by rememberSaveable(styleUrl) { mutableStateOf(styleUrl) }
     var regionBounds by remember { mutableStateOf<LatLngBounds?>(null) }
@@ -124,7 +132,11 @@ fun MapScreen(onBack: () -> Unit, hydrants: List<Hydrant>, onOpenHydrant: (Strin
                     attempt++
                 }) })
             dataError?.let { Text(stringResource(errorLabel(it)), Modifier.padding(horizontal=16.dp), color=MaterialTheme.colorScheme.error) }
-            if(!dataLoading && dataError==null) {
+            if(route!=null)RouteAttribution()
+            if(routeData?.numbers?.size==1)Text(stringResource(R.string.routes_single_stop),Modifier.padding(horizontal=16.dp))
+            else if(routeData!=null && !routeData.hasRoad && routeData.numbers.isNotEmpty())
+                Text(stringResource(R.string.routes_no_road_geometry),Modifier.padding(horizontal=16.dp))
+            if(!dataLoading && dataError==null && route==null) {
                 val notice=when { hydrants.isEmpty()->R.string.map_empty;validCount==0->R.string.map_no_coordinates
                     validCount<hydrants.size->R.string.map_missing_coordinates;else->null }
                 notice?.let { Text(stringResource(it,hydrants.size-validCount),Modifier.padding(horizontal=16.dp),style=MaterialTheme.typography.bodySmall) }
@@ -139,7 +151,7 @@ fun MapScreen(onBack: () -> Unit, hydrants: List<Hydrant>, onOpenHydrant: (Strin
                         if(!h.active)Text(stringResource(R.string.h_inactive))
                     }
                     FlowRow(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-                        TextButton(onClick={cancelFocus();onOpenHydrant(h.id)}) { Text(stringResource(R.string.h_details)) }
+                        if(onOpenHydrant!=null)TextButton(onClick={cancelFocus();onOpenHydrant(h.id)}) { Text(stringResource(R.string.h_details)) }
                         TextButton(onClick={selectedId=null;cancelFocus()}) { Text(stringResource(R.string.map_clear_selection)) }
                     }
                 }
@@ -153,7 +165,7 @@ fun MapScreen(onBack: () -> Unit, hydrants: List<Hydrant>, onOpenHydrant: (Strin
             }
             key(displayedStyle, attempt) {
                     // Factory creates one native view per entry/retry; ordinary recomposition only updates it.
-                    AndroidView(modifier=Modifier.weight(1f).fillMaxWidth(), factory={ context ->
+                    AndroidView(modifier=Modifier.weight(1f).fillMaxWidth().onSizeChanged { mapSize=it }, factory={ context ->
                         MapLibre.getInstance(context.applicationContext)
                         LifecycleMapView(context, lifecycle, saved.bundle).apply {
                             saved.view=this
@@ -164,18 +176,19 @@ fun MapScreen(onBack: () -> Unit, hydrants: List<Hydrant>, onOpenHydrant: (Strin
                             fun install(style: Style) {
                                 if(!released) {
                                     hydrantLayers=HydrantMapLayers(style); hydrantLayers?.update(currentData,currentSelection)
+                                    routeLayers=PlanRouteLayers(style);routeLayers?.update(currentRoute)
                                     updateLocation(currentLocation)
                                     renderReady=true
                                 }
                             }
                             val fail: () -> Unit = {
                                 if(!released && !fallback) {
-                                    failed=true; loading=false;renderReady=false;hydrantLayers=null
+                                    failed=true; loading=false;renderReady=false;hydrantLayers=null;routeLayers=null
                                     if(!fallback && readyMap != null) {
                                         fallback=true
                                         // Finish the SDK failure dispatch before replacing its style callback.
                                         post { if(!released) {
-                                            hydrantLayers=null
+                                            hydrantLayers=null;routeLayers=null
                                             readyMap?.setStyle(Style.Builder().fromJson(HydrantMapLayers.OFFLINE_STYLE)) { install(it) }
                                         } }
                                     }
@@ -226,6 +239,19 @@ fun MapScreen(onBack: () -> Unit, hydrants: List<Hydrant>, onOpenHydrant: (Strin
                         }
                     }, update={ view -> if(!view.released) {
                         view.hydrantLayers?.update(visibleData, selected?.id)
+                        view.routeLayers?.update(routeData)
+                        if(renderReady && mapSize.width>0 && mapSize.height>0 && view.width>0 && view.height>0 && routeData!=null &&
+                            fittedRoute!=routeData.key && routeData.points.isNotEmpty()) {
+                            val target=routeData
+                            view.post { if(!view.released && view.routeLayers!=null && currentRoute?.key==target.key && fittedRoute!=target.key) {
+                                val points=target.points.distinctBy { it.latitude to it.longitude }
+                                view.nativeMap?.let { map ->
+                                    if(points.size==1)map.moveCamera(CameraUpdateFactory.newLatLngZoom(points.first(),15.0))
+                                    else map.moveCamera(CameraUpdateFactory.newLatLngBounds(LatLngBounds.Builder().includes(points).build(),48))
+                                    fittedRoute=target.key
+                                }
+                            } }
+                        }
                         view.updateLocation(location)
                         regionBounds?.let { bounds -> view.nativeMap?.let { map -> if(renderReady) {
                             regionBounds=null
@@ -248,6 +274,18 @@ fun MapScreen(onBack: () -> Unit, hydrants: List<Hydrant>, onOpenHydrant: (Strin
     }
 }
 
+@Composable
+internal fun RouteAttribution() {
+    val uri=LocalUriHandler.current
+    Column(Modifier.padding(horizontal=16.dp)) {
+        Text(stringResource(R.string.routes_attribution),style=MaterialTheme.typography.bodySmall)
+        Row {
+            TextButton(onClick={uri.openUri("https://www.graphhopper.com/")}) { Text("GraphHopper") }
+            TextButton(onClick={uri.openUri("https://www.openstreetmap.org/copyright")}) { Text("© OpenStreetMap") }
+        }
+    }
+}
+
 private class SavedMap(var bundle: Bundle? = null) {
     var view: LifecycleMapView? = null
     fun snapshot() = Bundle().also { state ->
@@ -261,6 +299,7 @@ private class SavedMap(var bundle: Bundle? = null) {
 private class LifecycleMapView(context: Context, private val lifecycle: Lifecycle, saved: Bundle?) : MapView(context) {
     var nativeMap: MapLibreMap? = null
     var hydrantLayers: HydrantMapLayers? = null
+    var routeLayers: PlanRouteLayers? = null
     var beforeRelease: (() -> Unit)? = null
     private var lastLocation: Location? = null
     private var locationStyle: Style? = null
@@ -323,6 +362,7 @@ private class LifecycleMapView(context: Context, private val lifecycle: Lifecycl
         lastLocation=null;locationStyle=null
         nativeMap=null
         hydrantLayers=null
+        routeLayers=null
         lifecycle.removeObserver(observer)
         context.applicationContext.unregisterComponentCallbacks(memory)
         stop()

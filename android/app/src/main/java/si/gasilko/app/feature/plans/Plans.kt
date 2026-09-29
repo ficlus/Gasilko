@@ -15,9 +15,18 @@ data class InspectionPlan(val id: String, val organization: String, val name: St
     val startedAt: String?, val completedAt: String?, val version: Long)
 data class PlanTeam(val planId: String, val organization: String, val teamId: String, val active: Boolean)
 data class PlanItem(val id: String, val planId: String, val organization: String, val hydrantId: String,
-    val active: Boolean, val createdAt: String, val teamId: String? = null)
+    val active: Boolean, val createdAt: String, val teamId: String? = null, val routeOrder: Int? = null)
+data class PlanRoute(val planId: String, val organization: String, val teamId: String,
+    val provider: String, val profile: String, val calculatedAt: String, val distanceM: Double,
+    val durationS: Double, val geometry: String, val stops: String, val valid: Boolean)
+data class RouteStop(val hydrantId: String, val code: String?, val order: Int)
+fun PlanRoute.orderedStops(): List<RouteStop> = Json.parseToJsonElement(stops).jsonArray.map {
+    val row=it.jsonObject
+    RouteStop(row.getValue("hydrant").jsonPrimitive.content,row["code"]?.jsonPrimitive?.contentOrNull,
+        row.getValue("order").jsonPrimitive.int)
+}.sortedBy { it.order }
 data class PlanData(val plans: List<InspectionPlan> = emptyList(), val teams: List<PlanTeam> = emptyList(),
-    val items: List<PlanItem> = emptyList())
+    val items: List<PlanItem> = emptyList(), val routes: List<PlanRoute> = emptyList())
 data class PlanCandidates(val hydrants: List<Hydrant> = emptyList(), val filteredIds: Set<String> = emptySet(),
     val due: Map<String,InspectionDueState?> = emptyMap(), val registryCached: Boolean = false) {
     val incomplete get() = !registryCached || hydrants.any { it.active && due[it.id]==null }
@@ -51,7 +60,13 @@ data class PlanAssignment(val id: String, val version: Long, val operationId: St
         put("id",id);put("version",version);put("operation_id",operationId);put("action","ASSIGN")
     }
 }
+data class PlanRouting(val id: String, val version: Long, val operationId: String = UUID.randomUUID().toString()) {
+    fun payload() = buildJsonObject {
+        put("id",id);put("version",version);put("operation_id",operationId);put("action","ROUTE")
+    }
+}
 interface PlanRepository {
+    suspend fun routePlan(org: String, change: PlanRouting): PlanData = throw RegistryFailure(RegistryError.UNAVAILABLE)
     suspend fun assignPlan(org: String, change: PlanAssignment): PlanData = throw RegistryFailure(RegistryError.UNAVAILABLE)
     fun observePlans(org: String): Flow<PlanData> = flowOf(PlanData())
     fun observePlanCandidates(query: HydrantQuery): Flow<PlanCandidates> = flowOf(PlanCandidates())
@@ -65,12 +80,16 @@ internal fun decodePlans(value: JsonElement): PlanData {
     fun JsonObject.s(k: String)=getValue(k).jsonPrimitive.content
     fun JsonObject.optional(k: String)=get(k)?.jsonPrimitive?.contentOrNull
     fun JsonObject.b(k: String)=getValue(k).jsonPrimitive.boolean
-    fun rows(k: String)=value.jsonObject.getValue(k).jsonArray.map { it.jsonObject }
+    fun rows(k: String)=(if(k=="routes")value.jsonObject[k]?.jsonArray.orEmpty()
+        else value.jsonObject.getValue(k).jsonArray).map { it.jsonObject }
     return PlanData(rows("plans").map { InspectionPlan(it.s("id"),it.s("organization_id"),it.s("name"),it.s("status"),
         it.s("selection_mode"),it.getValue("selection_snapshot").toString(),it.optional("start_latitude")?.toDouble(),
         it.optional("start_longitude")?.toDouble(),it.b("return_to_start"),it.s("created_by"),it.s("created_at"),
         it.s("updated_at"),it.optional("started_at"),it.optional("completed_at"),it.s("version").toLong()) },
         rows("teams").map { PlanTeam(it.s("plan_id"),it.s("organization_id"),it.s("team_id"),it.b("active")) },
-        rows("items").map { PlanItem(it.s("id"),it.s("plan_id"),it.s("organization_id"),it.s("hydrant_id"),it.b("active"),it.s("created_at"),it.optional("team_id")) })
+        rows("items").map { PlanItem(it.s("id"),it.s("plan_id"),it.s("organization_id"),it.s("hydrant_id"),it.b("active"),it.s("created_at"),it.optional("team_id"),it.optional("route_order")?.toInt()) },
+        rows("routes").map { PlanRoute(it.s("plan_id"),it.s("organization_id"),it.s("team_id"),it.s("provider"),it.s("profile"),
+            it.s("calculated_at"),it.s("distance_m").toDouble(),it.s("duration_s").toDouble(),
+            it.getValue("geometry").toString(),it.getValue("stops").toString(),it.b("valid")) })
 }
 

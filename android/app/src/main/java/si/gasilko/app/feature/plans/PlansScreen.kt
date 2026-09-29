@@ -16,6 +16,11 @@ import si.gasilko.app.R
 import si.gasilko.app.feature.hydrants.domain.*
 import si.gasilko.app.feature.hydrants.presentation.*
 import si.gasilko.app.feature.teams.TeamData
+import si.gasilko.app.feature.map.MapScreen
+import si.gasilko.app.feature.map.RouteAttribution
+import java.time.Instant
+import java.text.DateFormat
+import java.util.Date
 import java.util.UUID
 
 data class PlanViewData(val data: PlanData=PlanData(),val teams: TeamData=TeamData(),
@@ -51,6 +56,8 @@ fun PlansScreen(model: HydrantViewModel,query: HydrantQuery,back: ()->Unit) {
     var draft by remember { mutableStateOf<PlanDraft?>(null) }
     var pending by remember { mutableStateOf<PlanSave?>(null) }
     var assigning by remember { mutableStateOf<PlanAssignment?>(null) }
+    var routing by remember { mutableStateOf<PlanRouting?>(null) }
+    var mapTeam by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<RegistryError?>(null) }
     var cancel by remember { mutableStateOf(false) }
@@ -60,14 +67,14 @@ fun PlansScreen(model: HydrantViewModel,query: HydrantQuery,back: ()->Unit) {
         scope.launch {
             try {
                 if(candidates)model.refreshPlanCandidates(query.organization)
-                else { model.refreshPlans(query.organization);draft=null;pending=null;assigning=null }
+                else { model.refreshPlans(query.organization);draft=null;pending=null;assigning=null;routing=null;mapTeam=null }
             } catch(e: CancellationException) { throw e }
             catch(e: Exception) { error=(e as? RegistryFailure)?.reason ?: RegistryError.SERVER }
             finally { busy=false }
         }
     }
     fun submit(status: PlanStatus) {
-        if(busy || assigning!=null)return
+        if(busy || assigning!=null || routing!=null)return
         val request=try { pending ?: draft?.request(status) ?: return }
             catch(e: RegistryFailure) { error=e.reason;return }
         pending=request;busy=true;error=null
@@ -81,7 +88,7 @@ fun PlansScreen(model: HydrantViewModel,query: HydrantQuery,back: ()->Unit) {
         }
     }
     fun assign() {
-        if(busy || pending!=null)return
+        if(busy || pending!=null || routing!=null)return
         val current=draft
         val request=assigning ?: current?.let { PlanAssignment(it.id,it.version) } ?: return
         assigning=request;busy=true;error=null
@@ -97,13 +104,30 @@ fun PlansScreen(model: HydrantViewModel,query: HydrantQuery,back: ()->Unit) {
             } finally { busy=false }
         }
     }
-    fun leave() { if(!busy) { if(draft!=null)draft=null else back() } }
+    fun route() {
+        if(busy || pending!=null || assigning!=null)return
+        val request=routing ?: draft?.let { PlanRouting(it.id,it.version) } ?: return
+        routing=request;busy=true;error=null
+        scope.launch {
+            try {
+                val result=model.routePlan(query.organization,request)
+                draft=result.plans.find { it.id==request.id }?.let { planDraft(it,result) }
+                routing=null
+            } catch(e: CancellationException) { throw e }
+            catch(e: Exception) {
+                error=(e as? RegistryFailure)?.reason ?: RegistryError.ROUTE_PROVIDER
+                if(error in listOf(RegistryError.VALIDATION,RegistryError.CONFLICT,RegistryError.ROUTE_ASSIGNMENTS,
+                    RegistryError.ROUTE_COORDINATES))routing=null
+            } finally { busy=false }
+        }
+    }
+    fun leave() { if(!busy) { if(mapTeam!=null)mapTeam=null else if(draft!=null)draft=null else back() } }
     BackHandler(onBack=::leave)
     LaunchedEffect(query.organization) { refresh() }
     val data=observed.data
     val d=draft
     val hasPendingHydrants=observed.candidates.hydrants.any { it.id in (d?.hydrants ?: emptySet()) && it.version==0L }
-    val editable=d?.editable==true && !busy && pending==null && assigning==null
+    val editable=d?.editable==true && !busy && pending==null && assigning==null && routing==null
     val saved=data.plans.find { it.id==d?.id }
     val savedDraft=saved?.let { planDraft(it,data) }
     val unchanged=d!=null && d==savedDraft
@@ -112,6 +136,12 @@ fun PlansScreen(model: HydrantViewModel,query: HydrantQuery,back: ()->Unit) {
     val assignmentByHydrant=assignedItems.associateBy { it.hydrantId }
     val assignedCounts=assignedItems.groupingBy { it.teamId }.eachCount()
     val unassigned=assignedItems.count { it.teamId==null || it.teamId !in savedTeams }
+    val routes=data.routes.filter { it.planId==saved?.id && it.valid && it.teamId in savedTeams }
+    val shownRoute=routes.find { it.teamId==mapTeam }
+    if(shownRoute!=null && observed.error==null && unchanged) {
+        MapScreen(onBack={mapTeam=null},hydrants=emptyList(),onOpenHydrant=null,route=shownRoute)
+        return
+    }
     Scaffold { padding ->
         Column(Modifier.fillMaxSize().padding(padding).padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
             Text(stringResource(R.string.plans_title),style=MaterialTheme.typography.headlineSmall)
@@ -120,9 +150,10 @@ fun PlansScreen(model: HydrantViewModel,query: HydrantQuery,back: ()->Unit) {
                 TextButton(onClick=::leave,enabled=!busy) { Text(stringResource(R.string.h_back)) }
                 TextButton(onClick={refresh()},enabled=!busy) { Text(stringResource(R.string.h_refresh)) }
                 if(d==null)TextButton(onClick={draft=PlanDraft(snapshot=planSelectionSnapshot(query,observed.candidates.incomplete))},
-                    enabled=!busy && pending==null && assigning==null) { Text(stringResource(R.string.plans_new)) }
+                    enabled=!busy && pending==null && assigning==null && routing==null) { Text(stringResource(R.string.plans_new)) }
                 if(pending!=null)TextButton(onClick={submit(pending!!.status)},enabled=!busy) { Text(stringResource(R.string.photo_retry)) }
                 if(assigning!=null)TextButton(onClick=::assign,enabled=!busy) { Text(stringResource(R.string.photo_retry)) }
+                if(routing!=null)TextButton(onClick=::route,enabled=!busy) { Text(stringResource(R.string.photo_retry)) }
             }
             if(busy)LinearProgressIndicator(Modifier.fillMaxWidth())
             (error ?: observed.error)?.let {
@@ -135,7 +166,7 @@ fun PlansScreen(model: HydrantViewModel,query: HydrantQuery,back: ()->Unit) {
                     items(data.plans,key={it.id}) { p ->
                         OutlinedButton(onClick={
                             draft=planDraft(p,data)
-                        },enabled=!busy && pending==null && assigning==null,modifier=Modifier.fillMaxWidth()) {
+                        },enabled=!busy && pending==null && assigning==null && routing==null,modifier=Modifier.fillMaxWidth()) {
                             Text(p.name+" · "+stringResource(planStatusLabel(PlanStatus.valueOf(p.status))))
                         }
                     }
@@ -155,6 +186,30 @@ fun PlansScreen(model: HydrantViewModel,query: HydrantQuery,back: ()->Unit) {
                         if(d.editable)TextButton(onClick=::assign,enabled=editable && unchanged && assignedItems.isNotEmpty() &&
                             savedTeams.isNotEmpty() && savedTeams.all { id->observed.teams.teams.any { it.id==id && it.active } }) {
                             Text(stringResource(R.string.plans_assign))
+                        }
+                    }
+                    item {
+                        Text(stringResource(R.string.routes_title),style=MaterialTheme.typography.titleMedium)
+                        Text(stringResource(R.string.routes_notice))
+                        if(saved?.startLatitude==null)Text(stringResource(R.string.routes_no_start))
+                        if(!unchanged && d.editable)Text(stringResource(R.string.routes_save_first))
+                        if(d.editable)TextButton(onClick=::route,enabled=editable && unchanged && unassigned==0 &&
+                            assignedItems.isNotEmpty() && savedTeams.isNotEmpty()) { Text(stringResource(R.string.routes_calculate)) }
+                        if(routes.isEmpty())Text(stringResource(R.string.routes_missing))
+                        else RouteAttribution()
+                    }
+                    items(routes,key={"route-"+it.teamId}) { route ->
+                        Text(observed.teams.teams.find { it.id==route.teamId }?.name ?: route.teamId.take(8),
+                            style=MaterialTheme.typography.titleMedium)
+                        Text(stringResource(R.string.routes_totals,route.distanceM/1000.0,kotlin.math.ceil(route.durationS/60.0).toInt()))
+                        val date=runCatching { DateFormat.getDateTimeInstance().format(Date.from(Instant.parse(route.calculatedAt))) }
+                            .getOrDefault(route.calculatedAt)
+                        Text(stringResource(R.string.routes_calculated,route.provider,date))
+                        val stops=remember(route) { route.orderedStops() }
+                        stops.forEach { stop -> Text(stringResource(R.string.routes_stop,stop.order,
+                            stop.code ?: stringResource(R.string.h_pending_code),stop.hydrantId.take(8))) }
+                        if(stops.isNotEmpty())TextButton(onClick={mapTeam=route.teamId},enabled=unchanged && !busy && observed.error==null) {
+                            Text(stringResource(R.string.routes_map))
                         }
                     }
                     item {
