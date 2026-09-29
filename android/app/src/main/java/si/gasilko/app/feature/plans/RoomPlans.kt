@@ -24,10 +24,10 @@ internal class RoomPlans(private val db: RegistryDatabase, private val online: P
     }
     fun observe(org: String): Flow<PlanData> = flow {
         val actor=account()
-        emitAll(db.invalidationTracker.createFlow("inspection_plans","inspection_plan_teams","inspection_plan_items","organizations").map {
+        emitAll(db.invalidationTracker.createFlow("inspection_plans","inspection_plan_teams","inspection_plan_items","inspection_plan_routes","organizations").map {
             access(actor,org)
             db.withTransaction { PlanData(db.plans().plans(actor,org).map { it.value },db.plans().teams(actor,org).map { it.value },
-                db.plans().items(actor,org).map { it.value }).also { check(actor) } }
+                db.plans().items(actor,org).map { it.value },db.plans().routes(actor,org).map { it.value }).also { check(actor) } }
         }.distinctUntilChanged())
     }
     fun candidates(query: HydrantQuery): Flow<PlanCandidates> = flow {
@@ -50,13 +50,16 @@ internal class RoomPlans(private val db: RegistryDatabase, private val online: P
         }.distinctUntilChanged())
     }
     private suspend fun cache(actor: String,org: String,data: PlanData) {
+        if(data.routes.any { r -> r.organization!=org || data.teams.none { it.planId==r.planId && it.teamId==r.teamId } })
+            throw RegistryFailure(RegistryError.VALIDATION)
         if(data.plans.any { it.organization!=org } || data.teams.any { t -> t.organization!=org || data.plans.none { it.id==t.planId } } ||
             data.items.any { i -> i.organization!=org || data.plans.none { it.id==i.planId } ||
                 (i.teamId!=null && data.teams.none { it.planId==i.planId && it.teamId==i.teamId && (!i.active || it.active) }) })throw RegistryFailure(RegistryError.VALIDATION)
         db.withTransaction {
             access(actor,org)
             db.plans().plans(data.plans.map { PlanEntity(actor,it) });db.plans().teams(data.teams.map { PlanTeamEntity(actor,it) })
-            db.plans().items(data.items.map { PlanItemEntity(actor,it) });check(actor)
+            db.plans().items(data.items.map { PlanItemEntity(actor,it) })
+            db.plans().routes(data.routes.map { PlanRouteEntity(actor,it) });check(actor)
         }
     }
     suspend fun refresh(org: String) = remote.withLock {
@@ -65,6 +68,11 @@ internal class RoomPlans(private val db: RegistryDatabase, private val online: P
     suspend fun assign(org: String,change: PlanAssignment): PlanData = remote.withLock {
         val actor=account();access(actor,org,true)
         val data=online.assignPlan(org,change)
+        access(actor,org,true);cache(actor,org,data);data
+    }
+    suspend fun route(org: String,change: PlanRouting): PlanData = remote.withLock {
+        val actor=account();access(actor,org,true)
+        val data=online.routePlan(org,change)
         access(actor,org,true);cache(actor,org,data);data
     }
     suspend fun save(org: String,change: PlanSave): PlanData = remote.withLock {
