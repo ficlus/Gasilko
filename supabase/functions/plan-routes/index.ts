@@ -1,4 +1,4 @@
-import { GraphHopper, RoutingError, type Point, type RoadProvider } from "./provider.ts";
+import { GraphHopper, RoutingError, type Point, type RoadPath, type RoadProvider } from "./provider.ts";
 import { drivingOrder } from "./optimize.ts";
 
 type Item = { id: string; hydrant: string; team: string; code: string | null; latitude: number; longitude: number };
@@ -22,16 +22,24 @@ async function calculate(input: Input, provider: RoadProvider) {
     const start: Point | null = input.latitude === null ? null : [input.longitude!, input.latitude];
     const points: Point[] = [...(start ? [start] : []), ...items.map(i => [i.longitude, i.latitude] as Point)];
     if (points.length > 100) throw new RoutingError("ROUTE_PROVIDER_LIMIT");
-    const matrix = await provider.matrix(points);
-    const order = drivingOrder(matrix, input.returnToStart);
-    const roadPoints = order.map(i => points[i]);
+    const snapped = await provider.snap(points);
+    const order = points.length === 1 ? [0] : drivingOrder(await provider.matrix(snapped), input.returnToStart);
+    const roadPoints = order.map(i => snapped[i]);
     if (input.returnToStart && roadPoints.length > 1) roadPoints.push(roadPoints[0]);
-    const path = await provider.route(roadPoints);
+    // A single stop with no explicit start has no driving leg. Keep its road access point, not a fake line.
+    const path: RoadPath = roadPoints.length === 1 ? { distance: 0, seconds: 0, coordinates: [], snapped: roadPoints } :
+      await provider.route(roadPoints);
     const stops = order.filter(i => !start || i !== 0).map((i, index) => ({ ...items[i - (start ? 1 : 0)], order: index + 1 }));
-    features.push({ type: "Feature", properties: { kind: "road" },
+    if (new Set(path.coordinates.map(p => p.join(","))).size > 1)
+      features.push({ type: "Feature", properties: { kind: "road" },
       geometry: { type: "LineString", coordinates: path.coordinates } });
-    for (const stop of stops) features.push({ type: "Feature", properties: { kind: "stop", number: stop.order, uuid: stop.hydrant },
-      geometry: { type: "Point", coordinates: [stop.longitude, stop.latitude] } });
+    for (const stop of stops) {
+      // Keep canonical stop payloads and original hydrant coordinates unchanged. The geometry JSON
+      // stores the provider road-access point alongside its UUID, without a schema/Room migration.
+      const routed = path.snapped[stop.order - 1 + (start ? 1 : 0)];
+      features.push({ type: "Feature", properties: { kind: "stop", number: stop.order, uuid: stop.hydrant, snapped: routed },
+        geometry: { type: "Point", coordinates: [stop.longitude, stop.latitude] } });
+    }
     results.push({ team, provider: provider.name, profile: "car", distance_m: path.distance,
       duration_s: path.seconds, geometry: { type: "FeatureCollection", features }, stops });
   }

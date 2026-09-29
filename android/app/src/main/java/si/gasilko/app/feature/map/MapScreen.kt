@@ -22,6 +22,8 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -59,6 +61,7 @@ fun MapScreen(onBack: () -> Unit, hydrants: List<Hydrant>, onOpenHydrant: ((Stri
     val routeData=remember(route) { route?.let(::routeMapData) }
     val currentRoute by rememberUpdatedState(routeData)
     var fittedRoute by rememberSaveable { mutableStateOf<String?>(null) }
+    var mapSize by remember { mutableStateOf(IntSize.Zero) }
     var attempt by rememberSaveable { mutableIntStateOf(0) }
     var displayedStyle by rememberSaveable(styleUrl) { mutableStateOf(styleUrl) }
     var regionBounds by remember { mutableStateOf<LatLngBounds?>(null) }
@@ -130,6 +133,9 @@ fun MapScreen(onBack: () -> Unit, hydrants: List<Hydrant>, onOpenHydrant: ((Stri
                 }) })
             dataError?.let { Text(stringResource(errorLabel(it)), Modifier.padding(horizontal=16.dp), color=MaterialTheme.colorScheme.error) }
             if(route!=null)RouteAttribution()
+            if(routeData?.numbers?.size==1)Text(stringResource(R.string.routes_single_stop),Modifier.padding(horizontal=16.dp))
+            else if(routeData!=null && !routeData.hasRoad && routeData.numbers.isNotEmpty())
+                Text(stringResource(R.string.routes_no_road_geometry),Modifier.padding(horizontal=16.dp))
             if(!dataLoading && dataError==null && route==null) {
                 val notice=when { hydrants.isEmpty()->R.string.map_empty;validCount==0->R.string.map_no_coordinates
                     validCount<hydrants.size->R.string.map_missing_coordinates;else->null }
@@ -159,7 +165,7 @@ fun MapScreen(onBack: () -> Unit, hydrants: List<Hydrant>, onOpenHydrant: ((Stri
             }
             key(displayedStyle, attempt) {
                     // Factory creates one native view per entry/retry; ordinary recomposition only updates it.
-                    AndroidView(modifier=Modifier.weight(1f).fillMaxWidth(), factory={ context ->
+                    AndroidView(modifier=Modifier.weight(1f).fillMaxWidth().onSizeChanged { mapSize=it }, factory={ context ->
                         MapLibre.getInstance(context.applicationContext)
                         LifecycleMapView(context, lifecycle, saved.bundle).apply {
                             saved.view=this
@@ -234,15 +240,15 @@ fun MapScreen(onBack: () -> Unit, hydrants: List<Hydrant>, onOpenHydrant: ((Stri
                     }, update={ view -> if(!view.released) {
                         view.hydrantLayers?.update(visibleData, selected?.id)
                         view.routeLayers?.update(routeData)
-                        if(renderReady && view.width>0 && view.height>0 && routeData!=null &&
+                        if(renderReady && mapSize.width>0 && mapSize.height>0 && view.width>0 && view.height>0 && routeData!=null &&
                             fittedRoute!=routeData.key && routeData.points.isNotEmpty()) {
                             val target=routeData
-                            fittedRoute=target.key
-                            view.post { if(!view.released && currentRoute?.key==target.key) {
+                            view.post { if(!view.released && view.routeLayers!=null && currentRoute?.key==target.key && fittedRoute!=target.key) {
                                 val points=target.points.distinctBy { it.latitude to it.longitude }
                                 view.nativeMap?.let { map ->
                                     if(points.size==1)map.moveCamera(CameraUpdateFactory.newLatLngZoom(points.first(),15.0))
                                     else map.moveCamera(CameraUpdateFactory.newLatLngBounds(LatLngBounds.Builder().includes(points).build(),48))
+                                    fittedRoute=target.key
                                 }
                             } }
                         }

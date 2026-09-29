@@ -350,4 +350,6 @@
     <string name="routes_configuration">Die Routenberechnung ist auf dem Server noch nicht eingerichtet. Bitte die Administration kontaktieren.</string>
     <string name="routes_provider_error">Routenberechnung fehlgeschlagen. Verbindung prüfen und erneut versuchen. Die letzte erfolgreiche Berechnung bleibt gespeichert.</string>
     <string name="routes_attribution">Routing: GraphHopper · Kartendaten © OpenStreetMap contributors</string>
+    <string name="routes_single_stop">Dieses Team hat einen Hydranten. Ohne Startposition gibt es keine Fahrstrecke zwischen Stopps.</string>
+    <string name="routes_no_road_geometry">Keine Straßengeometrie gespeichert. Straßenanschlusspunkte können zusammenfallen; Route bei Bedarf online neu berechnen.</string>
 </resources>

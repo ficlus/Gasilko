@@ -10,48 +10,69 @@ import org.maplibre.android.maps.Style
 import org.maplibre.android.style.expressions.Expression.*
 import org.maplibre.android.style.layers.LineLayer
 import org.maplibre.android.style.layers.SymbolLayer
+import org.maplibre.android.style.layers.Property
 import org.maplibre.android.style.layers.PropertyFactory.*
 import org.maplibre.android.style.sources.GeoJsonSource
 import si.gasilko.app.feature.plans.PlanRoute
 
 /** Derived display data only. The persisted road geometry is supplied by Room. */
-internal data class RouteMapData(val key: String, val json: String, val points: List<LatLng>, val numbers: Set<Int>)
+internal data class RouteMapData(val key: String, val roads: String, val stops: String,
+    val points: List<LatLng>, val numbers: Set<Int>, val hasRoad: Boolean)
 internal fun routeMapData(route: PlanRoute): RouteMapData {
     val points=mutableListOf<LatLng>()
     val numbers=mutableSetOf<Int>()
     val root=Json.parseToJsonElement(route.geometry).jsonObject
-    val features=root.getValue("features").jsonArray.map { element ->
+    val roads=mutableListOf<JsonElement>()
+    val stops=mutableListOf<JsonElement>()
+    root.getValue("features").jsonArray.forEach { element ->
         val feature=element.jsonObject
         val geometry=feature.getValue("geometry").jsonObject
         val properties=feature.getValue("properties").jsonObject
         val coordinates=geometry.getValue("coordinates").jsonArray
-        if(properties["kind"]?.jsonPrimitive?.content=="road") {
-            coordinates.forEach { point -> point.jsonArray.let { points.add(LatLng(it[1].jsonPrimitive.double,it[0].jsonPrimitive.double)) } }
-            feature
-        } else {
+        if(geometry["type"]?.jsonPrimitive?.content=="LineString") {
+            val line=coordinates.map { point -> point.jsonArray.let { LatLng(it[1].jsonPrimitive.double,it[0].jsonPrimitive.double) } }
+            // Old cached singleton/duplicate-point lines are not a visible driving route.
+            if(line.distinctBy { it.latitude to it.longitude }.size>=2) {
+                points.addAll(line);roads.add(feature)
+            }
+        } else if(geometry["type"]?.jsonPrimitive?.content=="Point" && properties["kind"]?.jsonPrimitive?.content=="stop") {
             points.add(LatLng(coordinates[1].jsonPrimitive.double,coordinates[0].jsonPrimitive.double))
             val number=properties.getValue("number").jsonPrimitive.int
             numbers.add(number)
-            JsonObject(feature+("properties" to JsonObject(properties+("icon" to JsonPrimitive("gasilko-route-stop-"+number)))))
+            (properties["snapped"] as? JsonArray)?.takeIf { it.size>=2 }?.let {
+                points.add(LatLng(it[1].jsonPrimitive.double,it[0].jsonPrimitive.double))
+            }
+            stops.add(JsonObject(feature+("properties" to JsonObject(properties+("icon" to JsonPrimitive("gasilko-route-stop-"+number))))))
         }
     }
-    return RouteMapData(route.planId+route.teamId+route.calculatedAt,JsonObject(root+("features" to JsonArray(features))).toString(),points,numbers)
+    fun collection(features: List<JsonElement>)=buildJsonObject {
+        put("type","FeatureCollection");put("features",JsonArray(features))
+    }.toString()
+    return RouteMapData(route.planId+route.teamId+route.calculatedAt,collection(roads),collection(stops),points,numbers,roads.isNotEmpty())
 }
 internal class PlanRouteLayers(private val style: Style) {
-    private val source=GeoJsonSource("gasilko-route",HydrantMapLayers.EMPTY)
-    private var last: String?=null
+    private val roads=GeoJsonSource("gasilko-route-roads",HydrantMapLayers.EMPTY)
+    private val stops=GeoJsonSource("gasilko-route-stops",HydrantMapLayers.EMPTY)
+    private var lastRoads: String?=null
+    private var lastStops: String?=null
     private val images=mutableSetOf<Int>()
     init {
-        style.addSource(source)
-        style.addLayer(LineLayer("gasilko-route-road","gasilko-route").withProperties(lineColor(Color.rgb(30,77,185)),lineWidth(5f))
-            .apply { setFilter(eq(get("kind"),literal("road"))) })
-        style.addLayer(SymbolLayer("gasilko-route-stops","gasilko-route").withProperties(
-            iconImage(get("icon")),iconSize(0.6f),iconAllowOverlap(true),iconIgnorePlacement(true))
-            .apply { setFilter(eq(get("kind"),literal("stop"))) })
+        // Dedicated sources avoid mixed-geometry filtering; lines sit above the basemap, below stop numbers.
+        style.addSource(roads);style.addSource(stops)
+        style.addLayer(LineLayer("gasilko-route-casing","gasilko-route-roads").withProperties(
+            lineColor(Color.WHITE),lineWidth(9f),lineOpacity(1f),visibility(Property.VISIBLE),
+            lineCap(Property.LINE_CAP_ROUND),lineJoin(Property.LINE_JOIN_ROUND)))
+        style.addLayer(LineLayer("gasilko-route-road","gasilko-route-roads").withProperties(
+            lineColor(Color.rgb(30,77,185)),lineWidth(5f),lineOpacity(1f),visibility(Property.VISIBLE),
+            lineCap(Property.LINE_CAP_ROUND),lineJoin(Property.LINE_JOIN_ROUND)))
+        style.addLayer(SymbolLayer("gasilko-route-stops","gasilko-route-stops").withProperties(
+            iconImage(get("icon")),iconSize(0.6f),iconAllowOverlap(true),iconIgnorePlacement(true)))
     }
     fun update(data: RouteMapData?) {
-        val json=data?.json ?: HydrantMapLayers.EMPTY
-        if(last==json)return
+        val roadJson=data?.roads ?: HydrantMapLayers.EMPTY
+        val stopJson=data?.stops ?: HydrantMapLayers.EMPTY
+        if(lastRoads!=roadJson) { roads.setGeoJson(roadJson);lastRoads=roadJson }
+        if(lastStops==stopJson)return
         data?.numbers?.forEach { number -> if(images.add(number)) {
             // Local bitmaps keep stop numbers readable with an offline/fallback style and no glyph server.
             val bitmap=Bitmap.createBitmap(64,64,Bitmap.Config.ARGB_8888)
@@ -64,6 +85,6 @@ internal class PlanRouteLayers(private val style: Style) {
             canvas.drawText(number.toString(),32f,32f-(paint.ascent()+paint.descent())/2,paint)
             style.addImage("gasilko-route-stop-"+number,bitmap)
         } }
-        source.setGeoJson(json);last=json
+        stops.setGeoJson(stopJson);lastStops=stopJson
     }
 }

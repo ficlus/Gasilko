@@ -277,4 +277,6 @@
     <string name="routes_configuration">Cestno usmerjanje še ni nastavljeno na strežniku. Obrnite se na skrbnika.</string>
     <string name="routes_provider_error">Izračun rut ni uspel. Preverite povezavo in poskusite znova. Zadnji uspešen izračun ostane shranjen.</string>
     <string name="routes_attribution">Usmerjanje: GraphHopper · Podatki zemljevida © OpenStreetMap contributors</string>
+    <string name="routes_single_stop">Ta ekipa ima en hidrant. Brez začetne lokacije ni voznega odseka med postanki.</string>
+    <string name="routes_no_road_geometry">Ni shranjene cestne geometrije. Dostopne točke lahko sovpadajo; po potrebi ponovno izračunajte ruto s povezavo.</string>
 </resources>

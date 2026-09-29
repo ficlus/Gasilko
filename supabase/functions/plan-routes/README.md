@@ -27,6 +27,25 @@ in each team is the fixed anchor; return-to-start closes there. The final provid
 path supplies geometry and driving totals (inspection time is not included).
 There is no straight-line fallback, automatic reassignment or navigation.
 
+Road access is resolved with independent identical-point car routing requests,
+with four concurrent requests at most and reuse of duplicate input coordinates.
+Both matrix and final routing use these provider-snapped positions, with empty
+`snap_preventions` and no application-imposed maximum snapping distance.
+This adds one provider call per unique input coordinate; provider quotas and
+the existing deadline still apply. Original GPS coordinates and canonical stop
+payloads remain unchanged. Each stop's GeoJSON properties retain `uuid` and
+`snapped: [longitude, latitude]` for the final routed access point.
+
+Provider geometry is normalized from GeoJSON or a 2D encoded polyline into
+longitude/latitude GeoJSON. A nonzero driving path with absent/degenerate
+geometry is rejected before commit. A single stop without a start has no
+driving leg; stops sharing the same road point can also have no driving segment.
+Neither case fabricates a line. Android uses separate road/stop sources, a
+contrasting road casing and camera bounds covering geometry, GPS markers and
+road access points. Existing cached results remain readable; recalculate online
+to obtain the new snapped-point metadata or replace an old missing geometry.
+No additional Supabase or Room migration is needed for this correction.
+
 Resource limits: 20 teams, 500 selected hydrants, 100 input positions
 per team including an explicit start, 4 MB retained provider response/result and
 a 100-second request deadline. GraphHopper subscription limits may be lower.
@@ -46,6 +65,10 @@ Manual verification (not executed):
 - Configure the secret and deploy the migration/function in a review environment.
 - Calculate multiple teams, one-stop/empty teams, with/without start, and open/
   return routes. Check road distance, duration, stop order and map geometry.
+- Include hydrants well away from roads; confirm no distance-based rejection,
+  unchanged marker GPS, persisted snapped access points and visible road lines.
+- Verify two or more distinct road stops, coincident road points, map style
+  reload/fallback and initial layout before camera fitting.
 - Repeat identical inputs and retry the same request after a lost response.
 - Reject missing/unassigned/unreachable locations and provider quota failures
   without partially replacing results or modifying assignments/selections.
