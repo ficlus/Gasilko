@@ -325,4 +325,12 @@
     <string name="plans_uncached">Nicht lokal gespeichert: %1$s</string>
     <string name="plans_retry">Bei Verbindungsfehlern dieselbe Anfrage wiederholen oder die Liste aktualisieren. Bei gleichzeitigen Änderungen den neuesten Plan erneut öffnen.</string>
     <string name="plans_pending">Synchronisieren Sie neue ausgewählte Hydranten, bevor Sie den Plan speichern.</string>
+    <string name="plans_assign">Auf Teams verteilen</string>
+    <string name="plans_assignment_title">Teamzuordnung</string>
+    <string name="plans_assignment_note">Die Zuordnung verwendet die zuletzt synchronisierten Koordinaten. Eine Neuberechnung ersetzt die Zuordnung; die Hydrantenauswahl bleibt unverändert.</string>
+    <string name="plans_assignment_save_first">Vor der Zuordnung Änderungen speichern und den Plan erneut öffnen oder die Daten aktualisieren.</string>
+    <string name="plans_assignment_count">%1$s: %2$d Hydranten</string>
+    <string name="plans_unassigned_count">Nicht zugeordnet: %1$d</string>
+    <string name="plans_unassigned">Nicht zugeordnet</string>
+    <string name="plans_unassigned_warning">Prüfen Sie die nicht zugeordneten Hydranten. Hydranten ohne gültige Koordinaten bleiben auch nach der Berechnung ohne Zuordnung.</string>
 </resources>

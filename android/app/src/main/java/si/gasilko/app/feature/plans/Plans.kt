@@ -15,7 +15,7 @@ data class InspectionPlan(val id: String, val organization: String, val name: St
     val startedAt: String?, val completedAt: String?, val version: Long)
 data class PlanTeam(val planId: String, val organization: String, val teamId: String, val active: Boolean)
 data class PlanItem(val id: String, val planId: String, val organization: String, val hydrantId: String,
-    val active: Boolean, val createdAt: String)
+    val active: Boolean, val createdAt: String, val teamId: String? = null)
 data class PlanData(val plans: List<InspectionPlan> = emptyList(), val teams: List<PlanTeam> = emptyList(),
     val items: List<PlanItem> = emptyList())
 data class PlanCandidates(val hydrants: List<Hydrant> = emptyList(), val filteredIds: Set<String> = emptySet(),
@@ -46,7 +46,13 @@ fun planSelectionSnapshot(query: HydrantQuery, incomplete: Boolean) = buildJsonO
     put("search",query.search);put("type",query.type);put("status",query.status?.name);put("active",query.active.name)
     put("cache_incomplete",incomplete);put("selected_at",Instant.now().toString())
 }.toString()
+data class PlanAssignment(val id: String, val version: Long, val operationId: String = UUID.randomUUID().toString()) {
+    fun payload() = buildJsonObject {
+        put("id",id);put("version",version);put("operation_id",operationId);put("action","ASSIGN")
+    }
+}
 interface PlanRepository {
+    suspend fun assignPlan(org: String, change: PlanAssignment): PlanData = throw RegistryFailure(RegistryError.UNAVAILABLE)
     fun observePlans(org: String): Flow<PlanData> = flowOf(PlanData())
     fun observePlanCandidates(query: HydrantQuery): Flow<PlanCandidates> = flowOf(PlanCandidates())
     suspend fun refreshPlans(org: String) {}
@@ -65,6 +71,6 @@ internal fun decodePlans(value: JsonElement): PlanData {
         it.optional("start_longitude")?.toDouble(),it.b("return_to_start"),it.s("created_by"),it.s("created_at"),
         it.s("updated_at"),it.optional("started_at"),it.optional("completed_at"),it.s("version").toLong()) },
         rows("teams").map { PlanTeam(it.s("plan_id"),it.s("organization_id"),it.s("team_id"),it.b("active")) },
-        rows("items").map { PlanItem(it.s("id"),it.s("plan_id"),it.s("organization_id"),it.s("hydrant_id"),it.b("active"),it.s("created_at")) })
+        rows("items").map { PlanItem(it.s("id"),it.s("plan_id"),it.s("organization_id"),it.s("hydrant_id"),it.b("active"),it.s("created_at"),it.optional("team_id")) })
 }
 

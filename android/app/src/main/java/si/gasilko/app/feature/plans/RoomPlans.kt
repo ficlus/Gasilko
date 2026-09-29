@@ -51,7 +51,8 @@ internal class RoomPlans(private val db: RegistryDatabase, private val online: P
     }
     private suspend fun cache(actor: String,org: String,data: PlanData) {
         if(data.plans.any { it.organization!=org } || data.teams.any { t -> t.organization!=org || data.plans.none { it.id==t.planId } } ||
-            data.items.any { i -> i.organization!=org || data.plans.none { it.id==i.planId } })throw RegistryFailure(RegistryError.VALIDATION)
+            data.items.any { i -> i.organization!=org || data.plans.none { it.id==i.planId } ||
+                (i.teamId!=null && data.teams.none { it.planId==i.planId && it.teamId==i.teamId && (!i.active || it.active) }) })throw RegistryFailure(RegistryError.VALIDATION)
         db.withTransaction {
             access(actor,org)
             db.plans().plans(data.plans.map { PlanEntity(actor,it) });db.plans().teams(data.teams.map { PlanTeamEntity(actor,it) })
@@ -60,6 +61,11 @@ internal class RoomPlans(private val db: RegistryDatabase, private val online: P
     }
     suspend fun refresh(org: String) = remote.withLock {
         val actor=account();access(actor,org);val data=online.readPlans(org);cache(actor,org,data)
+    }
+    suspend fun assign(org: String,change: PlanAssignment): PlanData = remote.withLock {
+        val actor=account();access(actor,org,true)
+        val data=online.assignPlan(org,change)
+        access(actor,org,true);cache(actor,org,data);data
     }
     suspend fun save(org: String,change: PlanSave): PlanData = remote.withLock {
         val actor=account();access(actor,org,true);val data=online.savePlan(org,change);access(actor,org,true);cache(actor,org,data);data

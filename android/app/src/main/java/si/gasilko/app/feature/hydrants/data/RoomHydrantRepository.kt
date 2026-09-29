@@ -35,6 +35,7 @@ class RoomHydrantRepository(
     override fun observePlanCandidates(query: HydrantQuery) = plans.candidates(query)
     override suspend fun refreshPlans(org: String) = plans.refresh(org)
     override suspend fun refreshPlanCandidates(org: String) = plans.refreshCandidates(org)
+    override suspend fun assignPlan(org: String, change: PlanAssignment) = plans.assign(org,change)
     override suspend fun savePlan(org: String, change: PlanSave) = plans.save(org,change)
     private val teams by lazy { RoomTeams(database,online,currentAccount,::organization) }
     override fun observeTeamData(organization: String) = teams.observe(organization)
