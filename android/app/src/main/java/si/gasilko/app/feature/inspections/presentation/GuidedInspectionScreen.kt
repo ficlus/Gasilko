@@ -75,7 +75,7 @@ internal fun InspectionOption(label: String, selected: Boolean, enabled: Boolean
 fun GuidedInspectionScreen(draft: InspectionDraft, hydrantLabel: String, busy: Boolean, error: RegistryError?,
     answer: (GuidedCheck,GuidedAnswer)->Unit, change: (InspectionResult?,String)->Unit,
     move: (Boolean)->Unit, complete: (String)->Unit, cancel: ()->Unit, measurements: (String,String)->Unit,
-    photos: @Composable ()->Unit = {}) {
+    photos: @Composable ()->Unit = {}, identification: @Composable ()->Unit = {}) {
     val editable=!busy && draft.completion==null
     val resources=LocalContext.current.resources
     val review=draft.step==7
@@ -85,6 +85,7 @@ fun GuidedInspectionScreen(draft: InspectionDraft, hydrantLabel: String, busy: B
             Column(Modifier.fillMaxSize().padding(padding).imePadding().verticalScroll(rememberScrollState()).padding(16.dp),
                 verticalArrangement=Arrangement.spacedBy(12.dp)) {
                 ScreenHeading(stringResource(R.string.inspection_guided),hydrantLabel)
+                identification()
                 StatusBadge(if(review)stringResource(R.string.guided_review) else stringResource(R.string.guided_progress,draft.step+1,7),FieldTone.INFO)
                 LinearProgressIndicator(progress={((draft.step+1)/8f).coerceIn(0f,1f)},modifier=Modifier.fillMaxWidth(),
                     color=MaterialTheme.colorScheme.tertiary,trackColor=MaterialTheme.colorScheme.tertiaryContainer)

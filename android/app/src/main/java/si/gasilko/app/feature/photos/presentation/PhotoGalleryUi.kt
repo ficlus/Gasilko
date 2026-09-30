@@ -140,13 +140,14 @@ private fun photoDate(entry: PhotoEntry) =
 private data class ImageFile(val path: String? = null, val error: Int? = null)
 
 @Composable
-private fun PhotoImage(model: HydrantViewModel, entry: PhotoEntry, modifier: Modifier,
-    scale: ContentScale = ContentScale.Crop) {
+internal fun PhotoImage(model: HydrantViewModel, entry: PhotoEntry, modifier: Modifier,
+    scale: ContentScale = ContentScale.Crop, permanentPreview: Boolean = false) {
     val photo=entry.photo
     var retry by remember(photo.id) { mutableIntStateOf(0) }
-    val file by produceState(ImageFile(),model,model.photoScope,photo,entry.localPath,retry) {
+    val file by produceState(ImageFile(),model,model.photoScope,photo,entry.localPath,retry,permanentPreview) {
         value=ImageFile()
-        try { value=ImageFile(path=model.photoImage(photo.organization,photo.hydrantId,photo.id,photo.inspectionId)) }
+        try { value=ImageFile(path=if(permanentPreview)model.permanentPhotoImage(photo.organization,photo.hydrantId,photo.id)
+            else model.photoImage(photo.organization,photo.hydrantId,photo.id,photo.inspectionId)) }
         catch(e: CancellationException) { throw e }
         catch(e: PhotoImageFailure) {
             value=ImageFile(error=if(e.reason==PhotoImageError.MISSING_LOCAL)R.string.photo_missing_local else R.string.photo_corrupt)

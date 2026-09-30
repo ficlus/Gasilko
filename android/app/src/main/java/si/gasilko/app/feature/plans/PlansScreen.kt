@@ -19,6 +19,7 @@ import si.gasilko.app.feature.hydrants.domain.*
 import si.gasilko.app.feature.hydrants.presentation.*
 import si.gasilko.app.feature.teams.TeamData
 import si.gasilko.app.feature.map.MapScreen
+import si.gasilko.app.feature.photos.presentation.PermanentHydrantPhoto
 import si.gasilko.app.feature.map.RouteAttribution
 import java.time.Instant
 import java.text.DateFormat
@@ -163,7 +164,12 @@ fun PlansScreen(model: HydrantViewModel,query: HydrantQuery,back: ()->Unit) {
     val routes=data.routes.filter { it.planId==saved?.id && it.valid && it.teamId in savedTeams }
     val shownRoute=routes.find { it.teamId==mapTeam }
     if(shownRoute!=null && observed.error==null && unchanged) {
-        MapScreen(onBack={mapTeam=null},hydrants=emptyList(),onOpenHydrant=null,route=shownRoute)
+        val routeIds=remember(shownRoute) { shownRoute.orderedStops().map { it.hydrantId }.toSet() }
+        MapScreen(onBack={mapTeam=null},
+            hydrants=observed.candidates.hydrants.filter { it.id in routeIds },
+            onOpenHydrant=model::open,route=shownRoute,
+            canOpenHydrant={!busy && !registry.loading && !registry.mutating},
+            photoPreview={ h -> PermanentHydrantPhoto(model,h.organization,h.id) })
         return
     }
     Scaffold { padding ->

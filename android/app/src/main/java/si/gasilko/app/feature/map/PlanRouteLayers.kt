@@ -17,9 +17,10 @@ import si.gasilko.app.feature.plans.PlanRoute
 
 /** Derived display data only. The persisted road geometry is supplied by Room. */
 internal data class RouteMapData(val key: String, val roads: String, val stops: String,
-    val points: List<LatLng>, val numbers: Set<Int>, val hasRoad: Boolean)
+    val points: List<LatLng>, val numbers: Set<Int>, val hasRoad: Boolean, val stopCoordinates: Map<String,LatLng> = emptyMap())
 internal fun routeMapData(route: PlanRoute): RouteMapData {
     val points=mutableListOf<LatLng>()
+    val stopCoordinates=mutableMapOf<String,LatLng>()
     val numbers=mutableSetOf<Int>()
     val root=Json.parseToJsonElement(route.geometry).jsonObject
     val roads=mutableListOf<JsonElement>()
@@ -36,7 +37,9 @@ internal fun routeMapData(route: PlanRoute): RouteMapData {
                 points.addAll(line);roads.add(feature)
             }
         } else if(geometry["type"]?.jsonPrimitive?.content=="Point" && properties["kind"]?.jsonPrimitive?.content=="stop") {
-            points.add(LatLng(coordinates[1].jsonPrimitive.double,coordinates[0].jsonPrimitive.double))
+            val position=LatLng(coordinates[1].jsonPrimitive.double,coordinates[0].jsonPrimitive.double)
+            points.add(position)
+            stopCoordinates[properties.getValue("uuid").jsonPrimitive.content]=position
             val number=properties.getValue("number").jsonPrimitive.int
             numbers.add(number)
             (properties["snapped"] as? JsonArray)?.takeIf { it.size>=2 }?.let {
@@ -48,9 +51,10 @@ internal fun routeMapData(route: PlanRoute): RouteMapData {
     fun collection(features: List<JsonElement>)=buildJsonObject {
         put("type","FeatureCollection");put("features",JsonArray(features))
     }.toString()
-    return RouteMapData(route.planId+route.teamId+route.calculatedAt,collection(roads),collection(stops),points,numbers,roads.isNotEmpty())
+    return RouteMapData(route.planId+route.teamId+route.calculatedAt,collection(roads),collection(stops),points,numbers,roads.isNotEmpty(),stopCoordinates)
 }
 internal class PlanRouteLayers(private val style: Style) {
+    companion object { const val STOP_LAYER="gasilko-route-stops" }
     private val roads=GeoJsonSource("gasilko-route-roads",HydrantMapLayers.EMPTY)
     private val stops=GeoJsonSource("gasilko-route-stops",HydrantMapLayers.EMPTY)
     private var lastRoads: String?=null
@@ -65,7 +69,7 @@ internal class PlanRouteLayers(private val style: Style) {
         style.addLayer(LineLayer("gasilko-route-road","gasilko-route-roads").withProperties(
             lineColor(Color.rgb(30,77,185)),lineWidth(5f),lineOpacity(1f),visibility(Property.VISIBLE),
             lineCap(Property.LINE_CAP_ROUND),lineJoin(Property.LINE_JOIN_ROUND)))
-        style.addLayer(SymbolLayer("gasilko-route-stops","gasilko-route-stops").withProperties(
+        style.addLayer(SymbolLayer(STOP_LAYER,"gasilko-route-stops").withProperties(
             iconImage(get("icon")),iconSize(0.6f),iconAllowOverlap(true),iconIgnorePlacement(true)))
     }
     fun update(data: RouteMapData?) {

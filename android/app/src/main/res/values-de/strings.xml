@@ -398,4 +398,7 @@
     <string name="shell_plans_hint">Pläne, Teamrouten und Einsätze vor Ort.</string>
     <string name="shell_teams_hint">Teammitglieder und Teamverwaltung.</string>
     <string name="shell_history_hint">Wählen Sie einen Hydranten im Register und öffnen Sie seinen Prüfverlauf.</string>
+    <string name="photo_identification">Hydrantenfoto</string>
+    <string name="photo_no_permanent">Kein dauerhaftes Hydrantenfoto</string>
+    <string name="map_open_hydrant">Hydrant öffnen</string>
 </resources>

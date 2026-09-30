@@ -151,7 +151,7 @@ class RoomHydrantRepository(
     override suspend fun completeInspectionWithPhotos(organization: String, hydrantId: String, input: InspectionCompletion,
         photos: List<LocalPhotoInput>): InspectionWrite = changes.withLock {
         val account=currentAccount()
-        if((input.mode==InspectionMode.QUICK && photos.isNotEmpty()) || photos.map { it.id }.distinct().size!=photos.size ||
+        if(photos.map { it.id }.distinct().size!=photos.size ||
             photos.any { it.category!=PhotoCategory.INSPECTION || it.inspectionId!=input.id })
             throw RegistryFailure(RegistryError.VALIDATION)
         val result=database.withTransaction {

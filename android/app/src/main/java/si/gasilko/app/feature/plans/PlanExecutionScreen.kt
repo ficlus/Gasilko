@@ -17,6 +17,7 @@ import si.gasilko.app.core.ui.*
 import si.gasilko.app.feature.hydrants.domain.*
 import si.gasilko.app.feature.hydrants.presentation.*
 import si.gasilko.app.feature.map.MapScreen
+import si.gasilko.app.feature.photos.presentation.PermanentHydrantPhoto
 
 @Composable
 @OptIn(ExperimentalLayoutApi::class)
@@ -69,7 +70,16 @@ fun PlanExecutionScreen(model: HydrantViewModel,query: HydrantQuery,initialPlan:
     LaunchedEffect(plan?.id,selected,route?.valid) { if(route==null)map=false }
     val routeLabels=remember(route) { route?.orderedStops().orEmpty().associateBy { it.hydrantId } }
     if(map && route!=null && view.error==null) {
-        MapScreen(onBack={map=false},hydrants=emptyList(),onOpenHydrant=null,route=route)
+        MapScreen(onBack={map=false},
+            hydrants=view.candidates.hydrants.filter { h -> routeLabels.containsKey(h.id) },
+            onOpenHydrant={ id -> stops.find { it.hydrantId==id }?.let { item ->
+                if(canExecute && !busy && data.reassignmentRequests.none { it.context.itemId==item.id })
+                    run { model.openPlanStop(query.organization,item.planId,item.id) }
+            } },route=route,
+            canOpenHydrant={ id -> canExecute && !busy && stops.any { item ->
+                item.hydrantId==id && data.reassignmentRequests.none { it.context.itemId==item.id }
+            } },
+            photoPreview={ h -> PermanentHydrantPhoto(model,h.organization,h.id) })
         return
     }
     Scaffold { padding ->
