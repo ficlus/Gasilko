@@ -35,6 +35,13 @@ class RoomHydrantRepository(
     override fun observePlanCandidates(query: HydrantQuery) = plans.candidates(query)
     override suspend fun refreshPlans(org: String) = plans.refresh(org)
     override suspend fun refreshPlanCandidates(org: String) = plans.refreshCandidates(org)
+    override suspend fun activatePlan(org: String,change: PlanAssignment) = plans.activate(org,change)
+    override suspend fun planStop(org: String,plan: String,item: String) = plans.stop(org,plan,item)
+    override suspend fun skipPlanItem(org: String,change: PlanSkip) = changes.withLock {
+        val actor=currentAccount();plans.skip(org,change);checkAccount(actor)
+        try { scheduleSync(actor,org) } catch(_: Exception) { android.util.Log.w("HydrantSync","schedule failed; skip retained") }
+        Unit
+    }
     override suspend fun routePlan(org: String, change: PlanRouting) = plans.route(org,change)
     override suspend fun assignPlan(org: String, change: PlanAssignment) = plans.assign(org,change)
     override suspend fun savePlan(org: String, change: PlanSave) = plans.save(org,change)
@@ -166,6 +173,12 @@ class RoomHydrantRepository(
             val prior=dao.get(account,organization,hydrantId)?.value ?: throw RegistryFailure(RegistryError.UNAVAILABLE)
             if(!prior.active && !org.role.manages) throw RegistryFailure(RegistryError.FORBIDDEN)
             val existing=dao.inspection(account,organization,input.id)?.value
+            input.planContext?.let { context ->
+                if(existing!=null && dao.pendingChanges(account,organization).none { it.operationId==input.id &&
+                    it.operation==CREATE_INSPECTION && Json.parseToJsonElement(it.payload).jsonObject.inspectionCompletion().planContext==context })
+                    throw RegistryFailure(RegistryError.VALIDATION)
+                plans.completeLocal(organization,context,hydrantId,input.id,input.completedAt)
+            }
             if(existing!=null) {
                 if(existing.hydrantId!=hydrantId || existing.inspectorId!=account || !existing.completion().sameEvent(input))
                     throw RegistryFailure(RegistryError.VALIDATION)

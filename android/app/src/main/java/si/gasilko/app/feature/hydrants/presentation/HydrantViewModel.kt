@@ -29,6 +29,7 @@ data class RegistryState(
     val confirmDeactivate: Boolean = false, val reloadId: String? = null,
     val inspectionDraft: InspectionDraft? = null, val inspectionSaved: Boolean = false,
     val showHistory: Boolean = false, val historyRefreshing: Boolean = false, val historyError: RegistryError? = null,
+    val planStop: PlanItem? = null, val executionPlanId: String? = null,
 ) { val manages get() = organization?.role?.manages == true; val writable get() = organization?.active == true }
 
 class HydrantViewModel(private val repository: HydrantRepository, private val injectedScope: CoroutineScope? = null): ViewModel() {
@@ -80,6 +81,16 @@ class HydrantViewModel(private val repository: HydrantRepository, private val in
     }
     suspend fun refreshPlans(org: String) = teamAccess(org) { repository.refreshTeams(org);repository.refreshPlans(org) }
     suspend fun refreshPlanCandidates(org: String) = teamAccess(org) { repository.refreshPlanCandidates(org) }
+    suspend fun activatePlan(org: String,change: PlanAssignment) = teamAccess(org) { repository.activatePlan(org,change) }
+    suspend fun skipPlanItem(org: String,change: PlanSkip) = teamAccess(org) { repository.skipPlanItem(org,change) }
+    fun leaveExecution() { mutableState.value=state.value.copy(executionPlanId=null) }
+    suspend fun openPlanStop(org: String,plan: String,item: String) {
+        val (row,hydrant)=teamAccess(org) {
+            val row=repository.planStop(org,plan,item)
+            row to repository.get(org,row.hydrantId)
+        }
+        mutableState.value=state.value.copy(selected=hydrant,planStop=row,executionPlanId=plan,inspectionSaved=false,error=null)
+    }
     suspend fun routePlan(org: String, change: PlanRouting) = teamAccess(org) { repository.routePlan(org,change) }
     suspend fun assignPlan(org: String, change: PlanAssignment) = teamAccess(org) { repository.assignPlan(org,change) }
     suspend fun savePlan(org: String, change: PlanSave) = teamAccess(org) { repository.savePlan(org,change) }
@@ -210,8 +221,26 @@ class HydrantViewModel(private val repository: HydrantRepository, private val in
     fun startInspection(mode: InspectionMode) {
         val s=state.value; val h=s.selected ?: return; val org=s.organization ?: return
         if(s.loading || s.mutating || s.form!=null || s.inspectionDraft!=null || !s.writable || (!h.active && !s.manages))return
-        mutableState.value=s.copy(inspectionDraft=InspectionDraft(UUID.randomUUID().toString(),org.id,h.id,System.currentTimeMillis(),mode=mode),
-            inspectionSaved=false,error=null)
+        if(s.planStop?.inspectionId!=null)return
+        val stamp=generation
+        mutableState.value=s.copy(loading=true,error=null)
+        start {
+            try {
+                val item=s.planStop?.let { repository.planStop(org.id,it.planId,it.id) }
+                if(stamp!=generation)return@start
+                if(item?.inspectionId!=null) {
+                    mutableState.value=state.value.copy(planStop=item,loading=false,error=RegistryError.EXECUTION_CHANGED)
+                } else mutableState.value=state.value.copy(loading=false,planStop=item,
+                    inspectionDraft=InspectionDraft(UUID.randomUUID().toString(),org.id,h.id,System.currentTimeMillis(),mode=mode,
+                        planContext=item?.context()),inspectionSaved=false,error=null)
+            } catch(e: CancellationException) { throw e }
+            catch(e: Exception) { if(stamp==generation) {
+                val error=reason(e)
+                if(error in listOf(RegistryError.EXPIRED,RegistryError.FORBIDDEN)) {
+                    clear();mutableState.value=RegistryState(error=error)
+                } else mutableState.value=state.value.copy(loading=false,error=error)
+            } }
+        }
     }
     fun changeInspection(result: InspectionResult?, notes: String) {
         val s=state.value; val draft=s.inspectionDraft ?: return
@@ -250,7 +279,8 @@ class HydrantViewModel(private val repository: HydrantRepository, private val in
             maxOf(draft.startedAt,System.currentTimeMillis()),
             notes=if(draft.mode!=InspectionMode.QUICK)checkNotes else draft.notes.takeIf { it.isNotBlank() },
             pressureBar=if(draft.mode==InspectionMode.QUICK)null else parseMeasurement(draft.pressure,"999.99").value,
-            flowLMin=if(draft.mode==InspectionMode.QUICK)null else parseMeasurement(draft.flow,"999999.99").value,id=draft.id)
+            flowLMin=if(draft.mode==InspectionMode.QUICK)null else parseMeasurement(draft.flow,"999999.99").value,id=draft.id,
+            planContext=draft.planContext)
         val stamp=generation
         mutableState.value=s.copy(inspectionDraft=draft.copy(completion=input),mutating=true,error=null)
         start {
@@ -259,6 +289,9 @@ class HydrantViewModel(private val repository: HydrantRepository, private val in
                     else repository.completeInspectionWithPhotos(draft.organization,draft.hydrantId,input,draft.photos)
                 if(stamp!=generation)return@start
                 mutableState.value=state.value.copy(selected=saved.hydrant,
+                    planStop=state.value.planStop?.copy(inspectionId=input.id,completedBy=saved.inspection.inspectorId,
+                        completedAt=Instant.ofEpochMilli(input.completedAt).toString(),executionVersion=(draft.planContext?.version ?: 0)+1,
+                        skipReason=null,skippedBy=null,skippedAt=null),
                     rows=state.value.rows.map { if(it.id==saved.hydrant.id)saved.hydrant else it }.filter { s.query.matches(it) },
                     inspectionDraft=null,inspectionSaved=true,mutating=false,error=null)
                 // Existing Room/sync observation updates the detail and list afterwards.
@@ -422,7 +455,7 @@ class HydrantViewModel(private val repository: HydrantRepository, private val in
         }catch(e: CancellationException){throw e}catch(e: Exception){if(stamp==generation)mutableState.value=old.copy(error=reason(e))} }
     }
     fun open(id: String) {
-        val old=state.value;val org=old.organization?:return
+        val old=state.value.copy(planStop=null,executionPlanId=null);val org=old.organization?:return
         if(old.loading || old.mutating)return
         photos.clear();historyJob?.cancel()
         mutableState.value=old.copy(loading=true,error=null,inspectionSaved=false,showHistory=false,historyRefreshing=false,historyError=null);val stamp=generation
@@ -431,7 +464,7 @@ class HydrantViewModel(private val repository: HydrantRepository, private val in
     }
     fun back() { if(!state.value.mutating && !state.value.loading) {
         photos.clear();historyJob?.cancel()
-        mutableState.value=state.value.copy(selected=null,form=null,reviewDraft=null,error=null,conflict=false,confirmDeactivate=false,reloadId=null,inspectionDraft=null,inspectionSaved=false,showHistory=false,historyRefreshing=false,historyError=null)
+        mutableState.value=state.value.copy(selected=null,planStop=null,form=null,reviewDraft=null,error=null,conflict=false,confirmDeactivate=false,reloadId=null,inspectionDraft=null,inspectionSaved=false,showHistory=false,historyRefreshing=false,historyError=null)
     } }
     fun add() { if(state.value.writable && !state.value.loading && !state.value.mutating)mutableState.value=state.value.copy(form=HydrantForm(UUID.randomUUID().toString()),reviewDraft=null,error=null,conflict=false) }
     fun addAt(latitude: Double, longitude: Double, accuracy: Float?) {

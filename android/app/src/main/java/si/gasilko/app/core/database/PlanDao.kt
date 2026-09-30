@@ -16,6 +16,8 @@ data class PlanRouteEntity(val account: String,@Embedded val value: PlanRoute)
 data class PlanCoverage(val account: String,val organization: String,val hydrantId: String,val version: Long,val refreshedAt: Long)
 data class PlanInspectionLast(val hydrantId: String,val completedAt: Long?,val issues: Int)
 @Dao interface PlanDao {
+    @Query("SELECT * FROM inspection_plan_items WHERE account=:account AND organization=:org AND planId=:plan AND id=:item")
+    suspend fun item(account: String,org: String,plan: String,item: String): PlanItemEntity?
     @Upsert suspend fun plans(rows: List<PlanEntity>)
     @Upsert suspend fun teams(rows: List<PlanTeamEntity>)
     @Upsert suspend fun items(rows: List<PlanItemEntity>)

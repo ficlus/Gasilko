@@ -22,11 +22,13 @@ data class InspectionCompletion(
     val mode: InspectionMode, val result: InspectionResult, val startedAt: Long, val completedAt: Long,
     val notes: String? = null, val pressureBar: Double? = null, val flowLMin: Double? = null,
     val id: String = UUID.randomUUID().toString(),
+    val planContext: si.gasilko.app.feature.plans.PlanStopContext? = null,
 ) {
     fun sameEvent(other: InspectionCompletion): Boolean {
         fun sameNumber(a: Double?, b: Double?) = if(a==null || b==null) a==b
             else BigDecimal.valueOf(a).compareTo(BigDecimal.valueOf(b))==0
-        return copy(pressureBar=null,flowLMin=null)==other.copy(pressureBar=null,flowLMin=null) &&
+        // Plan linkage is validated separately against the explicit plan-item receipt.
+        return copy(pressureBar=null,flowLMin=null,planContext=null)==other.copy(pressureBar=null,flowLMin=null,planContext=null) &&
             sameNumber(pressureBar,other.pressureBar) && sameNumber(flowLMin,other.flowLMin)
     }
     fun validate() {
@@ -47,7 +49,7 @@ data class Inspection(
     fun completion() = InspectionCompletion(mode,result,startedAt,completedAt,notes,pressureBar,flowLMin,id)
 }
 /** Local writes return local state; only the sync engine treats the online result as acknowledgement. */
-data class InspectionWrite(val inspection: Inspection, val hydrant: Hydrant)
+data class InspectionWrite(val inspection: Inspection, val hydrant: Hydrant, val planItem: si.gasilko.app.feature.plans.PlanItem? = null)
 enum class InspectionSyncState { SYNCED, PENDING, ATTENTION }
 data class InspectionHistoryEntry(val inspection: Inspection, val state: InspectionSyncState,
     val durableIssue: Boolean = false)

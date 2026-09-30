@@ -10,6 +10,7 @@ internal fun InspectionCompletion.payload() = buildJsonObject {
     put("started_at",Instant.ofEpochMilli(startedAt).toString())
     put("completed_at",Instant.ofEpochMilli(completedAt).toString())
     put("notes",notes);put("pressure_bar",pressureBar);put("flow_l_min",flowLMin)
+    planContext?.let { put("plan_id",it.planId);put("plan_item_id",it.itemId);put("plan_version",it.version) }
 }
 internal fun JsonObject.inspectionCompletion() = InspectionCompletion(
     InspectionMode.valueOf(getValue("mode").jsonPrimitive.content),
@@ -18,6 +19,9 @@ internal fun JsonObject.inspectionCompletion() = InspectionCompletion(
     Instant.parse(getValue("completed_at").jsonPrimitive.content).toEpochMilli(),
     this["notes"]?.jsonPrimitive?.contentOrNull, this["pressure_bar"]?.jsonPrimitive?.doubleOrNull,
     this["flow_l_min"]?.jsonPrimitive?.doubleOrNull, getValue("id").jsonPrimitive.content,
+    this["plan_id"]?.jsonPrimitive?.contentOrNull?.let {
+        si.gasilko.app.feature.plans.PlanStopContext(it,getValue("plan_item_id").jsonPrimitive.content,getValue("plan_version").jsonPrimitive.long)
+    },
 )
 internal fun decodeInspection(value: JsonElement): Inspection {
     val row=value.jsonObject

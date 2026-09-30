@@ -31,6 +31,8 @@ data class HydrantEntity(
 
 @Dao
 interface RegistryDao {
+    @Query("UPDATE pending_hydrant_changes SET state='ATTENTION' WHERE account=:account AND organization=:org AND sequence=:sequence AND state='PENDING' AND operation='SKIP_PLAN_ITEM'")
+    suspend fun blockExecution(account: String,org: String,sequence: Long)
     @Insert suspend fun insertInspection(row: InspectionEntity)
     @Insert(onConflict = OnConflictStrategy.IGNORE) suspend fun cacheInspections(rows: List<InspectionEntity>)
     @Query("SELECT * FROM inspections WHERE account = :account AND organization = :organization AND id = :id")
@@ -59,7 +61,7 @@ interface RegistryDao {
     suspend fun nextChange(account: String, organization: String): PendingHydrantChange?
     @Query("SELECT * FROM pending_hydrant_changes WHERE account = :account AND organization = :organization AND entityId = :id AND state NOT IN ('SYNCED','RESOLVED') ORDER BY COALESCE(orderSequence, sequence), sequence")
     suspend fun remainingChanges(account: String, organization: String, id: String): List<PendingHydrantChange>
-    @Query("SELECT acknowledgedVersion FROM pending_hydrant_changes WHERE account = :account AND organization = :organization AND entityId = :id AND operation != 'UPLOAD_PHOTO' AND COALESCE(orderSequence, sequence) < :before AND state = 'SYNCED' ORDER BY COALESCE(orderSequence, sequence) DESC, sequence DESC LIMIT 1")
+    @Query("SELECT acknowledgedVersion FROM pending_hydrant_changes WHERE account = :account AND organization = :organization AND entityId = :id AND operation NOT IN ('UPLOAD_PHOTO','SKIP_PLAN_ITEM') AND COALESCE(orderSequence, sequence) < :before AND state = 'SYNCED' ORDER BY COALESCE(orderSequence, sequence) DESC, sequence DESC LIMIT 1")
     suspend fun acknowledgedVersion(account: String, organization: String, id: String, before: Long): Long?
     @Query("UPDATE pending_hydrant_changes SET state = 'SYNCED', acknowledgedVersion = :version WHERE account = :account AND organization = :organization AND sequence = :sequence AND state = 'PENDING'")
     suspend fun acknowledge(account: String, organization: String, sequence: Long, version: Long?): Int
@@ -125,13 +127,21 @@ data class HydrantConflictEntity(
     val resolutionServerState: String? = null, val resolutionVersion: Long? = null, val replacementSequence: Long? = null,
 )
 
-@Database(entities = [OrganizationEntity::class, TypeEntity::class, HydrantEntity::class, PendingHydrantChange::class, HydrantConflictEntity::class, InspectionEntity::class, PhotoEntity::class, TeamEntity::class, TeamMemberEntity::class, TeamPersonEntity::class, PlanEntity::class, PlanTeamEntity::class, PlanItemEntity::class, PlanCoverage::class, PlanRouteEntity::class], version = 12, exportSchema = true)
+@Database(entities = [OrganizationEntity::class, TypeEntity::class, HydrantEntity::class, PendingHydrantChange::class, HydrantConflictEntity::class, InspectionEntity::class, PhotoEntity::class, TeamEntity::class, TeamMemberEntity::class, TeamPersonEntity::class, PlanEntity::class, PlanTeamEntity::class, PlanItemEntity::class, PlanCoverage::class, PlanRouteEntity::class], version = 13, exportSchema = true)
 abstract class RegistryDatabase : RoomDatabase() {
     abstract fun registry(): RegistryDao
     abstract fun photos(): PhotoDao
     abstract fun teams(): TeamDao
     abstract fun plans(): PlanDao
     companion object {
+        val MIGRATION_12_13 = object : Migration(12,13) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE inspection_plan_items ADD COLUMN executionVersion INTEGER NOT NULL DEFAULT 0")
+                listOf("inspectionId","completedBy","completedAt","skipReason","skippedBy","skippedAt").forEach {
+                    db.execSQL("ALTER TABLE inspection_plan_items ADD COLUMN " + it + " TEXT")
+                }
+            }
+        }
         val MIGRATION_11_12 = object : Migration(11,12) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE inspection_plan_items ADD COLUMN routeOrder INTEGER")
@@ -242,7 +252,7 @@ abstract class RegistryDatabase : RoomDatabase() {
         @Volatile private var instance: RegistryDatabase? = null
         fun open(context: Context): RegistryDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(context.applicationContext, RegistryDatabase::class.java,
-                "hydrant-registry.db").addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12).build().also { instance = it }
+                "hydrant-registry.db").addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13).build().also { instance = it }
         }
     }
 }

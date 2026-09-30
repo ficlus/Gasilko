@@ -6,6 +6,7 @@ import si.gasilko.app.core.database.*
 import si.gasilko.app.feature.hydrants.domain.*
 import si.gasilko.app.feature.inspections.data.*
 import si.gasilko.app.feature.inspections.domain.*
+import si.gasilko.app.feature.plans.*
 
 internal fun InspectionEntity.matchesServer(event: Inspection): Boolean =
     value.organization==event.organization && value.hydrantId==event.hydrantId && value.inspectorId==event.inspectorId &&
@@ -27,12 +28,19 @@ internal suspend fun recordInspectionIssue(database: RegistryDatabase, account: 
 /** Shared acknowledgement path for RPC receipts and history receipts. Caller holds
  * hydrantRemoteAccess. Only the ordered head can advance, never a later operation. */
 internal suspend fun acknowledgeHydrantOperation(database: RegistryDatabase, operation: PendingHydrantChange,
-    server: Hydrant, event: Inspection?, checkContext: ()->Unit): Boolean = database.withTransaction {
+    server: Hydrant, event: Inspection?, checkContext: ()->Unit, planItem: PlanItem? = null): Boolean = database.withTransaction {
     checkContext()
     val dao=database.registry()
     val account=operation.account;val organization=operation.organization
     val head=dao.nextChange(account,organization)
     if(head==null || head.sequence!=operation.sequence || head.state!="PENDING")return@withTransaction false
+    if(operation.operation==CREATE_INSPECTION)Json.parseToJsonElement(operation.payload).jsonObject.inspectionCompletion().planContext?.let { context ->
+        // Inspection history alone cannot acknowledge its explicit plan linkage.
+        if(planItem==null)return@withTransaction false
+        require(planItem.id==context.itemId && planItem.planId==context.planId && planItem.organization==organization &&
+            planItem.hydrantId==operation.entityId && planItem.inspectionId==operation.operationId &&
+            planItem.completedBy==account && planItem.executionVersion==context.version+1)
+    }
     require(server.id==operation.entityId && server.organization==organization && server.version>0)
     val previous=dao.acknowledgedVersion(account,organization,operation.entityId,operation.orderSequence ?: operation.sequence)
     val version=maxOf(operation.baseVersion ?: 0,previous ?: 0)
@@ -49,6 +57,7 @@ internal suspend fun acknowledgeHydrantOperation(database: RegistryDatabase, ope
         check(dao.acknowledgeInspection(account,organization,event.id,event.createdAt,
             event.hydrantVersionBefore,event.hydrantVersionAfter,System.currentTimeMillis())==1)
     }
+    planItem?.let { cachePlanItems(database,account,organization,listOf(it),operation.sequence) }
     check(dao.acknowledge(account,organization,operation.sequence,chainVersion)==1)
     var visible=server
     dao.remainingChanges(account,organization,server.id).forEach { visible=it.applyTo(visible) }

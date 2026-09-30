@@ -279,4 +279,21 @@
     <string name="routes_attribution">Usmerjanje: GraphHopper · Podatki zemljevida © OpenStreetMap contributors</string>
     <string name="routes_single_stop">Ta ekipa ima en hidrant. Brez začetne lokacije ni voznega odseka med postanki.</string>
     <string name="routes_no_road_geometry">Ni shranjene cestne geometrije. Dostopne točke lahko sovpadajo; po potrebi ponovno izračunajte ruto s povezavo.</string>
+    <string name="execution_no_route">Cestna ruta ni izračunana. Delo lahko nadaljujete s seznamom dodeljenih postankov. Ruto lahko izračunate pozneje.</string>
+    <string name="execution_title">Izvedba načrta</string>
+    <string name="execution_activate">Začni izvajanje načrta</string>
+    <string name="execution_empty">Ni aktivnih načrtov za vaše ekipe.</string>
+    <string name="execution_sync">Sinhroniziraj</string>
+    <string name="execution_reroute">Preračunaj preostalo ruto</string>
+    <string name="execution_pending">Napredek vsebuje lokalne spremembe. Pred preračunom jih sinhronizirajte.</string>
+    <string name="execution_pending_short">Čaka na sinhronizacijo</string>
+    <string name="execution_changed">Postanek je že zaključen ali spremenjen. Osvežite načrt in ga ponovno odprite.</string>
+    <string name="execution_completed">Zaključeno</string>
+    <string name="execution_skipped">Preskočeno – ostaja odprto</string>
+    <string name="execution_open">Odprto</string>
+    <string name="execution_next">Naslednji postanek</string>
+    <string name="execution_skip">Preskoči</string>
+    <string name="execution_skip_reason">Razlog za preskok (obvezno)</string>
+    <string name="execution_progress">Zaključeno %1$d / %2$d · Preostalo %3$d · Preskočeno %4$d</string>
+    <string name="execution_attention">Sprememba potrebuje pregled. Lokalni zapis ostaja shranjen; preverite stanje po sinhronizaciji.</string>
 </resources>

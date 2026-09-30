@@ -50,6 +50,12 @@ private fun planDraft(p: InspectionPlan, data: PlanData) = PlanDraft(p.id,p.vers
 @Composable
 @OptIn(ExperimentalLayoutApi::class)
 fun PlansScreen(model: HydrantViewModel,query: HydrantQuery,back: ()->Unit) {
+    val registry by model.state.collectAsStateWithLifecycle()
+    var execution by remember { mutableStateOf(registry.executionPlanId) }
+    if(!registry.manages || execution!=null) {
+        PlanExecutionScreen(model,query,execution) { execution=null;if(!registry.manages)back() }
+        return
+    }
     val flow=remember(model,query) { model.planData(query) }
     val observed by flow.collectAsStateWithLifecycle(initialValue=PlanViewData())
     val scope=rememberCoroutineScope()
@@ -57,6 +63,7 @@ fun PlansScreen(model: HydrantViewModel,query: HydrantQuery,back: ()->Unit) {
     var pending by remember { mutableStateOf<PlanSave?>(null) }
     var assigning by remember { mutableStateOf<PlanAssignment?>(null) }
     var routing by remember { mutableStateOf<PlanRouting?>(null) }
+    var activating by remember { mutableStateOf<PlanAssignment?>(null) }
     var mapTeam by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<RegistryError?>(null) }
@@ -67,14 +74,14 @@ fun PlansScreen(model: HydrantViewModel,query: HydrantQuery,back: ()->Unit) {
         scope.launch {
             try {
                 if(candidates)model.refreshPlanCandidates(query.organization)
-                else { model.refreshPlans(query.organization);draft=null;pending=null;assigning=null;routing=null;mapTeam=null }
+                else { model.refreshPlans(query.organization);draft=null;pending=null;assigning=null;routing=null;activating=null;mapTeam=null }
             } catch(e: CancellationException) { throw e }
             catch(e: Exception) { error=(e as? RegistryFailure)?.reason ?: RegistryError.SERVER }
             finally { busy=false }
         }
     }
     fun submit(status: PlanStatus) {
-        if(busy || assigning!=null || routing!=null)return
+        if(busy || assigning!=null || routing!=null || activating!=null)return
         val request=try { pending ?: draft?.request(status) ?: return }
             catch(e: RegistryFailure) { error=e.reason;return }
         pending=request;busy=true;error=null
@@ -88,7 +95,7 @@ fun PlansScreen(model: HydrantViewModel,query: HydrantQuery,back: ()->Unit) {
         }
     }
     fun assign() {
-        if(busy || pending!=null || routing!=null)return
+        if(busy || pending!=null || routing!=null || activating!=null)return
         val current=draft
         val request=assigning ?: current?.let { PlanAssignment(it.id,it.version) } ?: return
         assigning=request;busy=true;error=null
@@ -105,7 +112,7 @@ fun PlansScreen(model: HydrantViewModel,query: HydrantQuery,back: ()->Unit) {
         }
     }
     fun route() {
-        if(busy || pending!=null || assigning!=null)return
+        if(busy || pending!=null || assigning!=null || activating!=null)return
         val request=routing ?: draft?.let { PlanRouting(it.id,it.version) } ?: return
         routing=request;busy=true;error=null
         scope.launch {
@@ -121,13 +128,28 @@ fun PlansScreen(model: HydrantViewModel,query: HydrantQuery,back: ()->Unit) {
             } finally { busy=false }
         }
     }
+    fun activate() {
+        if(busy)return
+        val request=activating ?: draft?.let { PlanAssignment(it.id,it.version) } ?: return
+        activating=request;busy=true;error=null
+        scope.launch {
+            try {
+                model.activatePlan(query.organization,request)
+                activating=null;execution=request.id
+            } catch(e: CancellationException) { throw e }
+            catch(e: Exception) {
+                error=(e as? RegistryFailure)?.reason ?: RegistryError.SERVER
+                if(error in listOf(RegistryError.CONFLICT,RegistryError.VALIDATION))activating=null
+            } finally { busy=false }
+        }
+    }
     fun leave() { if(!busy) { if(mapTeam!=null)mapTeam=null else if(draft!=null)draft=null else back() } }
     BackHandler(onBack=::leave)
     LaunchedEffect(query.organization) { refresh() }
     val data=observed.data
     val d=draft
     val hasPendingHydrants=observed.candidates.hydrants.any { it.id in (d?.hydrants ?: emptySet()) && it.version==0L }
-    val editable=d?.editable==true && !busy && pending==null && assigning==null && routing==null
+    val editable=d?.editable==true && !busy && pending==null && assigning==null && routing==null && activating==null
     val saved=data.plans.find { it.id==d?.id }
     val savedDraft=saved?.let { planDraft(it,data) }
     val unchanged=d!=null && d==savedDraft
@@ -150,10 +172,11 @@ fun PlansScreen(model: HydrantViewModel,query: HydrantQuery,back: ()->Unit) {
                 TextButton(onClick=::leave,enabled=!busy) { Text(stringResource(R.string.h_back)) }
                 TextButton(onClick={refresh()},enabled=!busy) { Text(stringResource(R.string.h_refresh)) }
                 if(d==null)TextButton(onClick={draft=PlanDraft(snapshot=planSelectionSnapshot(query,observed.candidates.incomplete))},
-                    enabled=!busy && pending==null && assigning==null && routing==null) { Text(stringResource(R.string.plans_new)) }
+                    enabled=!busy && pending==null && assigning==null && routing==null && activating==null) { Text(stringResource(R.string.plans_new)) }
                 if(pending!=null)TextButton(onClick={submit(pending!!.status)},enabled=!busy) { Text(stringResource(R.string.photo_retry)) }
                 if(assigning!=null)TextButton(onClick=::assign,enabled=!busy) { Text(stringResource(R.string.photo_retry)) }
                 if(routing!=null)TextButton(onClick=::route,enabled=!busy) { Text(stringResource(R.string.photo_retry)) }
+                if(activating!=null)TextButton(onClick=::activate,enabled=!busy) { Text(stringResource(R.string.photo_retry)) }
             }
             if(busy)LinearProgressIndicator(Modifier.fillMaxWidth())
             (error ?: observed.error)?.let {
@@ -166,11 +189,19 @@ fun PlansScreen(model: HydrantViewModel,query: HydrantQuery,back: ()->Unit) {
                     items(data.plans,key={it.id}) { p ->
                         OutlinedButton(onClick={
                             draft=planDraft(p,data)
-                        },enabled=!busy && pending==null && assigning==null && routing==null,modifier=Modifier.fillMaxWidth()) {
+                        },enabled=!busy && pending==null && assigning==null && routing==null && activating==null,modifier=Modifier.fillMaxWidth()) {
                             Text(p.name+" · "+stringResource(planStatusLabel(PlanStatus.valueOf(p.status))))
                         }
                     }
                 } else {
+                    item {
+                        if(d.status==PlanStatus.PLANNED)Button(onClick=::activate,enabled=editable && unchanged) {
+                            Text(stringResource(R.string.execution_activate))
+                        }
+                        if(d.status==PlanStatus.ACTIVE)Button(onClick={execution=d.id},enabled=!busy) {
+                            Text(stringResource(R.string.execution_title))
+                        }
+                    }
                     item {
                         Text(stringResource(R.string.plans_assignment_title),style=MaterialTheme.typography.titleMedium)
                         Text(stringResource(R.string.plans_assignment_note))

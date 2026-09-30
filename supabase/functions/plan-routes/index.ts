@@ -68,7 +68,9 @@ Deno.serve(async req => {
       !uuid.test(body?.request?.operation_id ?? "") || !Number.isSafeInteger(body?.request?.version) || body.request.version < 1)
       throw new RoutingError("VALIDATION", 400);
     // Ignore client geometry, stops, provider URLs and actor IDs entirely.
-    const request = { id: body.request.id, version: body.request.version, operation_id: body.request.operation_id, action: "ROUTE" };
+    const action = body.request.action ?? "ROUTE";
+    if (!["ROUTE", "ROUTE_REMAINING"].includes(action)) throw new RoutingError("VALIDATION", 400);
+    const request = { id: body.request.id, version: body.request.version, operation_id: body.request.operation_id, action };
     const url = Deno.env.get("SUPABASE_URL"), anon = Deno.env.get("SUPABASE_ANON_KEY");
     const service = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY"), key = Deno.env.get("GRAPHHOPPER_API_KEY");
     if (!url || !anon || !service || !key) throw new RoutingError("ROUTE_NOT_CONFIGURED", 503);

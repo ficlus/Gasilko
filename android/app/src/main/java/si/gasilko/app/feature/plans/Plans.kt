@@ -15,7 +15,19 @@ data class InspectionPlan(val id: String, val organization: String, val name: St
     val startedAt: String?, val completedAt: String?, val version: Long)
 data class PlanTeam(val planId: String, val organization: String, val teamId: String, val active: Boolean)
 data class PlanItem(val id: String, val planId: String, val organization: String, val hydrantId: String,
-    val active: Boolean, val createdAt: String, val teamId: String? = null, val routeOrder: Int? = null)
+    val active: Boolean, val createdAt: String, val teamId: String? = null, val routeOrder: Int? = null,
+    @androidx.room.ColumnInfo(defaultValue="0") val executionVersion: Long = 0,
+    val inspectionId: String? = null, val completedBy: String? = null, val completedAt: String? = null,
+    val skipReason: String? = null, val skippedBy: String? = null, val skippedAt: String? = null)
+data class PlanStopContext(val planId: String, val itemId: String, val version: Long)
+data class PlanSkip(val context: PlanStopContext, val reason: String,
+    val id: String = UUID.randomUUID().toString(), val at: String = Instant.now().toString()) {
+    fun payload()=buildJsonObject {
+        put("id",id);put("plan_id",context.planId);put("item_id",context.itemId);put("version",context.version)
+        put("action","SKIP");put("reason",reason.trim());put("at",at)
+    }
+}
+internal const val SKIP_PLAN_ITEM="SKIP_PLAN_ITEM"
 data class PlanRoute(val planId: String, val organization: String, val teamId: String,
     val provider: String, val profile: String, val calculatedAt: String, val distanceM: Double,
     val durationS: Double, val geometry: String, val stops: String, val valid: Boolean)
@@ -26,7 +38,9 @@ fun PlanRoute.orderedStops(): List<RouteStop> = Json.parseToJsonElement(stops).j
         row.getValue("order").jsonPrimitive.int)
 }.sortedBy { it.order }
 data class PlanData(val plans: List<InspectionPlan> = emptyList(), val teams: List<PlanTeam> = emptyList(),
-    val items: List<PlanItem> = emptyList(), val routes: List<PlanRoute> = emptyList())
+    val items: List<PlanItem> = emptyList(), val routes: List<PlanRoute> = emptyList(),
+    val executableTeams: Set<String> = emptySet(), val pendingItems: Set<String> = emptySet(),
+    val attentionItems: Set<String> = emptySet())
 data class PlanCandidates(val hydrants: List<Hydrant> = emptyList(), val filteredIds: Set<String> = emptySet(),
     val due: Map<String,InspectionDueState?> = emptyMap(), val registryCached: Boolean = false) {
     val incomplete get() = !registryCached || hydrants.any { it.active && due[it.id]==null }
@@ -60,12 +74,16 @@ data class PlanAssignment(val id: String, val version: Long, val operationId: St
         put("id",id);put("version",version);put("operation_id",operationId);put("action","ASSIGN")
     }
 }
-data class PlanRouting(val id: String, val version: Long, val operationId: String = UUID.randomUUID().toString()) {
+data class PlanRouting(val id: String, val version: Long, val operationId: String = UUID.randomUUID().toString(), val remaining: Boolean=false) {
     fun payload() = buildJsonObject {
-        put("id",id);put("version",version);put("operation_id",operationId);put("action","ROUTE")
+        put("id",id);put("version",version);put("operation_id",operationId);put("action",if(remaining)"ROUTE_REMAINING" else "ROUTE")
     }
 }
 interface PlanRepository {
+    suspend fun activatePlan(org: String, change: PlanAssignment): PlanData = throw RegistryFailure(RegistryError.UNAVAILABLE)
+    suspend fun planStop(org: String, plan: String, item: String): PlanItem = throw RegistryFailure(RegistryError.UNAVAILABLE)
+    suspend fun skipPlanItem(org: String, change: PlanSkip): Unit = throw RegistryFailure(RegistryError.UNAVAILABLE)
+    suspend fun uploadPlanSkip(org: String, payload: JsonObject): PlanItem = throw RegistryFailure(RegistryError.UNAVAILABLE)
     suspend fun routePlan(org: String, change: PlanRouting): PlanData = throw RegistryFailure(RegistryError.UNAVAILABLE)
     suspend fun assignPlan(org: String, change: PlanAssignment): PlanData = throw RegistryFailure(RegistryError.UNAVAILABLE)
     fun observePlans(org: String): Flow<PlanData> = flowOf(PlanData())
@@ -87,9 +105,15 @@ internal fun decodePlans(value: JsonElement): PlanData {
         it.optional("start_longitude")?.toDouble(),it.b("return_to_start"),it.s("created_by"),it.s("created_at"),
         it.s("updated_at"),it.optional("started_at"),it.optional("completed_at"),it.s("version").toLong()) },
         rows("teams").map { PlanTeam(it.s("plan_id"),it.s("organization_id"),it.s("team_id"),it.b("active")) },
-        rows("items").map { PlanItem(it.s("id"),it.s("plan_id"),it.s("organization_id"),it.s("hydrant_id"),it.b("active"),it.s("created_at"),it.optional("team_id"),it.optional("route_order")?.toInt()) },
+        rows("items").map(::decodePlanItem),
         rows("routes").map { PlanRoute(it.s("plan_id"),it.s("organization_id"),it.s("team_id"),it.s("provider"),it.s("profile"),
             it.s("calculated_at"),it.s("distance_m").toDouble(),it.s("duration_s").toDouble(),
             it.getValue("geometry").toString(),it.getValue("stops").toString(),it.b("valid")) })
+}
+internal fun decodePlanItem(row: JsonObject): PlanItem {
+    fun s(k: String)=row[k]?.jsonPrimitive?.contentOrNull
+    return PlanItem(s("id")!!,s("plan_id")!!,s("organization_id")!!,s("hydrant_id")!!,row.getValue("active").jsonPrimitive.boolean,
+        s("created_at")!!,s("team_id"),s("route_order")?.toInt(),s("execution_version")?.toLong() ?: 0,
+        s("inspection_id"),s("completed_by"),s("completed_at"),s("skip_reason"),s("skipped_by"),s("skipped_at"))
 }
 

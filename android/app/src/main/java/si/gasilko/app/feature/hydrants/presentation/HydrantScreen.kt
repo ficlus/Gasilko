@@ -37,6 +37,8 @@ fun statusLabel(status: HydrantStatus): Int = when(status) {
     HydrantStatus.UNKNOWN -> R.string.h_unknown
 }
 fun errorLabel(error: RegistryError): Int = when(error) {
+    RegistryError.EXECUTION_PENDING -> R.string.execution_pending
+    RegistryError.EXECUTION_CHANGED -> R.string.execution_changed
     RegistryError.ROUTE_ASSIGNMENTS -> R.string.routes_assignments_required
     RegistryError.ROUTE_COORDINATES -> R.string.routes_coordinates_required
     RegistryError.ROUTE_UNREACHABLE -> R.string.routes_unreachable
@@ -86,7 +88,7 @@ fun HydrantScreen(model: HydrantViewModel, requestAccess: ()->Unit = {}, signOut
     var showConflicts by remember(state.organization?.id) { mutableStateOf(false) }
     var conflictSequence by remember(state.organization?.id) { mutableStateOf<Long?>(null) }
     LaunchedEffect(model) { if(!model.photos.state.value.busy)model.refresh() }
-    if(planQuery!=null && state.manages && state.writable) {
+    if(planQuery!=null && state.writable && state.planStop==null) {
         key(model,model.photoScope,state.organization!!.id) {
             si.gasilko.app.feature.plans.PlansScreen(model,planQuery!!) { planQuery=null }
         }
@@ -189,7 +191,7 @@ fun HydrantScreen(model: HydrantViewModel, requestAccess: ()->Unit = {}, signOut
         FlowRow(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
             TextButton(onClick={showMap=true;mapDetail=false},enabled=!busy && state.form==null && state.writable){Text(stringResource(R.string.map_title))}
             TextButton(onClick=model::refresh,enabled=!busy,modifier=Modifier.testTag("refresh")){Text(stringResource(R.string.h_refresh))}
-            if(state.manages && state.writable)TextButton(onClick={planQuery=state.query.copy(organization=state.organization!!.id)},
+            if(state.writable)TextButton(onClick={planQuery=state.query.copy(organization=state.organization!!.id)},
                 enabled=!busy && state.form==null && state.selected==null) { Text(stringResource(R.string.plans_title)) }
             if(state.manages && state.writable)TextButton(onClick={showTeams=true},enabled=!busy && state.form==null && state.selected==null) {
                 Text(stringResource(R.string.teams_title))
@@ -316,7 +318,8 @@ fun HydrantScreen(model: HydrantViewModel, requestAccess: ()->Unit = {}, signOut
         Text(stringResource(R.string.h_details),style=MaterialTheme.typography.titleLarge)
         TextButton(onClick=model::back,enabled=enabled){Text(stringResource(R.string.h_back))}
         if(state.inspectionSaved)Text(stringResource(R.string.inspection_saved),color=MaterialTheme.colorScheme.primary)
-        if(state.writable && (h.active || state.manages)) {
+        if(state.planStop?.inspectionId!=null)Text(stringResource(R.string.execution_completed),color=MaterialTheme.colorScheme.primary)
+        if(state.writable && (h.active || state.manages) && state.planStop?.inspectionId==null) {
             Button(onClick={model.startInspection(InspectionMode.QUICK)},enabled=enabled,modifier=Modifier.fillMaxWidth().heightIn(min=56.dp)) {
                 Text(stringResource(R.string.inspection_start_quick))
             }

@@ -38,7 +38,8 @@ data class HydrantFields(val type: String, val latitude: Double?, val longitude:
     val address: String?, val description: String?, val notes: String?, val interval: Int?,
     val status: HydrantStatus = HydrantStatus.UNKNOWN)
 enum class RegistryError { NETWORK, EXPIRED, FORBIDDEN, VALIDATION, CONFLICT, SERVER, UNAVAILABLE, LOCATION, COORDINATES, INTERVAL, TYPE,
-    ROUTE_ASSIGNMENTS, ROUTE_COORDINATES, ROUTE_UNREACHABLE, ROUTE_LIMIT, ROUTE_CONFIGURATION, ROUTE_PROVIDER }
+    ROUTE_ASSIGNMENTS, ROUTE_COORDINATES, ROUTE_UNREACHABLE, ROUTE_LIMIT, ROUTE_CONFIGURATION, ROUTE_PROVIDER,
+    EXECUTION_PENDING, EXECUTION_CHANGED }
 class RegistryFailure(val reason: RegistryError) : Exception()
 data class HydrantForm(
     val id: String, val type: String = "", val latitude: String = "", val longitude: String = "",
