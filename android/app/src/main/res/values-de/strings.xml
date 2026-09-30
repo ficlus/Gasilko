@@ -383,4 +383,11 @@
     <string name="reassign_current_team">Aktuelles Team: %1$s</string>
     <string name="reassign_changed">Dieser Stopp wurde neu zugewiesen.</string>
     <string name="reassign_actor">Ausgeführt von Benutzer: %1$s</string>
+    <string name="ui_location">Standort</string>
+    <string name="ui_technical">Technische Daten</string>
+    <string name="ui_inspections">Inspektionen</string>
+    <string name="ui_photos">Fotos</string>
+    <string name="ui_management">Verwaltung</string>
+    <string name="ui_remaining">Verbleibend</string>
+    <string name="ui_skipped">Übersprungen</string>
 </resources>

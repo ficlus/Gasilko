@@ -20,6 +20,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import si.gasilko.app.R
+import si.gasilko.app.core.ui.*
 import si.gasilko.app.feature.hydrants.domain.*
 import si.gasilko.app.feature.inspections.presentation.*
 import si.gasilko.app.feature.inspections.domain.InspectionMode
@@ -35,6 +36,12 @@ fun statusLabel(status: HydrantStatus): Int = when(status) {
     HydrantStatus.NOT_WORKING -> R.string.h_not_working
     HydrantStatus.NEEDS_INSPECTION -> R.string.h_needs_inspection
     HydrantStatus.UNKNOWN -> R.string.h_unknown
+}
+private fun hydrantTone(status: HydrantStatus)=when(status) {
+    HydrantStatus.WORKING->FieldTone.SUCCESS
+    HydrantStatus.NOT_WORKING->FieldTone.DANGER
+    HydrantStatus.NEEDS_INSPECTION->FieldTone.WARNING
+    HydrantStatus.UNKNOWN->FieldTone.NEUTRAL
 }
 fun errorLabel(error: RegistryError): Int = when(error) {
     RegistryError.REASSIGNMENT_PENDING -> R.string.reassign_pending
@@ -186,11 +193,11 @@ fun HydrantScreen(model: HydrantViewModel, requestAccess: ()->Unit = {}, signOut
     val keyboard=LocalSoftwareKeyboardController.current
     BackHandler(state.selected!=null || state.form!=null) { if(!photoState.busy) { if(state.form!=null)model.cancelForm() else model.back() } }
     Scaffold { padding -> Column(Modifier.fillMaxSize().padding(padding).imePadding().padding(horizontal=16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
-        Text(stringResource(R.string.h_title),style=MaterialTheme.typography.headlineMedium)
+        ScreenHeading(stringResource(R.string.h_title))
         Choice(stringResource(R.string.h_organization),state.organization?.name ?: stringResource(R.string.h_select_organization),
             state.organizations.map { it.id to it.name },!busy && state.form==null && state.organizations.size>1,"organization",model::switchOrganization)
         FlowRow(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-            TextButton(onClick={showMap=true;mapDetail=false},enabled=!busy && state.form==null && state.writable){Text(stringResource(R.string.map_title))}
+            SecondaryAction(onClick={showMap=true;mapDetail=false},enabled=!busy && state.form==null && state.writable,tone=FieldTone.INFO){Text(stringResource(R.string.map_title))}
             TextButton(onClick=model::refresh,enabled=!busy,modifier=Modifier.testTag("refresh")){Text(stringResource(R.string.h_refresh))}
             if(state.writable)TextButton(onClick={planQuery=state.query.copy(organization=state.organization!!.id)},
                 enabled=!busy && state.form==null && state.selected==null) { Text(stringResource(R.string.plans_title)) }
@@ -201,17 +208,22 @@ fun HydrantScreen(model: HydrantViewModel, requestAccess: ()->Unit = {}, signOut
             TextButton(onClick=signOut,enabled=!state.mutating && !photoState.busy){Text(stringResource(R.string.auth_sign_out))}
         }
         if(busy){LinearProgressIndicator(Modifier.fillMaxWidth());Text(stringResource(if(state.mutating)R.string.h_saving else R.string.auth_loading))}
-        state.error?.let { Text(stringResource(errorLabel(it)),color=MaterialTheme.colorScheme.error,modifier=Modifier.testTag("registry-error")) }
+        state.error?.let { FieldBanner(stringResource(errorLabel(it)),FieldTone.DANGER,modifier=Modifier.testTag("registry-error")) }
         if(state.conflict)Text(stringResource(if(state.selected!=null)R.string.h_conflict else R.string.h_conflict_reload),modifier=Modifier.testTag("conflict"))
         if(state.organization!=null && !state.writable)Text(stringResource(R.string.h_organization_inactive))
         if(state.organization != null) {
-            Text(stringResource(when(sync?.phase) {
+            StatusBadge(stringResource(when(sync?.phase) {
                 SyncPhase.SYNCHRONIZED -> R.string.h_sync_done
                 SyncPhase.SYNCING -> R.string.h_sync_running
                 SyncPhase.RETRY -> R.string.h_sync_retry
                 SyncPhase.CONFLICT -> R.string.h_sync_conflict
                 else -> R.string.h_sync_pending
-            }))
+            }),when(sync?.phase) {
+                SyncPhase.SYNCHRONIZED->FieldTone.SUCCESS
+                SyncPhase.CONFLICT,SyncPhase.RETRY->FieldTone.WARNING
+                SyncPhase.SYNCING->FieldTone.INFO
+                else->FieldTone.NEUTRAL
+            })
             FlowRow(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
                 TextButton(onClick=model::syncNow, enabled=!busy && state.writable && sync?.phase != SyncPhase.SYNCING) { Text(stringResource(R.string.h_sync_now)) }
                 if(!sync?.conflicts.isNullOrEmpty()) TextButton(onClick={showConflicts=true}, enabled=!busy && state.form==null) { Text(stringResource(R.string.h_sync_review)) }
@@ -224,8 +236,10 @@ fun HydrantScreen(model: HydrantViewModel, requestAccess: ()->Unit = {}, signOut
                 {galleryInspection=null;gallery=true},{galleryInspection=null;viewedPhoto=it},photoCounts,openInspectionPhotos)
             else -> {
                 if(state.organization!=null) {
-                    Button(onClick=model::add,enabled=!busy && state.writable,modifier=Modifier.testTag("add")){Text(stringResource(R.string.h_add))}
-                    TextButton(onClick={showFilters=!showFilters},enabled=!busy,modifier=Modifier.testTag("filters")){Text(stringResource(R.string.h_filters))}
+                    FlowRow(horizontalArrangement=Arrangement.spacedBy(8.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
+                        PrimaryAction(onClick=model::add,enabled=!busy && state.writable,modifier=Modifier.testTag("add")){Text(stringResource(R.string.h_add))}
+                        SecondaryAction(onClick={showFilters=!showFilters},enabled=!busy,modifier=Modifier.testTag("filters")){Text(stringResource(R.string.h_filters))}
+                    }
                     if(state.query.filtered)Text(listOfNotNull(state.query.search.takeIf{it.isNotBlank()},state.query.type?.let { typeName(state.types.find { type->type.id==it }) },state.query.status?.let{stringResource(statusLabel(it))},stringResource(activeLabel(state.query.active))).joinToString(" · "))
                 }
                 LazyColumn(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(8.dp)) {
@@ -244,14 +258,15 @@ fun HydrantScreen(model: HydrantViewModel, requestAccess: ()->Unit = {}, signOut
                     }
                     if(!busy && state.rows.isEmpty())item { Text(stringResource(if(state.organization==null)R.string.h_no_organization else if(state.query.filtered)R.string.h_no_matches else R.string.h_empty)) }
                     items(state.rows,key={it.id}) { h ->
-                        OutlinedCard(onClick={model.open(h.id)},enabled=!busy,modifier=Modifier.fillMaxWidth().testTag("hydrant-${h.id}")) {
-                            Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(4.dp)) {
-                                Text(h.code ?: stringResource(R.string.h_pending_code),style=MaterialTheme.typography.titleMedium)
-                                Text(typeName(state.types.find { it.id==h.type }))
-                                Text(stringResource(statusLabel(h.status)))
-                                Text(h.address ?: h.description ?: stringResource(R.string.h_coordinates))
-                                if(!h.active)Text(stringResource(R.string.h_inactive))
-                                if(h.id in sync?.pendingIds.orEmpty())Text(stringResource(R.string.h_unsynced))
+                        OutlinedCard(onClick={model.open(h.id)},enabled=!busy,modifier=Modifier.fillMaxWidth().testTag("hydrant-${h.id}"),
+                            colors=CardDefaults.outlinedCardColors(containerColor=MaterialTheme.colorScheme.surface)) {
+                            Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(10.dp)) {
+                                Text(h.code ?: stringResource(R.string.h_pending_code),style=MaterialTheme.typography.titleLarge)
+                                Text(typeName(state.types.find { it.id==h.type }),style=MaterialTheme.typography.bodyMedium,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                                StatusBadge(stringResource(statusLabel(h.status)),hydrantTone(h.status))
+                                Text(h.address ?: h.description ?: stringResource(R.string.h_coordinates),style=MaterialTheme.typography.bodyLarge)
+                                if(!h.active)StatusBadge(stringResource(R.string.h_inactive))
+                                if(h.id in sync?.pendingIds.orEmpty())StatusBadge(stringResource(R.string.h_unsynced),FieldTone.WARNING)
                             }
                         }
                     }
@@ -298,15 +313,25 @@ fun HydrantScreen(model: HydrantViewModel, requestAccess: ()->Unit = {}, signOut
         dismissButton={TextButton(onClick=model::dismissDeactivate){Text(stringResource(R.string.h_cancel))}})
 }
 @Composable private fun Field(label: Int, value: String?) {
-    Text(stringResource(label),style=MaterialTheme.typography.labelLarge)
-    Text(value?.takeIf { it.isNotBlank() } ?: stringResource(R.string.h_missing))
+    Column(verticalArrangement=Arrangement.spacedBy(2.dp)) {
+        Text(stringResource(label),style=MaterialTheme.typography.labelMedium,color=MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(value?.takeIf { it.isNotBlank() } ?: stringResource(R.string.h_missing),style=MaterialTheme.typography.bodyLarge)
+    }
 }
 @Composable private fun DetailFields(h: Hydrant, types: List<HydrantType>) {
-    Field(R.string.h_code,h.code ?: stringResource(R.string.h_pending_code));Field(R.string.h_type,typeName(types.find { it.id==h.type }))
-    Field(R.string.h_status,stringResource(statusLabel(h.status)));Field(R.string.h_latitude,h.latitude?.toString());Field(R.string.h_longitude,h.longitude?.toString())
-    Field(R.string.h_address,h.address);Field(R.string.h_description,h.description);Field(R.string.h_notes,h.notes)
-    Field(R.string.h_interval,h.interval?.toString() ?: stringResource(R.string.h_inherit_interval))
-    Field(R.string.h_active_state,stringResource(if(h.active)R.string.h_active else R.string.h_inactive));Field(R.string.h_version,h.version.toString())
+    SectionHeading(stringResource(R.string.ui_location))
+    OperationalCard {
+        Field(R.string.h_address,h.address);Field(R.string.h_description,h.description)
+        Field(R.string.h_latitude,h.latitude?.toString());Field(R.string.h_longitude,h.longitude?.toString())
+    }
+    SectionHeading(stringResource(R.string.ui_technical))
+    OperationalCard {
+        Field(R.string.h_code,h.code ?: stringResource(R.string.h_pending_code));Field(R.string.h_type,typeName(types.find { it.id==h.type }))
+        Field(R.string.h_status,stringResource(statusLabel(h.status)))
+        Field(R.string.h_interval,h.interval?.toString() ?: stringResource(R.string.h_inherit_interval))
+        Field(R.string.h_active_state,stringResource(if(h.active)R.string.h_active else R.string.h_inactive));Field(R.string.h_version,h.version.toString())
+        Field(R.string.h_notes,h.notes)
+    }
 }
 @Composable private fun HydrantDetails(state: RegistryState,model: HydrantViewModel,modifier: Modifier,
     gallery: PhotoGalleryState, openGallery: ()->Unit, openPhoto: (String)->Unit,
@@ -316,28 +341,32 @@ fun HydrantScreen(model: HydrantViewModel, requestAccess: ()->Unit = {}, signOut
     val h=state.selected?:return;val enabled=!state.loading && !state.mutating && !photoState.busy
     var status by remember(h.id,h.version,h.status) { mutableStateOf(h.status) }
     Column(modifier.verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(8.dp)) {
-        Text(stringResource(R.string.h_details),style=MaterialTheme.typography.titleLarge)
+        ScreenHeading(h.code ?: stringResource(R.string.h_pending_code),stringResource(R.string.h_details))
+        StatusBadge(stringResource(statusLabel(h.status)),hydrantTone(h.status))
         TextButton(onClick=model::back,enabled=enabled){Text(stringResource(R.string.h_back))}
-        if(state.inspectionSaved)Text(stringResource(R.string.inspection_saved),color=MaterialTheme.colorScheme.primary)
-        if(state.planStop?.inspectionId!=null)Text(stringResource(R.string.execution_completed),color=MaterialTheme.colorScheme.primary)
+        if(state.inspectionSaved)FieldBanner(stringResource(R.string.inspection_saved),FieldTone.SUCCESS)
+        if(state.planStop?.inspectionId!=null)StatusBadge(stringResource(R.string.execution_completed),FieldTone.SUCCESS)
         if(state.writable && (h.active || state.manages) && state.planStop?.inspectionId==null) {
-            Button(onClick={model.startInspection(InspectionMode.QUICK)},enabled=enabled,modifier=Modifier.fillMaxWidth().heightIn(min=56.dp)) {
+            SectionHeading(stringResource(R.string.ui_inspections))
+            PrimaryAction(onClick={model.startInspection(InspectionMode.QUICK)},enabled=enabled,modifier=Modifier.fillMaxWidth().heightIn(min=56.dp)) {
                 Text(stringResource(R.string.inspection_start_quick))
             }
-            OutlinedButton(onClick={model.startInspection(InspectionMode.GUIDED)},enabled=enabled,modifier=Modifier.fillMaxWidth().heightIn(min=56.dp)) {
+            SecondaryAction(onClick={model.startInspection(InspectionMode.GUIDED)},enabled=enabled,modifier=Modifier.fillMaxWidth().heightIn(min=56.dp)) {
                 Text(stringResource(R.string.inspection_start_guided))
             }
-            OutlinedButton(onClick={model.startInspection(InspectionMode.CLASSIC)},enabled=enabled,modifier=Modifier.fillMaxWidth().heightIn(min=56.dp)) {
+            SecondaryAction(onClick={model.startInspection(InspectionMode.CLASSIC)},enabled=enabled,modifier=Modifier.fillMaxWidth().heightIn(min=56.dp)) {
                 Text(stringResource(R.string.inspection_start_classic))
             }
         }
         DetailFields(h,state.types)
+        SectionHeading(stringResource(R.string.ui_photos))
         PhotoPreview(model,gallery,enabled,openGallery,openPhoto)
         if(state.writable && (h.active || state.manages)) {
             OutlinedButton(onClick={model.addPhoto(context)},enabled=enabled) { Text(stringResource(R.string.photo_add)) }
         }
         if(photoState.step==si.gasilko.app.feature.photos.presentation.PhotoStep.SAVED)
-            Text(stringResource(R.string.photo_saved_pending),color=MaterialTheme.colorScheme.primary)
+            FieldBanner(stringResource(R.string.photo_saved_pending),FieldTone.INFO)
+        SectionHeading(stringResource(R.string.ui_management))
         if(state.reviewDraft!=null && state.manages)Button(onClick=model::reviewDraft,enabled=enabled,modifier=Modifier.testTag("review-draft")){Text(stringResource(R.string.h_review_draft))}
         if(state.writable && (h.active || state.manages)) {
             Choice(stringResource(R.string.h_status),stringResource(statusLabel(status)),HydrantStatus.entries.map { it.name to stringResource(statusLabel(it)) },enabled,"status",{status=HydrantStatus.valueOf(it)})
@@ -353,7 +382,7 @@ fun HydrantScreen(model: HydrantViewModel, requestAccess: ()->Unit = {}, signOut
             val now by model.inspectionClock.collectAsStateWithLifecycle(initialValue=Instant.now())
             if(history.loaded && history.error==null)InspectionDueDetails(inspectionDue(history.rows.maxOfOrNull { it.completedAt },
                 h.interval,state.organization?.inspectionIntervalMonths,now))
-            Text(stringResource(R.string.inspection_local_history),style=MaterialTheme.typography.titleMedium)
+            SectionHeading(stringResource(R.string.inspection_local_history))
             TextButton(onClick=model::openHistory,enabled=enabled) { Text(stringResource(R.string.inspection_history_title)) }
             history.error?.let { Text(stringResource(errorLabel(it)),color=MaterialTheme.colorScheme.error) }
             if(history.loaded && history.rows.isEmpty() && history.error==null)Text(stringResource(R.string.inspection_history_empty))

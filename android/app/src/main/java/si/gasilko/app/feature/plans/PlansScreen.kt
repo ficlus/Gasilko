@@ -13,6 +13,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import si.gasilko.app.R
+import si.gasilko.app.core.ui.*
 import si.gasilko.app.feature.hydrants.domain.*
 import si.gasilko.app.feature.hydrants.presentation.*
 import si.gasilko.app.feature.teams.TeamData
@@ -166,8 +167,8 @@ fun PlansScreen(model: HydrantViewModel,query: HydrantQuery,back: ()->Unit) {
     }
     Scaffold { padding ->
         Column(Modifier.fillMaxSize().padding(padding).padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
-            Text(stringResource(R.string.plans_title),style=MaterialTheme.typography.headlineSmall)
-            Text(stringResource(R.string.plans_online_notice))
+            ScreenHeading(stringResource(R.string.plans_title))
+            FieldBanner(stringResource(R.string.plans_online_notice))
             FlowRow {
                 TextButton(onClick=::leave,enabled=!busy) { Text(stringResource(R.string.h_back)) }
                 TextButton(onClick={refresh()},enabled=!busy) { Text(stringResource(R.string.h_refresh)) }
@@ -180,30 +181,38 @@ fun PlansScreen(model: HydrantViewModel,query: HydrantQuery,back: ()->Unit) {
             }
             if(busy)LinearProgressIndicator(Modifier.fillMaxWidth())
             (error ?: observed.error)?.let {
-                Text(stringResource(errorLabel(it)),color=MaterialTheme.colorScheme.error)
+                FieldBanner(stringResource(errorLabel(it)),FieldTone.DANGER)
                 Text(stringResource(R.string.plans_retry))
             }
             LazyColumn(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(8.dp)) {
                 if(d==null) {
                     if(data.plans.isEmpty())item { Text(stringResource(R.string.plans_empty)) }
                     items(data.plans,key={it.id}) { p ->
-                        OutlinedButton(onClick={
+                        OutlinedCard(onClick={
                             draft=planDraft(p,data)
-                        },enabled=!busy && pending==null && assigning==null && routing==null && activating==null,modifier=Modifier.fillMaxWidth()) {
-                            Text(p.name+" · "+stringResource(planStatusLabel(PlanStatus.valueOf(p.status))))
+                        },enabled=!busy && pending==null && assigning==null && routing==null && activating==null,modifier=Modifier.fillMaxWidth(),
+                            colors=CardDefaults.outlinedCardColors(containerColor=MaterialTheme.colorScheme.surface)) {
+                            Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(10.dp)) {
+                                Text(p.name,style=MaterialTheme.typography.titleLarge)
+                                StatusBadge(stringResource(planStatusLabel(PlanStatus.valueOf(p.status))),when(PlanStatus.valueOf(p.status)) {
+                                    PlanStatus.ACTIVE,PlanStatus.PLANNED->FieldTone.INFO
+                                    PlanStatus.COMPLETED->FieldTone.SUCCESS
+                                    else->FieldTone.NEUTRAL
+                                })
+                            }
                         }
                     }
                 } else {
                     item {
-                        if(d.status==PlanStatus.PLANNED)Button(onClick=::activate,enabled=editable && unchanged) {
+                        if(d.status==PlanStatus.PLANNED)PrimaryAction(onClick=::activate,enabled=editable && unchanged) {
                             Text(stringResource(R.string.execution_activate))
                         }
-                        if(d.status==PlanStatus.ACTIVE)Button(onClick={execution=d.id},enabled=!busy) {
+                        if(d.status==PlanStatus.ACTIVE)PrimaryAction(onClick={execution=d.id},enabled=!busy) {
                             Text(stringResource(R.string.execution_title))
                         }
                     }
                     item {
-                        Text(stringResource(R.string.plans_assignment_title),style=MaterialTheme.typography.titleMedium)
+                        SectionHeading(stringResource(R.string.plans_assignment_title))
                         Text(stringResource(R.string.plans_assignment_note))
                         if(!unchanged && d.editable)Text(stringResource(R.string.plans_assignment_save_first))
                         if(saved!=null) {
@@ -212,7 +221,7 @@ fun PlansScreen(model: HydrantViewModel,query: HydrantQuery,back: ()->Unit) {
                                 Text(stringResource(R.string.plans_assignment_count,name,assignedCounts[team] ?: 0))
                             }
                             Text(stringResource(R.string.plans_unassigned_count,unassigned))
-                            if(unassigned>0)Text(stringResource(R.string.plans_unassigned_warning),color=MaterialTheme.colorScheme.error)
+                            if(unassigned>0)FieldBanner(stringResource(R.string.plans_unassigned_warning),FieldTone.WARNING)
                         }
                         if(d.editable)TextButton(onClick=::assign,enabled=editable && unchanged && assignedItems.isNotEmpty() &&
                             savedTeams.isNotEmpty() && savedTeams.all { id->observed.teams.teams.any { it.id==id && it.active } }) {
@@ -220,7 +229,7 @@ fun PlansScreen(model: HydrantViewModel,query: HydrantQuery,back: ()->Unit) {
                         }
                     }
                     item {
-                        Text(stringResource(R.string.routes_title),style=MaterialTheme.typography.titleMedium)
+                        SectionHeading(stringResource(R.string.routes_title))
                         Text(stringResource(R.string.routes_notice))
                         if(saved?.startLatitude==null)Text(stringResource(R.string.routes_no_start))
                         if(!unchanged && d.editable)Text(stringResource(R.string.routes_save_first))
@@ -247,7 +256,7 @@ fun PlansScreen(model: HydrantViewModel,query: HydrantQuery,back: ()->Unit) {
                         Text(stringResource(planStatusLabel(d.status)))
                         OutlinedTextField(d.name,{draft=d.copy(name=it.take(120))},enabled=editable,
                             label={Text(stringResource(R.string.plans_name))},singleLine=true)
-                        Text(stringResource(R.string.teams_title),style=MaterialTheme.typography.titleMedium)
+                        SectionHeading(stringResource(R.string.teams_title))
                     }
                     items(observed.teams.teams,key={"team-"+it.id}) { t ->
                         Row {
@@ -262,7 +271,7 @@ fun PlansScreen(model: HydrantViewModel,query: HydrantQuery,back: ()->Unit) {
                         }
                     }
                     item {
-                        Text(stringResource(R.string.plans_hydrants),style=MaterialTheme.typography.titleMedium)
+                        SectionHeading(stringResource(R.string.plans_hydrants))
                         Text(stringResource(R.string.plans_frozen))
                         if(observed.candidates.incomplete)Text(stringResource(R.string.plans_incomplete),color=MaterialTheme.colorScheme.error)
                         Text(stringResource(R.string.inspection_due_local))
