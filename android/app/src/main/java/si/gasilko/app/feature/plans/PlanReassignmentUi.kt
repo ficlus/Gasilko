@@ -17,6 +17,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.*
+import si.gasilko.app.core.ui.*
 import si.gasilko.app.R
 import si.gasilko.app.feature.teams.InspectionTeam
 import java.time.Instant
@@ -49,18 +50,22 @@ import java.util.Date
     }.value
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable internal fun ReassignmentDialog(item: PlanItem,destinations: List<InspectionTeam>,busy: Boolean,
-    online: Boolean,confirm: (PlanReassign)->Unit,close: ()->Unit) {
+    online: Boolean,confirm: (PlanReassign)->Unit,close: ()->Unit,currentTeam: String = item.teamId.orEmpty()) {
     var destination by remember(item.id,item.executionVersion) { mutableStateOf<String?>(null) }
     var reason by remember(item.id,item.executionVersion) { mutableStateOf("") }
     AlertDialog(onDismissRequest={if(!busy)close()},title={Text(stringResource(R.string.reassign_title))},
         text={Column(Modifier.verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(8.dp)) {
-            Text(stringResource(R.string.reassign_destination))
-            destinations.forEach { team ->
-                FilterChip(selected=destination==team.id,onClick={destination=team.id},enabled=!busy,label={Text(team.name)})
+            FieldBanner(stringResource(R.string.reassign_current_team,currentTeam))
+            SectionHeading(stringResource(R.string.reassign_destination))
+            FlowRow(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                destinations.forEach { team ->
+                    FilterChip(selected=destination==team.id,onClick={destination=team.id},enabled=!busy,label={Text(team.name)})
+                }
             }
-            OutlinedTextField(reason,{reason=it.take(2000)},enabled=!busy,label={Text(stringResource(R.string.reassign_reason))})
-            if(!online)Text(stringResource(R.string.reassign_offline))
+            OutlinedTextField(reason,{reason=it.take(2000)},enabled=!busy,label={Text(stringResource(R.string.reassign_reason))},modifier=Modifier.fillMaxWidth(),minLines=2)
+            if(!online)FieldBanner(stringResource(R.string.reassign_offline),FieldTone.WARNING)
         }},
         confirmButton={TextButton(onClick={
             confirm(PlanReassign(item.context(),item.teamId!!,destination!!,reason))
@@ -73,14 +78,16 @@ import java.util.Date
     fun name(id: String?)=teams.find { it.id==id }?.name ?: id.orEmpty()
     AlertDialog(onDismissRequest=close,title={Text(stringResource(R.string.reassign_history))},text={
         Column(Modifier.verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(12.dp)) {
-            Text(stringResource(R.string.reassign_current_team,name(item.teamId)))
-            if(events.isEmpty())Text(stringResource(R.string.reassign_no_history))
+            FieldBanner(stringResource(R.string.reassign_current_team,name(item.teamId)))
+            if(events.isEmpty())FieldBanner(stringResource(R.string.reassign_no_history))
             events.sortedWith(compareByDescending<PlanReassignment> { it.version }.thenByDescending { it.id }).forEach { event ->
-                Text(name(event.fromTeam)+" → "+name(event.toTeam),style=MaterialTheme.typography.titleSmall)
-                Text(event.reason)
-                Text(stringResource(R.string.reassign_actor,event.actor))
-                val time=runCatching { DateFormat.getDateTimeInstance().format(Date.from(Instant.parse(event.createdAt))) }.getOrDefault(event.createdAt)
-                Text(time)
+                OperationalCard {
+                    Text(name(event.fromTeam)+" → "+name(event.toTeam),style=MaterialTheme.typography.titleSmall)
+                    Text(event.reason)
+                    Text(stringResource(R.string.reassign_actor,event.actor))
+                    val time=runCatching { DateFormat.getDateTimeInstance().format(Date.from(Instant.parse(event.createdAt))) }.getOrDefault(event.createdAt)
+                    Text(time,style=MaterialTheme.typography.labelMedium)
+                }
             }
         }
     },confirmButton={TextButton(onClick=close) { Text(stringResource(R.string.h_back)) }})

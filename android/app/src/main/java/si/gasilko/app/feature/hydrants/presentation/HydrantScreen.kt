@@ -280,11 +280,11 @@ fun HydrantScreen(model: HydrantViewModel, requestAccess: ()->Unit = {}, signOut
         AlertDialog(onDismissRequest={if(!busy) { showConflicts=false; conflictSequence=null }},
             title={Text(stringResource(R.string.h_sync_review))},
             text={Column(Modifier.heightIn(max=440.dp).verticalScroll(rememberScrollState()), verticalArrangement=Arrangement.spacedBy(8.dp)) {
-                state.error?.let { Text(stringResource(errorLabel(it)), color=MaterialTheme.colorScheme.error) }
+                state.error?.let { FieldBanner(stringResource(errorLabel(it)),FieldTone.DANGER) }
                 if(conflict == null) {
-                    if(sync.conflicts.isEmpty())Text(stringResource(R.string.h_conflicts_resolved))
+                    if(sync.conflicts.isEmpty())FieldBanner(stringResource(R.string.h_conflicts_resolved),FieldTone.SUCCESS)
                     sync.conflicts.forEach { item ->
-                        OutlinedButton(onClick={conflictSequence=item.sequence}, enabled=!busy) { Text(item.local.code ?: item.local.id) }
+                        SecondaryAction(onClick={conflictSequence=item.sequence}, enabled=!busy,modifier=Modifier.fillMaxWidth()) { Text(item.local.code ?: item.local.id) }
                     }
                 } else {
                     Text(conflict.local.id)
@@ -292,17 +292,19 @@ fun HydrantScreen(model: HydrantViewModel, requestAccess: ()->Unit = {}, signOut
                         "CREATE" -> R.string.h_add; "UPDATE" -> R.string.h_edit
                         "CHANGE_STATUS" -> R.string.h_change_status; else -> R.string.h_active_state
                     }), style=MaterialTheme.typography.titleMedium)
-                    Text(stringResource(R.string.h_conflict_local), style=MaterialTheme.typography.titleMedium)
+                    FieldBanner(stringResource(R.string.h_conflict_local),FieldTone.NEUTRAL)
                     DetailFields(conflict.local,state.types)
                     if(conflict.intent != conflict.local) {
-                        Text(stringResource(R.string.h_conflict_intent), style=MaterialTheme.typography.titleMedium)
+                        HorizontalDivider(Modifier.padding(vertical=8.dp))
+                        FieldBanner(stringResource(R.string.h_conflict_intent),FieldTone.WARNING)
                         DetailFields(conflict.intent,state.types)
                     }
-                    Text(stringResource(R.string.h_conflict_server), style=MaterialTheme.typography.titleMedium)
+                    HorizontalDivider(Modifier.padding(vertical=8.dp))
+                    FieldBanner(stringResource(R.string.h_conflict_server),FieldTone.INFO)
                     conflict.server?.let { DetailFields(it,state.types) } ?: Text(stringResource(R.string.h_conflict_server_missing))
-                    Text(stringResource(R.string.h_resolution_notice))
-                    OutlinedButton(onClick={model.resolveConflict(conflict.sequence,ConflictResolution.KEEP_SERVER)}, enabled=!busy && state.writable && conflict.server!=null) { Text(stringResource(R.string.h_keep_server)) }
-                    OutlinedButton(onClick={model.resolveConflict(conflict.sequence,ConflictResolution.KEEP_LOCAL)}, enabled=!busy && state.writable && conflict.server!=null && (state.manages || conflict.operation !in listOf("UPDATE","SET_ACTIVE"))) { Text(stringResource(R.string.h_keep_local)) }
+                    FieldBanner(stringResource(R.string.h_resolution_notice),FieldTone.WARNING)
+                    SecondaryAction(modifier=Modifier.fillMaxWidth(),onClick={model.resolveConflict(conflict.sequence,ConflictResolution.KEEP_SERVER)}, enabled=!busy && state.writable && conflict.server!=null) { Text(stringResource(R.string.h_keep_server)) }
+                    SecondaryAction(modifier=Modifier.fillMaxWidth(),onClick={model.resolveConflict(conflict.sequence,ConflictResolution.KEEP_LOCAL)}, enabled=!busy && state.writable && conflict.server!=null && (state.manages || conflict.operation !in listOf("UPDATE","SET_ACTIVE"))) { Text(stringResource(R.string.h_keep_local)) }
                     TextButton(onClick={conflictSequence=null}, enabled=!busy) { Text(stringResource(R.string.h_back)) }
                 }
             }}, confirmButton={TextButton(onClick={showConflicts=false;conflictSequence=null}, enabled=!busy) { Text(stringResource(R.string.h_back)) }})

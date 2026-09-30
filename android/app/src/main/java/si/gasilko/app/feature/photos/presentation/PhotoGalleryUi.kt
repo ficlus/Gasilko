@@ -8,7 +8,10 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import si.gasilko.app.core.ui.*
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -29,23 +32,24 @@ import java.util.Date
 data class PhotoGalleryState(val entries: List<PhotoEntry> = emptyList(), val loaded: Boolean = false, val error: RegistryError? = null)
 
 @Composable
+@OptIn(ExperimentalLayoutApi::class)
 fun PhotoPreview(model: HydrantViewModel, state: PhotoGalleryState, enabled: Boolean,
     openGallery: ()->Unit, openPhoto: (String)->Unit) {
     Text(stringResource(R.string.photo_count,state.entries.size),style=MaterialTheme.typography.titleMedium)
     if(!state.loaded && state.error==null)CircularProgressIndicator(Modifier.size(24.dp))
-    if(state.error!=null)Text(stringResource(R.string.photo_metadata_failed))
-    if(state.loaded && state.entries.isEmpty())Text(stringResource(R.string.photo_empty))
-    Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+    if(state.error!=null)FieldBanner(stringResource(R.string.photo_metadata_failed),FieldTone.DANGER)
+    if(state.loaded && state.entries.isEmpty())FieldBanner(stringResource(R.string.photo_empty))
+    FlowRow(horizontalArrangement=Arrangement.spacedBy(8.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
         state.entries.take(3).forEach { entry ->
             key(entry.photo.id) {
-                Column(Modifier.weight(1f)) {
-                    PhotoImage(model,entry,Modifier.fillMaxWidth().height(100.dp).clickable(enabled) { openPhoto(entry.photo.id) })
+                Column(Modifier.width(136.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
+                    PhotoImage(model,entry,Modifier.fillMaxWidth().height(100.dp).clip(MaterialTheme.shapes.medium).clickable(enabled) { openPhoto(entry.photo.id) })
                     PhotoState(entry)
                 }
             }
         }
     }
-    TextButton(onClick=openGallery,enabled=enabled) { Text(stringResource(R.string.photo_all)) }
+    SecondaryAction(onClick=openGallery,enabled=enabled) { Text(stringResource(R.string.photo_all)) }
 }
 
 @Composable
@@ -59,40 +63,45 @@ fun PhotoGalleryScreen(model: HydrantViewModel, organization: String, hydrant: S
     var refreshFailed by remember { mutableStateOf(false) }
     BackHandler { if(!busy)back() }
     Surface(Modifier.fillMaxSize()) {
-        Column(Modifier.fillMaxSize().safeDrawingPadding().padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
-            Text(stringResource(if(inspectionId==null)R.string.photo_all else R.string.inspection_photos),style=MaterialTheme.typography.headlineSmall)
-            Text(label)
-            FlowRow(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-                TextButton(back,enabled=!busy) { Text(stringResource(R.string.h_back)) }
-                TextButton(onClick={
-                    refreshing=true;refreshFailed=false
-                    scope.launch {
-                        try { model.refreshPhotoMetadata(organization,hydrant) }
-                        catch(e: CancellationException) { throw e }
-                        catch(_: Exception) { refreshFailed=true }
-                        finally { refreshing=false }
+        BoxWithConstraints(Modifier.fillMaxSize().safeDrawingPadding()) {
+        Column(Modifier.fillMaxSize().padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
+            ScrollableHeader(maxHeight*0.5f) {
+                ScreenHeading(stringResource(if(inspectionId==null)R.string.photo_all else R.string.inspection_photos),label)
+                FlowRow(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                    CompactAction(back,enabled=!busy) { ActionLabel(stringResource(R.string.h_back),R.drawable.ic_field_arrow_back) }
+                    CompactAction(onClick={
+                        refreshing=true;refreshFailed=false
+                        scope.launch {
+                            try { model.refreshPhotoMetadata(organization,hydrant) }
+                            catch(e: CancellationException) { throw e }
+                            catch(_: Exception) { refreshFailed=true }
+                            finally { refreshing=false }
+                        }
+                    },enabled=!refreshing && !busy) { ActionLabel(stringResource(R.string.h_refresh),R.drawable.ic_field_refresh) }
+                    if(model.state.value.writable) {
+                        CompactAction(onClick=model::syncNow,enabled=!busy && phase!=SyncPhase.SYNCING) { Text(stringResource(R.string.h_sync_now)) }
                     }
-                },enabled=!refreshing && !busy) { Text(stringResource(R.string.h_refresh)) }
-                if(model.state.value.writable) {
-                    TextButton(onClick=model::syncNow,enabled=!busy && phase!=SyncPhase.SYNCING) { Text(stringResource(R.string.h_sync_now)) }
+                    if(canAdd && inspectionId==null) {
+                        PrimaryAction(onClick={model.addPhoto(context)},enabled=!busy) { ActionLabel(stringResource(R.string.photo_add),R.drawable.ic_field_photo_camera) }
+                    }
                 }
-                if(canAdd && inspectionId==null) {
-                    TextButton(onClick={model.addPhoto(context)},enabled=!busy) { Text(stringResource(R.string.photo_add)) }
-                }
+                if(refreshing || (!state.loaded && state.error==null))LinearProgressIndicator(Modifier.fillMaxWidth())
+                if(refreshFailed || state.error!=null)FieldBanner(stringResource(R.string.photo_metadata_failed),FieldTone.DANGER)
+                if(state.loaded && state.entries.isEmpty())FieldBanner(stringResource(R.string.photo_empty))
             }
-            if(refreshing || (!state.loaded && state.error==null))LinearProgressIndicator(Modifier.fillMaxWidth())
-            if(refreshFailed || state.error!=null)Text(stringResource(R.string.photo_metadata_failed),color=MaterialTheme.colorScheme.error)
-            if(state.loaded && state.entries.isEmpty())Text(stringResource(R.string.photo_empty))
             LazyVerticalGrid(columns=GridCells.Adaptive(144.dp),modifier=Modifier.weight(1f),
                 horizontalArrangement=Arrangement.spacedBy(12.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
                 items(state.entries,key={it.photo.id}) { entry ->
-                    Column {
+                    OutlinedCard(colors=CardDefaults.outlinedCardColors(containerColor=MaterialTheme.colorScheme.surface)) {
                         PhotoImage(model,entry,Modifier.fillMaxWidth().height(150.dp).clickable(!busy) { openPhoto(entry.photo.id) })
-                        Text(photoDate(entry),style=MaterialTheme.typography.bodySmall)
-                        PhotoState(entry)
+                        Column(Modifier.padding(12.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
+                            Text(photoDate(entry),style=MaterialTheme.typography.labelMedium)
+                            PhotoState(entry)
+                        }
                     }
                 }
             }
+        }
         }
     }
 }
@@ -100,9 +109,9 @@ fun PhotoGalleryScreen(model: HydrantViewModel, organization: String, hydrant: S
 @Composable
 fun PhotoViewer(model: HydrantViewModel, entry: PhotoEntry?, back: ()->Unit) {
     BackHandler(onBack=back)
-    Surface(Modifier.fillMaxSize(),color=Color(0xFF151515),contentColor=Color.White) {
+    Surface(Modifier.fillMaxSize(),color=MaterialTheme.colorScheme.inverseSurface,contentColor=MaterialTheme.colorScheme.inverseOnSurface) {
         Column(Modifier.fillMaxSize().safeDrawingPadding().padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
-            TextButton(back) { Text(stringResource(R.string.h_back)) }
+            TextButton(back,colors=ButtonDefaults.textButtonColors(contentColor=MaterialTheme.colorScheme.inverseOnSurface)) { ActionLabel(stringResource(R.string.h_back),R.drawable.ic_field_arrow_back) }
             if(entry==null)Text(stringResource(R.string.photo_empty))
             else {
                 Text(photoDate(entry))
@@ -114,11 +123,15 @@ fun PhotoViewer(model: HydrantViewModel, entry: PhotoEntry?, back: ()->Unit) {
 }
 
 @Composable private fun PhotoState(entry: PhotoEntry) {
-    Text(stringResource(when(entry.state) {
+    StatusBadge(stringResource(when(entry.state) {
         PhotoSyncState.SYNCED -> R.string.inspection_synced
         PhotoSyncState.PENDING -> R.string.inspection_pending
         PhotoSyncState.ATTENTION -> R.string.inspection_attention
-    }),style=MaterialTheme.typography.bodySmall)
+    }),when(entry.state) {
+        PhotoSyncState.SYNCED -> FieldTone.SUCCESS
+        PhotoSyncState.PENDING -> FieldTone.INFO
+        PhotoSyncState.ATTENTION -> FieldTone.WARNING
+    })
 }
 private fun photoDate(entry: PhotoEntry) =
     DateFormat.getDateTimeInstance(DateFormat.SHORT,DateFormat.SHORT).format(Date(entry.photo.capturedAt))
@@ -154,9 +167,9 @@ private fun PhotoImage(model: HydrantViewModel, entry: PhotoEntry, modifier: Mod
     }
     Box(modifier,contentAlignment=Alignment.Center) {
         val error=file.error ?: if(decodeFailed)R.string.photo_corrupt else null
-        if(error!=null)Column(horizontalAlignment=Alignment.CenterHorizontally) {
+        if(error!=null)Column(Modifier.verticalScroll(rememberScrollState()).padding(8.dp),horizontalAlignment=Alignment.CenterHorizontally) {
             Text(stringResource(error),style=MaterialTheme.typography.bodySmall)
-            TextButton(onClick={retry++}) { Text(stringResource(R.string.photo_retry)) }
+            TextButton(onClick={retry++},colors=ButtonDefaults.textButtonColors(contentColor=LocalContentColor.current)) { ActionLabel(stringResource(R.string.photo_retry),R.drawable.ic_field_refresh) }
         } else {
             if(request!=null)AsyncImage(model=request,contentDescription=stringResource(R.string.photo_title),
                 modifier=Modifier.fillMaxSize(),contentScale=scale,

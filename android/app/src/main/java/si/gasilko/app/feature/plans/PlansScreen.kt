@@ -7,6 +7,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -166,23 +167,26 @@ fun PlansScreen(model: HydrantViewModel,query: HydrantQuery,back: ()->Unit) {
         return
     }
     Scaffold { padding ->
-        Column(Modifier.fillMaxSize().padding(padding).padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
-            ScreenHeading(stringResource(R.string.plans_title))
-            FieldBanner(stringResource(R.string.plans_online_notice))
-            FlowRow {
-                TextButton(onClick=::leave,enabled=!busy) { Text(stringResource(R.string.h_back)) }
-                TextButton(onClick={refresh()},enabled=!busy) { Text(stringResource(R.string.h_refresh)) }
-                if(d==null)TextButton(onClick={draft=PlanDraft(snapshot=planSelectionSnapshot(query,observed.candidates.incomplete))},
-                    enabled=!busy && pending==null && assigning==null && routing==null && activating==null) { Text(stringResource(R.string.plans_new)) }
-                if(pending!=null)TextButton(onClick={submit(pending!!.status)},enabled=!busy) { Text(stringResource(R.string.photo_retry)) }
-                if(assigning!=null)TextButton(onClick=::assign,enabled=!busy) { Text(stringResource(R.string.photo_retry)) }
-                if(routing!=null)TextButton(onClick=::route,enabled=!busy) { Text(stringResource(R.string.photo_retry)) }
-                if(activating!=null)TextButton(onClick=::activate,enabled=!busy) { Text(stringResource(R.string.photo_retry)) }
-            }
-            if(busy)LinearProgressIndicator(Modifier.fillMaxWidth())
-            (error ?: observed.error)?.let {
-                FieldBanner(stringResource(errorLabel(it)),FieldTone.DANGER)
-                Text(stringResource(R.string.plans_retry))
+        BoxWithConstraints(Modifier.fillMaxSize().padding(padding).imePadding()) {
+        Column(Modifier.fillMaxSize().padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
+            ScrollableHeader(maxHeight*0.5f) {
+                ScreenHeading(stringResource(R.string.plans_title))
+                FieldBanner(stringResource(R.string.plans_online_notice))
+                FlowRow {
+                    TextButton(onClick=::leave,enabled=!busy) { Text(stringResource(R.string.h_back)) }
+                    TextButton(onClick={refresh()},enabled=!busy) { Text(stringResource(R.string.h_refresh)) }
+                    if(d==null)TextButton(onClick={draft=PlanDraft(snapshot=planSelectionSnapshot(query,observed.candidates.incomplete))},
+                        enabled=!busy && pending==null && assigning==null && routing==null && activating==null) { Text(stringResource(R.string.plans_new)) }
+                    if(pending!=null)TextButton(onClick={submit(pending!!.status)},enabled=!busy) { Text(stringResource(R.string.photo_retry)) }
+                    if(assigning!=null)TextButton(onClick=::assign,enabled=!busy) { Text(stringResource(R.string.photo_retry)) }
+                    if(routing!=null)TextButton(onClick=::route,enabled=!busy) { Text(stringResource(R.string.photo_retry)) }
+                    if(activating!=null)TextButton(onClick=::activate,enabled=!busy) { Text(stringResource(R.string.photo_retry)) }
+                }
+                if(busy)LinearProgressIndicator(Modifier.fillMaxWidth())
+                (error ?: observed.error)?.let {
+                    FieldBanner(stringResource(errorLabel(it)),FieldTone.DANGER)
+                    Text(stringResource(R.string.plans_retry))
+                }
             }
             LazyColumn(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(8.dp)) {
                 if(d==null) {
@@ -253,36 +257,38 @@ fun PlansScreen(model: HydrantViewModel,query: HydrantQuery,back: ()->Unit) {
                         }
                     }
                     item {
-                        Text(stringResource(planStatusLabel(d.status)))
-                        OutlinedTextField(d.name,{draft=d.copy(name=it.take(120))},enabled=editable,
-                            label={Text(stringResource(R.string.plans_name))},singleLine=true)
+                        OperationalCard {
+                            StatusBadge(stringResource(planStatusLabel(d.status)))
+                            OutlinedTextField(d.name,{draft=d.copy(name=it.take(120))},enabled=editable,
+                                label={Text(stringResource(R.string.plans_name))},singleLine=true,modifier=Modifier.fillMaxWidth())
+                        }
                         SectionHeading(stringResource(R.string.teams_title))
                     }
                     items(observed.teams.teams,key={"team-"+it.id}) { t ->
-                        Row {
+                        Row(Modifier.fillMaxWidth().heightIn(min=48.dp),verticalAlignment=Alignment.CenterVertically) {
                             Checkbox(t.id in d.teams,{checked->draft=d.copy(teams=if(checked)d.teams+t.id else d.teams-t.id)},enabled=editable)
-                            Text(t.name+" · "+stringResource(if(t.active)R.string.h_active else R.string.h_inactive))
+                            Text(t.name+" · "+stringResource(if(t.active)R.string.h_active else R.string.h_inactive),modifier=Modifier.weight(1f))
                         }
                     }
                     items((d.teams-observed.teams.teams.map { it.id }.toSet()).sorted(),key={"missing-team-"+it}) { id ->
-                        Row {
+                        Row(Modifier.fillMaxWidth().heightIn(min=48.dp),verticalAlignment=Alignment.CenterVertically) {
                             Checkbox(true,{draft=d.copy(teams=d.teams-id)},enabled=editable)
-                            Text(stringResource(R.string.plans_uncached,id))
+                            Text(stringResource(R.string.plans_uncached,id),modifier=Modifier.weight(1f))
                         }
                     }
                     item {
                         SectionHeading(stringResource(R.string.plans_hydrants))
-                        Text(stringResource(R.string.plans_frozen))
-                        if(observed.candidates.incomplete)Text(stringResource(R.string.plans_incomplete),color=MaterialTheme.colorScheme.error)
+                        FieldBanner(stringResource(R.string.plans_frozen))
+                        if(observed.candidates.incomplete)FieldBanner(stringResource(R.string.plans_incomplete),FieldTone.WARNING)
                         Text(stringResource(R.string.inspection_due_local))
                         TextButton(onClick={refresh(true)},enabled=editable) { Text(stringResource(R.string.plans_refresh_candidates)) }
                         SelectionMode.entries.forEach { mode ->
-                            Row {
+                            Row(Modifier.fillMaxWidth().heightIn(min=48.dp),verticalAlignment=Alignment.CenterVertically) {
                                 RadioButton(d.mode==mode,onClick={
                                     draft=d.copy(mode=mode,hydrants=if(mode==SelectionMode.MANUAL)d.hydrants else observed.candidates.select(mode),
                                         snapshot=planSelectionSnapshot(query,observed.candidates.incomplete))
                                 },enabled=editable)
-                                Text(stringResource(selectionLabel(mode)))
+                                Text(stringResource(selectionLabel(mode)),modifier=Modifier.weight(1f))
                             }
                         }
                         if(d.mode!=SelectionMode.MANUAL)TextButton(onClick={
@@ -293,13 +299,13 @@ fun PlansScreen(model: HydrantViewModel,query: HydrantQuery,back: ()->Unit) {
                     }
                     val visible=if(d.mode==SelectionMode.MANUAL)observed.candidates.hydrants else observed.candidates.hydrants.filter { it.id in d.hydrants }
                     items(visible,key={"hydrant-"+it.id}) { h ->
-                        Row {
+                        Row(Modifier.fillMaxWidth().heightIn(min=48.dp),verticalAlignment=Alignment.CenterVertically) {
                             if(d.mode==SelectionMode.MANUAL)Checkbox(h.id in d.hydrants,{checked->
                                 draft=d.copy(hydrants=if(checked)d.hydrants+h.id else d.hydrants-h.id,
                                     snapshot=planSelectionSnapshot(query,observed.candidates.incomplete))
                             },enabled=editable)
                             Text((h.code ?: stringResource(R.string.h_pending_code))+" · "+h.id.take(8)+
-                                if(h.active)"" else " · "+stringResource(R.string.h_inactive))
+                                if(h.active)"" else " · "+stringResource(R.string.h_inactive),modifier=Modifier.weight(1f))
                         }
                         if(saved!=null && assignmentByHydrant.containsKey(h.id)) {
                             val team=assignmentByHydrant[h.id]?.teamId
@@ -308,9 +314,9 @@ fun PlansScreen(model: HydrantViewModel,query: HydrantQuery,back: ()->Unit) {
                         }
                     }
                     items((d.hydrants-observed.candidates.hydrants.map { it.id }.toSet()).sorted(),key={"missing-hydrant-"+it}) { id ->
-                        Row {
+                        Row(Modifier.fillMaxWidth().heightIn(min=48.dp),verticalAlignment=Alignment.CenterVertically) {
                             if(d.mode==SelectionMode.MANUAL)Checkbox(true,{draft=d.copy(hydrants=d.hydrants-id)},enabled=editable)
-                            Text(stringResource(R.string.plans_uncached,id))
+                            Text(stringResource(R.string.plans_uncached,id),modifier=Modifier.weight(1f))
                         }
                         if(saved!=null && assignmentByHydrant.containsKey(id)) {
                             val team=assignmentByHydrant[id]?.teamId
@@ -319,18 +325,21 @@ fun PlansScreen(model: HydrantViewModel,query: HydrantQuery,back: ()->Unit) {
                         }
                     }
                     item {
-                        Text(stringResource(R.string.plans_start),style=MaterialTheme.typography.titleMedium)
-                        OutlinedTextField(d.latitude,{draft=d.copy(latitude=it)},enabled=editable,
-                            label={Text(stringResource(R.string.h_latitude))},singleLine=true)
-                        OutlinedTextField(d.longitude,{draft=d.copy(longitude=it)},enabled=editable,
-                            label={Text(stringResource(R.string.h_longitude))},singleLine=true)
-                        Row {
-                            Checkbox(d.returnToStart,{draft=d.copy(returnToStart=it)},enabled=editable)
-                            Text(stringResource(R.string.plans_return))
+                        SectionHeading(stringResource(R.string.plans_start))
+                        OperationalCard {
+                            OutlinedTextField(d.latitude,{draft=d.copy(latitude=it)},enabled=editable,
+                                label={Text(stringResource(R.string.h_latitude))},singleLine=true,modifier=Modifier.fillMaxWidth())
+                            OutlinedTextField(d.longitude,{draft=d.copy(longitude=it)},enabled=editable,
+                                label={Text(stringResource(R.string.h_longitude))},singleLine=true,modifier=Modifier.fillMaxWidth())
+                            Row(Modifier.fillMaxWidth().heightIn(min=48.dp),verticalAlignment=Alignment.CenterVertically) {
+                                Checkbox(d.returnToStart,{draft=d.copy(returnToStart=it)},enabled=editable)
+                                Text(stringResource(R.string.plans_return),modifier=Modifier.weight(1f))
+                            }
                         }
-                        if(d.editable)FlowRow {
-                            TextButton(onClick={submit(PlanStatus.DRAFT)},enabled=editable && !hasPendingHydrants && d.name.isNotBlank()) { Text(stringResource(R.string.plans_save_draft)) }
-                            TextButton(onClick={submit(PlanStatus.PLANNED)},enabled=editable && !hasPendingHydrants && d.name.isNotBlank() &&
+                        Spacer(Modifier.height(12.dp))
+                        if(d.editable)FlowRow(horizontalArrangement=Arrangement.spacedBy(8.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
+                            SecondaryAction(onClick={submit(PlanStatus.DRAFT)},enabled=editable && !hasPendingHydrants && d.name.isNotBlank()) { Text(stringResource(R.string.plans_save_draft)) }
+                            PrimaryAction(onClick={submit(PlanStatus.PLANNED)},enabled=editable && !hasPendingHydrants && d.name.isNotBlank() &&
                                 d.teams.isNotEmpty() && d.hydrants.isNotEmpty() &&
                                 d.teams.all { id->observed.teams.teams.any { it.id==id && it.active } }) {
                                 Text(stringResource(R.string.plans_mark_planned))
@@ -340,6 +349,7 @@ fun PlansScreen(model: HydrantViewModel,query: HydrantQuery,back: ()->Unit) {
                     }
                 }
             }
+        }
         }
     }
     if(cancel)AlertDialog(onDismissRequest={if(!busy)cancel=false},

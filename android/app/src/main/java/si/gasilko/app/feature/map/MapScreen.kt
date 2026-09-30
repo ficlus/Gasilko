@@ -47,6 +47,7 @@ import si.gasilko.app.feature.hydrants.presentation.statusLabel
 import si.gasilko.app.feature.hydrants.presentation.errorLabel
 import si.gasilko.app.feature.map.domain.GeoPoint
 import si.gasilko.app.BuildConfig
+import si.gasilko.app.core.ui.*
 import si.gasilko.app.R
 import si.gasilko.app.feature.plans.PlanRoute
 import java.net.URI
@@ -102,8 +103,8 @@ fun MapScreen(onBack: () -> Unit, hydrants: List<Hydrant>, onOpenHydrant: ((Stri
         val headerHeight=maxHeight*0.5f
         Column(Modifier.fillMaxSize()) {
             Column(Modifier.heightIn(max=headerHeight).verticalScroll(rememberScrollState())) {
-            Row(Modifier.padding(horizontal=16.dp), horizontalArrangement=Arrangement.spacedBy(16.dp)) {
-                TextButton(onClick=::back) { Text(stringResource(R.string.h_back)) }
+            FlowRow(Modifier.padding(horizontal=16.dp), horizontalArrangement=Arrangement.spacedBy(16.dp)) {
+                TextButton(onClick=::back) { ActionLabel(stringResource(R.string.h_back),R.drawable.ic_field_arrow_back) }
                 Text(stringResource(R.string.map_title), Modifier.padding(top=12.dp), style=MaterialTheme.typography.titleLarge)
             }
             FlowRow(Modifier.padding(horizontal=16.dp), horizontalArrangement=Arrangement.spacedBy(12.dp)) {
@@ -131,7 +132,7 @@ fun MapScreen(onBack: () -> Unit, hydrants: List<Hydrant>, onOpenHydrant: ((Stri
                     displayedStyle=region.definition.styleURL ?: styleUrl
                     attempt++
                 }) })
-            dataError?.let { Text(stringResource(errorLabel(it)), Modifier.padding(horizontal=16.dp), color=MaterialTheme.colorScheme.error) }
+            dataError?.let { FieldBanner(stringResource(errorLabel(it)), FieldTone.DANGER, Modifier.padding(horizontal=16.dp)) }
             if(route!=null)RouteAttribution()
             if(routeData?.numbers?.size==1)Text(stringResource(R.string.routes_single_stop),Modifier.padding(horizontal=16.dp))
             else if(routeData!=null && !routeData.hasRoad && routeData.numbers.isNotEmpty())
@@ -142,16 +143,16 @@ fun MapScreen(onBack: () -> Unit, hydrants: List<Hydrant>, onOpenHydrant: ((Stri
                 notice?.let { Text(stringResource(it,hydrants.size-validCount),Modifier.padding(horizontal=16.dp),style=MaterialTheme.typography.bodySmall) }
             }
             selected?.let { h ->
-                Column(Modifier.padding(horizontal=16.dp)) {
-                    Column {
+                OperationalCard(Modifier.padding(horizontal=16.dp,vertical=8.dp)) {
+                    Column(verticalArrangement=Arrangement.spacedBy(6.dp)) {
                         Text(stringResource(R.string.map_selected),Modifier.semantics { heading() },style=MaterialTheme.typography.labelSmall)
-                        Text(h.code ?: stringResource(R.string.h_pending_code))
+                        Text(h.code ?: stringResource(R.string.h_pending_code),style=MaterialTheme.typography.titleMedium)
                         if(h.code == null)Text(h.id, style=MaterialTheme.typography.labelSmall)
-                        Text(stringResource(statusLabel(h.status)))
-                        if(!h.active)Text(stringResource(R.string.h_inactive))
+                        StatusBadge(stringResource(statusLabel(h.status)))
+                        if(!h.active)StatusBadge(stringResource(R.string.h_inactive))
                     }
                     FlowRow(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-                        if(onOpenHydrant!=null)TextButton(onClick={cancelFocus();onOpenHydrant(h.id)}) { Text(stringResource(R.string.h_details)) }
+                        if(onOpenHydrant!=null)CompactAction(onClick={cancelFocus();onOpenHydrant(h.id)}) { Text(stringResource(R.string.h_details)) }
                         TextButton(onClick={selectedId=null;cancelFocus()}) { Text(stringResource(R.string.map_clear_selection)) }
                     }
                 }
@@ -159,8 +160,8 @@ fun MapScreen(onBack: () -> Unit, hydrants: List<Hydrant>, onOpenHydrant: ((Stri
             if(loading)LinearProgressIndicator(Modifier.fillMaxWidth())
             if(loading)Text(stringResource(R.string.map_loading),Modifier.padding(horizontal=16.dp))
             if(failed || !valid) {
-                Text(stringResource(if(valid) R.string.map_error else R.string.map_unconfigured),Modifier.padding(horizontal=16.dp))
-                TextButton(onClick=::retry,modifier=Modifier.padding(horizontal=16.dp)) { Text(stringResource(R.string.map_retry)) }
+                FieldBanner(stringResource(if(valid) R.string.map_error else R.string.map_unconfigured),FieldTone.WARNING,Modifier.padding(horizontal=16.dp))
+                CompactAction(onClick=::retry,modifier=Modifier.padding(horizontal=16.dp)) { ActionLabel(stringResource(R.string.map_retry),R.drawable.ic_field_refresh) }
             }
             }
             key(displayedStyle, attempt) {
@@ -274,12 +275,13 @@ fun MapScreen(onBack: () -> Unit, hydrants: List<Hydrant>, onOpenHydrant: ((Stri
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun RouteAttribution() {
     val uri=LocalUriHandler.current
     Column(Modifier.padding(horizontal=16.dp)) {
         Text(stringResource(R.string.routes_attribution),style=MaterialTheme.typography.bodySmall)
-        Row {
+        FlowRow {
             TextButton(onClick={uri.openUri("https://www.graphhopper.com/")}) { Text("GraphHopper") }
             TextButton(onClick={uri.openUri("https://www.openstreetmap.org/copyright")}) { Text("© OpenStreetMap") }
         }
