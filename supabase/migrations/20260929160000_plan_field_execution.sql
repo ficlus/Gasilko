@@ -36,10 +36,12 @@ begin
  if p.status<>'PLANNED' or (request->>'operation_id')::uuid is null then raise exception 'PLAN_NOT_PLANNED' using errcode='22023'; end if;
  if not exists(select 1 from public.inspection_plan_items where plan_id=p.id and active) or
  exists(select 1 from public.inspection_plan_items i where i.plan_id=p.id and i.active and
-  (i.team_id is null or i.route_order is null or not exists(select 1 from public.inspection_plan_routes r
-   join public.inspection_teams t on t.id=r.team_id where r.plan_id=p.id and r.team_id=i.team_id and r.valid and t.active))) then
+  (i.team_id is null or not exists(select 1 from public.inspection_plan_teams pt
+   join public.inspection_teams t on t.id=pt.team_id where pt.plan_id=p.id and pt.team_id=i.team_id
+    and pt.organization_id=organization and t.organization_id=organization and pt.active and t.active))) then
   raise exception 'ROUTE_ASSIGNMENTS_REQUIRED' using errcode='22023';
  end if;
+ -- Road routing is optional: activation requires selected, active team assignments only.
  update public.inspection_plans set status='ACTIVE',started_at=statement_timestamp(),version=p.version+1,
   last_operation_id=(request->>'operation_id')::uuid,last_request=request where id=p.id;
  perform private.write_audit(organization,actor,'PLAN_ACTIVATED','inspection_plans',p.id,to_jsonb(p),

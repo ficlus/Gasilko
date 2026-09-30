@@ -352,6 +352,7 @@
     <string name="routes_attribution">Usmerjanje: GraphHopper · Podatki zemljevida © OpenStreetMap contributors</string>
     <string name="routes_single_stop">Ta ekipa ima en hidrant. Brez začetne lokacije ni voznega odseka med postanki.</string>
     <string name="routes_no_road_geometry">Ni shranjene cestne geometrije. Dostopne točke lahko sovpadajo; po potrebi ponovno izračunajte ruto s povezavo.</string>
+    <string name="execution_no_route">Cestna ruta ni izračunana. Delo lahko nadaljujete s seznamom dodeljenih postankov. Ruto lahko izračunate pozneje.</string>
     <string name="execution_title">Izvedba načrta</string>
     <string name="execution_activate">Začni izvajanje načrta</string>
     <string name="execution_empty">Ni aktivnih načrtov za vaše ekipe.</string>

@@ -53,6 +53,7 @@ fun PlanExecutionScreen(model: HydrantViewModel,query: HydrantQuery,initialPlan:
         .map { it.teamId }.sorted()
     val selected=teamId?.takeIf { it in teamIds } ?: teamIds.firstOrNull()
     val all=data.items.filter { it.planId==plan?.id && it.active }
+    // Without road order, UUID provides a stable display-only list. Never persist a fabricated route.
     val stops=all.filter { it.teamId==selected }.sortedWith(compareBy<PlanItem> { it.inspectionId!=null }
         .thenBy { it.routeOrder ?: Int.MAX_VALUE }.thenBy { it.hydrantId })
     val next=stops.firstOrNull { it.inspectionId==null && it.skipReason==null } ?: stops.firstOrNull { it.inspectionId==null }
@@ -92,7 +93,7 @@ fun PlanExecutionScreen(model: HydrantViewModel,query: HydrantQuery,initialPlan:
                     }
                     item {
                         if(route!=null)TextButton(onClick={map=true},enabled=!busy) { Text(stringResource(R.string.routes_map)) }
-                        else Text(stringResource(R.string.routes_missing))
+                        else Text(stringResource(R.string.execution_no_route))
                         if(registry.manages)TextButton(onClick={run {
                             val request=routeRequest ?: PlanRouting(plan.id,plan.version,remaining=true).also { routeRequest=it }
                             model.routePlan(query.organization,request);routeRequest=null
