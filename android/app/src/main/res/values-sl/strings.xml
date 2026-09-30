@@ -317,4 +317,12 @@
     <string name="ui_management">Upravljanje</string>
     <string name="ui_remaining">Preostalo</string>
     <string name="ui_skipped">Preskočeno</string>
+    <string name="shell_home">Domov</string>
+    <string name="shell_account">Račun in dostop</string>
+    <string name="shell_operations">Stanje sinhronizacije</string>
+    <string name="shell_hydrants_hint">Register, iskanje in podatki o hidrantih.</string>
+    <string name="shell_map_hint">Hidranti na zemljevidu in bližnji hidranti.</string>
+    <string name="shell_plans_hint">Načrti, ekipne poti in terensko izvajanje.</string>
+    <string name="shell_teams_hint">Člani ekip in upravljanje ekip.</string>
+    <string name="shell_history_hint">Izberite hidrant v registru in odprite njegovo zgodovino pregledov.</string>
 </resources>
