@@ -18,7 +18,9 @@ internal suspend fun cachePlanSnapshot(db: RegistryDatabase,actor: String,org: S
         data.teams.any { t -> t.organization!=org || data.plans.none { it.id==t.planId } } ||
         data.items.any { i -> i.organization!=org || data.plans.none { it.id==i.planId } ||
             (i.teamId!=null && data.teams.none { it.planId==i.planId && it.teamId==i.teamId }) } ||
-        data.routes.any { r -> r.organization!=org || data.teams.none { it.planId==r.planId && it.teamId==r.teamId } })
+        data.routes.any { r -> r.organization!=org || data.teams.none { it.planId==r.planId && it.teamId==r.teamId } } ||
+        data.reassignments.any { r -> r.organization!=org || data.items.none { it.planId==r.planId && it.id==r.itemId } ||
+            listOf(r.fromTeam,r.toTeam).any { team -> data.teams.none { it.planId==r.planId && it.teamId==team } } })
         throw RegistryFailure(RegistryError.VALIDATION)
     val previous=db.plans().plans(actor,org).associate { it.value.id to it.value.version }
     val accepted=data.plans.filter { it.version >= (previous[it.id] ?: 0) }
@@ -31,6 +33,17 @@ internal suspend fun cachePlanSnapshot(db: RegistryDatabase,actor: String,org: S
         val prior=priorRoutes[route.planId to route.teamId]
         PlanRouteEntity(actor,if(prior!=null && prior.calculatedAt==route.calculatedAt && !prior.valid)route.copy(valid=false) else route)
     })
+    val requests=db.plans().reassignments(actor,org).associateBy { it.id }
+    db.plans().reassignments(data.reassignments.map { event ->
+        val prior=requests[event.id]
+        prior?.payload?.let { payload ->
+            val request=decodeReassign(payload)
+            if(event.actor!=actor || event.planId!=request.context.planId || event.itemId!=request.context.itemId ||
+                event.fromTeam!=request.fromTeam || event.toTeam!=request.toTeam || event.reason!=request.reason.trim() ||
+                event.version!=request.context.version+1)throw RegistryFailure(RegistryError.VALIDATION)
+        }
+        PlanReassignmentRecord(actor,org,event.id,event.planId,event.itemId,prior?.payload,event.payload().toString(),"ACKNOWLEDGED")
+    })
     check()
 }
 // A remote refresh/earlier receipt may update route order, but must retain later local execution intent.
@@ -39,10 +52,12 @@ internal suspend fun cachePlanItems(db: RegistryDatabase,actor: String,org: Stri
         .mapNotNull { it.planItemId() }.toSet()
     val merged=rows.map { server ->
         val local=db.plans().item(actor,org,server.planId,server.id)?.value
+        val assigned=if(local!=null && local.assignmentVersion>server.assignmentVersion)
+            server.copy(teamId=local.teamId,assignmentVersion=local.assignmentVersion,routeOrder=local.routeOrder) else server
         if(local!=null && (server.id in pending || local.executionVersion>server.executionVersion))
-            server.copy(executionVersion=local.executionVersion,inspectionId=local.inspectionId,completedBy=local.completedBy,
+            assigned.copy(executionVersion=local.executionVersion,inspectionId=local.inspectionId,completedBy=local.completedBy,
                 completedAt=local.completedAt,skipReason=local.skipReason,skippedBy=local.skippedBy,skippedAt=local.skippedAt)
-        else server
+        else assigned
     }
     db.plans().items(merged.map { PlanItemEntity(actor,it) })
 }

@@ -37,6 +37,7 @@ fun statusLabel(status: HydrantStatus): Int = when(status) {
     HydrantStatus.UNKNOWN -> R.string.h_unknown
 }
 fun errorLabel(error: RegistryError): Int = when(error) {
+    RegistryError.REASSIGNMENT_PENDING -> R.string.reassign_pending
     RegistryError.EXECUTION_PENDING -> R.string.execution_pending
     RegistryError.EXECUTION_CHANGED -> R.string.execution_changed
     RegistryError.ROUTE_ASSIGNMENTS -> R.string.routes_assignments_required

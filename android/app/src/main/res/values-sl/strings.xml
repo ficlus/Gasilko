@@ -285,7 +285,7 @@
     <string name="execution_empty">Ni aktivnih načrtov za vaše ekipe.</string>
     <string name="execution_sync">Sinhroniziraj</string>
     <string name="execution_reroute">Preračunaj preostalo ruto</string>
-    <string name="execution_pending">Napredek vsebuje lokalne spremembe. Pred preračunom jih sinhronizirajte.</string>
+    <string name="execution_pending">Napredek vsebuje lokalne spremembe. Pred predajo ali preračunom jih sinhronizirajte oziroma razrešite odprte težave.</string>
     <string name="execution_pending_short">Čaka na sinhronizacijo</string>
     <string name="execution_changed">Postanek je že zaključen ali spremenjen. Osvežite načrt in ga ponovno odprite.</string>
     <string name="execution_completed">Zaključeno</string>
@@ -296,4 +296,18 @@
     <string name="execution_skip_reason">Razlog za preskok (obvezno)</string>
     <string name="execution_progress">Zaključeno %1$d / %2$d · Preostalo %3$d · Preskočeno %4$d</string>
     <string name="execution_attention">Sprememba potrebuje pregled. Lokalni zapis ostaja shranjen; preverite stanje po sinhronizaciji.</string>
+    <string name="reassign_title">Spremeni ekipo postanka</string>
+    <string name="reassign_transfer">Predaj drugi ekipi</string>
+    <string name="reassign_take">Prevzemi</string>
+    <string name="reassign_destination">Ciljna ekipa</string>
+    <string name="reassign_reason">Razlog za spremembo (obvezno)</string>
+    <string name="reassign_confirm">Potrdi spremembo</string>
+    <string name="reassign_offline">Predaja in prevzem zahtevata internetno povezavo. Pregledi in preskoki ostajajo na voljo brez povezave.</string>
+    <string name="reassign_pending">Izid predaje še ni potrjen. Pred nadaljevanjem za ta postanek osvežite načrt ali ponovite zahtevo s povezavo.</string>
+    <string name="reassign_retry">Ponovi predajo za postanek %1$s</string>
+    <string name="reassign_history">Zgodovina predaj</string>
+    <string name="reassign_no_history">Ta postanek še ni bil predan.</string>
+    <string name="reassign_current_team">Trenutna ekipa: %1$s</string>
+    <string name="reassign_changed">Postanek je bil prerazporejen.</string>
+    <string name="reassign_actor">Izvedel uporabnik: %1$s</string>
 </resources>

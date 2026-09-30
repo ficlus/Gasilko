@@ -11,11 +11,20 @@ data class PlanTeamEntity(val account: String,@Embedded val value: PlanTeam)
 data class PlanItemEntity(val account: String,@Embedded val value: PlanItem)
 @Entity(tableName="inspection_plan_routes",primaryKeys=["account","organization","planId","teamId"])
 data class PlanRouteEntity(val account: String,@Embedded val value: PlanRoute)
+// Online-only request journal and acknowledged history. Never used as a background upload queue.
+@Entity(tableName="plan_reassignments",primaryKeys=["account","organization","id"])
+data class PlanReassignmentRecord(val account: String,val organization: String,val id: String,val planId: String,
+    val itemId: String,val payload: String?,val event: String?,val state: String)
 // Empty hydrantId marks a successful complete registry refresh. Other rows mark history coverage.
 @Entity(tableName="plan_cache_coverage",primaryKeys=["account","organization","hydrantId"])
 data class PlanCoverage(val account: String,val organization: String,val hydrantId: String,val version: Long,val refreshedAt: Long)
 data class PlanInspectionLast(val hydrantId: String,val completedAt: Long?,val issues: Int)
 @Dao interface PlanDao {
+    @Upsert suspend fun reassignments(rows: List<PlanReassignmentRecord>)
+    @Query("SELECT * FROM plan_reassignments WHERE account=:account AND organization=:org ORDER BY id")
+    suspend fun reassignments(account: String,org: String): List<PlanReassignmentRecord>
+    @Query("UPDATE plan_reassignments SET state='REJECTED' WHERE account=:account AND organization=:org AND id=:id AND state='REQUESTED'")
+    suspend fun rejectReassignment(account: String,org: String,id: String)
     @Query("SELECT * FROM inspection_plan_items WHERE account=:account AND organization=:org AND planId=:plan AND id=:item")
     suspend fun item(account: String,org: String,plan: String,item: String): PlanItemEntity?
     @Upsert suspend fun plans(rows: List<PlanEntity>)

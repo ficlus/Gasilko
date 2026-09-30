@@ -18,7 +18,8 @@ data class PlanItem(val id: String, val planId: String, val organization: String
     val active: Boolean, val createdAt: String, val teamId: String? = null, val routeOrder: Int? = null,
     @androidx.room.ColumnInfo(defaultValue="0") val executionVersion: Long = 0,
     val inspectionId: String? = null, val completedBy: String? = null, val completedAt: String? = null,
-    val skipReason: String? = null, val skippedBy: String? = null, val skippedAt: String? = null)
+    val skipReason: String? = null, val skippedBy: String? = null, val skippedAt: String? = null,
+    @androidx.room.ColumnInfo(defaultValue="0") val assignmentVersion: Long = 0)
 data class PlanStopContext(val planId: String, val itemId: String, val version: Long)
 data class PlanSkip(val context: PlanStopContext, val reason: String,
     val id: String = UUID.randomUUID().toString(), val at: String = Instant.now().toString()) {
@@ -40,7 +41,8 @@ fun PlanRoute.orderedStops(): List<RouteStop> = Json.parseToJsonElement(stops).j
 data class PlanData(val plans: List<InspectionPlan> = emptyList(), val teams: List<PlanTeam> = emptyList(),
     val items: List<PlanItem> = emptyList(), val routes: List<PlanRoute> = emptyList(),
     val executableTeams: Set<String> = emptySet(), val pendingItems: Set<String> = emptySet(),
-    val attentionItems: Set<String> = emptySet())
+    val attentionItems: Set<String> = emptySet(), val reassignments: List<PlanReassignment> = emptyList(),
+    val reassignmentRequests: List<PlanReassign> = emptyList())
 data class PlanCandidates(val hydrants: List<Hydrant> = emptyList(), val filteredIds: Set<String> = emptySet(),
     val due: Map<String,InspectionDueState?> = emptyMap(), val registryCached: Boolean = false) {
     val incomplete get() = !registryCached || hydrants.any { it.active && due[it.id]==null }
@@ -80,6 +82,7 @@ data class PlanRouting(val id: String, val version: Long, val operationId: Strin
     }
 }
 interface PlanRepository {
+    suspend fun reassignPlanItem(org: String, change: PlanReassign): PlanData = throw RegistryFailure(RegistryError.UNAVAILABLE)
     suspend fun activatePlan(org: String, change: PlanAssignment): PlanData = throw RegistryFailure(RegistryError.UNAVAILABLE)
     suspend fun planStop(org: String, plan: String, item: String): PlanItem = throw RegistryFailure(RegistryError.UNAVAILABLE)
     suspend fun skipPlanItem(org: String, change: PlanSkip): Unit = throw RegistryFailure(RegistryError.UNAVAILABLE)
@@ -108,12 +111,13 @@ internal fun decodePlans(value: JsonElement): PlanData {
         rows("items").map(::decodePlanItem),
         rows("routes").map { PlanRoute(it.s("plan_id"),it.s("organization_id"),it.s("team_id"),it.s("provider"),it.s("profile"),
             it.s("calculated_at"),it.s("distance_m").toDouble(),it.s("duration_s").toDouble(),
-            it.getValue("geometry").toString(),it.getValue("stops").toString(),it.b("valid")) })
+            it.getValue("geometry").toString(),it.getValue("stops").toString(),it.b("valid")) },
+        reassignments=value.jsonObject["reassignments"]?.jsonArray.orEmpty().map { decodeReassignment(it.jsonObject) })
 }
 internal fun decodePlanItem(row: JsonObject): PlanItem {
     fun s(k: String)=row[k]?.jsonPrimitive?.contentOrNull
     return PlanItem(s("id")!!,s("plan_id")!!,s("organization_id")!!,s("hydrant_id")!!,row.getValue("active").jsonPrimitive.boolean,
         s("created_at")!!,s("team_id"),s("route_order")?.toInt(),s("execution_version")?.toLong() ?: 0,
-        s("inspection_id"),s("completed_by"),s("completed_at"),s("skip_reason"),s("skipped_by"),s("skipped_at"))
+        s("inspection_id"),s("completed_by"),s("completed_at"),s("skip_reason"),s("skipped_by"),s("skipped_at"),s("assignment_version")?.toLong() ?: 0)
 }
 

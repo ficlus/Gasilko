@@ -83,6 +83,7 @@ class HydrantViewModel(private val repository: HydrantRepository, private val in
     suspend fun refreshPlanCandidates(org: String) = teamAccess(org) { repository.refreshPlanCandidates(org) }
     suspend fun activatePlan(org: String,change: PlanAssignment) = teamAccess(org) { repository.activatePlan(org,change) }
     suspend fun skipPlanItem(org: String,change: PlanSkip) = teamAccess(org) { repository.skipPlanItem(org,change) }
+    suspend fun reassignPlanItem(org: String,change: PlanReassign) = teamAccess(org) { repository.reassignPlanItem(org,change) }
     fun leaveExecution() { mutableState.value=state.value.copy(executionPlanId=null) }
     suspend fun openPlanStop(org: String,plan: String,item: String) {
         val (row,hydrant)=teamAccess(org) {

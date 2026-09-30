@@ -48,6 +48,7 @@ fun registryError(code: String?, message: String?, http: Int? = null): RegistryE
     http == 401 || code in listOf("PGRST301","PGRST303") -> RegistryError.EXPIRED
     code == "P0001" && message in listOf("HYDRANT_VERSION_CONFLICT","PLAN_VERSION_CONFLICT") -> RegistryError.CONFLICT
     code == "42501" || http == 403 -> RegistryError.FORBIDDEN
+    code == "22023" && message == "PLAN_ITEM_CHANGED" -> RegistryError.EXECUTION_CHANGED
     code?.startsWith("22") == true || code?.startsWith("23") == true -> RegistryError.VALIDATION
     else -> RegistryError.SERVER
 }
@@ -67,6 +68,9 @@ fun decodeHydrant(value: JsonElement): Hydrant {
         row.text("created_at"),row.text("updated_at"),row.text("updated_by"))
 }
 class OnlineHydrantRepository(private val wire: RegistryTransport, private val diagnostic: (String,RegistryError)->Unit = {_,_->}): HydrantRepository {
+    override suspend fun reassignPlanItem(org: String,change: PlanReassign) = request("plan_reassign") {
+        decodePlans(wire.rpc("reassign_plan_item",buildJsonObject { put("organization",org);put("request",change.payload()) }))
+    }
     override suspend fun activatePlan(org: String,change: PlanAssignment) = request("plans_activate") {
         decodePlans(wire.rpc("activate_inspection_plan",buildJsonObject { put("organization",org);put("request",change.payload()) }))
     }
