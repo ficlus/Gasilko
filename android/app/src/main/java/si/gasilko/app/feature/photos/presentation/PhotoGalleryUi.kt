@@ -64,8 +64,9 @@ fun PhotoGalleryScreen(model: HydrantViewModel, organization: String, hydrant: S
     BackHandler { if(!busy)back() }
     Surface(Modifier.fillMaxSize()) {
         BoxWithConstraints(Modifier.fillMaxSize().safeDrawingPadding()) {
+        val availableHeight = maxHeight
         Column(Modifier.fillMaxSize().padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
-            ScrollableHeader(maxHeight*0.5f) {
+            ScrollableHeader(availableHeight * 0.5f) {
                 ScreenHeading(stringResource(if(inspectionId==null)R.string.photo_all else R.string.inspection_photos),label)
                 FlowRow(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
                     CompactAction(back,enabled=!busy) { ActionLabel(stringResource(R.string.h_back),R.drawable.ic_field_arrow_back) }
