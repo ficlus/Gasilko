@@ -19,6 +19,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import si.gasilko.app.R
 import si.gasilko.app.core.auth.*
+import si.gasilko.app.core.ui.*
 
 @Composable
 fun AuthScreen(model: AuthViewModel = viewModel()) {
@@ -40,9 +41,9 @@ fun AuthScreen(model: AuthViewModel = viewModel()) {
     LaunchedEffect(state.route) { if(state.route==AuthRoute.UNAUTHENTICATED || state.route==AuthRoute.ACTIVE) requests=false }
     Column {
     if(state.route == AuthRoute.ACTIVE && state.offline)
-        Text(stringResource(R.string.auth_cached_authorization), Modifier.padding(horizontal=16.dp, vertical=8.dp))
+        FieldBanner(stringResource(R.string.auth_cached_authorization), modifier=Modifier.padding(horizontal=16.dp,vertical=8.dp))
     if(state.route == AuthRoute.ACTIVE && state.message in listOf(AuthMessage.OFFLINE_SEVEN_DAYS, AuthMessage.OFFLINE_ONE_DAY))
-        Text(stringResource(if(state.message == AuthMessage.OFFLINE_ONE_DAY) R.string.auth_offline_one_day else R.string.auth_offline_seven_days), Modifier.padding(16.dp))
+        FieldBanner(stringResource(if(state.message == AuthMessage.OFFLINE_ONE_DAY) R.string.auth_offline_one_day else R.string.auth_offline_seven_days), FieldTone.WARNING, Modifier.padding(16.dp))
     Box(Modifier.weight(1f)) {
     if(requests && state.route in listOf(AuthRoute.ACTIVE,AuthRoute.PENDING_APPROVAL)) AccessScreen(model.access,{requests=false},{requests=false;model.signOut()},model::refresh)
     else if(state.route == AuthRoute.ACTIVE && model.hydrants != null) registryScreens.SaveableStateProvider(state.account ?: "registry") {
@@ -52,32 +53,35 @@ fun AuthScreen(model: AuthViewModel = viewModel()) {
     } }
 }
 @Composable
+@OptIn(ExperimentalLayoutApi::class)
 fun AuthContent(state: AuthState, signIn: (String,String)->Unit, signUp: (String,String,String,String)->Unit, refresh: ()->Unit, signOut: ()->Unit, google: ()->Unit = {}, requestAccess: (()->Unit)? = null) {
-    Scaffold { padding -> Column(Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        Text(stringResource(R.string.app_name), style = MaterialTheme.typography.headlineMedium)
+    Scaffold { padding -> Column(Modifier.fillMaxSize().padding(padding).imePadding().verticalScroll(rememberScrollState()).padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        ScreenHeading(stringResource(R.string.app_name))
         when (state.route) {
             AuthRoute.LOADING -> { CircularProgressIndicator(); Text(stringResource(R.string.auth_loading)) }
             AuthRoute.UNAUTHENTICATED -> {
                 var signup by remember { mutableStateOf(false) }; var email by remember { mutableStateOf("") }
                 // Passwords are ephemeral Compose state, never SavedStateHandle/rememberSaveable/disk.
                 var password by remember { mutableStateOf("") }; var name by remember { mutableStateOf("") }; var language by remember { mutableStateOf("sl") }
-                OutlinedButton(onClick=google){Text(stringResource(R.string.access_continue_google))}
-                Text(stringResource(if (signup) R.string.auth_sign_up else R.string.auth_sign_in))
-                OutlinedTextField(email, { email = it }, label = { Text(stringResource(R.string.auth_email)) }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email))
-                OutlinedTextField(password, { password = it }, label = { Text(stringResource(R.string.auth_password)) }, singleLine = true, visualTransformation = PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password))
-                if (signup) {
-                    OutlinedTextField(name, { name = it.take(120) }, label = { Text(stringResource(R.string.auth_display_name)) }, singleLine = true)
-                    Text(stringResource(R.string.auth_language))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        FilterChip(selected = language == "sl", onClick = { language = "sl" }, label = { Text(stringResource(R.string.auth_slovenian)) })
-                        FilterChip(selected = language == "de", onClick = { language = "de" }, label = { Text(stringResource(R.string.auth_german)) })
+                SecondaryAction(onClick=google,modifier=Modifier.fillMaxWidth()){Text(stringResource(R.string.access_continue_google))}
+                OperationalCard {
+                    SectionHeading(stringResource(if (signup) R.string.auth_sign_up else R.string.auth_sign_in))
+                    OutlinedTextField(email, { email = it }, label = { Text(stringResource(R.string.auth_email)) }, modifier = Modifier.fillMaxWidth(), singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email))
+                    OutlinedTextField(password, { password = it }, label = { Text(stringResource(R.string.auth_password)) }, modifier = Modifier.fillMaxWidth(), singleLine = true, visualTransformation = PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password))
+                    if (signup) {
+                        OutlinedTextField(name, { name = it.take(120) }, label = { Text(stringResource(R.string.auth_display_name)) }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+                        Text(stringResource(R.string.auth_language))
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FilterChip(selected = language == "sl", onClick = { language = "sl" }, label = { Text(stringResource(R.string.auth_slovenian)) })
+                            FilterChip(selected = language == "de", onClick = { language = "de" }, label = { Text(stringResource(R.string.auth_german)) })
+                        }
                     }
+                    PrimaryAction(modifier=Modifier.fillMaxWidth(), enabled = email.isNotBlank() && password.isNotEmpty() && (!signup || name.isNotBlank()), onClick = {
+                        if (signup) signUp(email, password, name, language) else signIn(email, password)
+                        password = ""
+                    }) { Text(stringResource(if (signup) R.string.auth_sign_up else R.string.auth_sign_in)) }
+                    TextButton(onClick = { signup = !signup; password = "" }) { Text(stringResource(if (signup) R.string.auth_sign_in else R.string.auth_sign_up)) }
                 }
-                Button(enabled = email.isNotBlank() && password.isNotEmpty() && (!signup || name.isNotBlank()), onClick = {
-                    if (signup) signUp(email, password, name, language) else signIn(email, password)
-                    password = ""
-                }) { Text(stringResource(if (signup) R.string.auth_sign_up else R.string.auth_sign_in)) }
-                TextButton(onClick = { signup = !signup; password = "" }) { Text(stringResource(if (signup) R.string.auth_sign_in else R.string.auth_sign_up)) }
             }
             else -> {
                 val text = when (state.route) {
@@ -87,16 +91,16 @@ fun AuthContent(state: AuthState, signIn: (String,String)->Unit, signUp: (String
                     AuthRoute.REJECTED -> R.string.auth_rejected
                     else -> R.string.auth_profile_unavailable
                 }
-                Text(stringResource(text))
+                FieldBanner(stringResource(text),if(state.route==AuthRoute.ACTIVE)FieldTone.SUCCESS else FieldTone.WARNING)
                 if (state.route == AuthRoute.ACTIVE) Text(stringResource(R.string.auth_authorization_notice))
-                if(requestAccess!=null && state.route in listOf(AuthRoute.ACTIVE,AuthRoute.PENDING_APPROVAL)) Button(onClick=requestAccess){Text(stringResource(R.string.access_request_access))}
+                if(requestAccess!=null && state.route in listOf(AuthRoute.ACTIVE,AuthRoute.PENDING_APPROVAL)) PrimaryAction(onClick=requestAccess,modifier=Modifier.fillMaxWidth()){Text(stringResource(R.string.access_request_access))}
                 if (state.message != AuthMessage.CONFIGURATION) {
-                    Button(onClick = refresh) { Text(stringResource(R.string.auth_refresh_status)) }
+                    SecondaryAction(onClick = refresh) { ActionLabel(stringResource(R.string.auth_refresh_status),R.drawable.ic_field_refresh) }
                     TextButton(onClick = signOut) { Text(stringResource(R.string.auth_sign_out)) }
                 }
             }
         }
-        if (state.message != AuthMessage.NONE) Text(stringResource(when (state.message) {
+        if (state.message != AuthMessage.NONE) FieldBanner(stringResource(when (state.message) {
             AuthMessage.INVALID_CREDENTIALS -> R.string.auth_invalid_credentials
             AuthMessage.CONFIRM_EMAIL -> R.string.auth_confirm_email
             AuthMessage.SIGNUP_NOTICE -> R.string.auth_signup_notice
@@ -106,6 +110,6 @@ fun AuthContent(state: AuthState, signIn: (String,String)->Unit, signUp: (String
             AuthMessage.OFFLINE_EXPIRED -> R.string.auth_offline_expired
             AuthMessage.CONFIGURATION -> R.string.auth_configuration
             else -> R.string.auth_auth_error
-        }))
+        }),if(state.message in listOf(AuthMessage.CONFIRM_EMAIL,AuthMessage.SIGNUP_NOTICE))FieldTone.INFO else FieldTone.WARNING)
     } }
 }

@@ -6,6 +6,10 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.Alignment
+import si.gasilko.app.core.ui.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -67,33 +71,41 @@ fun TeamsScreen(model: HydrantViewModel, organization: String, back: ()->Unit) {
     fun goBack() { if(!busy) { if(selected!=null)selected=null else back() } }
     BackHandler(onBack=::goBack)
     Scaffold { padding ->
-        Column(Modifier.fillMaxSize().padding(padding).padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
-            Text(stringResource(R.string.teams_title),style=MaterialTheme.typography.headlineSmall)
-            Text(stringResource(R.string.teams_online_notice))
-            FlowRow {
-                TextButton(onClick=::goBack,enabled=!busy) { Text(stringResource(R.string.h_back)) }
-                TextButton(onClick=::refresh,enabled=!busy) { Text(stringResource(R.string.h_refresh)) }
-                TextButton(onClick={editor=TeamEditor(UUID.randomUUID().toString(),true)},enabled=editable) { Text(stringResource(R.string.teams_new)) }
-                pending?.let { change -> TextButton(onClick={submit(change)},enabled=!busy) { Text(stringResource(R.string.photo_retry)) } }
-            }
-            if(busy)LinearProgressIndicator(Modifier.fillMaxWidth())
-            (error ?: observed.error)?.let {
-                Text(stringResource(errorLabel(it)),color=MaterialTheme.colorScheme.error)
-                Text(stringResource(R.string.teams_retry_notice))
+        BoxWithConstraints(Modifier.fillMaxSize().padding(padding)) {
+        Column(Modifier.fillMaxSize().padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
+            ScrollableHeader(maxHeight*0.5f) {
+                ScreenHeading(stringResource(R.string.teams_title))
+                FieldBanner(stringResource(R.string.teams_online_notice))
+                FlowRow(horizontalArrangement=Arrangement.spacedBy(8.dp),verticalArrangement=Arrangement.spacedBy(4.dp)) {
+                    CompactAction(onClick=::goBack,enabled=!busy) { ActionLabel(stringResource(R.string.h_back),R.drawable.ic_field_arrow_back) }
+                    CompactAction(onClick=::refresh,enabled=!busy) { ActionLabel(stringResource(R.string.h_refresh),R.drawable.ic_field_refresh) }
+                    PrimaryAction(onClick={editor=TeamEditor(UUID.randomUUID().toString(),true)},enabled=editable) { Text(stringResource(R.string.teams_new)) }
+                    pending?.let { change -> TextButton(onClick={submit(change)},enabled=!busy) { Text(stringResource(R.string.photo_retry)) } }
+                }
+                if(busy)LinearProgressIndicator(Modifier.fillMaxWidth())
+                (error ?: observed.error)?.let {
+                    FieldBanner(stringResource(errorLabel(it)),FieldTone.DANGER)
+                    Text(stringResource(R.string.teams_retry_notice))
+                }
             }
             LazyColumn(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(8.dp)) {
                 if(team==null) {
-                    if(data.teams.isEmpty())item { Text(stringResource(R.string.teams_empty)) }
+                    if(data.teams.isEmpty())item { FieldBanner(stringResource(R.string.teams_empty)) }
                     items(data.teams,key={it.id}) { item ->
-                        OutlinedButton(onClick={selected=item.id},enabled=!busy,modifier=Modifier.fillMaxWidth()) {
-                            Text(item.name+" · "+stringResource(if(item.active)R.string.h_active else R.string.h_inactive))
+                        OutlinedCard(onClick={selected=item.id},enabled=!busy,modifier=Modifier.fillMaxWidth(),
+                            colors=CardDefaults.outlinedCardColors(containerColor=MaterialTheme.colorScheme.surface)) {
+                            Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(10.dp)) {
+                                Text(item.name,style=MaterialTheme.typography.titleLarge)
+                                StatusBadge(stringResource(if(item.active)R.string.h_active else R.string.h_inactive),
+                                    if(item.active)FieldTone.SUCCESS else FieldTone.NEUTRAL)
+                            }
                         }
                     }
                 } else {
                     item {
                         Text(team.name,style=MaterialTheme.typography.titleLarge)
-                        Text(stringResource(if(team.active)R.string.h_active else R.string.h_inactive))
-                        FlowRow {
+                        StatusBadge(stringResource(if(team.active)R.string.h_active else R.string.h_inactive),if(team.active)FieldTone.SUCCESS else FieldTone.NEUTRAL)
+                        FlowRow(horizontalArrangement=Arrangement.spacedBy(8.dp),verticalArrangement=Arrangement.spacedBy(4.dp)) {
                             TextButton(onClick={editor=TeamEditor(team.id,false,team.name)},enabled=editable) { Text(stringResource(R.string.teams_rename)) }
                             TextButton(onClick={submit(TeamChange(team.id,TeamOperation.ACTIVE,active=!team.active))},
                                 enabled=editable && (team.active || members.any { it.active })) {
@@ -101,13 +113,13 @@ fun TeamsScreen(model: HydrantViewModel, organization: String, back: ()->Unit) {
                             }
                             TextButton(onClick={picking=true},enabled=editable) { Text(stringResource(R.string.teams_add_member)) }
                         }
-                        Text(stringResource(R.string.teams_members),style=MaterialTheme.typography.titleMedium)
-                        Text(stringResource(R.string.teams_last_member),style=MaterialTheme.typography.bodySmall)
+                        SectionHeading(stringResource(R.string.teams_members))
+                        FieldBanner(stringResource(R.string.teams_last_member))
                     }
                     items(members,key={it.userId}) { member ->
-                        Column {
-                            Text(personLabel(member.displayName,member.userId))
-                            Text(stringResource(if(member.active)R.string.h_active else R.string.h_inactive))
+                        OperationalCard {
+                            Text(personLabel(member.displayName,member.userId),style=MaterialTheme.typography.titleMedium)
+                            StatusBadge(stringResource(if(member.active)R.string.h_active else R.string.h_inactive),if(member.active)FieldTone.SUCCESS else FieldTone.NEUTRAL)
                             if(member.active)TextButton(onClick={submit(TeamChange(team.id,TeamOperation.REMOVE,member=member.userId))},
                                 enabled=editable && members.count { it.active }>1) { Text(stringResource(R.string.teams_remove_member)) }
                         }
@@ -115,27 +127,28 @@ fun TeamsScreen(model: HydrantViewModel, organization: String, back: ()->Unit) {
                 }
             }
         }
+        }
     }
     editor?.let { draft ->
         AlertDialog(onDismissRequest={if(!busy)editor=null},title={Text(stringResource(if(draft.creating)R.string.teams_new else R.string.teams_rename))},
-            text={Column {
+            text={Column(Modifier.verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(12.dp)) {
                 OutlinedTextField(draft.name,{editor=draft.copy(name=it.take(120))},enabled=editable,
-                    label={Text(stringResource(R.string.teams_name))},singleLine=true)
+                    label={Text(stringResource(R.string.teams_name))},singleLine=true,modifier=Modifier.fillMaxWidth())
                 if(draft.creating) {
-                    Text(stringResource(R.string.teams_members))
+                    SectionHeading(stringResource(R.string.teams_members))
                     if(data.people.isEmpty())Text(stringResource(R.string.teams_no_candidates))
                     LazyColumn(Modifier.heightIn(max=260.dp)) {
                         items(data.people,key={it.id}) { person ->
-                            Row {
+                            Row(Modifier.fillMaxWidth().heightIn(min=48.dp),verticalAlignment=Alignment.CenterVertically) {
                                 Checkbox(person.id in draft.members,{checked ->
                                     editor=draft.copy(members=if(checked)draft.members+person.id else draft.members-person.id)
                                 },enabled=editable)
-                                Text(personLabel(person.displayName,person.id))
+                                Text(personLabel(person.displayName,person.id),modifier=Modifier.weight(1f))
                             }
                         }
                     }
                 }
-                error?.let { Text(stringResource(errorLabel(it)),color=MaterialTheme.colorScheme.error);Text(stringResource(R.string.teams_retry_notice)) }
+                error?.let { FieldBanner(stringResource(errorLabel(it)),FieldTone.DANGER);Text(stringResource(R.string.teams_retry_notice)) }
             }},
             confirmButton={TextButton(onClick={submit(TeamChange(draft.id,if(draft.creating)TeamOperation.CREATE else TeamOperation.RENAME,
                 name=draft.name.trim(),initialMembers=draft.members.sorted()))},
@@ -150,7 +163,7 @@ fun TeamsScreen(model: HydrantViewModel, organization: String, back: ()->Unit) {
             val candidates=data.people.filter { person -> members.none { it.userId==person.id && it.active } }
             if(candidates.isEmpty())item { Text(stringResource(R.string.teams_no_candidates)) }
             items(candidates,key={it.id}) { person ->
-                TextButton(onClick={submit(TeamChange(team.id,TeamOperation.ADD,member=person.id))},enabled=editable) {
+                SecondaryAction(onClick={submit(TeamChange(team.id,TeamOperation.ADD,member=person.id))},enabled=editable,modifier=Modifier.fillMaxWidth()) {
                     Text(personLabel(person.displayName,person.id))
                 }
             }

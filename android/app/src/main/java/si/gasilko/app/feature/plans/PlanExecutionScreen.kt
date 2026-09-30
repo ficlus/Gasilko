@@ -159,7 +159,7 @@ fun PlanExecutionScreen(model: HydrantViewModel,query: HydrantQuery,initialPlan:
         ReassignmentDialog(item,destinations(item),busy,online,{ request ->
             reassigning=null
             run { model.reassignPlanItem(query.organization,request) }
-        },{reassigning=null})
+        },{reassigning=null},currentTeam=view.teams.teams.find { it.id==item.teamId }?.name ?: item.teamId.orEmpty())
     }
     historyItem?.let { id -> all.find { it.id==id }?.let { item ->
         ReassignmentHistory(item,data.reassignments.filter { it.itemId==id },view.teams.teams) { historyItem=null }

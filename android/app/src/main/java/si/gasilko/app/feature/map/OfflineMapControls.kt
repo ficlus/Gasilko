@@ -16,10 +16,12 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.maplibre.android.geometry.LatLngBounds
+import si.gasilko.app.core.ui.*
 import si.gasilko.app.R
 import java.text.NumberFormat
 import java.util.Locale
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun OfflineMapControls(style: String, visibleBounds: ()->LatLngBounds?,
     onShow: (OfflineMapRegion)->Unit) {
@@ -48,7 +50,7 @@ internal fun OfflineMapControls(style: String, visibleBounds: ()->LatLngBounds?,
         lifecycle.addObserver(observer)
         onDispose { lifecycle.removeObserver(observer);stop() }
     }
-    TextButton(onClick={ bounds=visibleBounds();open=true }) {
+    CompactAction(onClick={ bounds=visibleBounds();open=true }) {
         val active=state.regions.count { it.downloading }
         Text(if(active>0) stringResource(R.string.offline_active_downloads,active) else stringResource(R.string.offline_maps))
     }
@@ -60,64 +62,65 @@ internal fun OfflineMapControls(style: String, visibleBounds: ()->LatLngBounds?,
     } } == true
     AlertDialog(onDismissRequest={open=false},title={Text(stringResource(R.string.offline_maps))},
         text={Column(Modifier.heightIn(max=480.dp).verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(8.dp)) {
-            Text(stringResource(R.string.offline_notice))
+            FieldBanner(stringResource(R.string.offline_notice))
             if(!supported)Text(stringResource(R.string.offline_unsupported))
-            Text(stringResource(R.string.offline_visible_area))
+            SectionHeading(stringResource(R.string.offline_visible_area))
             bounds?.let { Text(areaLabel(it),style=MaterialTheme.typography.bodySmall) }
             if(!valid)Text(stringResource(R.string.offline_invalid_area))
             Text(stringResource(R.string.offline_limits,OfflineMapPolicy.MIN_ZOOM,OfflineMapPolicy.MAX_ZOOM))
             if(duplicate)Text(stringResource(R.string.offline_duplicate))
-            OutlinedTextField(name,{name=it.take(80)},label={Text(stringResource(R.string.offline_name))},singleLine=true)
-            Button(onClick={bounds?.let { maps.create(name,it,style,context.resources.displayMetrics.density) }},
+            OutlinedTextField(name,{name=it.take(80)},label={Text(stringResource(R.string.offline_name))},singleLine=true,modifier=Modifier.fillMaxWidth())
+            PrimaryAction(onClick={bounds?.let { maps.create(name,it,style,context.resources.displayMetrics.density) }},
                 enabled=supported && valid && !duplicate && name.isNotBlank() && !state.busy && !state.error) {
                 Text(stringResource(R.string.offline_download))
             }
             if(state.busy)LinearProgressIndicator(Modifier.fillMaxWidth())
             if(state.error) {
-                Text(stringResource(R.string.offline_error))
+                FieldBanner(stringResource(R.string.offline_error),FieldTone.DANGER)
                 TextButton(onClick=maps::reload) { Text(stringResource(R.string.map_retry)) }
             }
-            if(!state.busy && !state.error && state.regions.isEmpty())Text(stringResource(R.string.offline_empty))
+            if(!state.busy && !state.error && state.regions.isEmpty())FieldBanner(stringResource(R.string.offline_empty))
             state.regions.forEach { row ->
-                HorizontalDivider()
-                Text(row.name,style=MaterialTheme.typography.titleSmall)
-                row.definition.bounds?.let { Text(areaLabel(it),style=MaterialTheme.typography.bodySmall) }
-                val status=row.status
-                val complete=status?.isComplete==true
-                val overLimit=(status?.completedResourceSize ?: 0)>=OfflineMapPolicy.MAX_BYTES
-                Text(stringResource(when {
-                    row.deleting -> R.string.offline_deleting
-                    row.failed -> R.string.offline_failed
-                    complete -> R.string.offline_complete
-                    row.downloading -> R.string.offline_downloading
-                    status==null -> R.string.offline_checking
-                    else -> R.string.offline_paused
-                }))
-                if(overLimit && !complete)Text(stringResource(R.string.offline_size_limit))
-                if(row.downloading && status==null)LinearProgressIndicator(Modifier.fillMaxWidth())
-                if(status!=null) {
-                    val number=NumberFormat.getNumberInstance().apply { maximumFractionDigits=1 }
-                    Text(stringResource(R.string.offline_size,number.format(status.completedResourceSize/1048576.0)))
-                    if(!complete) {
-                        if(status.isRequiredResourceCountPrecise && status.requiredResourceCount>0) {
-                            val progress=(status.completedResourceCount.toDouble()/status.requiredResourceCount).coerceIn(0.0,1.0).toFloat()
-                            LinearProgressIndicator(progress={progress},modifier=Modifier.fillMaxWidth())
-                            Text(stringResource(R.string.offline_progress,number.format(progress*100)))
-                        } else {
-                            if(row.downloading)LinearProgressIndicator(Modifier.fillMaxWidth())
-                            Text(stringResource(R.string.offline_resources,status.completedResourceCount))
+                OperationalCard {
+                    Text(row.name,style=MaterialTheme.typography.titleSmall)
+                    row.definition.bounds?.let { Text(areaLabel(it),style=MaterialTheme.typography.bodySmall) }
+                    val status=row.status
+                    val complete=status?.isComplete==true
+                    val overLimit=(status?.completedResourceSize ?: 0)>=OfflineMapPolicy.MAX_BYTES
+                    StatusBadge(stringResource(when {
+                        row.deleting -> R.string.offline_deleting
+                        row.failed -> R.string.offline_failed
+                        complete -> R.string.offline_complete
+                        row.downloading -> R.string.offline_downloading
+                        status==null -> R.string.offline_checking
+                        else -> R.string.offline_paused
+                    }))
+                    if(overLimit && !complete)Text(stringResource(R.string.offline_size_limit))
+                    if(row.downloading && status==null)LinearProgressIndicator(Modifier.fillMaxWidth())
+                    if(status!=null) {
+                        val number=NumberFormat.getNumberInstance().apply { maximumFractionDigits=1 }
+                        Text(stringResource(R.string.offline_size,number.format(status.completedResourceSize/1048576.0)))
+                        if(!complete) {
+                            if(status.isRequiredResourceCountPrecise && status.requiredResourceCount>0) {
+                                val progress=(status.completedResourceCount.toDouble()/status.requiredResourceCount).coerceIn(0.0,1.0).toFloat()
+                                LinearProgressIndicator(progress={progress},modifier=Modifier.fillMaxWidth())
+                                Text(stringResource(R.string.offline_progress,number.format(progress*100)))
+                            } else {
+                                if(row.downloading)LinearProgressIndicator(Modifier.fillMaxWidth())
+                                Text(stringResource(R.string.offline_resources,status.completedResourceCount))
+                            }
                         }
                     }
+                    if(!OfflineMapPolicy.supported(row.definition.styleURL.orEmpty()) && !complete)
+                        Text(stringResource(R.string.offline_unsupported))
+                    FlowRow(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                        TextButton(onClick={onShow(row);open=false},enabled=complete && !row.deleting) { Text(stringResource(R.string.offline_show)) }
+                        if(row.downloading) TextButton(onClick={maps.pause(row.id)}) { Text(stringResource(R.string.offline_pause)) }
+                        else if(!complete)TextButton(onClick={maps.start(row.id)},enabled=!row.deleting && !overLimit &&
+                            OfflineMapPolicy.supported(row.definition.styleURL.orEmpty())) { Text(stringResource(R.string.offline_resume)) }
+                    }
+                    TextButton(onClick={deleting=row.id},enabled=!row.deleting) { Text(stringResource(R.string.offline_delete)) }
                 }
-                if(!OfflineMapPolicy.supported(row.definition.styleURL.orEmpty()) && !complete)
-                    Text(stringResource(R.string.offline_unsupported))
-                Row {
-                    TextButton(onClick={onShow(row);open=false},enabled=complete && !row.deleting) { Text(stringResource(R.string.offline_show)) }
-                    if(row.downloading) TextButton(onClick={maps.pause(row.id)}) { Text(stringResource(R.string.offline_pause)) }
-                    else if(!complete)TextButton(onClick={maps.start(row.id)},enabled=!row.deleting && !overLimit &&
-                        OfflineMapPolicy.supported(row.definition.styleURL.orEmpty())) { Text(stringResource(R.string.offline_resume)) }
-                }
-                TextButton(onClick={deleting=row.id},enabled=!row.deleting) { Text(stringResource(R.string.offline_delete)) }
             }
         }},confirmButton={TextButton(onClick={open=false}) { Text(stringResource(R.string.h_back)) }})
     state.regions.find { it.id==deleting }?.let { row ->

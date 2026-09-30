@@ -12,6 +12,8 @@ import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.*
@@ -28,6 +30,7 @@ import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withContext
+import si.gasilko.app.core.ui.*
 import si.gasilko.app.R
 import si.gasilko.app.feature.hydrants.domain.Hydrant
 import si.gasilko.app.feature.hydrants.presentation.statusLabel
@@ -119,13 +122,13 @@ internal fun LocationControls(hydrants: List<Hydrant>, onLocation: (Location?) -
         if(denied || permanent || location.notice in listOf(LocationNotice.DENIED,LocationNotice.DISABLED,
                 LocationNotice.UNAVAILABLE,LocationNotice.STALE)) { useRequested=false;onUnavailable() }
     }
-    Column(Modifier.padding(horizontal=16.dp)) {
-        FlowRow(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+    Column(Modifier.padding(horizontal=16.dp),verticalArrangement=Arrangement.spacedBy(4.dp)) {
+        FlowRow(horizontalArrangement=Arrangement.spacedBy(8.dp),verticalArrangement=Arrangement.spacedBy(4.dp)) {
             if(!locationOnly) {
-                TextButton(onClick={onCenter();request()}) { Text(stringResource(R.string.map_my_location)) }
-                TextButton(onClick={showNearby=true;request()}) { Text(stringResource(R.string.map_nearby)) }
+                CompactAction(onClick={onCenter();request()}) { ActionLabel(stringResource(R.string.map_my_location),R.drawable.ic_field_my_location) }
+                CompactAction(onClick={showNearby=true;request()}) { Text(stringResource(R.string.map_nearby)) }
             }
-            if(onUseLocation!=null) TextButton(onClick={
+            if(onUseLocation!=null) CompactAction(onClick={
                 onUseRequested()
                 if(fix!=null && freshLocation(fix) && hasLocationPermission(context))useLocation?.invoke(Location(fix))
                 else { useRequested=true;request() }
@@ -141,7 +144,7 @@ internal fun LocationControls(hydrants: List<Hydrant>, onLocation: (Location?) -
             location.notice==LocationNotice.UNAVAILABLE -> R.string.map_location_unavailable
             else -> null
         }
-        message?.let { Text(stringResource(it),style=MaterialTheme.typography.bodySmall) }
+        message?.let { FieldBanner(stringResource(it),if(it==R.string.map_location_searching)FieldTone.INFO else FieldTone.WARNING) }
         if(fix!=null && !locationOnly) {
             Text(stringResource(if(context.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)==PackageManager.PERMISSION_GRANTED)
                 R.string.map_location_accuracy else R.string.map_location_approximate, NumberFormat.getIntegerInstance().format(fix.accuracy)),style=MaterialTheme.typography.bodySmall)
@@ -150,22 +153,22 @@ internal fun LocationControls(hydrants: List<Hydrant>, onLocation: (Location?) -
             val intent=if(permanent) Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,Uri.parse("package:${context.packageName}"))
                 else Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)
             try { context.startActivity(intent) } catch(_: android.content.ActivityNotFoundException) { denied=true }
-        }) { Text(stringResource(R.string.map_location_settings)) }
+        }) { ActionLabel(stringResource(R.string.map_location_settings),R.drawable.ic_field_my_location) }
         if(showNearby) AlertDialog(onDismissRequest={showNearby=false}, title={Text(stringResource(R.string.map_nearby))},
-            text={Column {
-                Text(stringResource(R.string.map_nearby_notice))
+            text={Column(Modifier.verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(8.dp)) {
+                FieldBanner(stringResource(R.string.map_nearby_notice))
                 if(fix==null)Text(stringResource(message ?: R.string.map_location_searching))
                 else if(dataLoading || calculated.first != hydrants || calculated.second != point)LinearProgressIndicator(Modifier.fillMaxWidth())
                 else if(nearby.isEmpty())Text(stringResource(R.string.map_nearby_empty))
-                LazyColumn(Modifier.heightIn(max=300.dp)) {
+                LazyColumn(Modifier.heightIn(max=300.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
                     items(nearby,key={it.hydrant.id}) { item ->
-                        TextButton(onClick={
+                        SecondaryAction(onClick={
                             if(fix!=null && freshLocation(fix)) { onSelect(item.hydrant);showNearby=false }
                             else { location=LocationState(notice=LocationNotice.STALE);updateLocation(null) }
                         }) {
-                            Column(Modifier.fillMaxWidth()) {
-                                Text(item.hydrant.code ?: (stringResource(R.string.h_pending_code)+" · "+item.hydrant.id))
-                                Text(stringResource(statusLabel(item.hydrant.status)))
+                            Column(Modifier.fillMaxWidth(),verticalArrangement=Arrangement.spacedBy(6.dp)) {
+                                Text(item.hydrant.code ?: (stringResource(R.string.h_pending_code)+" · "+item.hydrant.id),style=MaterialTheme.typography.titleMedium)
+                                StatusBadge(stringResource(statusLabel(item.hydrant.status)))
                                 val kilometers=item.meters>=1000
                                 val number=NumberFormat.getNumberInstance().apply { maximumFractionDigits=if(kilometers)2 else 0 }
                                 Text(stringResource(if(kilometers)R.string.map_distance_km else R.string.map_distance_m,
