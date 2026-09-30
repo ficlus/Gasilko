@@ -97,7 +97,7 @@ fun HydrantScreen(model: HydrantViewModel, requestAccess: ()->Unit = {}, signOut
     var showConflicts by remember(state.organization?.id) { mutableStateOf(false) }
     var conflictSequence by remember(state.organization?.id) { mutableStateOf<Long?>(null) }
     LaunchedEffect(model) { if(!model.photos.state.value.busy)model.refresh() }
-    if(planQuery!=null && state.writable && state.planStop==null) {
+    if(planQuery!=null && state.writable && state.planStop==null && state.selected==null) {
         key(model,model.photoScope,state.organization!!.id) {
             OrganizationFrame(state.organization?.name) {
                 si.gasilko.app.feature.plans.PlansScreen(model,planQuery!!) { planQuery=null }
@@ -163,17 +163,21 @@ fun HydrantScreen(model: HydrantViewModel, requestAccess: ()->Unit = {}, signOut
         val label=state.selected?.code ?: stringResource(R.string.h_pending_code)
         val context=LocalContext.current
         val inspectionBusy=state.mutating || photoState.busy
+        val identification: @Composable ()->Unit = {
+            if(draft.planContext!=null)PermanentHydrantPhoto(model,draft.organization,draft.hydrantId,label,
+                refreshMetadata=draft.completion==null)
+        }
         val stagedPhotos: @Composable ()->Unit = {
             StagedInspectionPhotos(draft.photos,!inspectionBusy && draft.completion==null,
                 {model.addInspectionPhoto(context)},model::removeInspectionPhoto)
         }
         OrganizationFrame(state.organization?.name) {
             if(draft.mode==InspectionMode.GUIDED)GuidedInspectionScreen(draft,label,inspectionBusy,state.error,
-                model::answerInspectionCheck,model::changeInspection,model::moveGuided,model::completeInspection,model::cancelInspection,model::changeMeasurements,stagedPhotos)
+                model::answerInspectionCheck,model::changeInspection,model::moveGuided,model::completeInspection,model::cancelInspection,model::changeMeasurements,stagedPhotos,identification)
             else if(draft.mode==InspectionMode.CLASSIC)ClassicInspectionScreen(draft,label,inspectionBusy,state.error,
-                model::answerInspectionCheck,model::changeInspection,model::completeInspection,model::cancelInspection,model::changeMeasurements,stagedPhotos)
-            else QuickInspectionScreen(draft,label,state.mutating,state.error,model::changeInspection,
-                {model.completeInspection()},model::cancelInspection)
+                model::answerInspectionCheck,model::changeInspection,model::completeInspection,model::cancelInspection,model::changeMeasurements,stagedPhotos,identification)
+            else QuickInspectionScreen(draft,label,inspectionBusy,state.error,model::changeInspection,
+                {model.completeInspection()},model::cancelInspection,stagedPhotos,identification)
         }
         return
     }
@@ -191,6 +195,8 @@ fun HydrantScreen(model: HydrantViewModel, requestAccess: ()->Unit = {}, signOut
             mapState.SaveableStateProvider("map") {
                 si.gasilko.app.feature.map.MapScreen(onBack={showMap=false}, hydrants=mapData.rows,
                     dataLoading=mapData.loading, dataError=mapData.error ?: state.error,
+                    photoPreview={ h -> PermanentHydrantPhoto(model,h.organization,h.id) },
+                    canOpenHydrant={!state.loading && !state.mutating && !photoState.busy},
                     creationEnabled=!state.loading && !state.mutating,
                     onAddHydrant={ latitude,longitude,accuracy ->
                         model.addAt(latitude,longitude,accuracy)

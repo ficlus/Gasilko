@@ -98,32 +98,35 @@ class HydrantViewModel(private val repository: HydrantRepository, private val in
     suspend fun refreshTeams(org: String) = teamAccess(org) { repository.refreshTeams(org) }
     suspend fun manageTeam(org: String, change: TeamChange) = teamAccess(org) { repository.changeTeam(org,change) }
     val photoScope get() = generation
-    private fun photoScopeCurrent(org: String, hydrant: String, stamp: Int) =
-        stamp==generation && state.value.organization?.id==org && state.value.selected?.id==hydrant
-    fun photoEntries(org: String, hydrant: String): Flow<PhotoGalleryState> {
+    private fun photoScopeCurrent(org: String, hydrant: String, stamp: Int, requireSelection: Boolean = true) =
+        stamp==generation && state.value.organization?.id==org && (!requireSelection || state.value.selected?.id==hydrant)
+    fun photoEntries(org: String, hydrant: String): Flow<PhotoGalleryState> = photoEntries(org,hydrant,true)
+    fun permanentPhotoEntries(org: String, hydrant: String): Flow<PhotoGalleryState> =
+        photoEntries(org,hydrant,false).map { state -> state.copy(entries=state.entries.filter { it.photo.category==PhotoCategory.HYDRANT }) }
+    private fun photoEntries(org: String, hydrant: String, requireSelection: Boolean): Flow<PhotoGalleryState> {
         val stamp=generation
         return repository.observePhotos(org,hydrant).map {
-            if(!photoScopeCurrent(org,hydrant,stamp))throw CancellationException()
+            if(!photoScopeCurrent(org,hydrant,stamp,requireSelection))throw CancellationException()
             PhotoGalleryState(it.filter { entry -> entry.photo.active }
                 .sortedWith(compareByDescending<PhotoEntry> { entry -> entry.photo.capturedAt }.thenByDescending { entry -> entry.photo.id }),loaded=true)
         }.catch { e ->
             if(e is CancellationException)throw e
             val error=(e as? RegistryFailure)?.reason ?: RegistryError.SERVER
-            if(photoScopeCurrent(org,hydrant,stamp) && error in listOf(RegistryError.EXPIRED,RegistryError.FORBIDDEN)) {
+            if(photoScopeCurrent(org,hydrant,stamp,requireSelection) && error in listOf(RegistryError.EXPIRED,RegistryError.FORBIDDEN)) {
                 clear();mutableState.value=RegistryState(error=error)
             }
             emit(PhotoGalleryState(error=error))
         }
     }
-    private suspend fun <T> photoRead(org: String, hydrant: String, action: suspend ()->T): T {
+    private suspend fun <T> photoRead(org: String, hydrant: String, requireSelection: Boolean = true, action: suspend ()->T): T {
         val stamp=generation
-        if(!photoScopeCurrent(org,hydrant,stamp))throw CancellationException()
+        if(!photoScopeCurrent(org,hydrant,stamp,requireSelection))throw CancellationException()
         try {
             val result=action()
-            if(!photoScopeCurrent(org,hydrant,stamp))throw CancellationException()
+            if(!photoScopeCurrent(org,hydrant,stamp,requireSelection))throw CancellationException()
             return result
         } catch(e: RegistryFailure) {
-            if(photoScopeCurrent(org,hydrant,stamp) && e.reason in listOf(RegistryError.EXPIRED,RegistryError.FORBIDDEN)) {
+            if(photoScopeCurrent(org,hydrant,stamp,requireSelection) && e.reason in listOf(RegistryError.EXPIRED,RegistryError.FORBIDDEN)) {
                 clear();mutableState.value=RegistryState(error=e.reason)
             }
             throw e
@@ -133,6 +136,12 @@ class HydrantViewModel(private val repository: HydrantRepository, private val in
         photoRead(org,hydrant) { repository.displayPhoto(org,hydrant,id,inspectionId) }
     suspend fun refreshPhotoMetadata(org: String, hydrant: String) =
         photoRead(org,hydrant) { repository.refreshPhotos(org,hydrant) }
+    // Read-only map/identification previews still pass through repository account, organization,
+    // hydrant and permanent-category checks; acquisition retains its selected-hydrant gate.
+    suspend fun permanentPhotoImage(org: String, hydrant: String, id: String) =
+        photoRead(org,hydrant,false) { repository.displayPhoto(org,hydrant,id,null) }
+    suspend fun refreshPermanentPhotos(org: String, hydrant: String) =
+        photoRead(org,hydrant,false) { repository.refreshPhotos(org,hydrant) }
     val photos: si.gasilko.app.feature.photos.presentation.PhotoAcquisition by lazy { si.gasilko.app.feature.photos.presentation.PhotoAcquisition(repository,scope,
         { org,id,stamp -> val s=state.value
             stamp==generation && s.organization?.id==org && s.selected?.id==id && s.writable && (s.selected?.active==true || s.manages)
@@ -140,13 +149,13 @@ class HydrantViewModel(private val repository: HydrantRepository, private val in
         { org,id,stamp,input ->
             val s=state.value;val draft=s.inspectionDraft
             if(!photoScopeCurrent(org,id,stamp) || draft==null || draft.id!=input.inspectionId ||
-                draft.mode==InspectionMode.QUICK || draft.completion!=null || s.mutating)
+                draft.completion!=null || s.mutating)
                 throw RegistryFailure(RegistryError.FORBIDDEN)
             mutableState.value=s.copy(inspectionDraft=draft.copy(photos=(draft.photos+input).distinctBy { it.id }))
         }) }
     fun addInspectionPhoto(context: android.content.Context) {
         val s=state.value;val draft=s.inspectionDraft ?: return
-        if(!s.loading && !s.mutating && s.writable && draft.completion==null && draft.mode!=InspectionMode.QUICK)
+        if(!s.loading && !s.mutating && s.writable && draft.completion==null)
             photos.begin(context,draft.organization,draft.hydrantId,generation,draft.id)
     }
     private fun discardStaged(draft: InspectionDraft, inputs: List<LocalPhotoInput> = draft.photos) {
@@ -286,8 +295,7 @@ class HydrantViewModel(private val repository: HydrantRepository, private val in
         mutableState.value=s.copy(inspectionDraft=draft.copy(completion=input),mutating=true,error=null)
         start {
             try {
-                val saved=if(draft.mode==InspectionMode.QUICK)repository.completeInspection(draft.organization,draft.hydrantId,input)
-                    else repository.completeInspectionWithPhotos(draft.organization,draft.hydrantId,input,draft.photos)
+                val saved=repository.completeInspectionWithPhotos(draft.organization,draft.hydrantId,input,draft.photos)
                 if(stamp!=generation)return@start
                 mutableState.value=state.value.copy(selected=saved.hydrant,
                     planStop=state.value.planStop?.copy(inspectionId=input.id,completedBy=saved.inspection.inspectorId,

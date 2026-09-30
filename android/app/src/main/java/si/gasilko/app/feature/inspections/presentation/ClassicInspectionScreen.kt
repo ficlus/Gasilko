@@ -21,7 +21,7 @@ import si.gasilko.app.feature.inspections.domain.InspectionResult
 fun ClassicInspectionScreen(draft: InspectionDraft, hydrantLabel: String, busy: Boolean, error: RegistryError?,
     answer: (GuidedCheck,GuidedAnswer)->Unit, change: (InspectionResult?,String)->Unit,
     complete: (String)->Unit, cancel: ()->Unit, measurements: (String,String)->Unit,
-    photos: @Composable ()->Unit = {}) {
+    photos: @Composable ()->Unit = {}, identification: @Composable ()->Unit = {}) {
     val editable=!busy && draft.completion==null
     val resources=LocalContext.current.resources
     val answered=GuidedCheck.entries.all { it in draft.answers } && draft.result!=null
@@ -30,6 +30,7 @@ fun ClassicInspectionScreen(draft: InspectionDraft, hydrantLabel: String, busy: 
         Column(Modifier.fillMaxSize().padding(padding).imePadding().verticalScroll(rememberScrollState()).padding(16.dp),
             verticalArrangement=Arrangement.spacedBy(12.dp)) {
             ScreenHeading(stringResource(R.string.inspection_classic),hydrantLabel)
+            identification()
             GuidedCheck.entries.forEach { check ->
                 OperationalCard { InspectionCheckOptions(check,draft.answers[check],editable) { answer(check,it) } }
             }

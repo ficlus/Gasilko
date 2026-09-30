@@ -48,13 +48,15 @@ fun inspectionModeLabel(mode: InspectionMode): Int = when(mode) {
 
 @Composable
 fun QuickInspectionScreen(draft: InspectionDraft, hydrantLabel: String, busy: Boolean,
-    error: RegistryError?, change: (InspectionResult?, String) -> Unit, complete: () -> Unit, cancel: () -> Unit) {
+    error: RegistryError?, change: (InspectionResult?, String) -> Unit, complete: () -> Unit, cancel: () -> Unit,
+    photos: @Composable ()->Unit = {}, identification: @Composable ()->Unit = {}) {
     val editable=!busy && draft.completion==null
     BackHandler { if(!busy)cancel() }
     Scaffold { padding ->
         Column(Modifier.fillMaxSize().padding(padding).imePadding().verticalScroll(rememberScrollState()).padding(16.dp),
             verticalArrangement=Arrangement.spacedBy(12.dp)) {
             ScreenHeading(stringResource(R.string.inspection_quick),hydrantLabel)
+            identification()
             SectionHeading(stringResource(R.string.inspection_choose_result))
             Column(Modifier.selectableGroup(),verticalArrangement=Arrangement.spacedBy(8.dp)) {
                 InspectionResult.entries.forEach { result ->
@@ -65,6 +67,7 @@ fun QuickInspectionScreen(draft: InspectionDraft, hydrantLabel: String, busy: Bo
             }
             OutlinedTextField(value=draft.notes,onValueChange={change(draft.result,it)},enabled=editable,
                 label={Text(stringResource(R.string.inspection_notes))},minLines=3,modifier=Modifier.fillMaxWidth())
+            photos()
             FieldBanner(stringResource(R.string.inspection_complete_notice))
             if(busy) { LinearProgressIndicator(Modifier.fillMaxWidth()); Text(stringResource(R.string.h_saving)) }
             error?.let {

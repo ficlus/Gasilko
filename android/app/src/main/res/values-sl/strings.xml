@@ -325,4 +325,7 @@
     <string name="shell_plans_hint">Načrti, ekipne poti in terensko izvajanje.</string>
     <string name="shell_teams_hint">Člani ekip in upravljanje ekip.</string>
     <string name="shell_history_hint">Izberite hidrant v registru in odprite njegovo zgodovino pregledov.</string>
+    <string name="photo_identification">Fotografija hidranta</string>
+    <string name="photo_no_permanent">Ni trajne fotografije hidranta</string>
+    <string name="map_open_hydrant">Odpri hidrant</string>
 </resources>

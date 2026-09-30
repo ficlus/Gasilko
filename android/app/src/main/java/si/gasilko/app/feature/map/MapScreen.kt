@@ -15,12 +15,12 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
+import si.gasilko.app.feature.plans.orderedStops
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.semantics.clearAndSetSemantics
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.layout.onSizeChanged
@@ -57,10 +57,12 @@ import java.net.URI
 @OptIn(ExperimentalLayoutApi::class)
 fun MapScreen(onBack: () -> Unit, hydrants: List<Hydrant>, onOpenHydrant: ((String) -> Unit)?,
     dataLoading: Boolean = false, dataError: RegistryError? = null, styleUrl: String = BuildConfig.MAP_STYLE_URL,
-    onAddHydrant: ((Double,Double,Float?)->Unit)? = null, creationEnabled: Boolean = true, route: PlanRoute? = null) {
+    onAddHydrant: ((Double,Double,Float?)->Unit)? = null, creationEnabled: Boolean = true, route: PlanRoute? = null,
+    photoPreview: @Composable (Hydrant)->Unit = {}, canOpenHydrant: (String)->Boolean = { true }) {
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val routeData=remember(route) { route?.let(::routeMapData) }
     val currentRoute by rememberUpdatedState(routeData)
+    val routeStops=remember(route) { route?.orderedStops().orEmpty().associateBy { it.hydrantId } }
     var fittedRoute by rememberSaveable { mutableStateOf<String?>(null) }
     var mapSize by remember { mutableStateOf(IntSize.Zero) }
     var attempt by rememberSaveable { mutableIntStateOf(0) }
@@ -86,17 +88,18 @@ fun MapScreen(onBack: () -> Unit, hydrants: List<Hydrant>, onOpenHydrant: ((Stri
     val currentLocation by rememberUpdatedState(location)
     val addHydrant by rememberUpdatedState(onAddHydrant)
     val canCreate by rememberUpdatedState(creationEnabled)
-    val selected = hydrants.find { it.id == selectedId && HydrantMapLayers.valid(it) }
+    val selected = hydrants.find { it.id == selectedId && (route!=null || HydrantMapLayers.valid(it)) }
+    val popupId=selectedId?.takeIf { selected!=null || it in routeData?.stopCoordinates.orEmpty() }
     val validCount = remember(hydrants) { hydrants.count(HydrantMapLayers::valid) }
     val data by produceState<Pair<List<Hydrant>?,String>>(null to HydrantMapLayers.EMPTY, hydrants) {
         value = hydrants to withContext(Dispatchers.Default) { HydrantMapLayers.data(hydrants) }
     }
     // Never retain old features while a new scoped/filter result is being serialized.
-    val visibleData = if(data.first == hydrants) data.second else HydrantMapLayers.EMPTY
+    val visibleData = if(route==null && data.first == hydrants) data.second else HydrantMapLayers.EMPTY
     val currentData by rememberUpdatedState(visibleData)
     val currentRows by rememberUpdatedState(hydrants)
     val currentSelection by rememberUpdatedState(selected?.id)
-    LaunchedEffect(hydrants, dataLoading) { if(!dataLoading && selected == null) selectedId=null }
+    LaunchedEffect(hydrants, dataLoading, routeData) { if(!dataLoading && popupId==null) selectedId=null }
     BackHandler(onBack=::back)
     Scaffold { padding ->
         BoxWithConstraints(Modifier.fillMaxSize().padding(padding)) {
@@ -142,21 +145,6 @@ fun MapScreen(onBack: () -> Unit, hydrants: List<Hydrant>, onOpenHydrant: ((Stri
                     validCount<hydrants.size->R.string.map_missing_coordinates;else->null }
                 notice?.let { Text(stringResource(it,hydrants.size-validCount),Modifier.padding(horizontal=16.dp),style=MaterialTheme.typography.bodySmall) }
             }
-            selected?.let { h ->
-                OperationalCard(Modifier.padding(horizontal=16.dp,vertical=8.dp)) {
-                    Column(verticalArrangement=Arrangement.spacedBy(6.dp)) {
-                        Text(stringResource(R.string.map_selected),Modifier.semantics { heading() },style=MaterialTheme.typography.labelSmall)
-                        Text(h.code ?: stringResource(R.string.h_pending_code),style=MaterialTheme.typography.titleMedium)
-                        if(h.code == null)Text(h.id, style=MaterialTheme.typography.labelSmall)
-                        StatusBadge(stringResource(statusLabel(h.status)))
-                        if(!h.active)StatusBadge(stringResource(R.string.h_inactive))
-                    }
-                    FlowRow(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-                        if(onOpenHydrant!=null)CompactAction(onClick={cancelFocus();onOpenHydrant(h.id)}) { Text(stringResource(R.string.h_details)) }
-                        TextButton(onClick={selectedId=null;cancelFocus()}) { Text(stringResource(R.string.map_clear_selection)) }
-                    }
-                }
-            }
             if(loading)LinearProgressIndicator(Modifier.fillMaxWidth())
             if(loading)Text(stringResource(R.string.map_loading),Modifier.padding(horizontal=16.dp))
             if(failed || !valid) {
@@ -164,9 +152,11 @@ fun MapScreen(onBack: () -> Unit, hydrants: List<Hydrant>, onOpenHydrant: ((Stri
                 CompactAction(onClick=::retry,modifier=Modifier.padding(horizontal=16.dp)) { ActionLabel(stringResource(R.string.map_retry),R.drawable.ic_field_refresh) }
             }
             }
+            BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+            val popupHeight=maxHeight*0.65f
             key(displayedStyle, attempt) {
                     // Factory creates one native view per entry/retry; ordinary recomposition only updates it.
-                    AndroidView(modifier=Modifier.weight(1f).fillMaxWidth().onSizeChanged { mapSize=it }, factory={ context ->
+                    AndroidView(modifier=Modifier.fillMaxSize().onSizeChanged { mapSize=it }, factory={ context ->
                         MapLibre.getInstance(context.applicationContext)
                         LifecycleMapView(context, lifecycle, saved.bundle).apply {
                             saved.view=this
@@ -216,14 +206,16 @@ fun MapScreen(onBack: () -> Unit, hydrants: List<Hydrant>, onOpenHydrant: ((Stri
                                         if(released || hydrantLayers==null) false else {
                                             val pixel=map.projection.toScreenLocation(point)
                                             val radius=12f * resources.displayMetrics.density
-                                            val hits=map.queryRenderedFeatures(pixel, *HydrantMapLayers.layerIds).ifEmpty {
-                                                map.queryRenderedFeatures(RectF(pixel.x-radius,pixel.y-radius,pixel.x+radius,pixel.y+radius), *HydrantMapLayers.layerIds)
+                                            val routing=currentRoute
+                                            val layers=if(routing!=null)arrayOf(PlanRouteLayers.STOP_LAYER) else HydrantMapLayers.layerIds
+                                            val hits=map.queryRenderedFeatures(pixel, *layers).ifEmpty {
+                                                map.queryRenderedFeatures(RectF(pixel.x-radius,pixel.y-radius,pixel.x+radius,pixel.y+radius), *layers)
                                             }
                                             val id=hits.mapNotNull { it.getStringProperty("uuid") }.distinct()
-                                                .filter { uuid -> currentRows.any { it.id==uuid && HydrantMapLayers.valid(it) } }
+                                                .filter { uuid -> if(routing!=null)uuid in routing.stopCoordinates else currentRows.any { it.id==uuid && HydrantMapLayers.valid(it) } }
                                                 .minWithOrNull(compareBy<String> { uuid ->
-                                                    val h=currentRows.first { it.id==uuid }
-                                                    val p=map.projection.toScreenLocation(LatLng(h.latitude!!,h.longitude!!))
+                                                    val position=routing?.stopCoordinates?.get(uuid) ?: currentRows.first { it.id==uuid }.let { LatLng(it.latitude!!,it.longitude!!) }
+                                                    val p=map.projection.toScreenLocation(position)
                                                     (p.x-pixel.x)*(p.x-pixel.x)+(p.y-pixel.y)*(p.y-pixel.y)
                                                 }.thenBy { it })
                                             cancelFocus();selectedId=id
@@ -269,6 +261,16 @@ fun MapScreen(onBack: () -> Unit, hydrants: List<Hydrant>, onOpenHydrant: ((Stri
                         if(saved.view===it) { saved.bundle=saved.snapshot();saved.view=null }
                         it.release()
                     })
+            }
+            popupId?.let { id -> key(id) {
+                // Leave the native attribution/logo edge visible; the card scrolls on short screens.
+                Box(Modifier.align(Alignment.BottomCenter).padding(start=12.dp,end=12.dp,bottom=48.dp)
+                    .heightIn(max=popupHeight).verticalScroll(rememberScrollState())) {
+                    HydrantMapPopup(id,selected,routeStops[id]?.code,
+                        open=if(selected!=null && onOpenHydrant!=null && canOpenHydrant(id))({cancelFocus();onOpenHydrant(id)}) else null,
+                        close={selectedId=null;cancelFocus()},photo=photoPreview)
+                }
+            } }
             }
         }
         }
