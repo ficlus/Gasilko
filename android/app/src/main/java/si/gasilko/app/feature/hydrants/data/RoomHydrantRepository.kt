@@ -37,6 +37,10 @@ class RoomHydrantRepository(
     override suspend fun refreshPlanCandidates(org: String) = plans.refreshCandidates(org)
     override suspend fun activatePlan(org: String,change: PlanAssignment) = plans.activate(org,change)
     override suspend fun planStop(org: String,plan: String,item: String) = plans.stop(org,plan,item)
+    override suspend fun reassignPlanItem(org: String,change: PlanReassign) = changes.withLock {
+        val actor=currentAccount();teams.refresh(org);checkAccount(actor)
+        plans.reassign(org,change).also { checkAccount(actor) }
+    }
     override suspend fun skipPlanItem(org: String,change: PlanSkip) = changes.withLock {
         val actor=currentAccount();plans.skip(org,change);checkAccount(actor)
         try { scheduleSync(actor,org) } catch(_: Exception) { android.util.Log.w("HydrantSync","schedule failed; skip retained") }

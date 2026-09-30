@@ -358,7 +358,7 @@
     <string name="execution_empty">Keine aktiven Pläne für Ihre Teams.</string>
     <string name="execution_sync">Synchronisieren</string>
     <string name="execution_reroute">Verbleibende Route neu berechnen</string>
-    <string name="execution_pending">Der Fortschritt enthält lokale Änderungen. Vor der Neuberechnung synchronisieren.</string>
+    <string name="execution_pending">Der Fortschritt enthält lokale Änderungen. Vor Übergabe oder Neuberechnung synchronisieren bzw. offene Probleme klären.</string>
     <string name="execution_pending_short">Synchronisierung ausstehend</string>
     <string name="execution_changed">Dieser Stopp wurde bereits abgeschlossen oder geändert. Plan aktualisieren und erneut öffnen.</string>
     <string name="execution_completed">Abgeschlossen</string>
@@ -369,4 +369,18 @@
     <string name="execution_skip_reason">Grund für das Überspringen (erforderlich)</string>
     <string name="execution_progress">Abgeschlossen %1$d / %2$d · Verbleibend %3$d · Übersprungen %4$d</string>
     <string name="execution_attention">Änderung muss geprüft werden. Der lokale Eintrag bleibt gespeichert; Status nach der Synchronisierung prüfen.</string>
+    <string name="reassign_title">Team des Stopps ändern</string>
+    <string name="reassign_transfer">An anderes Team übergeben</string>
+    <string name="reassign_take">Übernehmen</string>
+    <string name="reassign_destination">Zielteam</string>
+    <string name="reassign_reason">Grund für die Änderung (erforderlich)</string>
+    <string name="reassign_confirm">Änderung bestätigen</string>
+    <string name="reassign_offline">Übergabe und Übernahme erfordern eine Internetverbindung. Inspektionen und Überspringen bleiben offline verfügbar.</string>
+    <string name="reassign_pending">Die Übergabe ist noch nicht bestätigt. Vor weiteren Aktionen für diesen Stopp den Plan aktualisieren oder die Anfrage online wiederholen.</string>
+    <string name="reassign_retry">Übergabe für Stopp %1$s wiederholen</string>
+    <string name="reassign_history">Übergabeverlauf</string>
+    <string name="reassign_no_history">Dieser Stopp wurde noch nicht übergeben.</string>
+    <string name="reassign_current_team">Aktuelles Team: %1$s</string>
+    <string name="reassign_changed">Dieser Stopp wurde neu zugewiesen.</string>
+    <string name="reassign_actor">Ausgeführt von Benutzer: %1$s</string>
 </resources>
