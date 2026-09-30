@@ -67,6 +67,13 @@ fun decodeHydrant(value: JsonElement): Hydrant {
         row.text("created_at"),row.text("updated_at"),row.text("updated_by"))
 }
 class OnlineHydrantRepository(private val wire: RegistryTransport, private val diagnostic: (String,RegistryError)->Unit = {_,_->}): HydrantRepository {
+    override suspend fun activatePlan(org: String,change: PlanAssignment) = request("plans_activate") {
+        decodePlans(wire.rpc("activate_inspection_plan",buildJsonObject { put("organization",org);put("request",change.payload()) }))
+    }
+    override suspend fun uploadPlanSkip(org: String,payload: JsonObject) = request("plans_skip") {
+        decodePlanItem(wire.rpc("execute_plan_item",buildJsonObject { put("organization",org);put("request",payload) })
+            .jsonObject.getValue("plan_item").jsonObject)
+    }
     override suspend fun routePlan(org: String, change: PlanRouting) = request("plans_route") {
         decodePlans(wire.routePlan(buildJsonObject { put("organization",org);put("request",change.payload()) }))
     }
@@ -109,6 +116,16 @@ class OnlineHydrantRepository(private val wire: RegistryTransport, private val d
     override suspend fun completeInspection(organization: String, hydrantId: String, input: InspectionCompletion) = request("inspection_complete") {
         input.validate()
         val p=input.payload()
+        input.planContext?.let { context ->
+            val response=wire.rpc("execute_plan_item",buildJsonObject {
+                put("organization",organization);put("request",buildJsonObject {
+                    put("id",input.id);put("plan_id",context.planId);put("item_id",context.itemId);put("version",context.version)
+                    put("action","INSPECT");put("inspection",p)
+                })
+            }).jsonObject
+            return@request InspectionWrite(decodeInspection(response.getValue("inspection")),decodeHydrant(response.getValue("hydrant")),
+                decodePlanItem(response.getValue("plan_item").jsonObject))
+        }
         val response=wire.rpc("complete_inspection",buildJsonObject {
             put("organization",organization);put("hydrant_id",hydrantId);put("inspection_id",input.id)
             put("inspection_mode",input.mode.name);put("inspection_result",input.result.name)

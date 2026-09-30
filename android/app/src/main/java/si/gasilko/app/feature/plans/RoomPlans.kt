@@ -11,6 +11,7 @@ import si.gasilko.app.feature.hydrants.data.*
 import si.gasilko.app.feature.inspections.domain.*
 import si.gasilko.app.feature.inspections.data.*
 import java.time.Instant
+import kotlinx.serialization.json.*
 
 internal class RoomPlans(private val db: RegistryDatabase, private val online: PlanRepository,
     private val account: ()->String, private val authorize: suspend (String,String)->RegistryOrganization,
@@ -24,10 +25,15 @@ internal class RoomPlans(private val db: RegistryDatabase, private val online: P
     }
     fun observe(org: String): Flow<PlanData> = flow {
         val actor=account()
-        emitAll(db.invalidationTracker.createFlow("inspection_plans","inspection_plan_teams","inspection_plan_items","inspection_plan_routes","organizations").map {
-            access(actor,org)
+        emitAll(db.invalidationTracker.createFlow("inspection_plans","inspection_plan_teams","inspection_plan_items","inspection_plan_routes","organizations","inspection_team_members","inspection_teams","pending_hydrant_changes").map {
+            val authority=access(actor,org)
+            val teams=db.teams().teams(actor,org).filter { it.value.active }.map { it.value.id }.toSet()
+            val allowed=if(authority.role.manages)teams else db.teams().members(actor,org)
+                .filter { it.value.active && it.value.userId==actor && it.value.teamId in teams }.map { it.value.teamId }.toSet()
+            val pending=db.registry().pendingChanges(actor,org).filter { it.state !in listOf("SYNCED","RESOLVED") }
             db.withTransaction { PlanData(db.plans().plans(actor,org).map { it.value },db.plans().teams(actor,org).map { it.value },
-                db.plans().items(actor,org).map { it.value },db.plans().routes(actor,org).map { it.value }).also { check(actor) } }
+                db.plans().items(actor,org).map { it.value },db.plans().routes(actor,org).map { it.value },allowed,
+                pending.mapNotNull { it.planItemId() }.toSet(),pending.filter { it.state!="PENDING" }.mapNotNull { it.planItemId() }.toSet()).also { check(actor) } }
         }.distinctUntilChanged())
     }
     fun candidates(query: HydrantQuery): Flow<PlanCandidates> = flow {
@@ -50,17 +56,8 @@ internal class RoomPlans(private val db: RegistryDatabase, private val online: P
         }.distinctUntilChanged())
     }
     private suspend fun cache(actor: String,org: String,data: PlanData) {
-        if(data.routes.any { r -> r.organization!=org || data.teams.none { it.planId==r.planId && it.teamId==r.teamId } })
-            throw RegistryFailure(RegistryError.VALIDATION)
-        if(data.plans.any { it.organization!=org } || data.teams.any { t -> t.organization!=org || data.plans.none { it.id==t.planId } } ||
-            data.items.any { i -> i.organization!=org || data.plans.none { it.id==i.planId } ||
-                (i.teamId!=null && data.teams.none { it.planId==i.planId && it.teamId==i.teamId && (!i.active || it.active) }) })throw RegistryFailure(RegistryError.VALIDATION)
-        db.withTransaction {
-            access(actor,org)
-            db.plans().plans(data.plans.map { PlanEntity(actor,it) });db.plans().teams(data.teams.map { PlanTeamEntity(actor,it) })
-            db.plans().items(data.items.map { PlanItemEntity(actor,it) })
-            db.plans().routes(data.routes.map { PlanRouteEntity(actor,it) });check(actor)
-        }
+        access(actor,org)
+        cachePlanSnapshot(db,actor,org,data) { check(actor) }
     }
     suspend fun refresh(org: String) = remote.withLock {
         val actor=account();access(actor,org);val data=online.readPlans(org);cache(actor,org,data)
@@ -72,8 +69,51 @@ internal class RoomPlans(private val db: RegistryDatabase, private val online: P
     }
     suspend fun route(org: String,change: PlanRouting): PlanData = remote.withLock {
         val actor=account();access(actor,org,true)
+        if(change.remaining && db.registry().pendingChanges(actor,org).any { it.state !in listOf("SYNCED","RESOLVED") &&
+            it.planItemId()!=null && Json.parseToJsonElement(it.payload).jsonObject["plan_id"]?.jsonPrimitive?.content==change.id })
+            throw RegistryFailure(RegistryError.EXECUTION_PENDING)
         val data=online.routePlan(org,change)
         access(actor,org,true);cache(actor,org,data);data
+    }
+    suspend fun activate(org: String,change: PlanAssignment): PlanData = remote.withLock {
+        val actor=account();access(actor,org,true)
+        val data=online.activatePlan(org,change);access(actor,org,true);cache(actor,org,data);data
+    }
+    suspend fun stop(org: String,plan: String,item: String): PlanItem {
+        val actor=account();val authority=access(actor,org)
+        val p=db.plans().plans(actor,org).find { it.value.id==plan }?.value
+            ?: throw RegistryFailure(RegistryError.UNAVAILABLE)
+        val row=db.plans().item(actor,org,plan,item)?.value ?: throw RegistryFailure(RegistryError.UNAVAILABLE)
+        if(p.status!="ACTIVE" || !row.active || row.teamId==null ||
+            db.plans().teams(actor,org).none { it.value.planId==plan && it.value.teamId==row.teamId && it.value.active } ||
+            (!authority.role.manages && (db.teams().teams(actor,org).none { it.value.id==row.teamId && it.value.active } ||
+                db.teams().members(actor,org).none { it.value.teamId==row.teamId && it.value.userId==actor && it.value.active })))
+            throw RegistryFailure(RegistryError.FORBIDDEN)
+        check(actor);return row
+    }
+    suspend fun completeLocal(org: String,context: PlanStopContext,hydrant: String,id: String,at: Long) {
+        val actor=account();val row=stop(org,context.planId,context.itemId)
+        if(row.hydrantId!=hydrant)throw RegistryFailure(RegistryError.VALIDATION)
+        if(row.inspectionId==id)return
+        if(row.inspectionId!=null || row.executionVersion!=context.version)throw RegistryFailure(RegistryError.EXECUTION_CHANGED)
+        db.plans().items(listOf(PlanItemEntity(actor,row.copy(executionVersion=row.executionVersion+1,
+            inspectionId=id,completedBy=actor,completedAt=Instant.ofEpochMilli(at).toString(),skipReason=null,skippedBy=null,skippedAt=null))))
+    }
+    suspend fun skip(org: String,change: PlanSkip) = db.withTransaction {
+        val actor=account();val row=stop(org,change.context.planId,change.context.itemId)
+        val payload=change.payload().toString()
+        val prior=db.registry().pendingChanges(actor,org).find { it.operationId==change.id }
+        if(prior!=null) {
+            if(prior.operation!=SKIP_PLAN_ITEM || prior.payload!=payload)throw RegistryFailure(RegistryError.VALIDATION)
+            return@withTransaction
+        }
+        if(change.reason.trim().length !in 1..2000)throw RegistryFailure(RegistryError.VALIDATION)
+        if(row.inspectionId!=null || row.executionVersion!=change.context.version)throw RegistryFailure(RegistryError.EXECUTION_CHANGED)
+        db.plans().items(listOf(PlanItemEntity(actor,row.copy(executionVersion=row.executionVersion+1,
+            skipReason=change.reason.trim(),skippedBy=actor,skippedAt=change.at))))
+        db.registry().enqueue(PendingHydrantChange(operationId=change.id,account=actor,organization=org,entityId=row.hydrantId,
+            operation=SKIP_PLAN_ITEM,payload=payload,baseVersion=null,createdAt=System.currentTimeMillis()))
+        check(actor)
     }
     suspend fun save(org: String,change: PlanSave): PlanData = remote.withLock {
         val actor=account();access(actor,org,true);val data=online.savePlan(org,change);access(actor,org,true);cache(actor,org,data);data

@@ -13,6 +13,7 @@ import si.gasilko.app.feature.inspections.data.*
 import si.gasilko.app.feature.photos.domain.UPLOAD_PHOTO
 import si.gasilko.app.feature.photos.data.PhotoFiles
 import si.gasilko.app.feature.photos.data.uploadQueuedPhoto
+import si.gasilko.app.feature.plans.*
 
 // The app uses default, single-process WorkManager. Also serialize refreshes so a stale
 // pre-upload snapshot cannot replace a newly acknowledged row. Local writes remain independent.
@@ -40,6 +41,10 @@ class HydrantSyncEngine(
                 break // Filling missing server metadata is not a resolution.
             }
             if(operation.state != "PENDING") break
+            if(operation.operation==SKIP_PLAN_ITEM) {
+                uploadPlanSkip(database,online,operation,checkContext)
+                continue
+            }
             if(operation.operation==UPLOAD_PHOTO) {
                 uploadQueuedPhoto(database,online,photoFiles,operation,checkContext)
                 continue
@@ -50,6 +55,7 @@ class HydrantSyncEngine(
             val version = maxOf(operation.baseVersion ?: 0, acknowledged ?: 0)
             val payload = Json.parseToJsonElement(operation.payload).jsonObject
             var inspection: Inspection? = null
+            var planItem: PlanItem? = null
             checkContext()
             val server = try {
                 when(operation.operation) {
@@ -65,6 +71,7 @@ class HydrantSyncEngine(
                             throw RegistryFailure(RegistryError.VALIDATION)
                         }
                         inspection=event
+                        planItem=accepted.planItem
                         accepted.hydrant
                     }
                     "CREATE" -> online.create(organization, operation.entityId, payload.fields())
@@ -83,8 +90,12 @@ class HydrantSyncEngine(
                 break
             }
             require(server.id == operation.entityId && server.organization == organization && server.version > 0)
-            if(!acknowledgeHydrantOperation(database,operation,server,inspection,checkContext))break
+            if(!acknowledgeHydrantOperation(database,operation,server,inspection,checkContext,planItem))break
         }
+        checkContext()
+        val plans=online.readPlans(organization)
+        checkContext()
+        cachePlanSnapshot(database,account,organization,plans,checkContext)
     }
 }
 
@@ -99,6 +110,7 @@ private fun JsonObject.fields() = HydrantFields(
 internal fun PendingHydrantChange.applyTo(row: Hydrant): Hydrant {
     val p = Json.parseToJsonElement(payload).jsonObject
     return when(operation) {
+        SKIP_PLAN_ITEM -> row
         UPLOAD_PHOTO -> row // Attachment has no hydrant master/status effect during replay.
         CREATE_INSPECTION -> p.inspectionCompletion().result.hydrantStatus?.let { row.copy(status=it) } ?: row
         "UPDATE" -> p.fields().let { row.copy(type = it.type, latitude = it.latitude, longitude = it.longitude,
