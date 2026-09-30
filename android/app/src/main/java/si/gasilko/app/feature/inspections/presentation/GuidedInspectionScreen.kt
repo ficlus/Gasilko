@@ -17,6 +17,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import si.gasilko.app.R
+import si.gasilko.app.core.ui.*
+import androidx.compose.foundation.BorderStroke
 import si.gasilko.app.feature.hydrants.domain.RegistryError
 import si.gasilko.app.feature.hydrants.presentation.errorLabel
 import si.gasilko.app.feature.inspections.domain.InspectionResult
@@ -55,12 +57,14 @@ object InspectionNotesFormatter {
 }
 
 @Composable
-internal fun InspectionOption(label: String, selected: Boolean, enabled: Boolean, choose: () -> Unit) {
+internal fun InspectionOption(label: String, selected: Boolean, enabled: Boolean, tone: FieldTone=FieldTone.INFO, choose: () -> Unit) {
     Surface(shape=MaterialTheme.shapes.medium,
-        color=if(selected)MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceVariant) {
+        border=BorderStroke(if(selected)2.dp else 1.dp,if(selected)tone.foreground() else MaterialTheme.colorScheme.outlineVariant),
+        color=if(selected)tone.container() else MaterialTheme.colorScheme.surface,
+        contentColor=if(selected)tone.foreground() else MaterialTheme.colorScheme.onSurface) {
         Row(Modifier.fillMaxWidth().heightIn(min=64.dp).selectable(selected=selected,enabled=enabled,
             role=Role.RadioButton,onClick=choose).padding(12.dp),verticalAlignment=Alignment.CenterVertically) {
-            RadioButton(selected=selected,onClick=null,enabled=enabled)
+            RadioButton(selected=selected,onClick=null,enabled=enabled,colors=RadioButtonDefaults.colors(selectedColor=tone.foreground()))
             Spacer(Modifier.width(12.dp))
             Text(label,style=MaterialTheme.typography.titleMedium)
         }
@@ -80,9 +84,10 @@ fun GuidedInspectionScreen(draft: InspectionDraft, hydrantLabel: String, busy: B
         key(draft.id,draft.step) {
             Column(Modifier.fillMaxSize().padding(padding).imePadding().verticalScroll(rememberScrollState()).padding(16.dp),
                 verticalArrangement=Arrangement.spacedBy(12.dp)) {
-                Text(stringResource(R.string.inspection_guided),style=MaterialTheme.typography.headlineMedium)
-                Text(hydrantLabel,style=MaterialTheme.typography.titleMedium)
-                Text(if(review)stringResource(R.string.guided_review) else stringResource(R.string.guided_progress,draft.step+1,7))
+                ScreenHeading(stringResource(R.string.inspection_guided),hydrantLabel)
+                StatusBadge(if(review)stringResource(R.string.guided_review) else stringResource(R.string.guided_progress,draft.step+1,7),FieldTone.INFO)
+                LinearProgressIndicator(progress={((draft.step+1)/8f).coerceIn(0f,1f)},modifier=Modifier.fillMaxWidth(),
+                    color=MaterialTheme.colorScheme.tertiary,trackColor=MaterialTheme.colorScheme.tertiaryContainer)
                 if(draft.step<4) {
                     val check=GuidedCheck.entries[draft.step]
                     InspectionCheckOptions(check,draft.answers[check],editable) { answer(check,it) }
@@ -91,10 +96,10 @@ fun GuidedInspectionScreen(draft: InspectionDraft, hydrantLabel: String, busy: B
                 } else if(draft.step==5) {
                     photos()
                 } else if(!review) {
-                    Text(stringResource(R.string.inspection_choose_result),style=MaterialTheme.typography.titleLarge)
+                    SectionHeading(stringResource(R.string.inspection_choose_result))
                     Text(stringResource(R.string.guided_result_notice))
                     Column(Modifier.selectableGroup(),verticalArrangement=Arrangement.spacedBy(8.dp)) {
-                        InspectionResult.entries.forEach { value -> InspectionOption(stringResource(inspectionResultLabel(value)),draft.result==value,editable) { change(value,draft.notes) } }
+                        InspectionResult.entries.forEach { value -> InspectionOption(stringResource(inspectionResultLabel(value)),draft.result==value,editable,inspectionTone(value)) { change(value,draft.notes) } }
                     }
                 } else {
                     GuidedCheck.entries.forEach { check ->
@@ -103,7 +108,7 @@ fun GuidedInspectionScreen(draft: InspectionDraft, hydrantLabel: String, busy: B
                     }
                     draft.result?.let {
                         Text(stringResource(R.string.inspection_choose_result),style=MaterialTheme.typography.titleMedium)
-                        Text(stringResource(inspectionResultLabel(it)))
+                        StatusBadge(stringResource(inspectionResultLabel(it)),inspectionTone(it))
                     }
                     InspectionMeasurementValues(parseMeasurement(draft.pressure,"999.99").value,parseMeasurement(draft.flow,"999999.99").value)
                     Text(stringResource(R.string.photo_count,draft.photos.size))
@@ -112,24 +117,23 @@ fun GuidedInspectionScreen(draft: InspectionDraft, hydrantLabel: String, busy: B
                     label={Text(stringResource(R.string.inspection_notes))},minLines=3,modifier=Modifier.fillMaxWidth())
                 if(busy) { LinearProgressIndicator(Modifier.fillMaxWidth());Text(stringResource(R.string.h_saving)) }
                 error?.let {
-                    Text(stringResource(R.string.inspection_save_failed),color=MaterialTheme.colorScheme.error)
-                    Text(stringResource(errorLabel(it)),color=MaterialTheme.colorScheme.error)
+                    FieldBanner(stringResource(R.string.inspection_save_failed)+"\n"+stringResource(errorLabel(it)),FieldTone.DANGER)
                     if(draft.completion!=null)Text(stringResource(R.string.inspection_retry_notice))
                 }
                 if(review) {
-                    Text(stringResource(R.string.inspection_complete_notice))
-                    Button(onClick={complete(draft.completion?.notes ?: InspectionNotesFormatter.format(resources,draft.answers,draft.notes))},
+                    FieldBanner(stringResource(R.string.inspection_complete_notice))
+                    PrimaryAction(onClick={complete(draft.completion?.notes ?: InspectionNotesFormatter.format(resources,draft.answers,draft.notes))},
                         enabled=!busy && draft.result!=null && draft.measurementsValid() && GuidedCheck.entries.all { it in draft.answers },
                         modifier=Modifier.fillMaxWidth().heightIn(min=56.dp)) {
                         Text(stringResource(if(draft.completion==null)R.string.inspection_complete else R.string.inspection_retry))
                     }
                 } else {
                     val answered=when { draft.step<4 -> GuidedCheck.entries[draft.step] in draft.answers; draft.step==4 -> draft.measurementsValid(); draft.step==5 -> true; else -> draft.result!=null }
-                    Button(onClick={move(true)},enabled=editable && answered,modifier=Modifier.fillMaxWidth().heightIn(min=56.dp)) {
+                    PrimaryAction(onClick={move(true)},enabled=editable && answered,modifier=Modifier.fillMaxWidth().heightIn(min=56.dp)) {
                         Text(stringResource(if(draft.step==6)R.string.guided_review else R.string.guided_next))
                     }
                 }
-                if(draft.step>0)OutlinedButton(onClick={move(false)},enabled=editable,modifier=Modifier.fillMaxWidth().heightIn(min=48.dp)) {
+                if(draft.step>0)SecondaryAction(onClick={move(false)},enabled=editable,modifier=Modifier.fillMaxWidth().heightIn(min=48.dp)) {
                     Text(stringResource(R.string.h_back))
                 }
                 TextButton(onClick=cancel,enabled=!busy,modifier=Modifier.fillMaxWidth().heightIn(min=48.dp)) { Text(stringResource(R.string.h_cancel)) }

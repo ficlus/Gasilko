@@ -13,11 +13,13 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import si.gasilko.app.R
+import si.gasilko.app.core.ui.*
 import si.gasilko.app.feature.hydrants.domain.*
 import si.gasilko.app.feature.hydrants.presentation.*
 import si.gasilko.app.feature.map.MapScreen
 
 @Composable
+@OptIn(ExperimentalLayoutApi::class)
 fun PlanExecutionScreen(model: HydrantViewModel,query: HydrantQuery,initialPlan: String?=null,back: ()->Unit) {
     val registry by model.state.collectAsStateWithLifecycle()
     val flow=remember(model,query) { model.planData(query) }
@@ -72,41 +74,41 @@ fun PlanExecutionScreen(model: HydrantViewModel,query: HydrantQuery,initialPlan:
     }
     Scaffold { padding ->
         Column(Modifier.fillMaxSize().padding(padding).padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
-            Text(stringResource(R.string.execution_title),style=MaterialTheme.typography.headlineSmall)
-            Row {
+            ScreenHeading(stringResource(R.string.execution_title))
+            FlowRow(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
                 TextButton(onClick=::leave,enabled=!busy) { Text(stringResource(R.string.h_back)) }
                 TextButton(onClick={run { model.refreshPlans(query.organization) }},enabled=!busy) { Text(stringResource(R.string.h_refresh)) }
                 TextButton(onClick=model::syncNow,enabled=!busy) { Text(stringResource(R.string.execution_sync)) }
             }
             if(busy)LinearProgressIndicator(Modifier.fillMaxWidth())
-            (error ?: view.error)?.let { Text(stringResource(errorLabel(it)),color=MaterialTheme.colorScheme.error) }
+            (error ?: view.error)?.let { FieldBanner(stringResource(errorLabel(it)),FieldTone.DANGER) }
             LazyColumn(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(8.dp)) {
                 if(plan==null) {
                     if(active.isEmpty())item { Text(stringResource(R.string.execution_empty)) }
                     items(active,key={it.id}) { p ->
-                        OutlinedButton(onClick={planId=p.id;teamId=null},enabled=!busy) { Text(p.name) }
+                        SecondaryAction(onClick={planId=p.id;teamId=null},enabled=!busy,modifier=Modifier.fillMaxWidth()) { Text(p.name) }
                     }
                 } else {
                     item {
-                        Text(plan.name,style=MaterialTheme.typography.titleLarge)
+                        SectionHeading(plan.name)
                         ExecutionProgress(all)
                         TextButton(onClick={planId=null;teamId=null;routeRequest=null},enabled=!busy) { Text(stringResource(R.string.plans_title)) }
-                        if(!online)Text(stringResource(R.string.reassign_offline))
+                        if(!online)FieldBanner(stringResource(R.string.reassign_offline),FieldTone.WARNING)
                     }
                     items(teamIds,key={"team-"+it}) { id ->
-                        OutlinedButton(onClick={teamId=id},enabled=!busy) {
+                        SecondaryAction(onClick={teamId=id},enabled=!busy,modifier=Modifier.fillMaxWidth()) {
                             Text((if(selected==id)"✓ " else "")+(view.teams.teams.find { it.id==id }?.name ?: id.take(8)))
                         }
                         ExecutionProgress(all.filter { it.teamId==id })
                     }
                     item {
                         if(route!=null)TextButton(onClick={map=true},enabled=!busy) { Text(stringResource(R.string.routes_map)) }
-                        else Text(stringResource(R.string.execution_no_route))
+                        else FieldBanner(stringResource(R.string.execution_no_route))
                         if(registry.manages)TextButton(onClick={run {
                             val request=routeRequest ?: PlanRouting(plan.id,plan.version,remaining=true).also { routeRequest=it }
                             model.routePlan(query.organization,request);routeRequest=null
                         }},enabled=!busy) { Text(stringResource(R.string.execution_reroute)) }
-                        if(all.any { it.id in data.pendingItems })Text(stringResource(R.string.execution_pending))
+                        if(all.any { it.id in data.pendingItems })FieldBanner(stringResource(R.string.execution_pending),FieldTone.WARNING)
                         data.reassignmentRequests.filter { it.context.planId==plan.id }.forEach { request ->
                             Text(stringResource(R.string.reassign_pending))
                             Text((view.teams.teams.find { it.id==request.fromTeam }?.name ?: request.fromTeam)+" → "+
@@ -122,22 +124,19 @@ fun PlanExecutionScreen(model: HydrantViewModel,query: HydrantQuery,initialPlan:
                         val skipped=!completed && item.skipReason!=null
                         val uncertain=data.reassignmentRequests.any { it.context.itemId==item.id }
                         val history=data.reassignments.filter { it.itemId==item.id }
-                        Card(colors=CardDefaults.cardColors(containerColor=when {
-                            completed->MaterialTheme.colorScheme.secondaryContainer
-                            skipped->MaterialTheme.colorScheme.tertiaryContainer
-                            else->MaterialTheme.colorScheme.surfaceVariant })) {
-                            Column(Modifier.padding(12.dp)) {
-                                if(item.id==next?.id)Text(stringResource(R.string.execution_next),style=MaterialTheme.typography.titleMedium)
+                        OperationalCard(emphasized=item.id==next?.id) {
+                                if(item.id==next?.id)StatusBadge(stringResource(R.string.execution_next),FieldTone.INFO)
                                 val code=view.candidates.hydrants.find { it.id==item.hydrantId }?.code
                                     ?: routeLabels[item.hydrantId]?.code ?: item.hydrantId.take(8)
-                                Text((item.routeOrder?.toString()?.plus(". ") ?: "")+code)
+                                Text((item.routeOrder?.toString()?.plus(". ") ?: "")+code,style=MaterialTheme.typography.titleLarge)
                                 Text(stringResource(R.string.reassign_current_team,view.teams.teams.find { it.id==item.teamId }?.name ?: item.teamId.orEmpty()))
                                 if(history.isNotEmpty())Text(stringResource(R.string.reassign_changed))
-                                Text(stringResource(if(completed)R.string.execution_completed else if(skipped)R.string.execution_skipped else R.string.execution_open))
+                                StatusBadge(stringResource(if(completed)R.string.execution_completed else if(skipped)R.string.execution_skipped else R.string.execution_open),
+                                    if(completed)FieldTone.SUCCESS else if(skipped)FieldTone.WARNING else FieldTone.NEUTRAL)
                                 item.skipReason?.let { Text(it) }
-                                if(item.id in data.attentionItems)Text(stringResource(R.string.execution_attention),color=MaterialTheme.colorScheme.error)
-                                else if(item.id in data.pendingItems)Text(stringResource(R.string.execution_pending_short))
-                                Row {
+                                if(item.id in data.attentionItems)FieldBanner(stringResource(R.string.execution_attention),FieldTone.WARNING)
+                                else if(item.id in data.pendingItems)StatusBadge(stringResource(R.string.execution_pending_short),FieldTone.WARNING)
+                                FlowRow(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
                                     if(canExecute)TextButton(onClick={run { model.openPlanStop(query.organization,plan.id,item.id) }},enabled=!busy && !uncertain) {
                                         Text(stringResource(R.string.h_details))
                                     }
@@ -150,7 +149,6 @@ fun PlanExecutionScreen(model: HydrantViewModel,query: HydrantQuery,initialPlan:
                                     Text(stringResource(if(canExecute)R.string.reassign_transfer else R.string.reassign_take))
                                 }
                                 TextButton(onClick={historyItem=item.id},enabled=!busy) { Text(stringResource(R.string.reassign_history)) }
-                            }
                         }
                     }
                 }
@@ -179,6 +177,13 @@ fun PlanExecutionScreen(model: HydrantViewModel,query: HydrantQuery,initialPlan:
 }
 @Composable private fun ExecutionProgress(items: List<PlanItem>) {
     val completed=items.count { it.inspectionId!=null }
-    Text(stringResource(R.string.execution_progress,completed,items.size,items.size-completed,
-        items.count { it.inspectionId==null && it.skipReason!=null }))
+    OperationalCard {
+        Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(12.dp)) {
+            Metric("$completed / ${items.size}",stringResource(R.string.execution_completed),FieldTone.SUCCESS,Modifier.weight(1f))
+            Metric((items.size-completed).toString(),stringResource(R.string.ui_remaining),FieldTone.NEUTRAL,Modifier.weight(1f))
+            Metric(items.count { it.inspectionId==null && it.skipReason!=null }.toString(),stringResource(R.string.ui_skipped),FieldTone.WARNING,Modifier.weight(1f))
+        }
+        LinearProgressIndicator(progress={if(items.isEmpty())0f else completed.toFloat()/items.size},modifier=Modifier.fillMaxWidth(),
+            color=MaterialTheme.operations.success,trackColor=MaterialTheme.colorScheme.surfaceVariant)
+    }
 }

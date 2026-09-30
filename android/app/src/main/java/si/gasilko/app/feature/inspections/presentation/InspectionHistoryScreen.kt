@@ -10,6 +10,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import si.gasilko.app.R
+import si.gasilko.app.core.ui.*
 import si.gasilko.app.feature.hydrants.domain.*
 import si.gasilko.app.feature.hydrants.presentation.InspectionHistoryState
 import si.gasilko.app.feature.hydrants.presentation.errorLabel
@@ -22,7 +23,7 @@ fun InspectionHistoryItem(entry: InspectionHistoryEntry, photoCount: Int = 0, vi
     val inspection=entry.inspection
     Text(DateFormat.getDateTimeInstance(DateFormat.SHORT,DateFormat.SHORT).format(Date(inspection.completedAt)))
     Text(stringResource(inspectionModeLabel(inspection.mode)),style=MaterialTheme.typography.titleMedium)
-    Text(stringResource(inspectionResultLabel(inspection.result)))
+    StatusBadge(stringResource(inspectionResultLabel(inspection.result)),inspectionTone(inspection.result))
     Text(stringResource(R.string.inspection_inspector_unknown))
     Text(stringResource(when(entry.state) {
         InspectionSyncState.SYNCED -> R.string.inspection_synced
@@ -47,8 +48,7 @@ fun InspectionHistoryScreen(hydrantLabel: String, history: InspectionHistoryStat
     BackHandler(onBack=back)
     Scaffold { padding ->
         Column(Modifier.fillMaxSize().padding(padding).padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
-            Text(stringResource(R.string.inspection_history_title),style=MaterialTheme.typography.headlineMedium)
-            Text(hydrantLabel,style=MaterialTheme.typography.titleMedium)
+            ScreenHeading(stringResource(R.string.inspection_history_title),hydrantLabel)
             FlowRow(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
                 TextButton(onClick=back) { Text(stringResource(R.string.h_back)) }
                 TextButton(onClick=refresh,enabled=!refreshing) { Text(stringResource(R.string.h_refresh)) }

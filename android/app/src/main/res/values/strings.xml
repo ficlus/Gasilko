@@ -383,4 +383,11 @@
     <string name="reassign_current_team">Trenutna ekipa: %1$s</string>
     <string name="reassign_changed">Postanek je bil prerazporejen.</string>
     <string name="reassign_actor">Izvedel uporabnik: %1$s</string>
+    <string name="ui_location">Lokacija</string>
+    <string name="ui_technical">Tehnični podatki</string>
+    <string name="ui_inspections">Pregledi</string>
+    <string name="ui_photos">Fotografije</string>
+    <string name="ui_management">Upravljanje</string>
+    <string name="ui_remaining">Preostalo</string>
+    <string name="ui_skipped">Preskočeno</string>
 </resources>
