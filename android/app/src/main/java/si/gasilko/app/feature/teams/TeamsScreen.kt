@@ -72,8 +72,9 @@ fun TeamsScreen(model: HydrantViewModel, organization: String, back: ()->Unit) {
     BackHandler(onBack=::goBack)
     Scaffold { padding ->
         BoxWithConstraints(Modifier.fillMaxSize().padding(padding)) {
+        val availableHeight = maxHeight
         Column(Modifier.fillMaxSize().padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
-            ScrollableHeader(maxHeight*0.5f) {
+            ScrollableHeader(availableHeight * 0.5f) {
                 ScreenHeading(stringResource(R.string.teams_title))
                 FieldBanner(stringResource(R.string.teams_online_notice))
                 FlowRow(horizontalArrangement=Arrangement.spacedBy(8.dp),verticalArrangement=Arrangement.spacedBy(4.dp)) {

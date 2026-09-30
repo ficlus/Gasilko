@@ -168,8 +168,9 @@ fun PlansScreen(model: HydrantViewModel,query: HydrantQuery,back: ()->Unit) {
     }
     Scaffold { padding ->
         BoxWithConstraints(Modifier.fillMaxSize().padding(padding).imePadding()) {
+        val availableHeight = maxHeight
         Column(Modifier.fillMaxSize().padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
-            ScrollableHeader(maxHeight*0.5f) {
+            ScrollableHeader(availableHeight * 0.5f) {
                 ScreenHeading(stringResource(R.string.plans_title))
                 FieldBanner(stringResource(R.string.plans_online_notice))
                 FlowRow {

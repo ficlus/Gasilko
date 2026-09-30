@@ -209,8 +209,9 @@ fun HydrantScreen(model: HydrantViewModel, requestAccess: ()->Unit = {}, signOut
     BackHandler(!showHome && state.selected==null && state.form==null) { if(!busy)showHome=true }
     Scaffold { padding ->
     BoxWithConstraints(Modifier.fillMaxSize().padding(padding).imePadding()) {
+        val availableHeight = maxHeight
     Column(Modifier.fillMaxSize().padding(horizontal=16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
-        ScrollableHeader(maxHeight*0.5f) {
+        ScrollableHeader(availableHeight * 0.5f) {
             AppHeader(
                 title=stringResource(if(atHome)R.string.shell_home else R.string.h_title),
                 organization=state.organization?.name,
@@ -246,20 +247,20 @@ fun HydrantScreen(model: HydrantViewModel, requestAccess: ()->Unit = {}, signOut
                     }
                     if(state.query.filtered)Text(listOfNotNull(state.query.search.takeIf{it.isNotBlank()},state.query.type?.let { typeName(state.types.find { type->type.id==it }) },state.query.status?.let{stringResource(statusLabel(it))},stringResource(activeLabel(state.query.active))).joinToString(" · "))
                 }
-                LazyColumn(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(8.dp)) {
-                    if(showFilters && state.organization!=null)item {
-                        Column(verticalArrangement=Arrangement.spacedBy(8.dp)) {
-                            val q=state.filterDraft
-                            OutlinedTextField(q.search,{model.changeFilters(q.copy(search=it.take(200)))},label={Text(stringResource(R.string.h_search_hint))},enabled=!busy,modifier=Modifier.fillMaxWidth().testTag("search-input"))
-                            Choice(stringResource(R.string.h_type),q.type?.let { typeName(state.types.find { type->type.id==it }) } ?: stringResource(R.string.h_all),
-                                listOf("" to stringResource(R.string.h_all))+state.types.map { it.id to typeName(it) },!busy,"filter-type",{model.changeFilters(q.copy(type=it.ifBlank{null}))})
-                            Choice(stringResource(R.string.h_status),q.status?.let{stringResource(statusLabel(it))} ?: stringResource(R.string.h_all),
-                                listOf("" to stringResource(R.string.h_all))+HydrantStatus.entries.map{it.name to stringResource(statusLabel(it))},!busy,"filter-status",{model.changeFilters(q.copy(status=it.takeIf{it.isNotBlank()}?.let(HydrantStatus::valueOf)))})
-                            if(state.manages)Choice(stringResource(R.string.h_active_state),stringResource(activeLabel(q.active)),ActiveFilter.entries.map{it.name to stringResource(activeLabel(it))},!busy,"filter-active",{model.changeFilters(q.copy(active=ActiveFilter.valueOf(it)))})
-                            Button(onClick={keyboard?.hide();model.applyFilters();showFilters=false},enabled=!busy,modifier=Modifier.testTag("apply-filters")){Text(stringResource(R.string.h_search))}
-                            TextButton(onClick={keyboard?.hide();model.clearFilters();showFilters=false},enabled=!busy,modifier=Modifier.testTag("clear-filters")){Text(stringResource(R.string.h_clear_filters))}
-                        }
+                if(showFilters && state.organization!=null) {
+                    Column(verticalArrangement=Arrangement.spacedBy(8.dp)) {
+                        val q=state.filterDraft
+                        OutlinedTextField(q.search,{model.changeFilters(q.copy(search=it.take(200)))},label={Text(stringResource(R.string.h_search_hint))},enabled=!busy,modifier=Modifier.fillMaxWidth().testTag("search-input"))
+                        Choice(stringResource(R.string.h_type),q.type?.let { typeName(state.types.find { type->type.id==it }) } ?: stringResource(R.string.h_all),
+                            listOf("" to stringResource(R.string.h_all))+state.types.map { it.id to typeName(it) },!busy,"filter-type",{model.changeFilters(q.copy(type=it.ifBlank{null}))})
+                        Choice(stringResource(R.string.h_status),q.status?.let{stringResource(statusLabel(it))} ?: stringResource(R.string.h_all),
+                            listOf("" to stringResource(R.string.h_all))+HydrantStatus.entries.map{it.name to stringResource(statusLabel(it))},!busy,"filter-status",{model.changeFilters(q.copy(status=it.takeIf{it.isNotBlank()}?.let(HydrantStatus::valueOf)))})
+                        if(state.manages)Choice(stringResource(R.string.h_active_state),stringResource(activeLabel(q.active)),ActiveFilter.entries.map{it.name to stringResource(activeLabel(it))},!busy,"filter-active",{model.changeFilters(q.copy(active=ActiveFilter.valueOf(it)))})
+                        Button(onClick={keyboard?.hide();model.applyFilters();showFilters=false},enabled=!busy,modifier=Modifier.testTag("apply-filters")){Text(stringResource(R.string.h_search))}
+                        TextButton(onClick={keyboard?.hide();model.clearFilters();showFilters=false},enabled=!busy,modifier=Modifier.testTag("clear-filters")){Text(stringResource(R.string.h_clear_filters))}
                     }
+                }
+                LazyColumn(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(8.dp)) {
                     if(!busy && state.rows.isEmpty())item { Text(stringResource(if(state.organization==null)R.string.h_no_organization else if(state.query.filtered)R.string.h_no_matches else R.string.h_empty)) }
                     items(state.rows,key={it.id}) { h ->
                         OutlinedCard(onClick={model.open(h.id)},enabled=!busy,modifier=Modifier.fillMaxWidth().testTag("hydrant-${h.id}"),
