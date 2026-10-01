@@ -1,12 +1,15 @@
 package si.gasilko.app.feature.photos.presentation
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.clickable
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.CancellationException
 import si.gasilko.app.R
@@ -41,6 +44,33 @@ fun PermanentHydrantPhoto(model: HydrantViewModel,organization: String,hydrant: 
                         style=MaterialTheme.typography.bodyMedium)
                 }
             }
+        }
+    }
+}
+
+/** Same scoped permanent-photo read/cache as identification previews, without an empty placeholder. */
+@Composable
+fun ApproachHydrantPhoto(model: HydrantViewModel,organization: String,hydrant: String,visible: Boolean,expanded: Boolean) {
+    key(model,model.photoScope,organization,hydrant) {
+        val flow=remember { model.permanentPhotoEntries(organization,hydrant) }
+        val state by flow.collectAsStateWithLifecycle(initialValue=PhotoGalleryState())
+        var viewed by remember { mutableStateOf<String?>(null) }
+        // Once per target/scope, not once per GPS fix or distance-threshold crossing.
+        LaunchedEffect(Unit) {
+            try { model.refreshPermanentPhotos(organization,hydrant) }
+            catch(e: CancellationException) { throw e }
+            catch(_: Exception) { /* Optional remote metadata: retain the authorized cached photo. */ }
+        }
+        val entry=state.entries.firstOrNull().takeIf { state.error==null }
+        if(visible && entry!=null) {
+            PhotoImage(model,entry,Modifier.fillMaxWidth().height(if(expanded)176.dp else 88.dp)
+                .clip(MaterialTheme.shapes.medium).clickable(onClickLabel=stringResource(R.string.photo_title)) { viewed=entry.photo.id },
+                permanentPreview=true)
+        }
+        val viewedEntry=state.entries.find { it.photo.id==viewed }.takeIf { state.error==null }
+        LaunchedEffect(viewedEntry) { if(viewedEntry==null)viewed=null }
+        if(viewedEntry!=null)Dialog(onDismissRequest={viewed=null},properties=DialogProperties(usePlatformDefaultWidth=false)) {
+            PhotoViewer(model,viewedEntry,permanentPreview=true,back={viewed=null})
         }
     }
 }

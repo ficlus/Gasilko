@@ -108,7 +108,7 @@ fun PhotoGalleryScreen(model: HydrantViewModel, organization: String, hydrant: S
 }
 
 @Composable
-fun PhotoViewer(model: HydrantViewModel, entry: PhotoEntry?, back: ()->Unit) {
+fun PhotoViewer(model: HydrantViewModel, entry: PhotoEntry?, permanentPreview: Boolean = false, back: ()->Unit) {
     BackHandler(onBack=back)
     Surface(Modifier.fillMaxSize(),color=MaterialTheme.colorScheme.inverseSurface,contentColor=MaterialTheme.colorScheme.inverseOnSurface) {
         Column(Modifier.fillMaxSize().safeDrawingPadding().padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
@@ -117,7 +117,7 @@ fun PhotoViewer(model: HydrantViewModel, entry: PhotoEntry?, back: ()->Unit) {
             else {
                 Text(photoDate(entry))
                 PhotoState(entry)
-                PhotoImage(model,entry,Modifier.fillMaxWidth().weight(1f),ContentScale.Fit)
+                PhotoImage(model,entry,Modifier.fillMaxWidth().weight(1f),ContentScale.Fit,permanentPreview)
             }
         }
     }

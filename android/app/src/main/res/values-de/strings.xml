@@ -412,6 +412,9 @@
     <string name="nav_retry">Route erneut berechnen</string>
     <string name="nav_inspect">Hydrant / Prüfung öffnen</string>
     <string name="nav_target">Zielhydrant: %1$s</string>
+    <string name="nav_follow">Meinem Standort folgen</string>
+    <string name="nav_follow_paused">Freie Kartenansicht · zum Fortsetzen „Meinem Standort folgen“ antippen.</string>
+    <string name="nav_access_distance">Zum Straßenzugang: %1$d m. Der Hydrant kann abseits der Straße liegen.</string>
     <string name="nav_distance">%1$d m</string>
     <string name="nav_remaining">Verbleibend: %1$.1f km · etwa %2$d Min.</string>
     <string name="nav_wait_sync">Warten auf Prüfungssynchronisierung und aktualisierte Route. Die Prüfung bleibt gespeichert.</string>
