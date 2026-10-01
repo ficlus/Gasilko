@@ -4,6 +4,7 @@ import android.content.ComponentCallbacks2
 import android.content.Context
 import android.content.res.Configuration
 import android.os.Bundle
+import android.os.SystemClock
 import android.graphics.RectF
 import android.location.Location
 import androidx.activity.compose.BackHandler
@@ -50,6 +51,8 @@ import si.gasilko.app.BuildConfig
 import si.gasilko.app.core.ui.*
 import si.gasilko.app.R
 import si.gasilko.app.feature.plans.PlanRoute
+import si.gasilko.app.feature.map.navigation.NavigationCamera
+import si.gasilko.app.feature.map.navigation.NavigationThresholds
 import java.net.URI
 
 /** Rendering only: all hydrants are supplied by the existing local repository/ViewModel. */
@@ -140,12 +143,13 @@ fun MapScreen(onBack: () -> Unit, hydrants: List<Hydrant>, onOpenHydrant: ((Stri
             if(dataLoading)LinearProgressIndicator(Modifier.fillMaxWidth())
             LocationControls(hydrants, onLocation={location=it;onLocationUpdate(it)}, onCenter={cancelFocus();centerRequested=true;onRecenter()},
                 requestLocationKey=requestLocationKey,
+                centerLabel=if(navigationMode)R.string.nav_follow else R.string.map_my_location,
                 dataLoading=dataLoading,
                 onUseLocation=onAddHydrant?.let { { fix: Location ->
                     if(canCreate) { cancelFocus();addHydrant?.invoke(fix.latitude,fix.longitude,fix.accuracy) }
                 } },useLocationLabel=R.string.h_add,actionEnabled=creationEnabled,
                 onUnavailable={centerRequested=false},
-                onSelect={ h -> selectedId=h.id;cancelFocus();focus=GeoPoint(h.latitude!!,h.longitude!!) },
+                onSelect={ h -> selectedId=h.id;cancelFocus();userPan();focus=GeoPoint(h.latitude!!,h.longitude!!) },
                 additionalActions={ if(!navigationMode)OfflineMapControls(displayedStyle, visibleBounds={
                     if(loading || failed || !valid) null else saved.view?.takeIf { !it.released && it.width>0 && it.height>0 }
                         ?.nativeMap?.projection?.visibleRegion?.latLngBounds
@@ -162,7 +166,7 @@ fun MapScreen(onBack: () -> Unit, hydrants: List<Hydrant>, onOpenHydrant: ((Stri
                 if(!route.valid)FieldBanner(stringResource(R.string.routes_stale),FieldTone.WARNING)
             }
             if(!navigationMode && routeData?.numbers?.size==1)Text(stringResource(R.string.routes_single_stop),Modifier.padding(horizontal=16.dp))
-            else if(routeData!=null && !routeData.hasRoad && routeData.numbers.isNotEmpty())
+            else if(!navigationMode && routeData!=null && !routeData.hasRoad && routeData.numbers.isNotEmpty())
                 Text(stringResource(R.string.routes_no_road_geometry),Modifier.padding(horizontal=16.dp))
             if(!navigationMode && !dataLoading && dataError==null && route==null) {
                 val notice=when { hydrants.isEmpty()->R.string.map_empty;validCount==0->R.string.map_no_coordinates
@@ -192,7 +196,7 @@ fun MapScreen(onBack: () -> Unit, hydrants: List<Hydrant>, onOpenHydrant: ((Stri
                                 if(!released) {
                                     hydrantLayers=HydrantMapLayers(style); hydrantLayers?.update(currentData,currentSelection)
                                     routeLayers=PlanRouteLayers(style);routeLayers?.update(currentRoute)
-                                    updateLocation(currentLocation)
+                                    updateLocation(currentLocation,navigationMode)
                                     renderReady=true
                                 }
                             }
@@ -260,7 +264,7 @@ fun MapScreen(onBack: () -> Unit, hydrants: List<Hydrant>, onOpenHydrant: ((Stri
                         view.hydrantLayers?.update(visibleData, selected?.id)
                         view.routeLayers?.update(routeData)
                         view.nativeMap?.style?.takeIf { it.isFullyLoaded }?.let { style -> StartPointLayer.update(style,startPoint) }
-                        if(renderReady && mapSize.width>0 && mapSize.height>0 && view.width>0 && view.height>0 && routeData!=null &&
+                        if(!navigationMode && renderReady && mapSize.width>0 && mapSize.height>0 && view.width>0 && view.height>0 && routeData!=null &&
                             fittedRoute!=routeData.key && routeData.points.isNotEmpty()) {
                             val target=routeData
                             view.post { if(!view.released && view.routeLayers!=null && currentRoute?.key==target.key && fittedRoute!=target.key) {
@@ -272,14 +276,20 @@ fun MapScreen(onBack: () -> Unit, hydrants: List<Hydrant>, onOpenHydrant: ((Stri
                                 }
                             } }
                         }
-                        view.updateLocation(location)
+                        view.updateLocation(location,navigationMode)
                         regionBounds?.let { bounds -> view.nativeMap?.let { map -> if(renderReady) {
                             regionBounds=null
                             map.moveCamera(CameraUpdateFactory.newLatLngBounds(bounds,32))
                             map.moveCamera(CameraUpdateFactory.zoomTo(map.cameraPosition.zoom.coerceIn(
                                 OfflineMapPolicy.MIN_ZOOM.toDouble(),OfflineMapPolicy.MAX_ZOOM.toDouble())))
                         } } }
-                        val target=focus ?: location?.takeIf { (centerRequested || (followUser && it.elapsedRealtimeNanos!=lastFollowed)) && freshLocation(it) }?.let { GeoPoint(it.latitude,it.longitude) }
+                        if(navigationMode && focus==null && renderReady && (followUser || centerRequested)) {
+                            location?.takeIf(::usableNavigationLocation)?.let { fix ->
+                                view.nativeMap?.let { map -> view.navigationCamera.follow(map,fix,view.width,view.height,centerRequested) }
+                                centerRequested=false
+                            }
+                        }
+                        val target=focus ?: location?.takeIf { !navigationMode && (centerRequested || (followUser && it.elapsedRealtimeNanos!=lastFollowed)) && freshLocation(it) }?.let { GeoPoint(it.latitude,it.longitude) }
                         view.nativeMap?.let { map -> if(target!=null && renderReady) {
                             centerRequested=false;focus=null;lastFollowed=location?.elapsedRealtimeNanos ?: 0L
                             map.moveCamera(CameraUpdateFactory.newLatLngZoom(LatLng(target.latitude,target.longitude),maxOf(map.cameraPosition.zoom,15.0)))
@@ -288,6 +298,13 @@ fun MapScreen(onBack: () -> Unit, hydrants: List<Hydrant>, onOpenHydrant: ((Stri
                         if(saved.view===it) { saved.bundle=saved.snapshot();saved.view=null }
                         it.release()
                     })
+            }
+            if(navigationMode && !followUser)Surface(Modifier.align(Alignment.TopEnd).padding(12.dp),
+                shape=MaterialTheme.shapes.medium,tonalElevation=3.dp) {
+                CompactAction(onClick={cancelFocus();centerRequested=true;onRecenter()},
+                    enabled=location?.let(::usableNavigationLocation)==true) {
+                    ActionLabel(stringResource(R.string.nav_follow),R.drawable.ic_field_my_location)
+                }
             }
             popupId?.let { id -> key(id) {
                 // Leave the native attribution/logo edge visible; the card scrolls on short screens.
@@ -327,6 +344,10 @@ private class SavedMap(var bundle: Bundle? = null) {
     }
 }
 
+private fun usableNavigationLocation(fix: Location)=freshLocation(fix) && fix.hasAccuracy() &&
+    fix.accuracy<=NavigationThresholds.MAX_ACCURACY_METERS &&
+    SystemClock.elapsedRealtime()-fix.elapsedRealtimeNanos/1_000_000<=NavigationThresholds.MAX_FIX_AGE_MILLIS
+
 /** Owns the native view for exactly one Compose AndroidView attachment. */
 private class LifecycleMapView(context: Context, private val lifecycle: Lifecycle, saved: Bundle?) : MapView(context) {
     var nativeMap: MapLibreMap? = null
@@ -335,11 +356,12 @@ private class LifecycleMapView(context: Context, private val lifecycle: Lifecycl
     var beforeRelease: (() -> Unit)? = null
     private var lastLocation: Location? = null
     private var locationStyle: Style? = null
-    fun updateLocation(fix: Location?) {
+    val navigationCamera = NavigationCamera()
+    fun updateLocation(fix: Location?, navigation: Boolean = false) {
         if(released) return
         val map=nativeMap ?: return
         val component=map.locationComponent
-        if(fix == null || !freshLocation(fix) || !hasLocationPermission(context)) {
+        if(fix == null || !freshLocation(fix) || !hasLocationPermission(context) || (navigation && !usableNavigationLocation(fix))) {
             lastLocation=null
             if(component.isLocationComponentActivated && component.isLocationComponentEnabled) component.isLocationComponentEnabled=false
             return
@@ -352,11 +374,14 @@ private class LifecycleMapView(context: Context, private val lifecycle: Lifecycl
                 component.cameraMode=CameraMode.NONE
                 component.renderMode=RenderMode.NORMAL
             }
+            val renderedFix=if(navigation)navigationCamera.location(fix) else fix
+            val mode=if(navigation && renderedFix.hasBearing())RenderMode.GPS else RenderMode.NORMAL
+            if(component.renderMode!=mode)component.renderMode=mode
             if(!component.isLocationComponentEnabled) component.isLocationComponentEnabled=true
             val old=lastLocation
             if(old==null || old.elapsedRealtimeNanos!=fix.elapsedRealtimeNanos || old.latitude!=fix.latitude ||
                 old.longitude!=fix.longitude || old.accuracy!=fix.accuracy) {
-                component.forceLocationUpdate(fix);lastLocation=Location(fix)
+                component.forceLocationUpdate(renderedFix);lastLocation=Location(fix)
             }
         } catch(_: SecurityException) { if(component.isLocationComponentActivated) component.isLocationComponentEnabled=false }
     }

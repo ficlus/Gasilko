@@ -19,6 +19,7 @@ import si.gasilko.app.feature.hydrants.presentation.*
 import si.gasilko.app.feature.map.MapScreen
 import si.gasilko.app.feature.map.navigation.NavigationScreen
 import si.gasilko.app.feature.photos.presentation.PermanentHydrantPhoto
+import si.gasilko.app.feature.photos.presentation.ApproachHydrantPhoto
 
 @Composable
 @OptIn(ExperimentalLayoutApi::class)
@@ -86,7 +87,8 @@ fun PlanExecutionScreen(model: HydrantViewModel,query: HydrantQuery,initialPlan:
         NavigationScreen(model.navigation,view.candidates.hydrants.filter { h -> stops.any { it.hydrantId==h.id } },stops,route,
             onOpen={id -> stops.find { it.hydrantId==id }?.let { item -> run { model.openPlanStop(query.organization,plan.id,item.id) } } },
             canOpen={id -> !busy && stops.any { it.hydrantId==id && data.reassignmentRequests.none { r -> r.context.itemId==it.id } } },
-            photo={h -> PermanentHydrantPhoto(model,h.organization,h.id)})
+            photo={h -> PermanentHydrantPhoto(model,h.organization,h.id)},
+            targetPhoto={h,visible,expanded -> ApproachHydrantPhoto(model,h.organization,h.id,visible,expanded)})
         return
     }
     val routeLabels=remember(route) { route?.orderedStops().orEmpty().associateBy { it.hydrantId } }

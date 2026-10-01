@@ -2,6 +2,7 @@ package si.gasilko.app.feature.map.navigation
 
 import kotlinx.serialization.json.*
 import si.gasilko.app.feature.map.domain.GeoPoint
+import si.gasilko.app.feature.map.domain.NearbyHydrants
 import si.gasilko.app.feature.plans.PlanRoute
 import java.util.UUID
 
@@ -20,13 +21,13 @@ data class NavigationLeg(val meters: Double,val seconds: Double,val steps: List<
 data class NavigationStop(val item: String,val hydrant: String,val code: String?,val original: GeoPoint,val snapped: GeoPoint,val order: Int)
 data class NavigationRoute(val plan: String,val team: String,val version: Long,val provider: String,val meters: Double,
     val seconds: Double,val points: List<GeoPoint>,val legs: List<NavigationLeg>,val stops: List<NavigationStop>) {
-    fun mapRoute(org: String,key: String)=PlanRoute(plan,org,team,provider,"car",key,meters,seconds,
+    fun mapRoute(org: String,key: String,roadPoints: List<GeoPoint> = points)=PlanRoute(plan,org,team,provider,"car",key,meters,seconds,
         buildJsonObject {
             put("type","FeatureCollection")
             put("features",buildJsonArray {
-                if(points.size>1)add(buildJsonObject {
+                if(roadPoints.size>1)add(buildJsonObject {
                     put("type","Feature");put("properties",buildJsonObject { put("kind","road") })
-                    put("geometry",buildJsonObject { put("type","LineString");put("coordinates",JsonArray(points.map { it.json() })) })
+                    put("geometry",buildJsonObject { put("type","LineString");put("coordinates",JsonArray(roadPoints.map { it.json() })) })
                 })
                 stops.forEach { stop -> add(buildJsonObject {
                     put("type","Feature");put("properties",buildJsonObject {
@@ -36,6 +37,22 @@ data class NavigationRoute(val plan: String,val team: String,val version: Long,v
                 }) }
             })
         }.toString(),buildJsonArray { stops.forEach { add(buildJsonObject { put("hydrant",it.hydrant);put("code",it.code);put("order",it.order) }) } }.toString(),true)
+}
+/** Trim only the travelled prefix of the provider's road line. Stop coordinates stay untouched. */
+internal fun remainingRoad(points: List<GeoPoint>,travelled: Double): List<GeoPoint> {
+    if(travelled<=0 || points.size<2)return points
+    var remaining=travelled
+    for(index in 0 until points.lastIndex) {
+        val a=points[index];val b=points[index+1]
+        val meters=NearbyHydrants.distance(a,b)
+        if(meters>0 && remaining<meters) {
+            val fraction=remaining/meters
+            return listOf(GeoPoint(a.latitude+(b.latitude-a.latitude)*fraction,
+                a.longitude+(b.longitude-a.longitude)*fraction))+points.drop(index+1)
+        }
+        remaining-=meters
+    }
+    return points.takeLast(1)
 }
 private fun GeoPoint.json()=buildJsonArray { add(longitude);add(latitude) }
 internal fun decodeNavigation(value: JsonElement): NavigationRoute {

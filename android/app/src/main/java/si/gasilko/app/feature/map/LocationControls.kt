@@ -52,7 +52,8 @@ internal fun LocationControls(hydrants: List<Hydrant>, onLocation: (Location?) -
     onUseLocation: ((Location)->Unit)? = null, useLocationLabel: Int = R.string.h_use_location,
     onUseRequested: ()->Unit = {},
     locationOnly: Boolean = false, actionEnabled: Boolean = true, requestKey: String = "",
-    additionalActions: @Composable () -> Unit = {}, requestLocationKey: String? = null) {
+    additionalActions: @Composable () -> Unit = {}, requestLocationKey: String? = null,
+    centerLabel: Int = R.string.map_my_location) {
     val context=LocalContext.current
     val lifecycle=LocalLifecycleOwner.current.lifecycle
     var useRequested by rememberSaveable(requestKey) { mutableStateOf(false) }
@@ -126,7 +127,7 @@ internal fun LocationControls(hydrants: List<Hydrant>, onLocation: (Location?) -
     Column(Modifier.padding(horizontal=16.dp),verticalArrangement=Arrangement.spacedBy(4.dp)) {
         FlowRow(horizontalArrangement=Arrangement.spacedBy(8.dp),verticalArrangement=Arrangement.spacedBy(4.dp)) {
             if(!locationOnly) {
-                CompactAction(onClick={onCenter();request()}) { ActionLabel(stringResource(R.string.map_my_location),R.drawable.ic_field_my_location) }
+                CompactAction(onClick={onCenter();request()}) { ActionLabel(stringResource(centerLabel),R.drawable.ic_field_my_location) }
                 CompactAction(onClick={showNearby=true;request()}) { Text(stringResource(R.string.map_nearby)) }
             }
             if(onUseLocation!=null) CompactAction(onClick={

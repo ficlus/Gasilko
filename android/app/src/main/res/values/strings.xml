@@ -412,6 +412,9 @@
     <string name="nav_retry">Ponovi izračun poti</string>
     <string name="nav_inspect">Odpri hidrant / pregled</string>
     <string name="nav_target">Ciljni hidrant: %1$s</string>
+    <string name="nav_follow">Sledi moji lokaciji</string>
+    <string name="nav_follow_paused">Prost pogled · za nadaljevanje pritisnite »Sledi moji lokaciji«.</string>
+    <string name="nav_access_distance">Do cestnega dostopa: %1$d m. Hidrant je lahko odmaknjen od ceste.</string>
     <string name="nav_distance">%1$d m</string>
     <string name="nav_remaining">Preostalo: %1$.1f km · približno %2$d min</string>
     <string name="nav_wait_sync">Čakanje na sinhronizacijo pregleda in posodobljeno ruto. Pregled ostane shranjen.</string>

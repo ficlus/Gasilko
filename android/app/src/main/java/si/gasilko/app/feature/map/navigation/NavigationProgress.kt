@@ -18,8 +18,10 @@ internal object NavigationThresholds {
     const val TURN_NOW_METERS=50.0
 }
 internal data class Guidance(val meters: Double=0.0,val next: NavigationStep?=null,val step: Int=0,
-    val toManeuver: Double=0.0,val remaining: Double=0.0,val seconds: Double=0.0,val arrived: Boolean=false,val offRoute: Boolean=false)
-private data class Segment(val a: GeoPoint,val b: GeoPoint,val start: Double,val length: Double)
+    val toManeuver: Double=0.0,val remaining: Double=0.0,val seconds: Double=0.0,val arrived: Boolean=false,val offRoute: Boolean=false,
+    val toTarget: Double=Double.POSITIVE_INFINITY,val geometryMeters: Double=0.0)
+private data class Segment(val a: GeoPoint,val b: GeoPoint,val start: Double,val length: Double,
+    val geometryStart: Double,val geometryLength: Double)
 
 /** Progress is constrained to the current leg; crossing a later leg cannot skip an inspection. */
 internal class NavigationProgress(private val route: NavigationRoute) {
@@ -28,6 +30,7 @@ internal class NavigationProgress(private val route: NavigationRoute) {
     private val segments=mutableListOf<Segment>()
     private val starts=mutableListOf<Double>()
     private var length=0.0
+    private var geometryLength=0.0
     private var progress=0.0
     private var reached=false
     private var last: GeoPoint?=null
@@ -39,7 +42,10 @@ internal class NavigationProgress(private val route: NavigationRoute) {
             val total=distances.sum()
             points.zipWithNext().forEachIndexed { i,(a,b) ->
                 val d=if(meters!=null && total>0)meters*distances[i]/total else distances[i]
-                if(d>0) { segments.add(Segment(a,b,length,d));length+=d }
+                if(d>0) {
+                    segments.add(Segment(a,b,length,d,geometryLength,distances[i]))
+                    length+=d;geometryLength+=distances[i]
+                }
             }
         }
         if(steps.isNotEmpty())steps.forEach { starts.add(length);append(it.points,it.meters) }
@@ -68,14 +74,21 @@ internal class NavigationProgress(private val route: NavigationRoute) {
             badSamples++
         } else { badSince=null;badSamples=0;progress=max(progress,nearest?.second ?: 0.0) }
         last=point
-        if(NearbyHydrants.distance(point,route.stops.first().snapped)<=NavigationThresholds.ARRIVAL_METERS &&
+        val accessDistance=NearbyHydrants.distance(point,route.stops.first().snapped)
+        if(accessDistance<=NavigationThresholds.ARRIVAL_METERS &&
             length-progress<=NavigationThresholds.ARRIVAL_METERS*2)reached=true
         val arrived=reached
         val index=starts.indices.firstOrNull { starts[it]>progress+NavigationThresholds.MANEUVER_METERS } ?: steps.lastIndex
         val next=steps.getOrNull(index)
         val usedSeconds=if(length>0)(leg?.seconds ?: (route.seconds*length/max(route.meters,1.0)))*(progress/length).coerceIn(0.0,1.0) else 0.0
+        // A display-only offset along provider geometry; road-distance weights above stay unchanged.
+        val segment=segments.firstOrNull { it.start+it.length>=progress }
+        val geometryProgress=segment?.let {
+            it.geometryStart+it.geometryLength*((progress-it.start)/it.length).coerceIn(0.0,1.0)
+        } ?: geometryLength
         return Guidance(progress,next,index,(starts.getOrNull(index)?.minus(progress) ?: (length-progress)).coerceAtLeast(0.0),
             (route.meters-progress).coerceAtLeast(0.0),(route.seconds-usedSeconds).coerceAtLeast(0.0),arrived,
-            badSamples>=NavigationThresholds.OFF_ROUTE_SAMPLES && at-(badSince ?: at)>=NavigationThresholds.OFF_ROUTE_MILLIS)
+            badSamples>=NavigationThresholds.OFF_ROUTE_SAMPLES && at-(badSince ?: at)>=NavigationThresholds.OFF_ROUTE_MILLIS,
+            accessDistance,geometryProgress)
     }
 }

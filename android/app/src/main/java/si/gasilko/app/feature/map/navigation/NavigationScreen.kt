@@ -28,6 +28,12 @@ import si.gasilko.app.feature.plans.PlanRoute
 import java.util.Locale
 import kotlin.math.roundToInt
 
+internal object NavigationPresentation {
+    const val PHOTO_METERS=200.0
+    const val LARGE_PHOTO_METERS=50.0
+    const val ROAD_UPDATE_METERS=10.0
+}
+
 internal fun maneuverLabel(step: NavigationStep?): Int {
     if(step?.modifier=="uturn")return R.string.nav_uturn
     return when(step?.type) {
@@ -55,14 +61,20 @@ private fun maneuverIcon(step: NavigationStep?)=when {
 @Composable
 @OptIn(ExperimentalLayoutApi::class)
 internal fun NavigationScreen(session: NavigationSession,hydrants: List<Hydrant>,items: List<PlanItem>,cached: PlanRoute?,
-    onOpen: (String)->Unit,canOpen: (String)->Boolean,photo: @Composable (Hydrant) -> Unit) {
+    onOpen: (String)->Unit,canOpen: (String)->Boolean,photo: @Composable (Hydrant) -> Unit,
+    targetPhoto: @Composable (Hydrant,Boolean,Boolean) -> Unit) {
     val state by session.state.collectAsStateWithLifecycle()
     var follow by rememberSaveable(state.plan,state.team) { mutableStateOf(true) }
-    val route=remember(state.route,state.routeRevision) { state.route?.mapRoute(state.organization,"navigation-${state.routeRevision}") }
-        ?.let { it.copy(valid=!state.awaitingCompletion && state.routeSourceKey==state.sourceKey && cached?.valid!=false) } ?: cached
     val readyGuidance=!state.awaitingCompletion && state.routeSourceKey==state.sourceKey
     val guidance=if(readyGuidance)state.guidance else Guidance()
+    val roadProgress=kotlin.math.floor(guidance.geometryMeters/NavigationPresentation.ROAD_UPDATE_METERS)*NavigationPresentation.ROAD_UPDATE_METERS
+    val route=remember(state.route,state.routeRevision,roadProgress) {
+        state.route?.let { it.mapRoute(state.organization,"navigation-${state.routeRevision}",remainingRoad(it.points,roadProgress)) }
+    }?.let { it.copy(valid=readyGuidance && cached?.valid!=false) } ?: cached
     val target=state.route?.takeIf { readyGuidance }?.stops?.firstOrNull()
+    val targetHydrant=hydrants.find { it.id==target?.hydrant && it.organization==state.organization }
+    val approaching=state.locationReady && (guidance.arrived || guidance.toTarget<=NavigationPresentation.PHOTO_METERS)
+    val close=guidance.arrived || guidance.toTarget<=NavigationPresentation.LARGE_PHOTO_METERS
     val label=stringResource(if(guidance.arrived)R.string.nav_arrive else maneuverLabel(guidance.next))
     val meters=(guidance.toManeuver/10).roundToInt()*10
     val distance=stringResource(R.string.nav_distance,meters)
@@ -102,14 +114,29 @@ internal fun NavigationScreen(session: NavigationSession,hydrants: List<Hydrant>
                 Row(horizontalArrangement=Arrangement.spacedBy(12.dp)) {
                     Text(maneuverIcon(guidance.next),style=MaterialTheme.typography.headlineLarge)
                     Column(Modifier.weight(1f)) {
-                        Text(if(state.awaitingCompletion)stringResource(R.string.nav_wait_sync) else if(state.route==null)stringResource(R.string.nav_start) else if(guidance.arrived)label else distance,style=MaterialTheme.typography.headlineMedium)
+                        Text(if(state.awaitingCompletion)stringResource(R.string.nav_wait_sync) else if(state.route==null)stringResource(R.string.nav_start) else if(guidance.arrived)label else distance,
+                            style=if(guidance.arrived)MaterialTheme.typography.titleLarge else MaterialTheme.typography.headlineMedium)
                         if(state.route!=null && readyGuidance && !guidance.arrived)Text(label,style=MaterialTheme.typography.titleMedium)
-                        guidance.next?.road?.takeIf { it.isNotBlank() }?.let { Text(it) }
-                        target?.let { Text(stringResource(R.string.nav_target,it.code ?: it.hydrant.take(8))) }
+                        if(!guidance.arrived)guidance.next?.road?.takeIf { it.isNotBlank() }?.let { Text(it) }
+                        if(!approaching)target?.let { Text(stringResource(R.string.nav_target,it.code ?: it.hydrant.take(8))) }
                     }
                 }
                 if(state.route!=null && readyGuidance)Text(stringResource(R.string.nav_remaining,(guidance.remaining/100).roundToInt()/10.0,
                     kotlin.math.ceil(guidance.seconds/60).toInt()))
+                targetHydrant?.let { hydrant ->
+                    if(approaching) {
+                        Text(hydrant.code ?: (stringResource(R.string.h_pending_code)+" · "+hydrant.id.take(8)),
+                            style=MaterialTheme.typography.titleLarge)
+                        listOfNotNull(hydrant.address,hydrant.description).filter { it.isNotBlank() }.distinct().forEach { Text(it) }
+                        Text(stringResource(R.string.nav_access_distance,guidance.toTarget.roundToInt()),style=MaterialTheme.typography.bodyMedium)
+                    }
+                    // Keep this scoped loader in composition as distance changes, including outside 200 m.
+                    targetPhoto(hydrant,approaching,close)
+                }
+                target?.let { stop -> if(canOpen(stop.hydrant))PrimaryAction(onClick={onOpen(stop.hydrant)}) {
+                    Text(stringResource(R.string.nav_inspect))
+                } }
+                if(!follow)Text(stringResource(R.string.nav_follow_paused),style=MaterialTheme.typography.labelLarge)
                 if(voiceUnavailable)Text(stringResource(R.string.nav_voice_unavailable),style=MaterialTheme.typography.bodySmall)
                 if(state.busy)LinearProgressIndicator(Modifier.fillMaxWidth())
                 when {
@@ -123,9 +150,6 @@ internal fun NavigationScreen(session: NavigationSession,hydrants: List<Hydrant>
                     TextButton(onClick=session::stop) { Text(stringResource(R.string.nav_stop)) }
                     if(state.error!=null || guidance.offRoute)TextButton(onClick=session::request,
                         enabled=!state.busy && state.locationReady && !state.awaitingCompletion) { Text(stringResource(R.string.nav_retry)) }
-                    target?.let { stop -> if(canOpen(stop.hydrant))TextButton(onClick={onOpen(stop.hydrant)}) {
-                        Text(stringResource(R.string.nav_inspect))
-                    } }
                 }
             }
         })
