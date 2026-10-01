@@ -55,7 +55,7 @@ private fun maneuverIcon(step: NavigationStep?)=when {
 @Composable
 @OptIn(ExperimentalLayoutApi::class)
 internal fun NavigationScreen(session: NavigationSession,hydrants: List<Hydrant>,items: List<PlanItem>,cached: PlanRoute?,
-    onOpen: (String)->Unit,canOpen: (String)->Boolean,photo: @Composable(Hydrant)->Unit) {
+    onOpen: (String)->Unit,canOpen: (String)->Boolean,photo: @Composable (Hydrant) -> Unit) {
     val state by session.state.collectAsStateWithLifecycle()
     var follow by rememberSaveable(state.plan,state.team) { mutableStateOf(true) }
     val route=remember(state.route,state.routeRevision) { state.route?.mapRoute(state.organization,"navigation-${state.routeRevision}") }
