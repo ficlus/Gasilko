@@ -1,5 +1,7 @@
 package si.gasilko.app.feature.hydrants.data
 
+import si.gasilko.app.feature.map.navigation.*
+
 import androidx.room.withTransaction
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.sync.Mutex
@@ -46,6 +48,7 @@ class RoomHydrantRepository(
         try { scheduleSync(actor,org) } catch(_: Exception) { android.util.Log.w("HydrantSync","schedule failed; skip retained") }
         Unit
     }
+    override suspend fun navigatePlan(request: NavigationRequest) = plans.navigate(request)
     override suspend fun routePlan(org: String, change: PlanRouting) = plans.route(org,change)
     override suspend fun assignPlan(org: String, change: PlanAssignment) = plans.assign(org,change)
     override suspend fun savePlan(org: String, change: PlanSave) = plans.save(org,change)

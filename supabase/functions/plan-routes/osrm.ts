@@ -1,7 +1,7 @@
-import { RoutingError, type Point, type Matrix, type RoadPath, type RoadProvider } from "./provider.ts";
+import { RoutingError, type Point, type Matrix, type RoadPath, type RoadProvider, type NavigationLeg } from "./provider.ts";
 
 // Keep maneuver/leg parsing at the provider boundary for a later navigation feature.
-type Step = { name: string; distance: number; duration: number; geometry: { type: string; coordinates: Point[] }; maneuver: unknown };
+type Step = { name: string; distance: number; duration: number; geometry: { type: string; coordinates: Point[] }; maneuver: { type: string; modifier?: string; location: Point } };
 type Leg = { distance: number; duration: number; steps?: Step[] };
 type Route = { distance: number; duration: number; geometry: { type: string; coordinates: Point[] }; legs: Leg[] };
 const point = (p: unknown): p is Point => Array.isArray(p) && p.length === 2 &&
@@ -85,14 +85,27 @@ export class OsrmRoutingProvider implements RoadProvider {
     }
     return { times: data.durations, distances: data.distances };
   }
-  async route(points: Point[]): Promise<RoadPath> {
-    const data = await this.get("route", points, "overview=full&geometries=geojson&steps=false&alternatives=false");
+  async route(points: Point[], navigation = false): Promise<RoadPath> {
+    const data = await this.get("route", points, `overview=full&geometries=geojson&steps=${navigation}&alternatives=false`);
     const route: Route | undefined = data.routes?.[0];
     const snapped = data.waypoints?.map((w: { location: Point }) => w.location);
     if (!route || !positive(route.distance) || !positive(route.duration) || route.geometry?.type !== "LineString" ||
       !Array.isArray(route.geometry.coordinates) || !route.geometry.coordinates.every(point) ||
       !Array.isArray(snapped) || snapped.length !== points.length || !snapped.every(point) ||
       (route.distance > 0 && route.geometry.coordinates.length < 2)) throw new RoutingError("ROUTE_PROVIDER", 502);
-    return { distance: route.distance, seconds: route.duration, coordinates: route.geometry.coordinates, snapped };
+    const legs: NavigationLeg[] = navigation && Array.isArray(route.legs) ? route.legs.map(leg => {
+      if (!positive(leg.distance) || !positive(leg.duration)) throw new RoutingError("ROUTE_PROVIDER", 502);
+      const steps = (leg.steps ?? []).map(step => {
+        if (!positive(step.distance) || !positive(step.duration) || !Array.isArray(step.geometry?.coordinates) ||
+          !step.geometry.coordinates.every(point) || !point(step.maneuver?.location)) throw new RoutingError("ROUTE_PROVIDER", 502);
+        return { coordinates: step.geometry.coordinates, distance: step.distance, seconds: step.duration,
+          road: typeof step.name === "string" ? step.name.slice(0, 300) : "",
+          type: typeof step.maneuver.type === "string" ? step.maneuver.type.slice(0, 40) : "continue",
+          modifier: typeof step.maneuver.modifier === "string" ? step.maneuver.modifier.slice(0, 40) : "",
+          location: step.maneuver.location };
+      });
+      return { distance: leg.distance, seconds: leg.duration, steps };
+    }) : [];
+    return { distance: route.distance, seconds: route.duration, coordinates: route.geometry.coordinates, snapped, legs };
   }
 }

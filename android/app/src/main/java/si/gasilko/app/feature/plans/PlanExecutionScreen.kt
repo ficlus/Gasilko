@@ -17,12 +17,14 @@ import si.gasilko.app.core.ui.*
 import si.gasilko.app.feature.hydrants.domain.*
 import si.gasilko.app.feature.hydrants.presentation.*
 import si.gasilko.app.feature.map.MapScreen
+import si.gasilko.app.feature.map.navigation.NavigationScreen
 import si.gasilko.app.feature.photos.presentation.PermanentHydrantPhoto
 
 @Composable
 @OptIn(ExperimentalLayoutApi::class)
 fun PlanExecutionScreen(model: HydrantViewModel,query: HydrantQuery,initialPlan: String?=null,back: ()->Unit) {
     val registry by model.state.collectAsStateWithLifecycle()
+    val navigation by model.navigation.state.collectAsStateWithLifecycle()
     val flow=remember(model,query) { model.planData(query) }
     val view by flow.collectAsStateWithLifecycle(initialValue=PlanViewData())
     val data=view.data
@@ -30,8 +32,8 @@ fun PlanExecutionScreen(model: HydrantViewModel,query: HydrantQuery,initialPlan:
     val online=planNetworkAvailable()
     var reassigning by remember { mutableStateOf<PlanItem?>(null) }
     var historyItem by remember { mutableStateOf<String?>(null) }
-    var planId by remember { mutableStateOf(initialPlan) }
-    var teamId by remember { mutableStateOf<String?>(null) }
+    var planId by remember { mutableStateOf(navigation.plan.takeIf { navigation.active } ?: initialPlan) }
+    var teamId by remember { mutableStateOf(navigation.team.takeIf { navigation.active }) }
     var map by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<RegistryError?>(null) }
@@ -68,6 +70,25 @@ fun PlanExecutionScreen(model: HydrantViewModel,query: HydrantQuery,initialPlan:
     val next=stops.firstOrNull { it.inspectionId==null && it.skipReason==null } ?: stops.firstOrNull { it.inspectionId==null }
     val route=data.routes.find { it.planId==plan?.id && it.teamId==selected }
     LaunchedEffect(plan?.id,selected,route?.valid) { if(route==null)map=false }
+    val remaining=stops.filter { it.inspectionId==null }.map { it.id }.toSet()
+    val navigationReady=route?.valid==true && stops.none { it.id in data.pendingItems } &&
+        data.reassignmentRequests.none { it.context.planId==plan?.id }
+    LaunchedEffect(plan,selected,route,remaining,navigationReady,view.error,canExecute) {
+        if(navigation.active) {
+            if(navigation.organization!=query.organization || view.error in listOf(RegistryError.EXPIRED,RegistryError.FORBIDDEN) ||
+                (!registry.manages && data.plans.any { it.id==navigation.plan } && navigation.team !in data.executableTeams) ||
+                (data.plans.any { it.id==navigation.plan && it.status!="ACTIVE" }) ||
+                (plan!=null && (navigation.plan!=plan.id || navigation.team!=selected || !canExecute)))model.navigation.stop()
+            else if(plan!=null)model.navigation.updatePlan(plan.version,route?.calculatedAt.orEmpty(),navigationReady,remaining)
+        }
+    }
+    if(navigation.active && plan!=null && navigation.plan==plan.id && navigation.team==selected && canExecute && view.error==null) {
+        NavigationScreen(model.navigation,view.candidates.hydrants.filter { h -> stops.any { it.hydrantId==h.id } },stops,route,
+            onOpen={id -> stops.find { it.hydrantId==id }?.let { item -> run { model.openPlanStop(query.organization,plan.id,item.id) } } },
+            canOpen={id -> !busy && stops.any { it.hydrantId==id && data.reassignmentRequests.none { r -> r.context.itemId==it.id } } },
+            photo={h -> PermanentHydrantPhoto(model,h.organization,h.id)})
+        return
+    }
     val routeLabels=remember(route) { route?.orderedStops().orEmpty().associateBy { it.hydrantId } }
     if(map && route!=null && view.error==null) {
         MapScreen(onBack={map=false},
@@ -113,6 +134,9 @@ fun PlanExecutionScreen(model: HydrantViewModel,query: HydrantQuery,initialPlan:
                         ExecutionProgress(all.filter { it.teamId==id })
                     }
                     item {
+                        if(canExecute)TextButton(onClick={selected?.let { team ->
+                            model.startNavigation(query.organization,plan.id,team,plan.version,route?.calculatedAt.orEmpty())
+                        }},enabled=!busy && online && navigationReady && remaining.isNotEmpty()) { Text(stringResource(R.string.nav_start)) }
                         if(route?.valid==false)FieldBanner(stringResource(R.string.routes_stale),FieldTone.WARNING)
                         if(route!=null)TextButton(onClick={map=true},enabled=!busy) { Text(stringResource(R.string.routes_map)) }
                         else FieldBanner(stringResource(R.string.execution_no_route))

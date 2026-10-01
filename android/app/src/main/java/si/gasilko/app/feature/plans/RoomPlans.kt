@@ -1,5 +1,7 @@
 package si.gasilko.app.feature.plans
 
+import si.gasilko.app.feature.map.navigation.*
+
 import androidx.room.withTransaction
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
@@ -70,6 +72,22 @@ internal class RoomPlans(private val db: RegistryDatabase, private val online: P
         val actor=account();access(actor,org,true)
         val data=online.assignPlan(org,change)
         access(actor,org,true);cache(actor,org,data);data
+    }
+    suspend fun navigate(request: NavigationRequest): NavigationRoute {
+        val actor=account();val org=request.organization;val authority=access(actor,org)
+        val data=db.plans()
+        if(db.teams().teams(actor,org).none { it.value.id==request.team && it.value.active } ||
+            data.plans(actor,org).none { it.value.id==request.plan && it.value.status=="ACTIVE" } ||
+            data.teams(actor,org).none { it.value.planId==request.plan && it.value.teamId==request.team && it.value.active } ||
+            (!authority.role.manages && db.teams().members(actor,org).none { it.value.teamId==request.team && it.value.userId==actor && it.value.active }))
+            throw RegistryFailure(RegistryError.FORBIDDEN)
+        val items=data.items(actor,org).filter { it.value.planId==request.plan && it.value.teamId==request.team }.map { it.value.id }.toSet()
+        if(db.registry().pendingChanges(actor,org).any { it.state !in listOf("SYNCED","RESOLVED") && it.planItemId() in items })
+            throw RegistryFailure(RegistryError.EXECUTION_PENDING)
+        if(data.reassignments(actor,org).any { it.planId==request.plan && it.state=="REQUESTED" })
+            throw RegistryFailure(RegistryError.REASSIGNMENT_PENDING)
+        val result=online.navigatePlan(request)
+        access(actor,org);return result.also { check(actor) }
     }
     suspend fun route(org: String,change: PlanRouting): PlanData = remote.withLock {
         val actor=account();val authority=access(actor,org)
