@@ -1,5 +1,7 @@
 package si.gasilko.app.feature.hydrants.presentation
 
+import si.gasilko.app.feature.map.navigation.*
+
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.*
@@ -36,6 +38,7 @@ class HydrantViewModel(private val repository: HydrantRepository, private val in
     private val scope get() = injectedScope ?: viewModelScope
     private val mutableState = MutableStateFlow(RegistryState())
     val state = mutableState.asStateFlow()
+    internal val navigation by lazy { NavigationSession(scope) { input -> teamAccess(input.organization) { repository.navigatePlan(input) } } }
     private suspend fun <T> teamAccess(org: String, action: suspend ()->T): T {
         val stamp=generation
         if(state.value.organization?.id!=org)throw CancellationException()
@@ -84,7 +87,12 @@ class HydrantViewModel(private val repository: HydrantRepository, private val in
     suspend fun activatePlan(org: String,change: PlanAssignment) = teamAccess(org) { repository.activatePlan(org,change) }
     suspend fun skipPlanItem(org: String,change: PlanSkip) = teamAccess(org) { repository.skipPlanItem(org,change) }
     suspend fun reassignPlanItem(org: String,change: PlanReassign) = teamAccess(org) { repository.reassignPlanItem(org,change) }
-    fun leaveExecution() { mutableState.value=state.value.copy(executionPlanId=null) }
+    internal fun startNavigation(org: String,plan: String,team: String,version: Long,key: String) {
+        if(state.value.organization?.id!=org || !state.value.writable)return
+        mutableState.value=state.value.copy(executionPlanId=plan)
+        navigation.start(org,plan,team,version,key)
+    }
+    fun leaveExecution() { navigation.stop();mutableState.value=state.value.copy(executionPlanId=null) }
     suspend fun openPlanStop(org: String,plan: String,item: String) {
         val (row,hydrant)=teamAccess(org) {
             val row=repository.planStop(org,plan,item)
@@ -370,7 +378,7 @@ class HydrantViewModel(private val repository: HydrantRepository, private val in
                 }
         }
     }
-    fun clear() { state.value.inspectionDraft?.let { discardStaged(it) }; generation++; photos.clear(); job?.cancel(); historyJob?.cancel(); repository.setActiveOrganization(null); mutableSync.value=RegistrySyncState(); mutableState.value=RegistryState() }
+    fun clear() { navigation.stop();state.value.inspectionDraft?.let { discardStaged(it) }; generation++; photos.clear(); job?.cancel(); historyJob?.cancel(); repository.setActiveOrganization(null); mutableSync.value=RegistrySyncState(); mutableState.value=RegistryState() }
     fun syncNow() {
         val s = state.value; val org = s.organization ?: return
         if(!s.writable || s.loading || s.mutating || sync.value.phase == SyncPhase.SYNCING) return
@@ -445,7 +453,7 @@ class HydrantViewModel(private val repository: HydrantRepository, private val in
     fun switchOrganization(id: String) {
         if(state.value.mutating || state.value.form!=null || state.value.inspectionDraft!=null || state.value.loading) return
         val org=state.value.organizations.find { it.id==id } ?: return
-        state.value.inspectionDraft?.let { discardStaged(it) }; generation++; photos.clear(); job?.cancel();historyJob?.cancel()
+        navigation.stop();state.value.inspectionDraft?.let { discardStaged(it) }; generation++; photos.clear(); job?.cancel();historyJob?.cancel()
         repository.setActiveOrganization(null)
         mutableState.value=RegistryState(organizations=state.value.organizations,organization=org)
         refresh()

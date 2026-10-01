@@ -1,3 +1,4 @@
+import { navigationRoute } from "./navigation.ts";
 import { OsrmRoutingProvider } from "./osrm.ts";
 import { GraphHopper, RoutingError, type Point, type RoadPath, type RoadProvider } from "./provider.ts";
 import { drivingOrder } from "./optimize.ts";
@@ -70,9 +71,9 @@ Deno.serve(async req => {
       throw new RoutingError("VALIDATION", 400);
     // Ignore client geometry, stops, provider URLs and actor IDs entirely.
     const action = body.request.action ?? "ROUTE";
-    if (!["ROUTE", "ROUTE_REMAINING"].includes(action)) throw new RoutingError("VALIDATION", 400);
+    if (!["ROUTE", "ROUTE_REMAINING", "NAVIGATE"].includes(action)) throw new RoutingError("VALIDATION", 400);
     if (body.request.team_id != null && !uuid.test(body.request.team_id)) throw new RoutingError("VALIDATION", 400);
-    const request = { ...(body.request.team_id ? { team_id: body.request.team_id } : {}), id: body.request.id, version: body.request.version, operation_id: body.request.operation_id, action };
+    const request = { ...(body.request.team_id ? { team_id: body.request.team_id } : {}), id: body.request.id, version: body.request.version, operation_id: body.request.operation_id, action: action === "NAVIGATE" ? "ROUTE_REMAINING" : action };
     const url = Deno.env.get("SUPABASE_URL"), anon = Deno.env.get("SUPABASE_ANON_KEY");
     const service = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY"), key = Deno.env.get("GRAPHHOPPER_API_KEY");
     if (!url || !anon || !service) throw new RoutingError("ROUTE_CONFIGURATION", 503);
@@ -98,21 +99,36 @@ Deno.serve(async req => {
       }
       const text = await response.text(); return text ? JSON.parse(text) : null;
     }
+    const navigating = action === "NAVIGATE";
+    if (navigating && (!request.team_id || !Array.isArray(body.origin) || body.origin.length !== 2 ||
+      !body.origin.every((v: unknown) => typeof v === "number" && Number.isFinite(v)) ||
+      Math.abs(body.origin[0]) > 180 || Math.abs(body.origin[1]) > 90)) throw new RoutingError("ROUTE_COORDINATES");
     const prepared = await rpc("prepare_plan_routes", { organization: body.organization, request });
+    if (navigating && prepared.acknowledged) throw new RoutingError("CONFLICT", 409);
+    const snapshot = navigating ? await rpc("read_inspection_plans", { organization: body.organization }) : null;
+    const calculateRequest = (provider: RoadProvider) => navigating
+      ? navigationRoute(prepared.input, snapshot, body.origin, provider)
+      : calculate(prepared.input as Input, provider);
     if (!prepared.acknowledged) {
       const base = Deno.env.get("OSRM_BASE_URL"), username = Deno.env.get("OSRM_USERNAME"), password = Deno.env.get("OSRM_PASSWORD");
       const providerSignal = () => AbortSignal.any([signal, AbortSignal.timeout(45_000)]);
       let results;
       if (base && username && password) {
-        try { results = await calculate(prepared.input as Input, new OsrmRoutingProvider(base, username, password, providerSignal())); }
+        try { results = await calculateRequest(new OsrmRoutingProvider(base, username, password, providerSignal())); }
         catch (error) {
           // Only transport/provider availability failures allow a fresh provider calculation.
           if (!(error instanceof RoutingError) || error.code !== "ROUTE_PROVIDER" || !key || signal.aborted) throw error;
-          results = await calculate(prepared.input as Input, new GraphHopper(key, providerSignal()));
+          results = await calculateRequest(new GraphHopper(key, providerSignal()));
         }
       } else {
         if (base || username || password || !key) throw new RoutingError("ROUTE_CONFIGURATION", 503);
-        results = await calculate(prepared.input as Input, new GraphHopper(key, providerSignal()));
+        results = await calculateRequest(new GraphHopper(key, providerSignal()));
+      }
+      if (navigating) {
+        // Authorization, version, completion and assignment are checked again after provider latency.
+        const current = await rpc("prepare_plan_routes", { organization: body.organization, request });
+        if (JSON.stringify(current.input) !== JSON.stringify(prepared.input)) throw new RoutingError("CONFLICT", 409);
+        return reply(results); // Ephemeral: never commit current GPS, session geometry or steps.
       }
       await rpc("commit_plan_routes", { actor: user.id, organization: body.organization, request, input: prepared.input, results }, true);
     }

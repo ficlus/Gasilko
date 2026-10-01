@@ -61,8 +61,13 @@ fun MapScreen(onBack: () -> Unit, hydrants: List<Hydrant>, onOpenHydrant: ((Stri
     photoPreview: @Composable (Hydrant)->Unit = {}, canOpenHydrant: (String)->Boolean = { true },
     completedHydrants: Set<String> = emptySet(), routeHydrantIds: Set<String>? = null,
     completedRouteNumbers: Map<String,Int> = emptyMap(),
-    onSelectStart: ((Double,Double)->Unit)? = null, initialStart: GeoPoint? = null) {
+    onSelectStart: ((Double,Double)->Unit)? = null, initialStart: GeoPoint? = null,
+    navigationMode: Boolean=false, navigationContent: @Composable ()->Unit={},
+    onLocationUpdate: (Location?)->Unit={}, followUser: Boolean=false, onUserPan: ()->Unit={},
+    onRecenter: ()->Unit={}, requestLocationKey: String?=null) {
     val lifecycle = LocalLifecycleOwner.current.lifecycle
+    val userPan by rememberUpdatedState(onUserPan)
+    var lastFollowed by remember { mutableLongStateOf(0L) }
     val routeData=remember(route,completedHydrants,routeHydrantIds,completedRouteNumbers,hydrants) {
         route?.let { routeMapData(it,completedHydrants,routeHydrantIds,completedRouteNumbers,hydrants) }
     }
@@ -117,7 +122,8 @@ fun MapScreen(onBack: () -> Unit, hydrants: List<Hydrant>, onOpenHydrant: ((Stri
                 TextButton(onClick=::back) { ActionLabel(stringResource(R.string.h_back),R.drawable.ic_field_arrow_back) }
                 Text(stringResource(R.string.map_title), Modifier.padding(top=12.dp), style=MaterialTheme.typography.titleLarge)
             }
-            FlowRow(Modifier.padding(horizontal=16.dp), horizontalArrangement=Arrangement.spacedBy(12.dp)) {
+            navigationContent()
+            if(!navigationMode)FlowRow(Modifier.padding(horizontal=16.dp), horizontalArrangement=Arrangement.spacedBy(12.dp)) {
                 HydrantStatus.entries.forEach { status ->
                     Row(horizontalArrangement=Arrangement.spacedBy(4.dp)) {
                         Text("●",Modifier.clearAndSetSemantics {},color=Color(HydrantMapLayers.color(status)))
@@ -132,14 +138,15 @@ fun MapScreen(onBack: () -> Unit, hydrants: List<Hydrant>, onOpenHydrant: ((Stri
                 }
             }
             if(dataLoading)LinearProgressIndicator(Modifier.fillMaxWidth())
-            LocationControls(hydrants, onLocation={location=it}, onCenter={cancelFocus();centerRequested=true},
+            LocationControls(hydrants, onLocation={location=it;onLocationUpdate(it)}, onCenter={cancelFocus();centerRequested=true;onRecenter()},
+                requestLocationKey=requestLocationKey,
                 dataLoading=dataLoading,
                 onUseLocation=onAddHydrant?.let { { fix: Location ->
                     if(canCreate) { cancelFocus();addHydrant?.invoke(fix.latitude,fix.longitude,fix.accuracy) }
                 } },useLocationLabel=R.string.h_add,actionEnabled=creationEnabled,
                 onUnavailable={centerRequested=false},
                 onSelect={ h -> selectedId=h.id;cancelFocus();focus=GeoPoint(h.latitude!!,h.longitude!!) },
-                additionalActions={ OfflineMapControls(displayedStyle, visibleBounds={
+                additionalActions={ if(!navigationMode)OfflineMapControls(displayedStyle, visibleBounds={
                     if(loading || failed || !valid) null else saved.view?.takeIf { !it.released && it.width>0 && it.height>0 }
                         ?.nativeMap?.projection?.visibleRegion?.latLngBounds
                 }, onShow={ region ->
@@ -154,10 +161,10 @@ fun MapScreen(onBack: () -> Unit, hydrants: List<Hydrant>, onOpenHydrant: ((Stri
                 Text(stringResource(R.string.routes_completed_legend),Modifier.padding(horizontal=16.dp))
                 if(!route.valid)FieldBanner(stringResource(R.string.routes_stale),FieldTone.WARNING)
             }
-            if(routeData?.numbers?.size==1)Text(stringResource(R.string.routes_single_stop),Modifier.padding(horizontal=16.dp))
+            if(!navigationMode && routeData?.numbers?.size==1)Text(stringResource(R.string.routes_single_stop),Modifier.padding(horizontal=16.dp))
             else if(routeData!=null && !routeData.hasRoad && routeData.numbers.isNotEmpty())
                 Text(stringResource(R.string.routes_no_road_geometry),Modifier.padding(horizontal=16.dp))
-            if(!dataLoading && dataError==null && route==null) {
+            if(!navigationMode && !dataLoading && dataError==null && route==null) {
                 val notice=when { hydrants.isEmpty()->R.string.map_empty;validCount==0->R.string.map_no_coordinates
                     validCount<hydrants.size->R.string.map_missing_coordinates;else->null }
                 notice?.let { Text(stringResource(it,hydrants.size-validCount),Modifier.padding(horizontal=16.dp),style=MaterialTheme.typography.bodySmall) }
@@ -208,7 +215,7 @@ fun MapScreen(onBack: () -> Unit, hydrants: List<Hydrant>, onOpenHydrant: ((Stri
                                     readyMap=map
                                     nativeMap=map
                                     map.addOnCameraMoveStartedListener { reason ->
-                                        if(reason == MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE) cancelFocus()
+                                        if(reason == MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE) { cancelFocus();userPan() }
                                     }
                                     if(saved.bundle == null) map.cameraPosition = CameraPosition.Builder().target(LatLng(46.15, 14.95)).zoom(6.0).build()
                                     map.addOnMapLongClickListener { point ->
@@ -272,9 +279,9 @@ fun MapScreen(onBack: () -> Unit, hydrants: List<Hydrant>, onOpenHydrant: ((Stri
                             map.moveCamera(CameraUpdateFactory.zoomTo(map.cameraPosition.zoom.coerceIn(
                                 OfflineMapPolicy.MIN_ZOOM.toDouble(),OfflineMapPolicy.MAX_ZOOM.toDouble())))
                         } } }
-                        val target=focus ?: location?.takeIf { centerRequested && freshLocation(it) }?.let { GeoPoint(it.latitude,it.longitude) }
+                        val target=focus ?: location?.takeIf { (centerRequested || (followUser && it.elapsedRealtimeNanos!=lastFollowed)) && freshLocation(it) }?.let { GeoPoint(it.latitude,it.longitude) }
                         view.nativeMap?.let { map -> if(target!=null && renderReady) {
-                            centerRequested=false;focus=null
+                            centerRequested=false;focus=null;lastFollowed=location?.elapsedRealtimeNanos ?: 0L
                             map.moveCamera(CameraUpdateFactory.newLatLngZoom(LatLng(target.latitude,target.longitude),maxOf(map.cameraPosition.zoom,15.0)))
                         } }
                     } }, onReset=null, onRelease={

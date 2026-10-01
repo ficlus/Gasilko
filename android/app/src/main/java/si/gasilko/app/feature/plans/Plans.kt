@@ -1,5 +1,7 @@
 package si.gasilko.app.feature.plans
 
+import si.gasilko.app.feature.map.navigation.*
+
 import kotlinx.coroutines.flow.*
 import kotlinx.serialization.json.*
 import si.gasilko.app.feature.hydrants.domain.*
@@ -82,6 +84,7 @@ data class PlanRouting(val id: String, val version: Long, val operationId: Strin
     }
 }
 interface PlanRepository {
+    suspend fun navigatePlan(request: NavigationRequest): NavigationRoute = throw RegistryFailure(RegistryError.UNAVAILABLE)
     suspend fun reassignPlanItem(org: String, change: PlanReassign): PlanData = throw RegistryFailure(RegistryError.UNAVAILABLE)
     suspend fun activatePlan(org: String, change: PlanAssignment): PlanData = throw RegistryFailure(RegistryError.UNAVAILABLE)
     suspend fun planStop(org: String, plan: String, item: String): PlanItem = throw RegistryFailure(RegistryError.UNAVAILABLE)

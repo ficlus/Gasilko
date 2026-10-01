@@ -92,7 +92,10 @@ fun HydrantScreen(model: HydrantViewModel, requestAccess: ()->Unit = {}, signOut
     val observedSync by model.sync.collectAsStateWithLifecycle()
     val sync = observedSync.takeIf { it.organization == state.organization?.id }
     var showHome by rememberSaveable(state.organization?.id) { mutableStateOf(true) }
-    var planQuery by remember(model,model.photoScope,state.organization?.id) { mutableStateOf<HydrantQuery?>(null) }
+    var planQuery by remember(model,model.photoScope,state.organization?.id) {
+        mutableStateOf<HydrantQuery?>(model.navigation.state.value.takeIf { it.active && it.organization==state.organization?.id }
+            ?.let { state.query.copy(organization=it.organization) })
+    }
     var showTeams by remember(model,model.photoScope,state.organization?.id) { mutableStateOf(false) }
     var showConflicts by remember(state.organization?.id) { mutableStateOf(false) }
     var conflictSequence by remember(state.organization?.id) { mutableStateOf<Long?>(null) }

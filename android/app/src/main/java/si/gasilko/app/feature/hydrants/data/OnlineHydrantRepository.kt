@@ -1,5 +1,7 @@
 package si.gasilko.app.feature.hydrants.data
 
+import si.gasilko.app.feature.map.navigation.*
+
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.exceptions.RestException
@@ -78,6 +80,7 @@ class OnlineHydrantRepository(private val wire: RegistryTransport, private val d
         decodePlanItem(wire.rpc("execute_plan_item",buildJsonObject { put("organization",org);put("request",payload) })
             .jsonObject.getValue("plan_item").jsonObject)
     }
+    override suspend fun navigatePlan(input: NavigationRequest) = request("plans_navigation") { decodeNavigation(wire.routePlan(input.arguments())) }
     override suspend fun routePlan(org: String, change: PlanRouting) = request("plans_route") {
         decodePlans(wire.routePlan(buildJsonObject { put("organization",org);put("request",change.payload()) }))
     }

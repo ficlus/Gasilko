@@ -52,7 +52,7 @@ internal fun LocationControls(hydrants: List<Hydrant>, onLocation: (Location?) -
     onUseLocation: ((Location)->Unit)? = null, useLocationLabel: Int = R.string.h_use_location,
     onUseRequested: ()->Unit = {},
     locationOnly: Boolean = false, actionEnabled: Boolean = true, requestKey: String = "",
-    additionalActions: @Composable () -> Unit = {}) {
+    additionalActions: @Composable () -> Unit = {}, requestLocationKey: String? = null) {
     val context=LocalContext.current
     val lifecycle=LocalLifecycleOwner.current.lifecycle
     var useRequested by rememberSaveable(requestKey) { mutableStateOf(false) }
@@ -104,6 +104,7 @@ internal fun LocationControls(hydrants: List<Hydrant>, onLocation: (Location?) -
             launcher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
         } else { useRequested=false;onUnavailable() }
     }
+    LaunchedEffect(requestLocationKey) { if(requestLocationKey!=null)request() }
     val fix=location.fix?.takeIf(::freshLocation)
     LaunchedEffect(fix,useRequested,actionEnabled,requestKey) {
         if(useRequested && actionEnabled && fix!=null && lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED) &&

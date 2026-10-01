@@ -1,12 +1,15 @@
 // Provider boundary. No raw response, URL, exception or key may reach logs/client/database.
 export type Point = [number, number]; // longitude, latitude
 export type Matrix = { times: number[][]; distances: number[][] };
-export type RoadPath = { distance: number; seconds: number; coordinates: Point[]; snapped: Point[] };
+export type NavigationStep = { coordinates: Point[]; distance: number; seconds: number; road: string;
+  type: string; modifier: string; location: Point };
+export type NavigationLeg = { distance: number; seconds: number; steps: NavigationStep[] };
+export type RoadPath = { distance: number; seconds: number; coordinates: Point[]; snapped: Point[]; legs?: NavigationLeg[] };
 export interface RoadProvider {
   readonly name: string;
   snap(points: Point[]): Promise<Point[]>;
   matrix(points: Point[]): Promise<Matrix>;
-  route(points: Point[]): Promise<RoadPath>;
+  route(points: Point[], navigation?: boolean): Promise<RoadPath>;
 }
 export class RoutingError extends Error {
   constructor(readonly code: string, readonly status = 422) { super(code); }
