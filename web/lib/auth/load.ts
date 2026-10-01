@@ -11,7 +11,8 @@ export async function loadAccount(client: SupabaseClient | null): Promise<Accoun
     if (status.error) return { state: 'ERROR', admin: false };
     const state = accountState(status.data);
     if (state !== 'ACTIVE') return { state, admin: false };
-    const membership = await client.from('user_organizations').select('user_id,organization_id,role').eq('user_id', user.id).eq('role', 'ADMIN');
+    const membership = await client.from('user_organizations').select('user_id,organization_id,role,organizations!inner(active)')
+      .eq('user_id', user.id).in('role', ['ADMIN', 'MANAGER']).eq('organizations.active', true);
     if (membership.error) return { state: 'ERROR', admin: false };
     return { state, admin: canEnterAdmin(state, membership.data ?? [], user.id) };
   } catch { return { state: 'ERROR', admin: false }; }
