@@ -76,9 +76,9 @@ data class PlanAssignment(val id: String, val version: Long, val operationId: St
         put("id",id);put("version",version);put("operation_id",operationId);put("action","ASSIGN")
     }
 }
-data class PlanRouting(val id: String, val version: Long, val operationId: String = UUID.randomUUID().toString(), val remaining: Boolean=false) {
+data class PlanRouting(val id: String, val version: Long, val operationId: String = UUID.randomUUID().toString(), val remaining: Boolean=false,val teamId: String?=null) {
     fun payload() = buildJsonObject {
-        put("id",id);put("version",version);put("operation_id",operationId);put("action",if(remaining)"ROUTE_REMAINING" else "ROUTE")
+        put("id",id);put("version",version);put("operation_id",operationId);put("action",if(remaining)"ROUTE_REMAINING" else "ROUTE");teamId?.let { put("team_id",it) }
     }
 }
 interface PlanRepository {

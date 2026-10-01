@@ -29,9 +29,13 @@ internal suspend fun cachePlanSnapshot(db: RegistryDatabase,actor: String,org: S
     db.plans().plans(accepted.map { PlanEntity(actor,it) })
     db.plans().teams(data.teams.filter { it.planId in ids }.map { PlanTeamEntity(actor,it) })
     cachePlanItems(db,actor,org,data.items.filter { it.planId in ids })
+    val unfinishedSync=db.registry().pendingChanges(actor,org).filter { it.state !in listOf("SYNCED","RESOLVED") }.mapNotNull { it.planItemId() }.toSet()
+    val localItems=db.plans().items(actor,org)
     db.plans().routes(data.routes.filter { it.planId in ids }.map { route ->
         val prior=priorRoutes[route.planId to route.teamId]
-        PlanRouteEntity(actor,if(prior!=null && prior.calculatedAt==route.calculatedAt && !prior.valid)route.copy(valid=false) else route)
+        val localCompletion=localItems.any { it.value.planId==route.planId && it.value.teamId==route.teamId &&
+            it.value.inspectionId!=null && it.value.id in unfinishedSync }
+        PlanRouteEntity(actor,if(localCompletion || (prior!=null && prior.calculatedAt==route.calculatedAt && !prior.valid))route.copy(valid=false) else route)
     })
     val requests=db.plans().reassignments(actor,org).associateBy { it.id }
     db.plans().reassignments(data.reassignments.map { event ->

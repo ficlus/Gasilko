@@ -37,11 +37,11 @@ internal object PlanRoutingRemote {
                 response.status.value==403 -> RegistryError.FORBIDDEN
                 code=="CONFLICT" -> RegistryError.CONFLICT
                 code=="VALIDATION" -> RegistryError.VALIDATION
-                code=="ROUTE_ASSIGNMENTS_REQUIRED" -> RegistryError.ROUTE_ASSIGNMENTS
-                code=="ROUTE_COORDINATES_REQUIRED" -> RegistryError.ROUTE_COORDINATES
+                code in listOf("ROUTE_ASSIGNMENTS_REQUIRED","ROUTE_ASSIGNMENTS") -> RegistryError.ROUTE_ASSIGNMENTS
+                code in listOf("ROUTE_COORDINATES_REQUIRED","ROUTE_COORDINATES") -> RegistryError.ROUTE_COORDINATES
                 code=="ROUTE_UNREACHABLE" -> RegistryError.ROUTE_UNREACHABLE
-                code=="ROUTE_PROVIDER_LIMIT" -> RegistryError.ROUTE_LIMIT
-                code=="ROUTE_NOT_CONFIGURED" -> RegistryError.ROUTE_CONFIGURATION
+                code in listOf("ROUTE_PROVIDER_LIMIT","ROUTE_LIMIT") -> RegistryError.ROUTE_LIMIT
+                code in listOf("ROUTE_NOT_CONFIGURED","ROUTE_CONFIGURATION") -> RegistryError.ROUTE_CONFIGURATION
                 else -> RegistryError.ROUTE_PROVIDER
             }
             throw RegistryFailure(error)
