@@ -59,8 +59,19 @@ export class OsrmRoutingProvider implements RoadProvider {
       while (next < points.length) {
         const index = next++;
         const data = await this.get("nearest", [points[index]], "number=1&radiuses=unlimited");
-        const snapped = data.waypoints?.[0]?.location;
-        if (!point(snapped)) throw new RoutingError("ROUTE_UNREACHABLE");
+         const waypoint = data.waypoints?.[0];
+        const snapped = waypoint?.location;
+        const snapDistance = waypoint?.distance;
+        
+        if (
+          !point(snapped) ||
+          typeof snapDistance !== "number" ||
+          !Number.isFinite(snapDistance) ||
+          snapDistance > 300
+        ) {
+          throw new RoutingError("ROUTE_UNREACHABLE");
+        }
+        
         result[index] = snapped;
       }
     }));
