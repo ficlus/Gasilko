@@ -4,7 +4,7 @@ import { browserClient } from '../../lib/supabase/browser';
 import { dictionary, type Locale } from '../../lib/i18n';
 import { reviewRequest, type ReviewRequest } from '../../lib/access/review';
 
-export function ReviewQueue({ locale, initial }: { locale: Locale; initial: ReviewRequest[] }) {
+export function ReviewQueue({ locale, initial, organization }: { locale: Locale; initial: ReviewRequest[]; organization?: string }) {
   const t = dictionary(locale);
   const [rows, setRows] = useState(initial);
   const [more, setMore] = useState(initial.length === 50);
@@ -13,7 +13,10 @@ export function ReviewQueue({ locale, initial }: { locale: Locale; initial: Revi
   async function load(append: boolean) {
     const client = browserClient();
     if (!client) throw Error();
-    const { data, error } = await client.rpc('list_reviewable_access_requests', { after_id: append ? rows.at(-1)?.id : null });
+    const after_id = append ? rows.at(-1)?.id : null;
+    const { data, error } = organization
+      ? await client.rpc('list_organization_access_reviews', { organization, after_id })
+      : await client.rpc('list_reviewable_access_requests', { after_id });
     if (error) throw Error();
     setRows(append ? [...rows, ...(data ?? [])] : data ?? []);
     setMore(data?.length === 50);

@@ -3,7 +3,7 @@ export function accountState(value: unknown): AccountState {
   return value === 'ACTIVE' || value === 'PENDING_APPROVAL' || value === 'SUSPENDED' || value === 'REJECTED' ? value : 'ERROR';
 }
 export function canEnterAdmin(state: AccountState, memberships: { user_id: string; organization_id: string; role: string }[], userId: string): boolean {
-  return state === 'ACTIVE' && memberships.some(m => m.user_id === userId && m.role === 'ADMIN' && !!m.organization_id);
+  return state === 'ACTIVE' && memberships.some(m => m.user_id === userId && ['ADMIN', 'MANAGER'].includes(m.role) && !!m.organization_id);
 }
 export function errorKey(error: { code?: string; status?: number } | null | undefined) {
   if (error?.code === 'invalid_credentials') return 'invalidCredentials';
