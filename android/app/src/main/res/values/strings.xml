@@ -349,7 +349,7 @@
     <string name="routes_limit">Izračun ni uspel zaradi omejitve ponudnika ali velikosti načrta (največ 20 ekip, 500 hidrantov in 100 lokacij na ekipo z začetkom).</string>
     <string name="routes_configuration">Cestno usmerjanje še ni nastavljeno na strežniku. Obrnite se na skrbnika.</string>
     <string name="routes_provider_error">Izračun rut ni uspel. Preverite povezavo in poskusite znova. Zadnji uspešen izračun ostane shranjen.</string>
-    <string name="routes_attribution">Usmerjanje: GraphHopper · Podatki zemljevida © OpenStreetMap contributors</string>
+    <string name="routes_attribution">Usmerjanje: %1$s · Podatki zemljevida © OpenStreetMap contributors</string>
     <string name="routes_single_stop">Ta ekipa ima en hidrant. Brez začetne lokacije ni voznega odseka med postanki.</string>
     <string name="routes_no_road_geometry">Ni shranjene cestne geometrije. Dostopne točke lahko sovpadajo; po potrebi ponovno izračunajte ruto s povezavo.</string>
     <string name="execution_no_route">Cestna ruta ni izračunana. Delo lahko nadaljujete s seznamom dodeljenih postankov. Ruto lahko izračunate pozneje.</string>
@@ -401,4 +401,10 @@
     <string name="photo_identification">Fotografija hidranta</string>
     <string name="photo_no_permanent">Ni trajne fotografije hidranta</string>
     <string name="map_open_hydrant">Odpri hidrant</string>
+    <string name="plans_my_location">Moja lokacija</string>
+    <string name="plans_pick_start">Izberi na zemljevidu</string>
+    <string name="plans_pick_start_hint">Tapnite zemljevid, da izberete začetno točko. Načrt se ne shrani samodejno.</string>
+    <string name="plans_use_start">Uporabi izbrano začetno točko</string>
+    <string name="routes_stale">Ruta ni posodobljena. Pregled ostane zaključen. Po sinhronizaciji lahko preostalo ruto preračunate prek spleta.</string>
+    <string name="routes_completed_legend">Zeleno: zaključen postanek</string>
 </resources>

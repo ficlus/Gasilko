@@ -72,14 +72,19 @@ internal class RoomPlans(private val db: RegistryDatabase, private val online: P
         access(actor,org,true);cache(actor,org,data);data
     }
     suspend fun route(org: String,change: PlanRouting): PlanData = remote.withLock {
-        val actor=account();access(actor,org,true)
+        val actor=account();val authority=access(actor,org)
+        if(!authority.role.manages && (!change.remaining || change.teamId==null ||
+            db.plans().teams(actor,org).none { it.value.planId==change.id && it.value.teamId==change.teamId && it.value.active } ||
+            db.teams().teams(actor,org).none { it.value.id==change.teamId && it.value.active } ||
+            db.teams().members(actor,org).none { it.value.teamId==change.teamId && it.value.userId==actor && it.value.active }))
+            throw RegistryFailure(RegistryError.FORBIDDEN)
         if(db.plans().reassignments(actor,org).any { it.planId==change.id && it.state=="REQUESTED" })
             throw RegistryFailure(RegistryError.REASSIGNMENT_PENDING)
         if(change.remaining && db.registry().pendingChanges(actor,org).any { it.state !in listOf("SYNCED","RESOLVED") &&
             it.planItemId()!=null && Json.parseToJsonElement(it.payload).jsonObject["plan_id"]?.jsonPrimitive?.content==change.id })
             throw RegistryFailure(RegistryError.EXECUTION_PENDING)
         val data=online.routePlan(org,change)
-        access(actor,org,true);cache(actor,org,data);data
+        access(actor,org);cache(actor,org,data);data
     }
     suspend fun activate(org: String,change: PlanAssignment): PlanData = remote.withLock {
         val actor=account();access(actor,org,true)
@@ -143,6 +148,7 @@ internal class RoomPlans(private val db: RegistryDatabase, private val online: P
         if(row.hydrantId!=hydrant)throw RegistryFailure(RegistryError.VALIDATION)
         if(row.inspectionId==id)return
         if(row.inspectionId!=null || row.executionVersion!=context.version)throw RegistryFailure(RegistryError.EXECUTION_CHANGED)
+        db.plans().staleRoute(actor,org,row.planId,row.teamId!!)
         db.plans().items(listOf(PlanItemEntity(actor,row.copy(executionVersion=row.executionVersion+1,
             inspectionId=id,completedBy=actor,completedAt=Instant.ofEpochMilli(at).toString(),skipReason=null,skippedBy=null,skippedAt=null))))
     }

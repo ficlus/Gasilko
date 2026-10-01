@@ -1,3 +1,4 @@
+import { OsrmRoutingProvider } from "./osrm.ts";
 import { GraphHopper, RoutingError, type Point, type RoadPath, type RoadProvider } from "./provider.ts";
 import { drivingOrder } from "./optimize.ts";
 
@@ -10,7 +11,7 @@ const reply = (body: unknown, status = 200) => new Response(JSON.stringify(body)
 });
 async function calculate(input: Input, provider: RoadProvider) {
   // Bound edge CPU, provider credits and response size. Provider subscription limits may be lower.
-  if (input.teams.length > 20 || input.items.length > 500) throw new RoutingError("ROUTE_PROVIDER_LIMIT");
+  if (input.teams.length > 20 || input.items.length > 500) throw new RoutingError("ROUTE_LIMIT");
   const results = [];
   for (const team of [...input.teams].sort()) {
     const items = input.items.filter(i => i.team === team).sort((a, b) => a.hydrant < b.hydrant ? -1 : a.hydrant > b.hydrant ? 1 : 0);
@@ -21,7 +22,7 @@ async function calculate(input: Input, provider: RoadProvider) {
     }
     const start: Point | null = input.latitude === null ? null : [input.longitude!, input.latitude];
     const points: Point[] = [...(start ? [start] : []), ...items.map(i => [i.longitude, i.latitude] as Point)];
-    if (points.length > 100) throw new RoutingError("ROUTE_PROVIDER_LIMIT");
+    if (points.length > 100) throw new RoutingError("ROUTE_LIMIT");
     const snapped = await provider.snap(points);
     const order = points.length === 1 ? [0] : drivingOrder(await provider.matrix(snapped), input.returnToStart);
     const roadPoints = order.map(i => snapped[i]);
@@ -43,7 +44,7 @@ async function calculate(input: Input, provider: RoadProvider) {
     results.push({ team, provider: provider.name, profile: "car", distance_m: path.distance,
       duration_s: path.seconds, geometry: { type: "FeatureCollection", features }, stops });
   }
-  if (JSON.stringify(results).length > 4_000_000) throw new RoutingError("ROUTE_PROVIDER_LIMIT");
+  if (JSON.stringify(results).length > 4_000_000) throw new RoutingError("ROUTE_LIMIT");
   return results;
 }
 Deno.serve(async req => {
@@ -70,10 +71,11 @@ Deno.serve(async req => {
     // Ignore client geometry, stops, provider URLs and actor IDs entirely.
     const action = body.request.action ?? "ROUTE";
     if (!["ROUTE", "ROUTE_REMAINING"].includes(action)) throw new RoutingError("VALIDATION", 400);
-    const request = { id: body.request.id, version: body.request.version, operation_id: body.request.operation_id, action };
+    if (body.request.team_id != null && !uuid.test(body.request.team_id)) throw new RoutingError("VALIDATION", 400);
+    const request = { ...(body.request.team_id ? { team_id: body.request.team_id } : {}), id: body.request.id, version: body.request.version, operation_id: body.request.operation_id, action };
     const url = Deno.env.get("SUPABASE_URL"), anon = Deno.env.get("SUPABASE_ANON_KEY");
     const service = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY"), key = Deno.env.get("GRAPHHOPPER_API_KEY");
-    if (!url || !anon || !service || !key) throw new RoutingError("ROUTE_NOT_CONFIGURED", 503);
+    if (!url || !anon || !service) throw new RoutingError("ROUTE_CONFIGURATION", 503);
     const signal = AbortSignal.timeout(100_000);
     const auth = await fetch(url + "/auth/v1/user", { headers: { Authorization: authorization, apikey: anon }, signal });
     if (!auth.ok) {
@@ -90,7 +92,7 @@ Deno.serve(async req => {
       if (!response.ok) {
         let error: any = {}; try { error = await response.json(); } catch { /* bounded public code only */ }
         const code = error.code === "42501" ? "FORBIDDEN" : error.message === "PLAN_VERSION_CONFLICT" ? "CONFLICT" :
-          ["ROUTE_COORDINATES_REQUIRED", "ROUTE_ASSIGNMENTS_REQUIRED"].includes(error.message) ? error.message :
+          error.message === "ROUTE_COORDINATES_REQUIRED" ? "ROUTE_COORDINATES" : error.message === "ROUTE_ASSIGNMENTS_REQUIRED" ? "ROUTE_ASSIGNMENTS" :
           response.status === 401 ? "EXPIRED" : error.code?.startsWith("22") ? "VALIDATION" : "SERVER";
         throw new RoutingError(code, code === "FORBIDDEN" ? 403 : code === "EXPIRED" ? 401 : code === "CONFLICT" ? 409 : 422);
       }
@@ -98,7 +100,20 @@ Deno.serve(async req => {
     }
     const prepared = await rpc("prepare_plan_routes", { organization: body.organization, request });
     if (!prepared.acknowledged) {
-      const results = await calculate(prepared.input as Input, new GraphHopper(key, signal));
+      const base = Deno.env.get("OSRM_BASE_URL"), username = Deno.env.get("OSRM_USERNAME"), password = Deno.env.get("OSRM_PASSWORD");
+      const providerSignal = () => AbortSignal.any([signal, AbortSignal.timeout(45_000)]);
+      let results;
+      if (base && username && password) {
+        try { results = await calculate(prepared.input as Input, new OsrmRoutingProvider(base, username, password, providerSignal())); }
+        catch (error) {
+          // Only transport/provider availability failures allow a fresh provider calculation.
+          if (!(error instanceof RoutingError) || error.code !== "ROUTE_PROVIDER" || !key || signal.aborted) throw error;
+          results = await calculate(prepared.input as Input, new GraphHopper(key, providerSignal()));
+        }
+      } else {
+        if (base || username || password || !key) throw new RoutingError("ROUTE_CONFIGURATION", 503);
+        results = await calculate(prepared.input as Input, new GraphHopper(key, providerSignal()));
+      }
       await rpc("commit_plan_routes", { actor: user.id, organization: body.organization, request, input: prepared.input, results }, true);
     }
     // Fresh RLS authorization on the response, even if access changed while GraphHopper was running.
@@ -106,7 +121,7 @@ Deno.serve(async req => {
   } catch (error) {
     if (error instanceof RoutingError) return reply({ error: error.code }, error.status);
     // Do not log/return exceptions: fetch errors may contain the provider key-bearing URL.
-    return reply({ error: "ROUTE_PROVIDER_UNAVAILABLE" }, 502);
+    return reply({ error: "ROUTE_PROVIDER" }, 502);
   }
 });
 

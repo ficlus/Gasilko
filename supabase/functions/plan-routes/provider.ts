@@ -25,9 +25,9 @@ function coordinates(value: unknown): Point[] {
     const delta = () => {
       let result = 0, shift = 0, digit: number;
       do {
-        if (cursor >= encoded.length || shift > 30) throw new RoutingError("ROUTE_PROVIDER_UNAVAILABLE", 502);
+        if (cursor >= encoded.length || shift > 30) throw new RoutingError("ROUTE_PROVIDER", 502);
         digit = encoded.charCodeAt(cursor++) - 63;
-        if (digit < 0 || digit > 63) throw new RoutingError("ROUTE_PROVIDER_UNAVAILABLE", 502);
+        if (digit < 0 || digit > 63) throw new RoutingError("ROUTE_PROVIDER", 502);
         result += (digit & 31) * 2 ** shift; shift += 5;
       } while (digit >= 32);
       return result % 2 ? -(result + 1) / 2 : result / 2;
@@ -35,14 +35,14 @@ function coordinates(value: unknown): Point[] {
     while (cursor < encoded.length) {
       latitude += delta(); longitude += delta();
       const p: Point = [longitude / 100_000, latitude / 100_000];
-      if (!point(p)) throw new RoutingError("ROUTE_PROVIDER_UNAVAILABLE", 502);
+      if (!point(p)) throw new RoutingError("ROUTE_PROVIDER", 502);
       points.push(p);
     }
     return points;
   }
   const line = value as { type?: string; coordinates?: unknown };
   if (line?.type !== "LineString" || !Array.isArray(line.coordinates) || !line.coordinates.every(point))
-    throw new RoutingError("ROUTE_PROVIDER_UNAVAILABLE", 502);
+    throw new RoutingError("ROUTE_PROVIDER", 502);
   return line.coordinates.map((p: Point) => [p[0], p[1]]);
 }
 const distinct = (points: Point[]) => new Set(points.map(p => p.join(","))).size;
@@ -57,18 +57,29 @@ export class GraphHopper implements RoadProvider {
         signal: this.signal, redirect: "error",
       });
       if (!response.ok) {
-        await response.body?.cancel();
-        throw new RoutingError(response.status === 429 || response.status === 413 ? "ROUTE_PROVIDER_LIMIT" :
-          response.status === 400 ? "ROUTE_UNREACHABLE" : "ROUTE_PROVIDER_UNAVAILABLE", 502);
+        // Inspect a bounded diagnostic solely to classify hosted subscription/location limits.
+        const reader = response.body?.getReader(); let detail = "";
+        if (reader) {
+          const decoder = new TextDecoder(); let size = 0;
+          while (size < 16000) {
+            const { value, done } = await reader.read(); if (done) break;
+            detail += decoder.decode(value.subarray(0, 16000 - size)); size += value.length;
+          }
+          await reader.cancel();
+        }
+        const limit = /too many|maximum|max locations|(?:point|location).*limit|limit.*(?:point|location)|subscription|upgrade|package|quota/i.test(detail);
+        throw new RoutingError(limit || [413, 429].includes(response.status) ? "ROUTE_LIMIT" :
+          [401, 403].includes(response.status) ? "ROUTE_CONFIGURATION" :
+          response.status === 400 ? "ROUTE_UNREACHABLE" : "ROUTE_PROVIDER", 502);
       }
       // Bound retained geometry/matrix data; never echo provider bodies.
       const reader = response.body?.getReader();
-      if (!reader) throw new RoutingError("ROUTE_PROVIDER_UNAVAILABLE", 502);
+      if (!reader) throw new RoutingError("ROUTE_PROVIDER", 502);
       const chunks: Uint8Array[] = []; let size = 0;
       while (true) {
         const { value, done } = await reader.read(); if (done) break;
         size += value.length;
-        if (size > 4_000_000) { await reader.cancel(); throw new RoutingError("ROUTE_PROVIDER_LIMIT", 502); }
+        if (size > 4_000_000) { await reader.cancel(); throw new RoutingError("ROUTE_LIMIT", 502); }
         chunks.push(value);
       }
       const bytes = new Uint8Array(size); let offset = 0;
@@ -76,7 +87,7 @@ export class GraphHopper implements RoadProvider {
       return JSON.parse(new TextDecoder().decode(bytes));
     } catch (error) {
       if (error instanceof RoutingError) throw error;
-      throw new RoutingError("ROUTE_PROVIDER_UNAVAILABLE", 502);
+      throw new RoutingError("ROUTE_PROVIDER", 502);
     }
   }
   async matrix(points: Point[]): Promise<Matrix> {
@@ -123,7 +134,7 @@ export class GraphHopper implements RoadProvider {
     const geometry = path.points == null ? [] : coordinates(path.points);
     if (snapped.length !== request.length ||
       ((distinct(snapped) > 1 || path.distance > 0) && distinct(geometry) < 2))
-      throw new RoutingError("ROUTE_PROVIDER_UNAVAILABLE", 502);
+      throw new RoutingError("ROUTE_PROVIDER", 502);
     return { distance: path.distance, seconds: path.time / 1000, coordinates: geometry, snapped };
   }
 }

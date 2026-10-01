@@ -349,7 +349,7 @@
     <string name="routes_limit">Berechnung durch Anbieter- oder Größenlimit abgebrochen (höchstens 20 Teams, 500 Hydranten und 100 Positionen pro Team einschließlich Start).</string>
     <string name="routes_configuration">Die Routenberechnung ist auf dem Server noch nicht eingerichtet. Bitte die Administration kontaktieren.</string>
     <string name="routes_provider_error">Routenberechnung fehlgeschlagen. Verbindung prüfen und erneut versuchen. Die letzte erfolgreiche Berechnung bleibt gespeichert.</string>
-    <string name="routes_attribution">Routing: GraphHopper · Kartendaten © OpenStreetMap contributors</string>
+    <string name="routes_attribution">Routing: %1$s · Kartendaten © OpenStreetMap contributors</string>
     <string name="routes_single_stop">Dieses Team hat einen Hydranten. Ohne Startposition gibt es keine Fahrstrecke zwischen Stopps.</string>
     <string name="routes_no_road_geometry">Keine Straßengeometrie gespeichert. Straßenanschlusspunkte können zusammenfallen; Route bei Bedarf online neu berechnen.</string>
     <string name="execution_no_route">Keine Straßenroute berechnet. Sie können mit der Liste der zugewiesenen Stopps weiterarbeiten. Die Route kann später berechnet werden.</string>
@@ -401,4 +401,10 @@
     <string name="photo_identification">Hydrantenfoto</string>
     <string name="photo_no_permanent">Kein dauerhaftes Hydrantenfoto</string>
     <string name="map_open_hydrant">Hydrant öffnen</string>
+    <string name="plans_my_location">Mein Standort</string>
+    <string name="plans_pick_start">Auf der Karte auswählen</string>
+    <string name="plans_pick_start_hint">Tippen Sie auf die Karte, um den Startpunkt auszuwählen. Der Plan wird nicht automatisch gespeichert.</string>
+    <string name="plans_use_start">Ausgewählten Startpunkt verwenden</string>
+    <string name="routes_stale">Route nicht aktuell. Die Prüfung bleibt abgeschlossen. Nach der Synchronisierung können Sie die verbleibende Route online neu berechnen.</string>
+    <string name="routes_completed_legend">Grün: abgeschlossener Stopp</string>
 </resources>

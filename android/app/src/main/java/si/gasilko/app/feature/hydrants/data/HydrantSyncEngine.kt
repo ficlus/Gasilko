@@ -91,6 +91,25 @@ class HydrantSyncEngine(
             }
             require(server.id == operation.entityId && server.organization == organization && server.version > 0)
             if(!acknowledgeHydrantOperation(database,operation,server,inspection,checkContext,planItem))break
+            // Inspection receipt and queue acknowledgement are durable before this best-effort action.
+            // One attempt per newly acknowledged event; failures remain stale for a manual retry.
+            planItem?.takeIf { it.inspectionId!=null && it.teamId!=null }?.let { item ->
+                try {
+                    checkContext()
+                    val snapshot=online.readPlans(organization)
+                    val plan=snapshot.plans.find { it.id==item.planId && it.status=="ACTIVE" }
+                    if(plan!=null) {
+                        val request=PlanRouting(plan.id,plan.version,
+                            operationId=java.util.UUID.nameUUIDFromBytes(("remaining:"+operation.operationId).toByteArray(Charsets.UTF_8)).toString(),
+                            remaining=true,teamId=item.teamId)
+                        checkContext()
+                        val routed=online.routePlan(organization,request)
+                        checkContext()
+                        cachePlanSnapshot(database,account,organization,routed,checkContext)
+                    }
+                } catch(e: kotlinx.coroutines.CancellationException) { throw e }
+                catch(_: Exception) { /* No retry loop and no inspection/queue rollback. */ }
+            }
         }
         checkContext()
         val plans=online.readPlans(organization)

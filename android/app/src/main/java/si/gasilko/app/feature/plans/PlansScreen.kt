@@ -19,6 +19,8 @@ import si.gasilko.app.feature.hydrants.domain.*
 import si.gasilko.app.feature.hydrants.presentation.*
 import si.gasilko.app.feature.teams.TeamData
 import si.gasilko.app.feature.map.MapScreen
+import si.gasilko.app.feature.map.LocationControls
+import si.gasilko.app.feature.map.domain.GeoPoint
 import si.gasilko.app.feature.photos.presentation.PermanentHydrantPhoto
 import si.gasilko.app.feature.map.RouteAttribution
 import java.time.Instant
@@ -68,6 +70,8 @@ fun PlansScreen(model: HydrantViewModel,query: HydrantQuery,back: ()->Unit) {
     var routing by remember { mutableStateOf<PlanRouting?>(null) }
     var activating by remember { mutableStateOf<PlanAssignment?>(null) }
     var mapTeam by remember { mutableStateOf<String?>(null) }
+    var selectStart by remember { mutableStateOf(false) }
+    var startAccuracy by remember(draft?.id) { mutableStateOf<Float?>(null) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<RegistryError?>(null) }
     var cancel by remember { mutableStateOf(false) }
@@ -146,7 +150,7 @@ fun PlansScreen(model: HydrantViewModel,query: HydrantQuery,back: ()->Unit) {
             } finally { busy=false }
         }
     }
-    fun leave() { if(!busy) { if(mapTeam!=null)mapTeam=null else if(draft!=null)draft=null else back() } }
+    fun leave() { if(!busy) { if(selectStart)selectStart=false else if(mapTeam!=null)mapTeam=null else if(draft!=null)draft=null else back() } }
     BackHandler(onBack=::leave)
     LaunchedEffect(query.organization) { refresh() }
     val data=observed.data
@@ -163,11 +167,20 @@ fun PlansScreen(model: HydrantViewModel,query: HydrantQuery,back: ()->Unit) {
     val unassigned=assignedItems.count { it.teamId==null || it.teamId !in savedTeams }
     val routes=data.routes.filter { it.planId==saved?.id && it.valid && it.teamId in savedTeams }
     val shownRoute=routes.find { it.teamId==mapTeam }
+    if(selectStart && d!=null && editable) {
+        MapScreen(onBack={selectStart=false},hydrants=observed.candidates.hydrants,onOpenHydrant=null,
+            initialStart=d.latitude.replace(',','.').toDoubleOrNull()?.let { lat -> d.longitude.replace(',','.').toDoubleOrNull()?.let { lon -> GeoPoint(lat,lon) } },
+            onSelectStart={lat,lon ->
+                draft=d.copy(latitude=lat.toString(),longitude=lon.toString());startAccuracy=null;selectStart=false
+            })
+        return
+    }
     if(shownRoute!=null && observed.error==null && unchanged) {
         val routeIds=remember(shownRoute) { shownRoute.orderedStops().map { it.hydrantId }.toSet() }
         MapScreen(onBack={mapTeam=null},
             hydrants=observed.candidates.hydrants.filter { it.id in routeIds },
             onOpenHydrant=model::open,route=shownRoute,
+            completedHydrants=assignedItems.filter { it.inspectionId!=null }.map { it.hydrantId }.toSet(),
             canOpenHydrant={!busy && !registry.loading && !registry.mutating},
             photoPreview={ h -> PermanentHydrantPhoto(model,h.organization,h.id) })
         return
@@ -247,7 +260,7 @@ fun PlansScreen(model: HydrantViewModel,query: HydrantQuery,back: ()->Unit) {
                         if(d.editable)TextButton(onClick=::route,enabled=editable && unchanged && unassigned==0 &&
                             assignedItems.isNotEmpty() && savedTeams.isNotEmpty()) { Text(stringResource(R.string.routes_calculate)) }
                         if(routes.isEmpty())Text(stringResource(R.string.routes_missing))
-                        else RouteAttribution()
+                        else RouteAttribution(routes.map { it.provider }.distinct().joinToString(" / "))
                     }
                     items(routes,key={"route-"+it.teamId}) { route ->
                         Text(observed.teams.teams.find { it.id==route.teamId }?.name ?: route.teamId.take(8),
@@ -333,10 +346,24 @@ fun PlansScreen(model: HydrantViewModel,query: HydrantQuery,back: ()->Unit) {
                     }
                     item {
                         SectionHeading(stringResource(R.string.plans_start))
+                        LocationControls(emptyList(),onLocation={},onCenter={},onSelect={},onUnavailable={},
+                            locationOnly=true,actionEnabled=editable,requestKey=d.id+":"+d.latitude+":"+d.longitude,
+                            useLocationLabel=R.string.plans_my_location,
+                            onUseLocation={fix ->
+                                if(editable && draft?.id==d.id && draft?.latitude==d.latitude && draft?.longitude==d.longitude) {
+                                    draft=d.copy(latitude=fix.latitude.toString(),longitude=fix.longitude.toString())
+                                    startAccuracy=fix.takeIf { it.hasAccuracy() }?.accuracy
+                                }
+                            })
+                        TextButton(onClick={selectStart=true},enabled=editable) { Text(stringResource(R.string.plans_pick_start)) }
+                        startAccuracy?.let { accuracy ->
+                            Text(stringResource(R.string.h_coordinate_accuracy,accuracy))
+                            if(accuracy>50f)FieldBanner(stringResource(R.string.h_location_low_accuracy),FieldTone.WARNING)
+                        }
                         OperationalCard {
-                            OutlinedTextField(d.latitude,{draft=d.copy(latitude=it)},enabled=editable,
+                            OutlinedTextField(d.latitude,{startAccuracy=null;draft=d.copy(latitude=it)},enabled=editable,
                                 label={Text(stringResource(R.string.h_latitude))},singleLine=true,modifier=Modifier.fillMaxWidth())
-                            OutlinedTextField(d.longitude,{draft=d.copy(longitude=it)},enabled=editable,
+                            OutlinedTextField(d.longitude,{startAccuracy=null;draft=d.copy(longitude=it)},enabled=editable,
                                 label={Text(stringResource(R.string.h_longitude))},singleLine=true,modifier=Modifier.fillMaxWidth())
                             Row(Modifier.fillMaxWidth().heightIn(min=48.dp),verticalAlignment=Alignment.CenterVertically) {
                                 Checkbox(d.returnToStart,{draft=d.copy(returnToStart=it)},enabled=editable)

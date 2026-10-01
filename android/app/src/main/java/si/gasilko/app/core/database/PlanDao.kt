@@ -20,6 +20,8 @@ data class PlanReassignmentRecord(val account: String,val organization: String,v
 data class PlanCoverage(val account: String,val organization: String,val hydrantId: String,val version: Long,val refreshedAt: Long)
 data class PlanInspectionLast(val hydrantId: String,val completedAt: Long?,val issues: Int)
 @Dao interface PlanDao {
+    @Query("UPDATE inspection_plan_routes SET valid=0 WHERE account=:account AND organization=:org AND planId=:plan AND teamId=:team")
+    suspend fun staleRoute(account: String,org: String,plan: String,team: String)
     @Upsert suspend fun reassignments(rows: List<PlanReassignmentRecord>)
     @Query("SELECT * FROM plan_reassignments WHERE account=:account AND organization=:org ORDER BY id")
     suspend fun reassignments(account: String,org: String): List<PlanReassignmentRecord>

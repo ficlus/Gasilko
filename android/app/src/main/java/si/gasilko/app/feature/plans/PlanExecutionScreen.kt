@@ -66,16 +66,17 @@ fun PlanExecutionScreen(model: HydrantViewModel,query: HydrantQuery,initialPlan:
     val stops=all.filter { it.teamId==selected }.sortedWith(compareBy<PlanItem> { it.inspectionId!=null }
         .thenBy { it.routeOrder ?: Int.MAX_VALUE }.thenBy { it.hydrantId })
     val next=stops.firstOrNull { it.inspectionId==null && it.skipReason==null } ?: stops.firstOrNull { it.inspectionId==null }
-    val route=data.routes.find { it.planId==plan?.id && it.teamId==selected && it.valid }
+    val route=data.routes.find { it.planId==plan?.id && it.teamId==selected }
     LaunchedEffect(plan?.id,selected,route?.valid) { if(route==null)map=false }
     val routeLabels=remember(route) { route?.orderedStops().orEmpty().associateBy { it.hydrantId } }
     if(map && route!=null && view.error==null) {
         MapScreen(onBack={map=false},
-            hydrants=view.candidates.hydrants.filter { h -> routeLabels.containsKey(h.id) },
+            hydrants=view.candidates.hydrants.filter { h -> stops.any { it.hydrantId==h.id } },
             onOpenHydrant={ id -> stops.find { it.hydrantId==id }?.let { item ->
                 if(canExecute && !busy && data.reassignmentRequests.none { it.context.itemId==item.id })
                     run { model.openPlanStop(query.organization,item.planId,item.id) }
-            } },route=route,
+            } },route=route,completedHydrants=stops.filter { it.inspectionId!=null }.map { it.hydrantId }.toSet(),routeHydrantIds=stops.map { it.hydrantId }.toSet(),
+            completedRouteNumbers=stops.filter { it.inspectionId!=null && it.routeOrder!=null }.associate { it.hydrantId to it.routeOrder!! },
             canOpenHydrant={ id -> canExecute && !busy && stops.any { item ->
                 item.hydrantId==id && data.reassignmentRequests.none { it.context.itemId==item.id }
             } },
@@ -106,18 +107,19 @@ fun PlanExecutionScreen(model: HydrantViewModel,query: HydrantQuery,initialPlan:
                         if(!online)FieldBanner(stringResource(R.string.reassign_offline),FieldTone.WARNING)
                     }
                     items(teamIds,key={"team-"+it}) { id ->
-                        SecondaryAction(onClick={teamId=id},enabled=!busy,modifier=Modifier.fillMaxWidth()) {
+                        SecondaryAction(onClick={teamId=id;routeRequest=null},enabled=!busy,modifier=Modifier.fillMaxWidth()) {
                             Text((if(selected==id)"✓ " else "")+(view.teams.teams.find { it.id==id }?.name ?: id.take(8)))
                         }
                         ExecutionProgress(all.filter { it.teamId==id })
                     }
                     item {
+                        if(route?.valid==false)FieldBanner(stringResource(R.string.routes_stale),FieldTone.WARNING)
                         if(route!=null)TextButton(onClick={map=true},enabled=!busy) { Text(stringResource(R.string.routes_map)) }
                         else FieldBanner(stringResource(R.string.execution_no_route))
-                        if(registry.manages)TextButton(onClick={run {
-                            val request=routeRequest ?: PlanRouting(plan.id,plan.version,remaining=true).also { routeRequest=it }
+                        if(canExecute)TextButton(onClick={run {
+                            val request=routeRequest ?: PlanRouting(plan.id,plan.version,remaining=true,teamId=selected).also { routeRequest=it }
                             model.routePlan(query.organization,request);routeRequest=null
-                        }},enabled=!busy) { Text(stringResource(R.string.execution_reroute)) }
+                        }},enabled=!busy && online) { Text(stringResource(R.string.execution_reroute)) }
                         if(all.any { it.id in data.pendingItems })FieldBanner(stringResource(R.string.execution_pending),FieldTone.WARNING)
                         data.reassignmentRequests.filter { it.context.planId==plan.id }.forEach { request ->
                             Text(stringResource(R.string.reassign_pending))

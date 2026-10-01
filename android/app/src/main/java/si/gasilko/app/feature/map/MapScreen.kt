@@ -58,9 +58,16 @@ import java.net.URI
 fun MapScreen(onBack: () -> Unit, hydrants: List<Hydrant>, onOpenHydrant: ((String) -> Unit)?,
     dataLoading: Boolean = false, dataError: RegistryError? = null, styleUrl: String = BuildConfig.MAP_STYLE_URL,
     onAddHydrant: ((Double,Double,Float?)->Unit)? = null, creationEnabled: Boolean = true, route: PlanRoute? = null,
-    photoPreview: @Composable (Hydrant)->Unit = {}, canOpenHydrant: (String)->Boolean = { true }) {
+    photoPreview: @Composable (Hydrant)->Unit = {}, canOpenHydrant: (String)->Boolean = { true },
+    completedHydrants: Set<String> = emptySet(), routeHydrantIds: Set<String>? = null,
+    completedRouteNumbers: Map<String,Int> = emptyMap(),
+    onSelectStart: ((Double,Double)->Unit)? = null, initialStart: GeoPoint? = null) {
     val lifecycle = LocalLifecycleOwner.current.lifecycle
-    val routeData=remember(route) { route?.let(::routeMapData) }
+    val routeData=remember(route,completedHydrants,routeHydrantIds,completedRouteNumbers,hydrants) {
+        route?.let { routeMapData(it,completedHydrants,routeHydrantIds,completedRouteNumbers,hydrants) }
+    }
+    val selectingStart by rememberUpdatedState(onSelectStart!=null)
+    var startPoint by remember { mutableStateOf(initialStart?.takeIf { it.valid }) }
     val currentRoute by rememberUpdatedState(routeData)
     val routeStops=remember(route) { route?.orderedStops().orEmpty().associateBy { it.hydrantId } }
     var fittedRoute by rememberSaveable { mutableStateOf<String?>(null) }
@@ -71,7 +78,7 @@ fun MapScreen(onBack: () -> Unit, hydrants: List<Hydrant>, onOpenHydrant: ((Stri
     var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
     var location by remember { mutableStateOf<Location?>(null) }
     var centerRequested by rememberSaveable { mutableStateOf(false) }
-    var focus by remember { mutableStateOf<GeoPoint?>(null) }
+    var focus by remember { mutableStateOf(initialStart?.takeIf { it.valid }) }
     // Keep the camera outside the native-view retry key.
     val saved = rememberSaveable(saver=Saver<SavedMap, Bundle>(
         save={it.snapshot()}, restore={SavedMap(it)})) { SavedMap() }
@@ -118,6 +125,12 @@ fun MapScreen(onBack: () -> Unit, hydrants: List<Hydrant>, onOpenHydrant: ((Stri
                     }
                 }
             }
+            if(onSelectStart!=null) {
+                Text(stringResource(R.string.plans_pick_start_hint),Modifier.padding(horizontal=16.dp))
+                TextButton(onClick={startPoint?.let { onSelectStart(it.latitude,it.longitude) }},enabled=startPoint!=null) {
+                    Text(stringResource(R.string.plans_use_start))
+                }
+            }
             if(dataLoading)LinearProgressIndicator(Modifier.fillMaxWidth())
             LocationControls(hydrants, onLocation={location=it}, onCenter={cancelFocus();centerRequested=true},
                 dataLoading=dataLoading,
@@ -136,7 +149,11 @@ fun MapScreen(onBack: () -> Unit, hydrants: List<Hydrant>, onOpenHydrant: ((Stri
                     attempt++
                 }) })
             dataError?.let { FieldBanner(stringResource(errorLabel(it)), FieldTone.DANGER, Modifier.padding(horizontal=16.dp)) }
-            if(route!=null)RouteAttribution()
+            if(route!=null) {
+                RouteAttribution(route.provider)
+                Text(stringResource(R.string.routes_completed_legend),Modifier.padding(horizontal=16.dp))
+                if(!route.valid)FieldBanner(stringResource(R.string.routes_stale),FieldTone.WARNING)
+            }
             if(routeData?.numbers?.size==1)Text(stringResource(R.string.routes_single_stop),Modifier.padding(horizontal=16.dp))
             else if(routeData!=null && !routeData.hasRoad && routeData.numbers.isNotEmpty())
                 Text(stringResource(R.string.routes_no_road_geometry),Modifier.padding(horizontal=16.dp))
@@ -195,7 +212,7 @@ fun MapScreen(onBack: () -> Unit, hydrants: List<Hydrant>, onOpenHydrant: ((Stri
                                     }
                                     if(saved.bundle == null) map.cameraPosition = CameraPosition.Builder().target(LatLng(46.15, 14.95)).zoom(6.0).build()
                                     map.addOnMapLongClickListener { point ->
-                                        if(released || !canCreate || addHydrant==null || !GeoPoint(point.latitude,point.longitude).valid)false
+                                        if(released || selectingStart || !canCreate || addHydrant==null || !GeoPoint(point.latitude,point.longitude).valid)false
                                         else {
                                             cancelFocus()
                                             addHydrant?.invoke(point.latitude,point.longitude,null)
@@ -203,7 +220,9 @@ fun MapScreen(onBack: () -> Unit, hydrants: List<Hydrant>, onOpenHydrant: ((Stri
                                         }
                                     }
                                     map.addOnMapClickListener { point ->
-                                        if(released || hydrantLayers==null) false else {
+                                        if(released || hydrantLayers==null) false else if(selectingStart) {
+                                            startPoint=GeoPoint(point.latitude,point.longitude);cancelFocus();true
+                                        } else {
                                             val pixel=map.projection.toScreenLocation(point)
                                             val radius=12f * resources.displayMetrics.density
                                             val routing=currentRoute
@@ -233,6 +252,7 @@ fun MapScreen(onBack: () -> Unit, hydrants: List<Hydrant>, onOpenHydrant: ((Stri
                     }, update={ view -> if(!view.released) {
                         view.hydrantLayers?.update(visibleData, selected?.id)
                         view.routeLayers?.update(routeData)
+                        view.nativeMap?.style?.takeIf { it.isFullyLoaded }?.let { style -> StartPointLayer.update(style,startPoint) }
                         if(renderReady && mapSize.width>0 && mapSize.height>0 && view.width>0 && view.height>0 && routeData!=null &&
                             fittedRoute!=routeData.key && routeData.points.isNotEmpty()) {
                             val target=routeData
@@ -279,12 +299,13 @@ fun MapScreen(onBack: () -> Unit, hydrants: List<Hydrant>, onOpenHydrant: ((Stri
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-internal fun RouteAttribution() {
+internal fun RouteAttribution(provider: String="GraphHopper") {
     val uri=LocalUriHandler.current
     Column(Modifier.padding(horizontal=16.dp)) {
-        Text(stringResource(R.string.routes_attribution),style=MaterialTheme.typography.bodySmall)
+        Text(stringResource(R.string.routes_attribution,provider),style=MaterialTheme.typography.bodySmall)
         FlowRow {
-            TextButton(onClick={uri.openUri("https://www.graphhopper.com/")}) { Text("GraphHopper") }
+            if(provider.contains("OSRM"))TextButton(onClick={uri.openUri("https://project-osrm.org/")}) { Text("OSRM") }
+            if(provider.contains("GraphHopper"))TextButton(onClick={uri.openUri("https://www.graphhopper.com/")}) { Text("GraphHopper") }
             TextButton(onClick={uri.openUri("https://www.openstreetmap.org/copyright")}) { Text("© OpenStreetMap") }
         }
     }
