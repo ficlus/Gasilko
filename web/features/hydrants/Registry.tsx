@@ -11,7 +11,7 @@ import { defaultFilters, hasFilters, queryString, type RegistryFilters } from '.
 type Text = ReturnType<typeof dictionary>;
 export function statusLabel(t: Text, status: Status) { return { WORKING: t.hWorking, NOT_WORKING: t.hNotWorking, NEEDS_INSPECTION: t.hNeedsInspection, UNKNOWN: t.hUnknown }[status]; }
 function errorLabel(t: Text, error: Failure) { return { network: t.hNetwork, expired: t.hExpired, forbidden: t.hForbidden, validation: t.hValidation, conflict: t.hConflict, server: t.hServer, unavailable: t.hUnavailable, location: t.hLocation, coordinates: t.hCoordinates, interval: t.hInvalidInterval, type: t.hInvalidType }[error]; }
-function typeLabel(t: Text, type?: HydrantType) {
+export function typeLabel(t: Text, type?: Pick<HydrantType,'organization_id'|'code'|'name'>) {
   if (!type) return t.hMissing;
   const seeded: Record<string, string> = { ABOVE_GROUND: t.hAboveGround, UNDERGROUND: t.hUnderground, WALL: t.hWall, OTHER: t.hOther };
   return (type.organization_id === null ? seeded[type.code] : undefined) ?? type.name;

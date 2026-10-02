@@ -21,3 +21,5 @@ supabase/.temp/
 supabase/.branches/
 .idea/
 .DS_Store
+# Generated from the pinned MapLibre package before web dev/build.
+web/public/maplibre/
