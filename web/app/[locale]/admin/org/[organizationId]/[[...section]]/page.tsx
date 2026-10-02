@@ -7,16 +7,21 @@ import { AdminShell } from '@/features/admin/AdminShell';
 import { SessionControls } from '@/features/auth/SessionControls';
 import { ReviewQueue } from '@/features/access/ReviewQueue';
 import { AdminHydrants } from '@/features/hydrants/AdminHydrants';
+import { Teams } from '@/features/planning/Teams';
+import { Plans, PlanningDashboard } from '@/features/planning/Plans';
 
 export const dynamic = 'force-dynamic';
-export default async function OrganizationAdmin({ params }: {
+export default async function OrganizationAdmin({ params, searchParams }: {
   params: Promise<{ locale: string; organizationId: string; section?: string[] }>;
+  searchParams: Promise<{plan?:string}>;
 }) {
   const { locale, organizationId, section: segments } = await params;
   if (!isLocale(locale) || !/^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(organizationId) || (segments?.length ?? 0) > 1) notFound();
   const section = segments?.[0] ?? 'dashboard';
   if (!adminSections.some(item => item === section)) notFound();
   const t = dictionary(locale);
+  const query = await searchParams;
+  const planId = typeof query.plan === 'string' && /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(query.plan) ? query.plan : undefined;
   const { client, context, user } = await adminContext(locale, organizationId.toLowerCase());
   if (!context) return <main><h1>{t.adminShell}</h1><p role="alert">{t.adminUnavailable}</p><SessionControls locale={locale}/></main>;
   const organization = context.organizations.find(org => org.id === organizationId.toLowerCase() && org.id === context.selected);
@@ -40,7 +45,10 @@ export default async function OrganizationAdmin({ params }: {
           <p>{t.adminPositionNotice}</p></section>
       </div>
       <section className="admin-card"><h2>{t.adminHierarchy}</h2><p>{context.path.map(org => org.name).join(' › ')}</p><p>{t.adminPathNotice}</p></section>
-    </> : !['hydrants','map','inspections','users'].includes(section) && <section className="admin-card"><h2>{t.adminComingTitle}</h2><p>{t.adminComingNotice}</p></section>}
+    </> : !['hydrants','map','inspections','users','teams','plans'].includes(section) && <section className="admin-card"><h2>{t.adminComingTitle}</h2><p>{t.adminComingNotice}</p></section>}
+    {section === 'teams' && <Teams key={organization.id} locale={locale} root={organization.id}/>}
+    {section === 'plans' && <Plans key={organization.id} locale={locale} root={organization.id} initialId={planId}/>}
+    {section === 'dashboard' && <PlanningDashboard key={organization.id} locale={locale} root={organization.id}/>}
     {['dashboard','hydrants','map','inspections'].includes(section) && <AdminHydrants key={organization.id+':'+section} locale={locale} root={organization.id} section={section}/>}
     {reviews && <section className="admin-card"><h2>{t.reviewAccessRequests}</h2>
       {reviews.error ? <p role="alert">{t.requestError}</p> : <ReviewQueue key={organization.id + ':' + organization.access}
