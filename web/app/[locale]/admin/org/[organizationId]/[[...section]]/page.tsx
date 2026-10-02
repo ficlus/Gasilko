@@ -6,6 +6,7 @@ import { accessLabel, adminSections, configurationName, type AdminSection } from
 import { AdminShell } from '@/features/admin/AdminShell';
 import { SessionControls } from '@/features/auth/SessionControls';
 import { ReviewQueue } from '@/features/access/ReviewQueue';
+import { AdminHydrants } from '@/features/hydrants/AdminHydrants';
 
 export const dynamic = 'force-dynamic';
 export default async function OrganizationAdmin({ params }: {
@@ -39,7 +40,8 @@ export default async function OrganizationAdmin({ params }: {
           <p>{t.adminPositionNotice}</p></section>
       </div>
       <section className="admin-card"><h2>{t.adminHierarchy}</h2><p>{context.path.map(org => org.name).join(' › ')}</p><p>{t.adminPathNotice}</p></section>
-    </> : <section className="admin-card"><h2>{t.adminComingTitle}</h2><p>{t.adminComingNotice}</p></section>}
+    </> : !['hydrants','map','inspections','users'].includes(section) && <section className="admin-card"><h2>{t.adminComingTitle}</h2><p>{t.adminComingNotice}</p></section>}
+    {['dashboard','hydrants','map','inspections'].includes(section) && <AdminHydrants key={organization.id+':'+section} locale={locale} root={organization.id} section={section}/>}
     {reviews && <section className="admin-card"><h2>{t.reviewAccessRequests}</h2>
       {reviews.error ? <p role="alert">{t.requestError}</p> : <ReviewQueue key={organization.id + ':' + organization.access}
         locale={locale} organization={organization.id} initial={reviews.data ?? []}/>}
