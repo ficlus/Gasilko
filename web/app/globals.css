@@ -111,3 +111,15 @@ button:disabled { opacity: .6; cursor: wait; }
 .web-hydrants button,.web-detail button,.web-form-grid input,.web-form-grid select{min-height:44px}
 .web-detail dd,.web-history p{overflow-wrap:anywhere}
 @media(max-width:1000px){.web-split{display:block}.web-view-switch{display:flex}.show-list .web-map-panel{position:absolute;visibility:hidden;width:1px;height:1px;overflow:hidden}.show-map .web-list{display:none}.web-map{height:60vh}.web-map-panel{position:relative;top:0}.web-list{max-height:none}}
+/* M8.3 reuses the existing operational cards, controls and map. */
+.planning-choices{display:flex;flex-wrap:wrap;gap:1rem;margin:1rem 0}
+.planning-choices label{display:flex;align-items:center;gap:.5rem;min-height:44px}
+.planning-choices input,.planning-selection input{width:auto;min-height:auto}
+.planning-member{display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap;padding:.5rem 0}
+.planning-selection{max-height:25rem;overflow:auto;margin:1rem 0}
+.plan-progress{display:grid;gap:.4rem;margin:.75rem 0}.plan-progress progress{width:100%;height:1rem;accent-color:var(--team-color,#a9232e)}
+.team-card{border-inline-start:5px solid var(--team-color)}
+.plan-stop{border-inline-start:5px solid #68767e;padding:1rem!important;margin:.5rem 0;background:#f5f7f8}
+.plan-stop.completed{background:#edf6ef}.plan-stop.skipped{background:#fff8df}
+.web-detail fieldset{min-width:0}.web-detail fieldset legend{font-weight:700;padding:.3rem}
+.web-detail textarea,.web-detail select{max-width:100%;min-height:44px}.web-detail small{display:block}

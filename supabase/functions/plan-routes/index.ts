@@ -103,7 +103,11 @@ Deno.serve(async req => {
     if (navigating && (!request.team_id || !Array.isArray(body.origin) || body.origin.length !== 2 ||
       !body.origin.every((v: unknown) => typeof v === "number" && Number.isFinite(v)) ||
       Math.abs(body.origin[0]) > 180 || Math.abs(body.origin[1]) > 90)) throw new RoutingError("ROUTE_COORDINATES");
-    const prepared = await rpc("prepare_plan_routes", { organization: body.organization, request });
+    // Web management keeps exact-org MANAGER/ADMIN authority, including after provider latency.
+    // Android and navigation retain their existing team-member contracts.
+    const web = body.web === true;
+    if (web && navigating) throw new RoutingError("VALIDATION", 400);
+    const prepared = await rpc(web ? "web_prepare_plan_routes" : "prepare_plan_routes", { organization: body.organization, request });
     if (navigating && prepared.acknowledged) throw new RoutingError("CONFLICT", 409);
     const snapshot = navigating ? await rpc("read_inspection_plans", { organization: body.organization }) : null;
     const calculateRequest = (provider: RoadProvider) => navigating
@@ -130,8 +134,10 @@ Deno.serve(async req => {
         if (JSON.stringify(current.input) !== JSON.stringify(prepared.input)) throw new RoutingError("CONFLICT", 409);
         return reply(results); // Ephemeral: never commit current GPS, session geometry or steps.
       }
-      await rpc("commit_plan_routes", { actor: user.id, organization: body.organization, request, input: prepared.input, results }, true);
+      await rpc(web ? "web_commit_plan_routes" : "commit_plan_routes", { actor: user.id, organization: body.organization, request, input: prepared.input, results }, true);
     }
+    // Web refetches its bounded plan detail. No organization-wide snapshot is needed here.
+    if (web) return reply({ acknowledged: true });
     // Fresh RLS authorization on the response, even if access changed while GraphHopper was running.
     return reply(await rpc("read_inspection_plans", { organization: body.organization }));
   } catch (error) {
