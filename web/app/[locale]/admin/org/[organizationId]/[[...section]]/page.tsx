@@ -9,6 +9,7 @@ import { Administration, AdministrationDashboard } from '@/features/administrati
 import { AdminHydrants } from '@/features/hydrants/AdminHydrants';
 import { Teams } from '@/features/planning/Teams';
 import { Plans, PlanningDashboard } from '@/features/planning/Plans';
+import { Exchange } from '@/features/exchange/Exchange';
 
 export const dynamic = 'force-dynamic';
 export default async function OrganizationAdmin({ params, searchParams }: {
@@ -44,6 +45,7 @@ export default async function OrganizationAdmin({ params, searchParams }: {
     </> : null}
     {['users','organizations','types','audit'].includes(section)&&<Administration key={organization.id+':'+section} locale={locale} root={organization.id} section={section}/>}
     {section==='dashboard'&&<AdministrationDashboard key={organization.id} locale={locale} root={organization.id}/>}
+    {section === 'exchange' && <Exchange key={organization.id} locale={locale} root={organization.id}/>}
     {section === 'teams' && <Teams key={organization.id} locale={locale} root={organization.id}/>}
     {section === 'plans' && <Plans key={organization.id} locale={locale} root={organization.id} initialId={planId}/>}
     {section === 'dashboard' && <PlanningDashboard key={organization.id} locale={locale} root={organization.id}/>}
