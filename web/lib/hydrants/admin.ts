@@ -1,7 +1,7 @@
 import { browserClient } from '../supabase/browser';
 import { apiError } from './service';
 import { RegistryError, type Hydrant, type HydrantType } from './domain';
-export type Row = Hydrant & { organization_name: string; type_name: string; type_code: string; type_organization_id: string|null;
+export type Row = Hydrant & { organization_name: string; type_name: string; type_code: string; type_organization_id: string|null; type_names?:Record<string,string>;
  preview_path: string|null; last_inspection_at:string|null; next_due:string|null; due_state:'CURRENT'|'DUE_SOON'|'OVERDUE'|'NEVER_INSPECTED'; updated_at:string };
 export type Scope = { organizations:{id:string;name:string;writable:boolean}[]; types:HydrantType[] };
 export type Filters = { search:string; organization:string; status:string; type:string; active:string; due:string; hidden:string[] };
