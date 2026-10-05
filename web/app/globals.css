@@ -123,3 +123,10 @@ button:disabled { opacity: .6; cursor: wait; }
 .plan-stop.completed{background:#edf6ef}.plan-stop.skipped{background:#fff8df}
 .web-detail fieldset{min-width:0}.web-detail fieldset legend{font-weight:700;padding:.3rem}
 .web-detail textarea,.web-detail select{max-width:100%;min-height:44px}.web-detail small{display:block}
+.administration{min-width:0}.administration-filters{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,210px),1fr));gap:.8rem;margin:1rem 0}
+.administration-editor fieldset{min-width:0;border:1px solid #d8dce0;border-radius:8px;padding:1rem;margin:.6rem 0}
+.administration-editor label{display:block;margin:.6rem 0}.administration-editor input,.administration-editor select{max-width:100%;min-height:44px}
+.administration-options{max-height:16rem;overflow:auto}.administration-options label,.administration-check{display:flex!important;align-items:center;gap:.5rem}
+.administration-options input,.administration-check input,.administration-filters input[type=checkbox]{width:auto;min-height:auto}
+.administration-payload{white-space:pre-wrap;overflow-wrap:anywhere;max-height:28rem;overflow:auto;font-size:.85rem}
+.administration .admin-card{overflow-wrap:anywhere}.administration button{min-height:44px}.administration .actions{flex-wrap:wrap}

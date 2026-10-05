@@ -1,4 +1,5 @@
 import { dictionary, type Locale } from '../i18n';
+import {administrationText} from '../administration/messages';
 
 export type NamedConfiguration = { code: string; names: Record<string, string> };
 export type AdminOrganization = {
@@ -10,12 +11,12 @@ export type AdminContext = {
   organizations: AdminOrganization[]; selected: string | null;
   path: { id: string; name: string }[]; positions: NamedConfiguration[];
 };
-export const adminSections = ['dashboard', 'hydrants', 'map', 'inspections', 'teams', 'plans', 'users', 'organizations', 'audit'] as const;
+export const adminSections = ['dashboard', 'hydrants', 'map', 'inspections', 'teams', 'plans', 'users', 'organizations', 'types', 'audit'] as const;
 export type AdminSection = typeof adminSections[number];
 export function sectionLabel(section: AdminSection, locale: Locale) {
   const t = dictionary(locale);
   return { dashboard: t.adminDashboard, hydrants: t.hTitle, map: t.adminMap, inspections: t.adminInspections,
-    teams: t.adminTeams, plans: t.adminPlans, users: t.adminUsers, organizations: t.adminOrganizations, audit: t.adminAudit }[section];
+    teams: t.adminTeams, plans: t.adminPlans, users: t.adminUsers, organizations: t.adminOrganizations, types:administrationText(locale).types, audit: t.adminAudit }[section];
 }
 export function accessLabel(access: AdminOrganization['access'] | 'FIREFIGHTER' | null, locale: Locale) {
   const t = dictionary(locale);

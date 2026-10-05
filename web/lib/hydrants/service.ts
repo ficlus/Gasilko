@@ -46,7 +46,7 @@ export function hydrantService(client: SupabaseClient): HydrantService {
       const organizations = await pages<Omit<Organization, 'role'>>('organizations', 'id,name,active', {});
       return organizations.flatMap(o => { const m = memberships.find(m => m.organization_id === o.id); return m && ['FIREFIGHTER','MANAGER','ADMIN'].includes(m.role) ? [{ ...o, role: m.role }] : []; });
     },
-    async types(org) { return [...await pages<HydrantType>('hydrant_types', 'id,organization_id,code,name,active', { organization_id: null }), ...await pages<HydrantType>('hydrant_types', 'id,organization_id,code,name,active', { organization_id: org })]; },
+    async types(org) { return [...await pages<HydrantType>('hydrant_types', 'id,organization_id,code,name,active,names,display_order', { organization_id: null }), ...await pages<HydrantType>('hydrant_types', 'id,organization_id,code,name,active,names,display_order', { organization_id: org })].sort((a,b)=>(a.display_order??0)-(b.display_order??0)||a.name.localeCompare(b.name)||a.id.localeCompare(b.id)); },
     async list(q) {
       return checked(await client.rpc('search_hydrants', { organization: q.organizationId,
         search_text: q.search.trim(), type_id: q.typeId ?? null, status_filter: q.status ?? null,

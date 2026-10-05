@@ -5,7 +5,7 @@ import { adminContext } from '@/lib/admin/context';
 import { accessLabel, adminSections, configurationName, type AdminSection } from '@/lib/admin/model';
 import { AdminShell } from '@/features/admin/AdminShell';
 import { SessionControls } from '@/features/auth/SessionControls';
-import { ReviewQueue } from '@/features/access/ReviewQueue';
+import { Administration, AdministrationDashboard } from '@/features/administration/Administration';
 import { AdminHydrants } from '@/features/hydrants/AdminHydrants';
 import { Teams } from '@/features/planning/Teams';
 import { Plans, PlanningDashboard } from '@/features/planning/Plans';
@@ -22,14 +22,10 @@ export default async function OrganizationAdmin({ params, searchParams }: {
   const t = dictionary(locale);
   const query = await searchParams;
   const planId = typeof query.plan === 'string' && /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(query.plan) ? query.plan : undefined;
-  const { client, context, user } = await adminContext(locale, organizationId.toLowerCase());
+  const { context, user } = await adminContext(locale, organizationId.toLowerCase());
   if (!context) return <main><h1>{t.adminShell}</h1><p role="alert">{t.adminUnavailable}</p><SessionControls locale={locale}/></main>;
   const organization = context.organizations.find(org => org.id === organizationId.toLowerCase() && org.id === context.selected);
   if (!organization) notFound();
-  // This check is per page request, not just a persistent Next layout. The scoped
-  // RPC below and existing review mutation independently enforce database roles.
-  const reviews = section === 'users' && organization.access !== 'READ_ONLY'
-    ? await client.rpc('list_organization_access_reviews', { organization: organization.id }) : null;
   return <AdminShell locale={locale} context={context} organization={organization} section={section as AdminSection} user={user}>
     {section === 'dashboard' ? <>
       <div className="admin-cards">
@@ -45,15 +41,13 @@ export default async function OrganizationAdmin({ params, searchParams }: {
           <p>{t.adminPositionNotice}</p></section>
       </div>
       <section className="admin-card"><h2>{t.adminHierarchy}</h2><p>{context.path.map(org => org.name).join(' › ')}</p><p>{t.adminPathNotice}</p></section>
-    </> : !['hydrants','map','inspections','users','teams','plans'].includes(section) && <section className="admin-card"><h2>{t.adminComingTitle}</h2><p>{t.adminComingNotice}</p></section>}
+    </> : null}
+    {['users','organizations','types','audit'].includes(section)&&<Administration key={organization.id+':'+section} locale={locale} root={organization.id} section={section}/>}
+    {section==='dashboard'&&<AdministrationDashboard key={organization.id} locale={locale} root={organization.id}/>}
     {section === 'teams' && <Teams key={organization.id} locale={locale} root={organization.id}/>}
     {section === 'plans' && <Plans key={organization.id} locale={locale} root={organization.id} initialId={planId}/>}
     {section === 'dashboard' && <PlanningDashboard key={organization.id} locale={locale} root={organization.id}/>}
     {['dashboard','hydrants','map','inspections'].includes(section) && <AdminHydrants key={organization.id+':'+section} locale={locale} root={organization.id} section={section}/>}
-    {reviews && <section className="admin-card"><h2>{t.reviewAccessRequests}</h2>
-      {reviews.error ? <p role="alert">{t.requestError}</p> : <ReviewQueue key={organization.id + ':' + organization.access}
-        locale={locale} organization={organization.id} initial={reviews.data ?? []}/>}
-    </section>}
     <p><Link href={'/' + locale + '/requests'}>{t.currentRequests}</Link></p>
   </AdminShell>;
 }
