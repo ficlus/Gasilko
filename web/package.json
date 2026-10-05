@@ -12,6 +12,7 @@
     "start": "next start"
   },
   "dependencies": {
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
     "maplibre-gl": "6.11.2",
     "@supabase/ssr": "0.12.7",
     "@supabase/supabase-js": "2.116.0",

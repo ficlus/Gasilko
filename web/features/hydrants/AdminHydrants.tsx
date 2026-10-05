@@ -11,6 +11,7 @@ import {resultLabel} from './ManualInspection';
 import {HydrantDetail,dueLabel} from './HydrantDetail';
 import {HydrantEditor} from './HydrantEditor';
 import type {Bounds} from '../map/HydrantMap';
+import {ExportActions} from '../exchange/Exchange';
 const Map=dynamic(()=>import('../map/HydrantMap'),{ssr:false});
 type Dashboard={metrics:Record<string,number>;inspections:{id:string;hydrant_id:string;code:string;result:string;completed_at:string;organization_name:string}[];changes:{id:string;code:string;status:Row['status'];updated_at:string;organization_name:string}[]};
 export function AdminHydrants({locale,root,section,initialId}:{locale:Locale;root:string;section:string;initialId?:string}){
@@ -46,6 +47,7 @@ export function AdminHydrants({locale,root,section,initialId}:{locale:Locale;roo
  const displayRows:Row[]=selected&&!rows.some(r=>r.id===selected.id)?[selected,...rows]:rows;
  return <section className="web-hydrants"><div className="actions"><button onClick={reload}>{t.hRefresh}</button>{scope.organizations.some(o=>o.writable)&&<button onClick={()=>setCreate(true)}>{t.hAdd}</button>}</div>
  {error&&<p role="alert">{error}</p>}
+ {['hydrants','map','inspections'].includes(section)&&<ExportActions root={root} locale={locale} kind={section==='inspections'?'inspections':'hydrants'} filters={filters}/>}
  {section==='dashboard'&&dashboard&&<><div className="admin-cards web-metrics">{Object.entries(dashboard.metrics).map(([k,n])=><article className="admin-card" key={k}><span>{k==='total'?t.wActiveTotal:k==='OVERDUE'||k==='NEVER_INSPECTED'?dueLabel(t,k):statusLabel(t,k as Row['status'])}</span><strong>{n}</strong></article>)}</div>
  <div className="admin-cards"><section className="admin-card"><h2>{t.wRecentInspections}</h2>{dashboard.inspections.map(i=><button className="web-row" key={i.id} onClick={()=>setDetail(i.hydrant_id)}><strong>{i.code}</strong> {resultLabel(t,i.result)}<small>{i.organization_name} · {new Date(i.completed_at).toLocaleString(locale)}</small></button>)}</section>
  <section className="admin-card"><h2>{t.wRecentChanges}</h2>{dashboard.changes.map(h=><button className="web-row" key={h.id} onClick={()=>setDetail(h.id)}><strong>{h.code}</strong> {statusLabel(t,h.status)}<small>{h.organization_name} · {new Date(h.updated_at).toLocaleString(locale)}</small></button>)}</section></div></>}

@@ -130,3 +130,8 @@ button:disabled { opacity: .6; cursor: wait; }
 .administration-options input,.administration-check input,.administration-filters input[type=checkbox]{width:auto;min-height:auto}
 .administration-payload{white-space:pre-wrap;overflow-wrap:anywhere;max-height:28rem;overflow:auto;font-size:.85rem}
 .administration .admin-card{overflow-wrap:anywhere}.administration button{min-height:44px}.administration .actions{flex-wrap:wrap}
+.exchange{min-width:0}.exchange fieldset{min-width:0;border:1px solid #d8dce0;border-radius:8px;padding:1rem;margin:1rem 0}
+.exchange label{display:block;margin:.7rem 0}.exchange input,.exchange select{max-width:100%;min-height:44px}.exchange input[type=checkbox]{min-height:auto;width:auto;margin-inline-end:.5rem}
+.exchange .actions{flex-wrap:wrap}.exchange button{min-height:44px}.exchange .admin-card{margin-block:1rem;overflow-wrap:anywhere}
+.exchange-table{max-width:100%;overflow:auto}.exchange table{width:100%;border-collapse:collapse}.exchange th,.exchange td{padding:.7rem;text-align:start;border-bottom:1px solid #d8dce0;vertical-align:top}
+.exchange dl{margin:0}.exchange dt{font-weight:600}.exchange dd{margin:0 0 .6rem;overflow-wrap:anywhere}.exchange details{padding:.7rem 0}.exchange code{overflow-wrap:anywhere}
