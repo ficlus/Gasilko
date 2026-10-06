@@ -3,6 +3,7 @@ import { dictionary, type Locale } from '../../lib/i18n';
 import { accessLabel, adminSections, adminUrl, sectionLabel, type AdminContext, type AdminOrganization, type AdminSection } from '../../lib/admin/model';
 import { OrganizationSwitcher } from './OrganizationSwitcher';
 import { SessionControls } from '../auth/SessionControls';
+import { incidentText } from '../../lib/incidents/messages';
 
 export function AdminShell({ locale, context, organization, section, user, children }: {
   locale: Locale; context: AdminContext; organization: AdminOrganization; section: AdminSection;
@@ -28,6 +29,7 @@ export function AdminShell({ locale, context, organization, section, user, child
         {adminSections.map(item => <Link key={item} href={adminUrl(locale, organization.id, item)} aria-current={section === item ? 'page' : undefined}>
           {sectionLabel(item, locale)}
         </Link>)}
+        <Link href={`/${locale}/incidents?org=${organization.id}`}>{incidentText(locale)('title')}</Link>
         <Link className="admin-account" href={'/' + locale + '/account'}>{t.backAccount}</Link>
       </nav>
       <main id="admin-content" className="admin-main" tabIndex={-1}>

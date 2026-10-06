@@ -1165,6 +1165,127 @@ endif
 
 ## Implementation
 
+### M14.1 implementation decisions
+
+M14.1 implements the first Web Incident Core on merged M14.0. This subsection
+resolves implementation details and the explicitly requested limited closure
+extension; all other domain/security boundaries above remain authoritative.
+
+- New forward migrations: `20261006120000_incident_core.sql` and
+  `20261006121000_import_target_qualification.sql`. Neither changes the historical
+  M14.0/M9 migration or applies itself to a live database.
+- Web routes: `/[locale]/incidents`, `/new`, and `/[incident UUID]`, with an explicit
+  `org` acting-context query. The incident UUID is the same across participating
+  organizations. ACTIVE users enter from Account; Admin navigation also links
+  here without granting inherited-org access. No Android/Room change.
+- `incident_entry` returns current exact active organizations and create flags,
+  active localized types, up to50 invitation previews and50 nomination previews.
+  These bounded inbox previews deliberately do not grant full draft read access.
+  A non-manager nominee can accept consent in their inbox. Process/refresh to see
+  further inbox items; this is not a national membership directory.
+- `incident_list` uses25-row `(created_at,id)` descending keyset pages, scoped by
+  acting organization and optional lifecycle state. `incidents_created_cursor_idx`
+  supports this new path. `incident_context` retains its signature and adds typed
+  detail, participant history, current/latest commander, nomination and action
+  flags. `incident_candidates` returns at most30 active organizations (identity
+  only) or active lead-org member names/IDs, with bounded substring search.
+  Candidate/inbox reads never widen profile/organization table RLS.
+- `incident_timeline_page` retains ascending sequence keysets and the same bounds,
+  and adds actor/organization labels to avoid per-row directory reads. All BIGINT
+  versions/revisions/cursors are now decimal strings in Web-facing DTOs to avoid
+  JavaScript precision loss; consumers pass those strings back as BIGINT inputs.
+- The server generates incident UUID once. The immutable receipt maps the caller's
+  operation UUID to that identity, so lost-response retries return the same UUID.
+  Reference format is internal `INC-YYYY-NNNNNN` (minimum six digits), unique in
+  creator-organization/year scope. The UI always shows organization context; the
+  same reference may exist in another organization. It is not an official112number.
+  A private locked counter allocates the number; year uses Europe/Ljubljana, which
+  is also the initial report timezone. No caller-controlled numbering/creator/time.
+- Manual primary coordinates may be absent together only with a nonempty
+  `unknown_location_reason` (≤1000characters). This validated extension is stored
+  under that one metadata key; clients cannot submit arbitrary metadata. Activation
+  rechecks point or reason. No geocoding, browser tracking or map editor.
+- `private.incident_operation_receipts` is needed because existing Web hydrant
+  audit receipts identify a hydrant operation and planning uses different domain
+  payloads. Incident receipts have a global operation UUID PK, actor/org/incident,
+  fixed command code, bounded canonical JSONB request and immutable result/time.
+  JSONB equality is the payload identity (no lossy hash-only comparison). Retry
+  checks current account/exact active acting membership and original actor/request.
+  It returns only the caller's minimal acknowledgement, never an old detail
+  snapshot; this also permits consent/invitation acknowledgement replay where full
+  draft read is intentionally unavailable. No operational authority is replayed.
+- A private fixed-command dispatcher centralizes the transaction. Public wrappers
+  are narrow: `incident_create_draft`, `incident_update_summary`,
+  `incident_nominate_initial_command`, `incident_accept_initial_command`,
+  `incident_request_participation`, `incident_accept_participation`,
+  `incident_decline_participation`, `incident_consent_release`,
+  `incident_release_participation`, `incident_activate`, `incident_stabilize`,
+  `incident_reactivate`, `incident_close`, `incident_cancel`.
+  Each accepts `(p_operation UUID,p_acting_organization_id UUID,p_incident_id UUID,
+  p_expected_version BIGINT,p_payload JSONB)`. Create uses null incident and version0;
+  other calls use the core version. Payload keys are explicitly allowlisted. These
+  wrappers implement the corresponding planned contracts in §8; no public generic
+  status/role/table mutation is exposed.
+- `private.incident_acting_member` and `private.incident_draft_manager` augment,
+  not replace, M14.0 read/capability helpers. The existing `private.lock_organization`
+  and profile-row locks serialize membership/account changes. Operation advisory
+  lock precedes sorted org/profile locks and incident FOR UPDATE. Every successful
+  M14.1 command advances core version (except creation starts1); affected
+  participant/assignment versions advance too. Aggregate revision advances once;
+  each event consumes one incident sequence. This conservative core version also
+  rejects stale concurrent child/lifecycle actions before broader per-entity
+  concurrency is needed in later milestones.
+- `private.append_incident_event` accepts only this milestone's event catalog,
+  derives actor from auth.uid(), coordinates counter update and appends typed
+  evidence inside the domain transaction. First event increments aggregate revision;
+  additional event ordinals share it. Create emits INCIDENT_CREATED plus
+  PARTICIPANT_JOINED; activation emits INCIDENT_ACTIVATED plus COMMAND_ASSIGNED.
+  Every mutation also writes existing audit evidence and an immutable receipt.
+- Initial command follows M14.0's stricter **nominate → explicit nominee consent →
+  activate** sequence. `private.incident_command_consents` stores REQUESTED/
+  ACCEPTED/WITHDRAWN/CONSUMED episodes, expiry24hours and actor/times. The
+  `incident_consent_current_unique` partial index permits one open nomination per
+  incident; `incident_consent_inbox_idx` serves nominee inbox. Replacement while
+  DRAFT withdraws the old consent, preserves it and records its ID in the new
+  nomination event. No active role is granted until activation atomically inserts
+  the IC assignment. No active handover or implicit ADMIN commander.
+- Participation may be invited by draft creator-org manager or active incident
+  capability. Accept/decline requires receiving-org manager. Non-lead release
+  needs two explicit actions: own manager records consent, then IC commits release.
+  `release_consented_by/at` on participant are paired by a CHECK; consent actor's
+  current membership/account/org is rechecked. An org with a live role assignment
+  cannot be released. PARTICIPANT_RELEASE_REQUESTED is the added stable event for
+  agency consent; existing PARTICIPANT_RELEASED records the actual release.
+- **Requested scope extension:** M14.1 now implements limited STABILIZED→CLOSED
+  rather than waiting for M14.10. It requires current IC, matching version,
+  nonempty reason and no unresolved initial consent. It records final commander
+  assignment ID, ends that assignment temporally, sets server closure time and
+  preserves timeline/audit/receipt. No nonexistent task/unit gates, report snapshot
+  table or PDF workflow is fabricated. M14.10 must add its richer closure/report
+  invariants when those entities exist. Terminal core/participation/command writes
+  reject; historical read semantics remain unchanged.
+- Stable errors: NOT_AUTHORIZED, STALE_VERSION, INVALID_TRANSITION,
+  INVALID_COMMANDER, INVALID_PARTICIPANT, INCIDENT_TERMINAL, OPERATION_REUSED,
+  VALIDATION_FAILED, INVALID_STATE. Web exposes localized safe errors through the
+  existing SSR authenticated client, never raw SQL details or service credentials.
+  Stale input remains visible until the user refreshes/reviews. Ambiguous network
+  failure freezes the original request for retry; a sessionStorage key stores only
+  operation UUID keyed by account/request hash (not the incident payload). Changing
+  account hides old presentation and mutations verify expected account binding.
+- SI/DE list/forms/detail/confirmations/inbox/timeline reuse existing registry/admin
+  styles, semantic buttons and dialogs. Manual refresh only; no realtime or push.
+- M9 repair copies the existing `web_import_confirm` definition into a forward
+  CREATE OR REPLACE and qualifies only the duplicate-target subquery's
+  `wir.target` / `wir.import_id` / GROUP BY references. Signature/grants/import
+  behavior remain unchanged. This is the explicitly deferred repository repair.
+
+M14.1 is implementation-only: no tests, builds, lint, typecheck, CI, browser smoke,
+emulator, migration execution or deployment. Manual verification must cover
+distinct manager/nominee consent, stale concurrent activation, duplicate retries,
+invite/accept/decline/release, suspended/revoked membership, cross-org/inherited
+denial, terminal history, SI/DE and the M9 duplicate-target path after an approved
+migration deployment.
+
 ### M14.0 delivery and migration boundary
 
 Migration: `supabase/migrations/20261006100000_incident_operations_foundation.sql`.
