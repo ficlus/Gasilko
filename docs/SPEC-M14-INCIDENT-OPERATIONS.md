@@ -1407,6 +1407,111 @@ convergence and authorized scoped read size when later validation is permitted;
 do not claim performance guarantees or operational readiness from this unexecuted
 foundation. Validate SI/DE terminology with field operators before broad rollout.
 
+## M14.2 implemented command contract
+
+Migrations `20261006140000_incident_command.sql` and
+`20261006141000_incident_command_api.sql` extend M14.1 forward only.
+They reuse assignments, participants, private command consents, operation receipts,
+core version, aggregate revision, timeline sequence and audit. No new tables,
+Android flows, notifications or offline operational grants are introduced.
+
+### Roles, scope and capabilities
+
+All reads require current authorized participant scope (or the existing historical
+terminal access). All writes recheck exact acting organization, active account,
+membership, organization, participation, lifecycle and effective assignment under
+the existing organization/profile/incident locks. Organization ADMIN/MANAGER is
+not an operational role; parent links are structural and never grant capabilities.
+
+| Role | Current M14.2 capabilities | Multiplicity / scope |
+|---|---|---|
+| Incident Commander | Read; edit summary; invite; release after existing exact-org manager consent and explicit role cleanup; offer/end subordinate command roles; initiate/cancel transfer; initiate combined lead transfer; stabilize/reactivate/close | At most one ACTIVE assignment per incident; effective IC belongs to current lead |
+| Deputy Commander | Read; edit summary; invite participants. No role grant, release, transfer or lifecycle authority | Multiple distinct people permitted, preserving M14.0's existing non-exclusive role model and per-person uniqueness; no automatic succession |
+| Agency Commander | Read and explicit representation of their own participating organization. Resource/task management remains deferred; no incident-wide edit, invite, release, role grant, transfer or lifecycle authority | At most one ACTIVE assignment per incident/organization; candidate must explicitly accept |
+| Operator | Existing participant read; scoped note/map actions remain deferred. No new assignment UI | Existing code retained, no artificial single-operator constraint |
+| Ordinary participant / responder | Existing participant read without requiring a RESPONDER assignment; tasks remain deferred, no pointless assignment UI | No role rows created merely for membership |
+| Exact organization MANAGER/ADMIN without command role | Existing draft and own-organization participation administration; consent to receiving lead; narrowly scoped invalid-IC recovery below. No ordinary operational command power | Exact organization only; no inherited/global ADMIN override |
+
+Any eligible named recipient can accept/decline their own unexpired offer/transfer;
+this does not require an organization-administration role. Sector, unit, task,
+resource, RTS and COP capabilities remain deferred for every role.
+
+### Offers, history and hierarchy
+
+M14.1 consents gain INITIAL/ROLE/TRANSFER/RECOVERY kinds and retain their original
+records. New offers use REQUESTED, then CONSUMED on atomic acceptance, or
+DECLINED/CANCELLED/EXPIRED. CONSUMED is the existing completed-consent vocabulary,
+not an additional pending state. All offers expire after 24 hours; reads derive
+expiry immediately and subsequent proposal mutations materialize expiry without
+a scheduler. Pending offers grant no authority. Only one live transfer/recovery
+is allowed; duplicate offers are constrained per incident/org/person/role.
+
+The IC offers DEPUTY_COMMANDER or AGENCY_COMMANDER to active participant members.
+Personal acceptance is the agency-autonomy consent; a manager is not silently
+appointed. Both currently attach to the IC. A storage trigger protects identity
+and historical parent links and checks same-incident, acyclic parents. Ending a
+role requires a reason and explicit cleanup of live children first. The IC cannot
+be removed through the subordinate-end action. No self-resignation workflow.
+
+Transfers end/reissue subordinate episodes under the new root in parent order,
+preserving old UUIDs/parents and recording old-to-new assignment UUID mappings in
+the transfer event. Expired branches are ended, not reactivated. Role history is
+paged in batches of 50; candidate search is bounded to 30 minimal labels/IDs.
+Command inbox/request snapshots are bounded to 50, with pending items first in
+detail; the sequenced incident timeline retains the full operational event history.
+
+### Transfer, lead and recovery
+
+Same-organization transfer preserves the lead organization. Cross-organization
+transfer uses an explicit LEAD_AND_COMMAND request because M14.0 requires the
+effective IC to belong to the lead organization. The UI identifies both changes.
+An exact current MANAGER/ADMIN of the receiving ACTIVE participant must approve
+lead receipt; the proposed IC then explicitly accepts. Both authorizations are
+rechecked at commit. There is no unrestricted lead dropdown or command-only
+cross-org shortcut. Request, consent, rejection, cancellation, handover and lead
+change are visible in timeline/audit. Outgoing authority remains until acceptance.
+
+Acceptance uses one transaction: lock, recheck expected core version and outgoing
+assignment/version, end old IC, establish the new IC and (if requested) lead,
+rebase subordinate episodes, finalize consent, increment core version/revision,
+append sequenced events and save the existing operation receipt. The same UUID
+and canonical payload replay the receipt; stale competing operations fail rather
+than silently rebasing. Decline/cancel/expiry do not change command authority.
+
+This task explicitly authorizes the exceptional recovery policy deferred in
+M14.0: an exact active MANAGER/ADMIN of the current lead organization may propose
+a replacement in that organization only when there is no effective current IC.
+A reason and explicit recipient acceptance are required. Both steps recheck the
+absence of a valid IC; acceptance also rechecks the initiator's authority.
+COMMANDER_STILL_VALID blocks a normal-transfer bypass. A stranded pending transfer
+can be explicitly cancelled with a reason by that same recovery authority.
+Historical IC assignment, initiator, reason, receipt and events are retained;
+there is no automatic deputy promotion or global admin takeover.
+
+Closure now explicitly ends all remaining ACTIVE command roles and cancels pending
+command requests in its existing transaction, with ended assignment IDs in the
+closure event. This implements the M14.2 closure requirement rather than the
+earlier deferred-transfer closure restriction. Participant release still refuses
+any live role with PARTICIPANT_HAS_ACTIVE_COMMAND and never cleans roles silently.
+
+### Web and validation boundary
+
+The existing incident route/API, organization selector, confirmation dialog and
+stable operation retry path serve the nested command tree, scoped proposals,
+inbox, transfer/lead/recovery confirmations and history. Current IC and lead
+organization remain separately visible. SI/DE labels and stable business errors
+are localized. Mutation authorization is server-side; hidden buttons are not
+security. Scope/account changes discard the view and abort command reads.
+
+No tests were added or run, and no build, lint, typecheck, CI, browser check,
+migration application or deployment was performed, as explicitly requested.
+Before deployment, manually verify role offer acceptance/decline/expiry; scoped
+candidate privacy; duplicate agency/IC rejection; tree cycles and immutable
+history; same/cross-org transfer and lead approval; stale/lost-response retries;
+concurrent revocation and acceptance; invalid-IC recovery versus valid-IC refusal;
+closure and participant cleanup; account/org switching; and SI/DE presentation.
+These changes are unexecuted implementation, not evidence of operational readiness.
+
 ## Need Professional Help in Developing Your Architecture?
 
 Please contact me at [sammuti.com](https://sammuti.com) :)
