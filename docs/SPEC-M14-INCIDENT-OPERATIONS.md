@@ -1,0 +1,1291 @@
+# SPEC-M14-Incident-Operations
+
+## Background
+
+This is the authoritative Incident Operations / Rescue Command extension to
+[SPEC.md](SPEC.md). It defines M14.0 through M14.10. Existing hydrant,
+inspection, planning, authentication and organization behavior remains governed
+by SPEC.md. This extension introduces an incident aggregate; it does not turn an
+inspection plan into an emergency, an inspection team into a vehicle, or an
+organization administrator into an incident commander.
+
+Baseline: merged PR #52, main `ba000f82c7ed577cacff126cdda62d776d7227ad`.
+Firefighting is the first use case. Organizations representing Civil Protection,
+EMS, Police, municipalities and specialist rescue services use the same identity,
+participation and command contracts. No agency-specific integration is assumed.
+
+### Architecture inspected and reuse decision
+
+| Existing source / concept | Decision |
+| --- | --- |
+| `20260917120000_geography_organizations_profiles.sql`; `20260917140000_memberships_roles_rls.sql` | Reuse `profiles`, `organizations`, `user_organizations`, account states and exact-organization roles. An active membership means a present membership row, ACTIVE profile and active organization; there is no invented membership-active column. |
+| `20261001140000_web_admin_organization_foundation.sql` | Reuse configurable organization types, relationships and positions. Inherited hierarchy remains READ-only for its existing modules. It does not imply incident participation or command. |
+| `20260918090000_review_bootstrap_audit.sql`; hydrant authorization migration | Reuse `audit_log`, `private.write_audit`, `private.audit_immutable`, organization security locks and live profile/membership checks. Do not introduce another audit subsystem. |
+| Hydrant schema, inspection teams/plans and M7 execution | Reference existing hydrant UUIDs. Inspection rosters/plans retain their current semantics. Incident resource assignments are a different domain relationship. Reuse version, operation UUID and locked RPC patterns, with durable incident receipts as described below. |
+| `20261005140000_notifications.sql`, existing FCM Edge delivery | Reuse events, category preferences, device registration and delivery leases/logs. Add incident event/recipient adapters later, not a second notification transport. |
+| `supabase/functions/plan-routes/provider.ts` | Reuse `RoadProvider` (`snap`, `matrix`, `route`), OSRM primary and current fallback/configuration. Incident business targets later adapt to this boundary; no routing infrastructure change now. |
+| Android `RegistryDatabase`, Room repositories, sync engine/worker, authorization and MapLibre/NAV1/NAV2 | Keep Compose → ViewModel → Repository → Room. Extend the existing durable worker/queue architecture in M14.8; no direct UI Supabase access, second worker or navigation engine. |
+| Web `lib/admin/context.ts`, `lib/auth/load.ts`, Supabase SSR | Reuse server-verified session and per-request context. Existing Web ADMIN/MANAGER entry is not incident-command authority. A later incident entry can admit an authorized firefighter without widening administrative access. |
+| Existing migrations / DATABASE.md | No usable unit/vehicle/resource or incident aggregate exists. No PostGIS dependency is introduced. |
+
+### What M14.0 actually implements
+
+One additive migration creates five public tables: `incident_types`, `incidents`,
+`incident_participants`, `incident_role_assignments`, `incident_timeline`; two
+caller-bound private authorization helpers; two read RPCs; constraints, indexes,
+SELECT RLS and history deletion guards. Only `OTHER` reference configuration is
+seeded. No operational records, UI, mutation RPCs, publication, jobs or storage
+buckets are created. Android, Web, M10, routing and existing schemas are unchanged.
+
+The foundation intentionally grants **no INSERT/UPDATE/DELETE/TRUNCATE to anon,
+authenticated or service_role** on these tables. Database owner maintenance is
+not an operational API. M14.1 must implement the locked, audited commands below
+before clients can create incidents. Database shape constraints are present now;
+multi-row lifecycle/command invariants and mutation emissions belong to those
+commands, not to an unimplemented generic write endpoint.
+
+## Requirements
+
+### Must have
+
+- One stable UUID per incident, separate display reference, explicit participants
+  and live scoped command authority. No duplicate users, organizations or hydrants.
+- Strict state transitions; explicit ownership/control boundaries; one current IC;
+  same-incident foreign keys; no silent authority derived from positions/hierarchy.
+- Server-acknowledged, versioned, idempotent commands; append-only operational
+  evidence and existing audit records. No silent overwrite of offline intent.
+- Room field reads and durable local field operations; reconnect reconciliation;
+  notification/realtime messages never grant access or imply command completion.
+- Private attachments; bounded location sharing; current authorization checked at
+  server commit; no service credentials in Android/browser.
+- Language-neutral codes with default/Slovenian/German presentation. UTC timestamps,
+  explicit WGS84 coordinate order, validated bounded geometry.
+- Incremental M14.1–M14.10 delivery with no production migration applied by M14.0.
+
+### Should have
+
+- Consistent incident context snapshots, keyset timeline pages, typed command
+  targets and incident revision cursors; concise operator acknowledgements.
+- Agency, sector and unit delegation; explicit command handover; cached route and
+  map presentation using existing infrastructure; reportable historical relations.
+
+### Could have
+
+- Official CAD/112 adapters, optional narrowly scoped GPS sharing and organization
+  policy configuration once contracts, authority and retention are agreed.
+- Configurable closure warnings and number formatting without changing UUID identity.
+
+### Will not have in M14.0
+
+Full incident screens/workflows, sectors/resources/tasks/dispatch tables, realtime
+subscriptions, incident Room cache, external adapters, location telemetry, reports
+or fake data. QR, route capacity 100→200, Oracle/OSRM changes, offline-map hosting,
+SMTP completion, FIX pack, M11–M13 and unrelated planning idempotency cleanup remain
+on hold. The known M9 `web_import_confirm` ambiguity (`target` → `wir.target`) is
+explicitly deferred to M14.1; its migration is not changed here.
+
+## Method
+
+### 1. Aggregate, identity, time and state
+
+An incident is a real-world operation shared by explicit participating
+organizations. `created_organization_id` records provenance;
+`lead_organization_id` records current coordination responsibility;
+`actor_organization_id` identifies the caller's selected authority for a command.
+An incident is not owned by whichever organization is currently selected in UI.
+Physical resources keep their owning organization during cross-agency deployment.
+
+UUID is canonical for all references and retry identities. `reference_number` is
+nullable until allocated by M14.1, unique within creator organization and
+`reference_year`. Year is derived at creation in the validated incident timezone
+and never changes after number allocation, including a lead transfer. Formatting
+is configurable; no final prefix or sequential business format is prescribed.
+A private per-organization/year allocator in M14.1 may consume numbers with gaps.
+Numbers never authorize access and external IDs never become internal PKs.
+
+All persisted operational times use `timestamptz`. Server timestamps order commits;
+client `occurred_at` describes an observation and never decides ordering or authority.
+`timezone` is an IANA name validated against `pg_timezone_names` by future create/
+edit RPCs. The foundation bounds the string only. Default `Europe/Ljubljana` is
+presentation context, not a naive timestamp format.
+
+Severity measures assessed consequences (`UNKNOWN`, `MINOR`, `MAJOR`, `CRITICAL`).
+Incident priority measures response urgency (`LOW`, `NORMAL`, `HIGH`, `CRITICAL`).
+Dispatch and task priority use their own fields with those urgency codes and do
+not mutate incident severity or lifecycle.
+
+| From → to | Authority and invariant | Evidence |
+| --- | --- | --- |
+| DRAFT → ACTIVE | Exact creator-org MANAGER/ADMIN, online; lead ACTIVE participation exists; nominated IC has explicitly accepted and has current lead-org membership; valid type/title/location or explicit unknown-location reason | INCIDENT_ACTIVATED + audit |
+| DRAFT → CANCELLED | Exact creator-org MANAGER/ADMIN; non-empty reason; no deployment | INCIDENT_CANCELLED + audit |
+| ACTIVE → STABILIZED | Current IC, online | INCIDENT_STABILIZED + audit |
+| STABILIZED → ACTIVE | Current IC, online; escalation reason; clear current stabilized_at while retaining earlier event | INCIDENT_REACTIVATED + audit |
+| STABILIZED → CLOSED | Current IC, online; closure contract in §13 | INCIDENT_CLOSED + audit/report |
+
+All other transitions are denied, including ACTIVE→CLOSED, ACTIVE→CANCELLED and
+reopening a terminal incident. Mistaken active incidents are stabilized and closed
+with an explanation; cancellation must not erase deployed activity. M14.10 can
+introduce an explicit exceptional workflow only by updating this contract.
+`declared_at` is first activation, `started_at` is known real-world start,
+`stabilized_at` describes the current stabilization, and closure/cancellation times
+are exclusive. History retains every earlier transition.
+
+### 2. Implemented data dictionary
+
+Status codes below are bounded text CHECK constraints, not PostgreSQL enums.
+Incident categories use a reference table, matching existing configuration practice.
+Every FK uses `ON DELETE RESTRICT`. UUID defaults are convenient for trusted callers;
+mobile commands must supply their pre-generated IDs. Counters are BIGINT; transport
+clients must preserve full precision rather than treating them as JavaScript floats.
+
+#### `public.incident_types` — IMPLEMENTED_IN_M14_0
+
+Needed now: incident categorization cannot reference hydrant types or hard-code an
+agency-specific enum. PK `id uuid`; unique `code text` matching uppercase stable
+codes, maximum64 characters. `names jsonb` requires nonempty `sl` and `de` strings,
+object ≤4096bytes; additional language keys are allowed. `active boolean`,
+`created_at/updated_at timestamptz`. UUID `14000000-0000-4000-8000-000000000001`
+identifies `OTHER`. FIRE_STRUCTURE, FIRE_VEHICLE, WILDFIRE, TECHNICAL_RESCUE,
+TRAFFIC_ACCIDENT, HAZMAT, FLOOD, SEARCH_RESCUE and MEDICAL_SUPPORT are examples for
+later authorized configuration, not seeds. Types referenced by history are
+deactivated rather than removed. ACTIVE accounts may SELECT including inactive
+historical types. No client writes; future configuration is controlled maintenance.
+
+#### `public.incidents` — IMPLEMENTED_IN_M14_0
+
+Needed now: neither hydrants nor inspection plans model an emergency aggregate.
+
+| Columns | Contract |
+| --- | --- |
+| `id uuid` | PK |
+| `reference_number text?`, `reference_year smallint` | Trimmed nonempty1–80 if present; year2000–9999; immutable numbering scope |
+| `title text`, `summary text` | Trimmed title1–200; summary ≤10000, default empty |
+| `incident_type_id uuid` | FK incident_types; future writes require active type, old inactive reference remains readable |
+| `severity`, `priority`, `status text` | Codes/state machine §1; default UNKNOWN/NORMAL/DRAFT |
+| `created_organization_id`, `lead_organization_id uuid` | Existing organizations FKs, both required |
+| `created_by uuid` | Existing profiles FK, required and server-derived |
+| `latitude`, `longitude double precision?` | Both absent or both finite and within [-90,90]/[-180,180]; separate named fields |
+| `address text?` | ≤1000 characters |
+| `started_at`, `declared_at`, `stabilized_at`, `closed_at`, `cancelled_at timestamptz?` | Status/time consistency CHECK and chronological checks |
+| `timezone text` | Bounded1–100; future RPC validates IANA name |
+| `metadata jsonb` | Object ≤8192bytes, extensions only, never authority/identity/state |
+| `created_at`, `updated_at timestamptz` | Server-maintained by future commands |
+| `version bigint` | Core row optimistic version, starts1 |
+| `revision bigint` | Aggregate change cursor, starts0, increases for every accepted domain transaction |
+| `timeline_sequence bigint` | Last committed event sequence, starts0 |
+
+Core fields are mutable through planned commands until terminal state. Creator,
+UUID and number scope never mutate. Current-state rows persist long-term; timeline
+and audit preserve changes. External identity is a future separate mapping, not an
+unvalidated metadata identifier. Read scope is §4; no client mutations.
+
+#### `public.incident_participants` — IMPLEMENTED_IN_M14_0
+
+Needed now: organization hierarchy is not consent to incident participation.
+PK `id uuid`; FKs `incident_id`, `organization_id`; `agency_role text`
+LEAD/SUPPORT/LIAISON describes the agency relationship, **not personal command**.
+`status text` REQUESTED/ACTIVE/RELEASED/DECLINED/CANCELLED;
+`source text` CREATOR/INVITATION/REQUEST/EXTERNAL. Required `requested_by` profiles
+FK and `requested_at`; nullable `accepted_by/accepted_at`, `ended_by/ended_at`,
+`end_reason` (nonempty≤2000). `updated_at`, positive `version`.
+
+REQUESTED has no accept/end values; ACTIVE requires accept values and no end;
+RELEASED requires both accept and end; DECLINED/CANCELLED have end/reason and no
+accept. Time ordering is checked. Rejoin creates a new episode UUID. Terminal
+episodes are never reset to ACTIVE. At most one REQUESTED/ACTIVE episode per
+incident/org and at most one ACTIVE LEAD. Composite unique keys support scoped
+assignment/timeline FKs. Participant history is long-lived, no deletion. Full
+rows are incident-reader-visible; invitation preview for a not-yet-participating
+org is a separate minimal future RPC, not broader SELECT RLS.
+
+#### `public.incident_role_assignments` — IMPLEMENTED_IN_M14_0
+
+Needed now: organization role/position cannot encode temporary incident authority.
+PK `id uuid`; `incident_id` FK; `(participation_id,incident_id,organization_id)`
+composite FK to one participant episode; `user_id` and `assigned_by` profile FKs.
+`role` currently INCIDENT_COMMANDER/DEPUTY_COMMANDER/AGENCY_COMMANDER/OPERATOR/
+RESPONDER. `parent_assignment_id` optional same-incident self FK; no self-parent;
+IC has no parent. `status` ACTIVE/ENDED/REVOKED; `valid_from`, optional
+`valid_until > valid_from`; `ended_by/ended_at/end_reason` required for terminal
+states and absent while ACTIVE; `created_at/updated_at`, positive `version`.
+
+One ACTIVE IC per incident, one ACTIVE agency commander per incident/org and one
+ACTIVE exact incident/org/user/role assignment. Time expiry removes effective
+authority immediately but does not free the unique slot until an explicit end
+command records history. Parent chains confer no inherited capabilities.
+M14.2 adds `sector_id` and M14.4 `unit_assignment_id` with same-incident FKs before
+allowing SECTOR_COMMANDER and UNIT_LEADER. No dangling future scope UUIDs now.
+Assignment identity, user, role, participant, parent and valid_from are immutable
+once issued; corrections end the episode and create another. Future commands
+enforce this and acyclic active parents under aggregate lock. This foundation has
+no writable API that could bypass these planned invariants. History is long-lived.
+
+#### `public.incident_timeline` — IMPLEMENTED_IN_M14_0
+
+Needed now: `audit_log` is security evidence and notifications are delivery hints;
+neither is an incident's ordered operational history. PK `id uuid`; `incident_id`
+FK; positive `sequence` and `revision bigint`; `operation_id uuid` and positive
+`event_ordinal smallint`; stable `event_code text` regex uppercase≤80;
+`actor_user_id/actor_organization_id` existing profile/org FKs;
+optional `participation_id` OR `assignment_id` same-incident FK (at most one);
+`recorded_at` server clock, optional `occurred_at` observation time;
+`data jsonb` object≤16384bytes with event-specific DTO (§9).
+
+Unique `(incident_id,sequence)` and `(incident_id,operation_id,event_ordinal)`.
+Incident-wide events leave subject FKs null. Future subject types add explicit
+FK columns with exclusivity checks; never authorization through arbitrary JSON.
+UPDATE/DELETE/TRUNCATE are rejected by existing immutable-history trigger.
+Incident readers may see all foundation events; sensitive later communications
+are separately scoped, never hidden payloads in this shared stream. Long-lived.
+
+#### Index and uniqueness inventory (including implicit indexes)
+
+| Table | Index / constraint | Access path / invariant |
+| --- | --- | --- |
+| incident_types | PK(id), UNIQUE(code) | UUID joins and stable configuration code |
+| incidents | PK(id) | Aggregate lock/read |
+| incidents | `incidents_reference_unique(created_organization_id,reference_year,reference_number)` WHERE number nonnull | Display reference uniqueness, not identity |
+| incidents | `incidents_creator_list_idx(created_organization_id,updated_at DESC,id)` | Creator draft/list keyset |
+| incidents | `incidents_lead_list_idx(lead_organization_id,status,updated_at DESC,id)` | Lead dashboard/future lifecycle filtering |
+| incident_participants | PK(id); UNIQUE(id,incident_id,organization_id); UNIQUE(id,incident_id) | Scoped assignment/event FKs |
+| incident_participants | `incident_participants_live_unique(incident_id,organization_id)` WHERE REQUESTED/ACTIVE | One open participation episode |
+| incident_participants | `incident_participants_lead_unique(incident_id)` WHERE ACTIVE/LEAD | One lead episode |
+| incident_participants | `incident_participants_org_idx(organization_id,status,incident_id)` | Caller-org incident list / live read gate |
+| incident_role_assignments | PK(id); UNIQUE(id,incident_id) | Same-incident parent/event FKs |
+| incident_role_assignments | `incident_roles_commander_unique(incident_id)` WHERE ACTIVE IC | One current IC slot |
+| incident_role_assignments | `incident_roles_agency_unique(incident_id,organization_id)` WHERE ACTIVE agency commander | One commander per agency |
+| incident_role_assignments | `incident_roles_live_unique(incident_id,organization_id,user_id,role)` WHERE ACTIVE | No duplicate role episodes |
+| incident_role_assignments | `incident_roles_user_idx(user_id,incident_id)` WHERE ACTIVE | Current caller capabilities |
+| incident_role_assignments | `incident_roles_participation_idx(participation_id,incident_id,organization_id)` | Release/revoke episode lookup |
+| incident_role_assignments | `incident_roles_parent_idx(parent_assignment_id,incident_id)` WHERE parent nonnull | Command children lookup |
+| incident_timeline | PK(id); UNIQUE(incident_id,sequence); UNIQUE(incident_id,operation_id,event_ordinal) | Stable identity, keyset timeline, no duplicate event per operation |
+
+No speculative geometry/JSONB/status-only indexes are added. Timeline has no
+timestamp pagination index because server sequence is the ordering authority.
+
+### 3. Participation and command authority
+
+Participation lifecycle: REQUESTED→ACTIVE/DECLINED/CANCELLED;
+ACTIVE→RELEASED. Exact receiving-org MANAGER/ADMIN accepts/declines an invitation;
+the IC/deputy invites, but cannot conscript another organization's membership.
+Creator participation is activated in the draft-creation transaction by its
+MANAGER/ADMIN. Requests by an organization still require IC acceptance plus its
+own manager's consent. A released org loses active operational access immediately;
+after closure, its current active members may read shared incident history.
+
+Lead transfer and command transfer are distinct explicit commands. The IC may
+belong only to the ACTIVE lead organization. Lead transfer therefore atomically
+changes lead participant roles, incident lead org and IC episode to a consenting
+qualified member of the new lead organization. A command transfer within the same
+lead org ends the old IC episode and inserts the accepted successor. Neither
+creator provenance nor hierarchy rank changes during either transfer.
+
+M14.2 handover uses a durable `incident_command_transfers` request with from/to
+assignment/user/org, expiry, requester, recipient acceptance and reason. Outgoing
+IC remains authoritative until acceptance commits. Acceptance rechecks current
+memberships, participation, old IC and incident/transfer versions under locks.
+It ends the old assignment before inserting the new one in the same transaction;
+unique indexes prevent overlapping current ownership. A timed-out/rejected request
+changes no authority. No automatic successor, offline handover or ADMIN override.
+If the last commander loses authority, operations fail closed; an exceptional
+recovery policy requires a separately approved later contract, not a hidden bypass.
+
+Role capabilities:
+
+- IC: incident-wide operational command, lifecycle, participants, roles and handover.
+- Deputy: edit summary, invite agencies; later issue tasks/manage COP under IC.
+  Cannot transfer command or close an incident by implication.
+- Agency commander: own agency's deployed resources and scoped tasking. Cannot
+  command another agency merely because both participate.
+- Sector commander: only expressly delegated sector/resources/tasks. Sector
+  geography is not an authorization source; membership in its command scope is.
+- Unit leader: own incident unit/crew statuses and assigned task acknowledgements/
+  outcomes. Cannot transfer command or assign unrelated units.
+- Operator: read plus explicitly scoped operational note/map actions later; never
+  an all-powerful dispatcher role by name alone.
+- Responder: read and own assigned task acknowledgement/completion; no command grant.
+
+All require current ACTIVE profile, active exact organization membership,
+ACTIVE participation and effective non-revoked assignment. Roles carry scope,
+not a caller-selectable capabilities JSON. Multi-role users select one acting
+organization per command; privileges from unrelated organizations cannot be mixed.
+
+### 4. Authorization matrix and RLS
+
+Legend: **ALLOW** means role capability exists, still subject to the universal
+live checks, incident state, target scope and expected version. **CONDITIONAL**
+means the additional condition below is required. **DENY** means this role alone
+never grants it. Tables split the same matrix for readability.
+
+| Principal | Read incident | Activate | Edit summary | Invite org | Accept participation | Assign incident role | Create sector | Assign unit |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Ordinary org FIREFIGHTER | CONDITIONAL P | DENY | DENY | DENY | DENY | DENY | DENY | DENY |
+| Ordinary org MANAGER | CONDITIONAL P/D | CONDITIONAL D | CONDITIONAL D | DENY | CONDITIONAL O | DENY | DENY | DENY |
+| Ordinary org ADMIN | CONDITIONAL P/D | CONDITIONAL D | CONDITIONAL D | DENY | CONDITIONAL O | DENY | DENY | DENY |
+| Incident responder | ALLOW | DENY | DENY | DENY | DENY | DENY | DENY | DENY |
+| Unit leader | ALLOW | DENY | DENY | DENY | DENY | DENY | DENY | DENY |
+| Sector commander | ALLOW | DENY | DENY | DENY | DENY | DENY | DENY | CONDITIONAL S |
+| Agency commander | ALLOW | DENY | DENY | DENY | DENY | CONDITIONAL A | DENY | CONDITIONAL A |
+| Incident commander | ALLOW | DENY | ALLOW | ALLOW | DENY | ALLOW | ALLOW | ALLOW |
+| Non-participant inherited reader | DENY | DENY | DENY | DENY | DENY | DENY | DENY | DENY |
+| Unrelated organization member | DENY | DENY | DENY | DENY | DENY | DENY | DENY | DENY |
+
+| Principal | Issue task | Ack task | Complete task | Transfer command | Close | Edit map object | Read timeline |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Ordinary org FIREFIGHTER | DENY | DENY | DENY | DENY | DENY | DENY | CONDITIONAL P |
+| Ordinary org MANAGER | DENY | DENY | DENY | DENY | DENY | DENY | CONDITIONAL P/D |
+| Ordinary org ADMIN | DENY | DENY | DENY | DENY | DENY | DENY | CONDITIONAL P/D |
+| Incident responder | DENY | CONDITIONAL T | CONDITIONAL T | DENY | DENY | DENY | ALLOW |
+| Unit leader | CONDITIONAL U | CONDITIONAL T/U | CONDITIONAL T/U | DENY | DENY | CONDITIONAL U | ALLOW |
+| Sector commander | CONDITIONAL S | CONDITIONAL T | CONDITIONAL T | DENY | DENY | CONDITIONAL S | ALLOW |
+| Agency commander | CONDITIONAL A | CONDITIONAL T | CONDITIONAL T | DENY | DENY | CONDITIONAL A | ALLOW |
+| Incident commander | ALLOW | CONDITIONAL T | CONDITIONAL T | ALLOW | ALLOW | ALLOW | ALLOW |
+| Non-participant inherited reader | DENY | DENY | DENY | DENY | DENY | DENY | DENY |
+| Unrelated organization member | DENY | DENY | DENY | DENY | DENY | DENY | DENY |
+
+P: exact active member of ACTIVE participant org, or RELEASED participant after
+terminal incident. D: creator-org MANAGER/ADMIN in DRAFT; activation also requires
+accepted named IC. O: accepting only their own organization's invitation, with
+minimal invite preview. A: own agency resources/RESPONDER or UNIT_LEADER delegation,
+not IC/deputy/other agency roles. S: explicitly delegated sector resources; cannot
+pull resources from other sectors. U: own unit/crew; task issue means subordinate
+tasks to own crew, not self-escalation or another unit. T: personally assigned task
+or designated active leader of its assigned unit. Authority to issue a task does
+not let its issuer fabricate a recipient's acknowledgement/completion.
+
+No operational assignment is automatically given to the draft creator/activator.
+Activation is a bounded organizational bootstrap action, with accepted IC named
+explicitly. An IC is never permitted activation solely by holding another
+incident's IC role. Current foundation capabilities cover only five online core
+actions; future scope-specific capabilities must be added with their target FKs.
+
+| Implemented table | SELECT | INSERT / UPDATE / DELETE |
+| --- | --- | --- |
+| incident_types | ACTIVE account, including inactive historical types | None for clients/service_role |
+| incidents | DRAFT: exact active creator-org MANAGER/ADMIN. Other states: exact active member of ACTIVE participant, or RELEASED participant in terminal state | None; future narrow RPC only |
+| incident_participants | Same incident read gate; participation never inferred from org hierarchy | None; future narrow RPC only |
+| incident_role_assignments | Same incident read gate; public operational identity only | None; future narrow RPC only |
+| incident_timeline | Same gate; shared operational events only | None; future trusted append only; no update/delete even through ordinary maintenance |
+
+`private.can_read_incident` and `private.has_incident_capability` are SECURITY
+DEFINER, empty search_path, caller-bound to auth.uid(), and expose boolean answers
+only. Existing membership helpers plus explicit org.active checks avoid recursive
+RLS. All other new functions are SECURITY INVOKER and retain RLS. Every new
+function revokes default PUBLIC execution before authenticated grants. There are
+no dynamic SQL/filter arguments. Service-role use is not an authorization strategy.
+
+An inherited Web reader can still read the existing authorized organization data;
+that does not grant incident access. Incident participation does not widen hydrant,
+profile, photo or inspection RLS either. Cross-agency display uses authorized
+minimal incident DTOs, not unrestricted joins to another org's private records.
+
+### 5. Future domain dictionary (specified, not created)
+
+The following entries are **contracts**, not empty M14.0 tables. Unless stated
+otherwise: UUID PK; existing profile actor FKs; incident-scoped composite FKs
+`(id,incident_id)`; `created_at/updated_at timestamptz`, positive `version bigint`
+and `changed_revision bigint`; RESTRICT deletion; SELECT through authorized
+incident/target scope; no direct client DML; writes through §8 commands; soft
+terminal state and long-lived history. Indexes listed are the intended minimum,
+to be added with the owning milestone, not now. Global inventory tables use
+organization scope and the existing role helpers instead.
+
+| Entity / delivery | Columns and invariants | Indexes, authorization and retention |
+| --- | --- | --- |
+| `private.incident_operation_receipts` M14.1 | PK operation_id; actor_user_id, acting_org_id, incident_id, command_code, canonical_request jsonb≤64KiB, response jsonb≤128KiB, committed_at; same UUID with different actor/scope/request rejected; immutable success receipt | UNIQUE PK globally; (incident_id,committed_at); no client table access; command replay rechecks read authority; long-lived |
+| `private.incident_number_counters` M14.1 | PK(organization_id,reference_year), next_value bigint>0; FK org; allocation under row lock, format separate | PK only; private command access; not business identity |
+| `incident_command_transfers` M14.2 | incident_id, from_assignment_id, to_user_id, to_org_id, kind COMMAND/LEAD_AND_COMMAND, reason1–2000, status REQUESTED/ACCEPTED/DECLINED/CANCELLED/EXPIRED, requested_by/at, expires_at, decided_by/at, operation_id; no mutation of accepted history | Unique live REQUESTED per incident; unique operation_id; (to_user_id,status,incident_id); read commander/recipient, redacted decision event shared; long-lived |
+| `incident_sectors` M14.3 | incident_id, code≤64, name≤200, optional validated Polygon geometry, active, created_by/updated_by; sector command is role assignment, not a duplicated commander column | UNIQUE(incident_id,code); (incident_id,active); shared read, IC/deputy create, scoped commander edits; deactivate, long-lived |
+| `incident_map_objects` M14.3 | incident_id, kind COMMAND_POST/STAGING/HAZARD/WATER_SOURCE/ACCESS_POINT/PERIMETER/NOTE, label≤200, description≤4000, geometry, optional sector_id, created_by/updated_by, active; water-source marker is not a copy of a hydrant | (incident_id,active,changed_revision); optimistic updates, capability/scope gates; deactivate and retain historical versions in events |
+| `incident_hydrant_links` M14.3 | id,incident_id,hydrant_id FK existing hydrants, purpose WATER_SUPPLY/REFERENCE, created_by, active; optional bounded report-only snapshot captured at use/closure | UNIQUE(incident_id,hydrant_id,purpose); incident read plus existing hydrant read for live data; linking requires source read; no duplicated registry |
+| `operational_vehicles` M14.4 | organization_id, callsign≤80, name≤200, category_code, registration?≤80, active, availability AVAILABLE/UNAVAILABLE, seats integer≥0, water_litres integer≥0, bounded typed capability map; no maintenance accounting | UNIQUE(org,callsign) for active rows; (org,active); owning org role writes; participating users get minimal deployment DTO, not private registration; long-lived |
+| `operational_units` M14.4 | organization_id, callsign≤80, name≤200, unit_kind VEHICLE_CREW/RESCUE_TEAM/DRONE_TEAM/MEDICAL_TEAM/OTHER, optional vehicle_id same org FK, active, capability codes; a vehicle may be absent | UNIQUE(org,callsign) active; (org,active); exact-org inventory control; no incident authority implicit |
+| `incident_units` M14.4 | incident_id, participation_id/org scoped FK, unit_id same-org FK, optional sector_id, status per §6, assigned_by/at, released_by/at, commander_assignment_id, assignment episode times | UNIQUE(unit_id) WHERE not RELEASED/UNAVAILABLE prevents double deployment; (incident_id,status), (participation_id); IC/agency scope writes; release/new episode, long-lived |
+| `incident_crew_members` M14.4 | incident_id, unit_assignment_id, user_id FK profile, membership_org_id, crew_role LEADER/DRIVER/RESPONDER/SPECIALIST, joined_at,left_at,status ACTIVE/LEFT, added_by; active exact org membership checked at commit | UNIQUE(incident_id,user_id) active; (unit_assignment_id,status); UNIT_LEADER authority is a separate explicit role assignment; member histories long-lived |
+| `operational_resources` M14.4 | organization_id, name, resource_type_code, unit_of_measure_code, total_quantity numeric≥0, active; one row denotes a countable stock or individually identified item (quantity1), not a person | (org,active,type); exact-org inventory write; no fleet/warehouse ERP |
+| `incident_resource_allocations` M14.4 | incident_id, resource_id, participant_id, quantity>0, optional unit_assignment_id, status RESERVED/DEPLOYED/RETURNED/CONSUMED/CANCELLED, allocated_by/at, ended_at | (incident_id,status),(resource_id,status); lock stock row and sum live allocations ≤available; owner unchanged; long-lived |
+| `incident_tasks` M14.5 | incident_id, issuer_assignment_id, assignee_user_id OR unit_assignment_id (exactly one), task_type_code, title≤200,instructions≤8000,priority,status,sector_id?,target_map_object_id OR target_hydrant_id OR target_unit_assignment_id OR target_latitude+longitude (exactly one target), issued_at,acknowledged_at,started_at,completed_at,outcome?,blocked_reason?,updated_by | (incident_id,status),(unit_assignment_id,status),(assignee_user_id,status); all target FKs scoped/authorized; no client DML; task version and history long-lived |
+| `incident_task_dependencies` M14.5 | PK(task_id,depends_on_task_id), incident_id, created_by/at, active; both same incident, no self/cycle; deactivate instead of delete | Reverse(depends_on_task_id,active); task issuer authority; DAG checked under incident lock; retain history |
+| `incident_mobilizations` M14.6 | incident_id, recipient_org_id, requested_by, priority, reason, status REQUESTED/ACCEPTED/DECLINED/CANCELLED/FULFILLED, requested_at,responded_by/at, response_reason | (recipient_org_id,status,requested_at); current-org managers see minimal request even before joining; acceptance creates participation through same contract; long-lived |
+| `incident_turnout_responses` M14.6 | mobilization_id, incident_id, user_id OR unit_id exactly one, status AVAILABLE/UNAVAILABLE/EN_ROUTE/ARRIVED/RELEASED, response_at, departure_at,arrival_at,release_at; optional ETA is declared, not invented routing time | Unique(mobilization,target) via partial user/unit indexes; (incident_id,status); own response or authorized unit leader, long-lived |
+| `incident_messages` M14.7 | incident_id, sender_user_id/acting_org_id, audience INCIDENT/ORGANIZATION/UNIT, audience_org_id OR unit_assignment_id matching audience, body≤4000, sent_at, supersedes_id?; append-only corrections | (incident_id,sent_at,id), audience lookup; recipient SELECT RLS, no broadcast of private text to timeline; operational communication, not social chat |
+| `incident_attachments` M14.7 | incident_id, uploader_user_id/org, task_id OR message_id OR map_object_id optional max1, storage_path unique, content_hash, mime_type,size_bytes,captured_at, status PENDING/AVAILABLE/ATTENTION/RETRACTED; no public URLs | (incident_id,status), unique storage_path; target audience gate + private Storage; immutable bytes after registration, explicit retraction; policy retention |
+| `incident_changes` M14.7 | PK(incident_id,revision,ordinal), entity_kind + typed subject FK, operation UPSERT/REVOKE, audience scope, entity_version, recorded_at; identifiers only, authorized current DTO fetched in snapshot | Keyset PK; private writer, scoped change reader; retention30days then mandatory full snapshot; not an audit replacement |
+| `incident_current_positions` M14.8 | incident_id, unit_assignment_id PK with incident, sharing_user_id, device_registration_id reference existing device, lat/lon,accuracy_m≥0,observed_at,received_at,expires_at,sequence; source opt-in foreground sharing | (incident_id,expires_at); scoped incident unit read; latest only, TTL15min, no permanent trail; no M14.0 implementation |
+| `private.incident_external_links` M14.9 | id, provider_code, external_event_id, incident_id, last_provider_revision?,last_payload_hash, last_received_at; UNIQUE(provider_code,external_event_id) | Incident lookup; adapter-only, long-lived minimal mapping; never primary identity |
+| `private.incident_external_receipts` M14.9 | id,provider_code,external_message_id,payload_hash,provider_revision?,received_at,processed_at,outcome,incident_id?, encrypted_raw_payload_ref? | UNIQUE(provider_code,external_message_id); provider/event revision uniqueness where supported; private only; raw payload≤72h, minimal dedupe receipt long-lived |
+| `incident_closures` M14.10 | id,incident_id,final_commander_assignment_id,closed_by/at,reason,outcome,final_revision,snapshot_schema_version,snapshot_private_path,content_hash; immutable sealed snapshot | UNIQUE(incident_id); incident historical read; close command only; long-lived; later amendments append linked records, never replace seal |
+
+Reference codes for unit categories, capabilities, resource measures and task types
+must become small validated configuration tables when introduced, not arbitrary
+authorization JSON. They are not seeded or added now. Vehicle registration,
+medical details, personal contact data and credentials do not belong in shared COP
+DTOs. Original identity tables remain authoritative; historical snapshots are
+clearly labeled and cannot grant access.
+
+### 6. Units, tasks and mobilization state machines
+
+Organization is the legal/administrative participant. Unit is a deployable
+operational entity; vehicle is an owned asset; crew is a temporary set of existing
+people assigned to a unit; person is an existing profile; resource is a countable
+asset/stock. A saved inspection team can supply a roster suggestion with explicit
+current-membership checks, but is never automatically a deployed crew. Deploying
+a unit does not transfer vehicle/resource ownership to the lead organization.
+
+| Unit state transition | Command rule |
+| --- | --- |
+| AVAILABLE→REQUESTED | Dispatch request; no implied arrival |
+| REQUESTED→DISPATCHED or UNAVAILABLE | Owning agency accepts/declines; reason on unavailable |
+| DISPATCHED→EN_ROUTE→ON_SCENE | Unit leader records actual departure/arrival |
+| ON_SCENE→ASSIGNED→ON_SCENE | Authorized scoped tasking / release from task |
+| ON_SCENE/ASSIGNED→RETURNING→RELEASED | Explicit release/return; unfinished tasks addressed |
+| Any nonterminal→UNAVAILABLE | Explicit inability/safety reason; task impact retained for command attention |
+
+Unavailable/released deployment episodes never silently reactivate. A fresh
+assignment episode requires fresh authority and readiness. Short-circuit arrival
+after a missed device report is an explicit server command recording omitted
+steps as unknown, not invented timestamps. Per-person turnout does not change an
+entire unit's state automatically. Crew membership dates remain independent of
+vehicle availability and permanent org membership.
+
+Task is an instruction with one explicit assignee, target and issuer assignment.
+An order is the issue/transition command, not a second task database. Supported
+initial type contracts include RECON, WATER_SUPPLY, RESCUE, SUPPRESSION, SECURE_AREA,
+STAGING and OTHER; labels are configurable and do not confer authority. A target
+must be a same-incident map object/unit, an authorized existing hydrant, or a
+validated coordinate. Free text cannot replace target validation.
+
+| Task transition | Required actor / data |
+| --- | --- |
+| DRAFT→ISSUED | Authorized issuer; current assignee, target and dependencies valid |
+| DRAFT→CANCELLED | Issuer, reason |
+| ISSUED→ACKNOWLEDGED | Assigned person or current assigned unit leader; explicit acknowledgement |
+| ACKNOWLEDGED→IN_PROGRESS | Same executor; dependencies completed or authorized explicit dependency override event |
+| ISSUED/ACKNOWLEDGED/IN_PROGRESS→BLOCKED | Executor, nonempty reason; previous status retained in event |
+| BLOCKED→ACKNOWLEDGED or IN_PROGRESS | Executor, resolution note; cannot bypass missing acknowledgement |
+| IN_PROGRESS→COMPLETED or FAILED | Executor, outcome; failed requires reason; immutable final result |
+| ISSUED/ACKNOWLEDGED/IN_PROGRESS/BLOCKED→CANCELLED | Authorized issuing command scope; reason; recipient informed |
+
+Terminal tasks cannot be reset. Follow-up work is a new linked task. Assignment
+change is an explicit online command that increments version, preserves previous
+recipient/history, and resets any recipient acknowledgement to ISSUED. It cannot
+rewrite a completed outcome. Dependency cycles are rejected. Cross-agency tasking
+requires IC/deputy authority; agency commanders manage their own resources;
+sector commanders only resources explicitly delegated to their sector. No user
+may grant themselves additional command capability through a task.
+
+RTS-style UX is selection of authorized unit(s), target and action followed by a
+normal confirmed command. Dragging a marker or clicking a map is not a command
+until submitted. Multi-unit tasking creates one task per assignee in a bounded
+atomic command with distinct stable task UUIDs. UI gestures are not persisted,
+and a visual arrow is not evidence of server acceptance.
+
+Mobilization (M14.6): IC/deputy requests an organization or already available unit;
+receiving org accepts/declines; acceptance establishes participation through the
+same participant contract. Organization/unit/member turnout responses remain
+distinct. Unit dispatch, departure, arrival and release use the same unit state
+machine. Requests for reinforcement are mobilizations linked to the incident,
+not cloned incidents. FCM alerts are hints; an actual response must commit through
+an authorized command and produce timeline evidence. No response is inferred from
+push delivery, notification opening or GPS proximity.
+
+### 7. COP, geometry, routing and location sharing
+
+The future COP read model combines incident point, sectors/zones, operational
+markers, existing authorized hydrants/water sources, units, command posts,
+staging areas, tasks, routes and timeline. Selected organization layers use their
+existing authorization. All entities retain UUID identity and source provenance;
+MapLibre sources/layers are projections, not stores of authority.
+
+Transport geometry is GeoJSON **Geometry**, WGS84 `[longitude, latitude]`.
+Named API fields remain `latitude`/`longitude`. M14.3 stores validated bounded
+JSONB geometry without adding PostGIS now. Allowed types: Point for positions;
+LineString for perimeters/paths where the object kind permits; Polygon for sectors
+and zones. No arbitrary FeatureCollection/properties blob, CRS override, Z/M
+coordinates or GeometryCollection. Maximum geometry64KiB and2000 coordinate pairs;
+LineString≥2 vertices; Polygon rings≥4, closed, non-self-intersecting; latitude
+[-90,90], longitude[-180,180], all finite. Dateline-crossing geometry is rejected
+with a clear unsupported-geometry error initially. Validation is performed by the
+server and DB helper before writes, not only Compose/MapLibre. Bounds columns can
+be derived later if a real spatial query requires indexes. PostGIS would require
+an explicit future dependency decision, not a hidden installation.
+
+Map edits use expected entity version, actor and updated_at. A stale edit returns
+both authoritative state and unchanged local intent for explicit resolution.
+No CRDT, last-write-wins or automatic merging of operational boundaries. Sector
+geometry does not change command delegation automatically.
+
+Hydrant markers remain at their canonical original coordinates. Road snapping is
+only a routing input/output; it never rewrites a hydrant. The existing `RoadProvider`
+returns snapped points, road matrix and route geometry; incident target adapters
+later pass incident/task/unit context without reusing plan ownership logic.
+Reuse current OSRM primary, fallback behavior, navigation step/camera/bearing and
+reroute logic. No new provider, keys in clients, Oracle setting or capacity change.
+The current100 capacity remains. A provider failure never becomes fabricated
+straight-line travel distance/time. Offline clients show cached route geometry
+with age and provider; new route calculation needs connectivity. NAV2 consumes
+an explicit selected target and may not silently retask a unit.
+
+Location sharing is **future opt-in**, scoped to an ACTIVE incident unit, preferably
+one designated leader device. Existing device registration is reused; sharing
+identity is not an unrestricted device token. Defaults: foreground updates at most
+every10seconds and when moved≥10m, accuracy/observed time included, stale display
+after2minutes, expire latest position after15minutes. No background permission or
+tracking implied by joining an incident. No GPS trail is stored initially. If a
+later operational policy needs short trails, maximum24h, explicit notice/consent
+and separately reviewed retention are required. Stop on opt-out, release, account/
+org switch or authorization loss. Reject another unit's position, future timestamps
+>2minutes and out-of-order device sequence updates. Reconnection sends latest
+position, not a replayed location history. Positions are not audit events, push
+payloads or permanent employee-performance records. Sharing start/stop can be
+audited without retaining coordinates in audit. No telemetry is implemented now.
+
+### 8. Canonical API / RPC dictionary
+
+#### Common command envelope — PLANNED_M14_1
+
+All future mutations take `operation_id UUID`, `incident_id UUID` (preallocated
+also for create), `acting_organization_id UUID`, `expected_version BIGINT` for
+the target row, and a typed bounded payload. Actor comes only from `auth.uid()`.
+Creation uses expected_version0. Commands affecting several entities take named
+expected versions for each safety-sensitive entity. No generic table name,
+SQL filter or client-provided event/authority payload is accepted.
+
+Success DTO: `{contract_version:1, operation_id, incident_id, entity_id,
+entity_version, incident_revision, timeline_from, timeline_to, state}` with an
+explicit typed state projection. Domain failure codes: NOT_AUTHORIZED (also hidden
+not-found), STALE_VERSION, INVALID_TRANSITION, INVALID_SCOPE, OPERATION_REUSED,
+PRECONDITION_FAILED. Transport failure remains retryable; authorization/stale
+failure remains attention-needed with original local data intact. Acknowledgement
+means transaction committed, not merely queued HTTP/FCM delivery.
+
+Durable receipt key is global operation UUID, scoped in the receipt to actor,
+incident and acting org. A retry must match canonical typed request exactly,
+including explicit null/default normalization. Different payload/actor/scope
+raises OPERATION_REUSED. Save immutable receipt in the same transaction as domain,
+timeline and audit. A lost-response retry may replay its original successful DTO
+after current read authorization is rechecked, even though its expected version
+is now old; it must not reapply the mutation. Replays cause no new timeline/audit/
+notifications. Do not copy a last-operation-only shortcut from planning: later
+operations must not destroy earlier retry receipts.
+
+| Contract / availability | Input → result | Authorization; idempotency/concurrency; evidence |
+| --- | --- | --- |
+| `incident_context` IMPLEMENTED_IN_M14_0 | `(p_incident_id uuid,p_acting_organization_id uuid)` → explicit core DTO with contract_version1, UUID/reference,title/summary/type,severity/priority/status,lead/creator org,point/address/timezone,version/revision/timeline_sequence,updated_at,acting org,sorted capabilities | Current incident read + exact active acting org that is eligible for that incident; absent/denied→null. Read-only; one SQL statement snapshot; no receipt/event/audit. Does not pretend to be full future operational snapshot. |
+| `incident_timeline_page` IMPLEMENTED_IN_M14_0 | `(p_incident_id uuid,p_acting_organization_id uuid,p_after_sequence bigint=0,p_limit int=100)` → contract_version1, incident_id, events ascending sequence, high_watermark | Same context gate; null for denied/absent. Limit clamps1–200; negative/null cursor→0. Next cursor is last returned sequence, never high_watermark until all pages consumed. SQL snapshot, no write/evidence. |
+| `private.can_read_incident` IMPLEMENTED_IN_M14_0 | `(p_incident_id uuid)` → boolean | Caller-bound profile/exact active membership/participation; no target-user parameter; draft manager exception; read helper only, no event. |
+| `private.has_incident_capability` IMPLEMENTED_IN_M14_0 | `(p_incident_id uuid,p_acting_organization_id uuid,p_capability text)` → boolean | Current effective explicit role in ACTIVE/STABILIZED incident; IC five core capabilities, deputy EDIT_SUMMARY/INVITE_ORGANIZATION; unknown capability false. Advisory read; future writes must recheck under locks. |
+| `incident_create_draft` PLANNED_M14_1 | Envelope + type,title,summary,point/address or unknown_location_reason,timezone,priority,severity,started_at → core DTO | Exact active creator-org MANAGER/ADMIN; client incident/participant UUIDs; version0; validate type/timezone; atomically create creator ACTIVE LEAD participation and receipt. INCIDENT_CREATED/PARTICIPANT_JOINED + audit. No implicit IC. |
+| `incident_update_summary` PLANNED_M14_1 | Envelope + allowed core fields → core DTO | Draft creator-org manager or live IC/deputy; expected core version; no lifecycle/lead/identity changes; INCIDENT_DETAILS_UPDATED + audit. |
+| `incident_nominate_initial_command` PLANNED_M14_1 | Envelope + consent UUID, nominee user, expires_at → consent DTO | Exact creator-org manager, DRAFT, nominee current lead-org member; durable nomination only, no role grant; COMMAND_NOMINATED + audit. |
+| `incident_accept_initial_command` PLANNED_M14_1 | Envelope + nominated user=self, proposed assignment UUID → acceptance DTO | Nominated active lead-org member explicitly consents; draft manager's nomination bound to incident version; server records expiring consent, no active role until activation. COMMAND_ACCEPTED + audit. Consent storage added with M14.1 write model. |
+| `incident_activate` PLANNED_M14_1 | Envelope + accepted commander nomination ID/version → core DTO | Creator-org manager, DRAFT only; recheck nominee consent/membership, lead participant; insert IC atomically, set declared_at; INCIDENT_ACTIVATED/COMMAND_ASSIGNED + audit. |
+| `incident_change_lifecycle` PLANNED_M14_1 | Envelope + next_status,reason → core DTO | §1 transitions only; draft cancel manager, stabilize/reactivate IC; CLOSED delegated to close contract; expected version; transition event + audit. |
+| `incident_request_participation` PLANNED_M14_1 | Envelope + participant UUID, recipient org,agency_role SUPPORT/LIAISON,reason → invitation DTO | IC/deputy; target active org; dedupe receipt plus one live episode; PARTICIPANT_REQUESTED + audit. External/self-request entry adapters cannot bypass receiving consent. |
+| `incident_invitation_context` PLANNED_M14_1 | participant UUID, acting org → minimal title,type,requester org,request time,status | Receiving-org exact manager; no full incident/map/timeline exposure; read-only, no events. |
+| `incident_accept_participation` PLANNED_M14_1 | Envelope + participant ID/expected version, decision ACCEPT/DECLINE,reason → participant DTO | Exact receiving-org manager, REQUESTED only; live account/org; receipt; PARTICIPANT_JOINED/DECLINED + audit. |
+| `incident_release_participation` PLANNED_M14_2 | Envelope + participant ID/version,reason → participant DTO | IC and release acknowledgement by agency commander/own manager; lead must first transfer; unresolved units/tasks require explicit handling; end roles atomically; PARTICIPANT_RELEASED + audit. |
+| `incident_assign_role` PLANNED_M14_2 | Envelope + assignment UUID,participant,user,role,parent,scope,valid_until → assignment DTO | IC; agency commander only own-agency responder/unit-leader grants, never IC; active membership/parent, no cycles/self-escalation; IC change uses transfer only. COMMAND_ASSIGNED + audit. |
+| `incident_end_role` PLANNED_M14_2 | Envelope + assignment/version,reason → ended DTO | Granting command scope; IC termination requires accepted successor or closure; preserve episode; COMMAND_ENDED/REVOKED + audit. |
+| `incident_request_command_transfer` PLANNED_M14_2 | Envelope + transfer UUID,to_user,to_org,kind,reason,expires_at → transfer DTO | Current IC; target current lead org unless LEAD_AND_COMMAND; recipient org must ACTIVE; one pending transfer; COMMAND_TRANSFER_REQUESTED + audit. |
+| `incident_accept_command_transfer` PLANNED_M14_2 | Envelope + transfer/version,current IC version,new assignment UUID → command context | Named recipient, current exact membership; target-org manager consent additionally for lead transfer; recheck old authority/version, atomically end/start and change lead if needed; COMMAND_TRANSFERRED/[LEAD_ORGANIZATION_CHANGED] + audit. |
+| `incident_add_operational_note` PLANNED_M14_7 | Envelope + note text≤4000,occurred_at → event DTO | Active scoped responder/operator/commander, no arbitrary event code/actor; bounded text; receipt. OPERATIONAL_NOTE_ADDED + audit without duplicating sensitive body. This is the only user-facing append-like action. |
+| `private.append_incident_event` PLANNED_M14_1 | Validated typed code/subject/data from trusted command, operation UUID/ordinal → event UUID/sequence | Not client-callable. Lock incident, increment sequence in same transaction; caller function derives actor; event catalog whitelist. Receipt owns idempotency; unique event tuple is secondary protection. |
+| `incident_create_sector` PLANNED_M14_3 | Envelope + sector UUID,code,name,geometry? → sector DTO | IC/deputy, geometry checks, version0; SECTOR_CREATED + audit. |
+| `incident_put_map_object` PLANNED_M14_3 | Envelope + object UUID,kind,label,geometry,sector? → object DTO | IC/deputy or scoped commander/operator capability; expected version; MAP_OBJECT_CREATED/UPDATED + audit. |
+| `incident_assign_unit` PLANNED_M14_4 | Envelope + assignment UUID,participation,unit,sector?,accepted availability/version → unit deployment DTO | IC with owning agency consent, or own agency commander; sector commander only delegates already offered units in own scope; lock unit/incident; UNIT_ASSIGNED + audit. |
+| `incident_transition_unit` PLANNED_M14_4 | Envelope + unit assignment/version,next_status,reason/observed_at → unit DTO | Unit leader own unit for movement/status, command authority for task allocation/release; §6; UNIT_STATUS_CHANGED + audit. |
+| `incident_create_task` PLANNED_M14_5 | Envelope + task UUID,type,assignee,target,priority,instructions,dependencies → task DTO | Scoped issuer, current target/assignee visibility, no cycles; version0; TASK_CREATED then TASK_ISSUED if explicitly requested, audit. |
+| `incident_transition_task` PLANNED_M14_5 | Envelope + task/version,next_status,reason,outcome,occurred_at → task DTO | §6 actor/state rules, live assignee at commit; stale offline result preserved for attention; TASK_* + audit. |
+| `incident_reassign_task` PLANNED_M14_5 | Envelope + task/version,new assignee,reason → task DTO | Issuer command scope; unfinished only, online; retain previous assignee/result evidence; TASK_REASSIGNED + audit. |
+| `incident_request_mobilization` PLANNED_M14_6 | Envelope + request UUID,target org/unit,priority,reason → request DTO | IC/deputy/current scoped agency commander, exact target checks; MOBILIZATION_REQUESTED + audit and M10 hint. |
+| `incident_respond_turnout` PLANNED_M14_6 | Envelope + request/version,person=self OR led unit,state,observed_at → response DTO | Own current membership or unit leader; receipt; TURNOUT_RESPONDED/UNIT_STATUS_CHANGED + audit. |
+| `incident_operational_snapshot` PLANNED_M14_7 | incident,acting org,page token? → core,participants,command,units/tasks/map authorized DTO pages + pinned revision R and sequence S | Current incident and audience gates; consistent snapshot manifest with expiring token; no dozens of independent unordered UI queries; read-only. |
+| `incident_changes_since` PLANNED_M14_7 | incident,acting org,cursor(revision,ordinal),limit≤200 → authorized change descriptors,next cursor,high_watermark,reset_required | Current authority on every page; history gap/expired manifest→full snapshot; no events/audit. |
+| `incident_close` PLANNED_M14_10 | Envelope + reason,outcome,final summary,unit/task disposition references → closure DTO | Current IC, STABILIZED, no pending command transfer, §13; row locks/version; immutable closure snapshot, INCIDENT_CLOSED + audit. |
+
+The M14.1 consent record must be durable (`private.incident_command_consents`:
+PK id, incident FK, nominee profile/org, nominated_by, requested_at,expires_at,
+accepted_at?,consumed_at?, expected_incident_version, operation UUID UNIQUE).
+Only named nominee/creator-org manager see its narrow DTO; one unconsumed consent
+per nominee/incident, consumed atomically by activation, long-lived evidence.
+No role is granted by an unaccepted nomination. This small write-workflow table is
+deliberately not created by M14.0.
+
+APIs evolve additively under `contract_version:1`; unsupported command codes fail
+explicitly. Unknown timeline codes render a neutral localized event and keep raw
+DTO for later refresh, never cause a client crash or grant capability. Breaking
+changes require a negotiated new contract, not silently changed table-row JSON.
+
+### 9. Timeline, audit and operational event catalog
+
+Timeline is shared operational evidence; audit is the existing security/change
+record with before/after data and organization actor; notification event is a
+delivery trigger; message is scoped communication. They have separate purpose and
+retention. Do not use FCM delivery time as event order, audit rows as the COP feed,
+or chat text as task status. Task/unit/participant histories derive from typed
+entities and explicit transitions, never parsing notes.
+
+Every accepted domain command locks the incident and advances `revision` once.
+It allocates one or more contiguous `timeline_sequence` values while holding that
+lock, inserts timeline and audit, and stores the receipt in the same transaction.
+Rollback rolls back counters/events as well. Concurrent transactions cannot
+publish an event with a lower committed sequence after a higher one. Sequences
+are incident-local, not global. Client time can be displayed separately.
+`version` changes only on the affected entity; core version need not increase for
+every task note. A transaction's multiple events share its revision and have
+distinct positive event ordinals.
+
+Audit uses `private.write_audit(actor_org, auth.uid(), event_code, entity_kind,
+entity_uuid, before, after)`. Cross-agency commands record the actor org and typed
+affected org IDs; no broad cross-org audit SELECT policy is added. The shared
+timeline carries safe operational evidence to participants. Credentials, medical
+details, raw external payloads and routine precise GPS fixes are excluded.
+
+| Stable event codes | Required typed data / subject; emitter milestone |
+| --- | --- |
+| INCIDENT_CREATED, INCIDENT_DETAILS_UPDATED | Incident subject; changed field names, core version; M14.1 |
+| INCIDENT_ACTIVATED, INCIDENT_STABILIZED, INCIDENT_REACTIVATED, INCIDENT_CANCELLED, INCIDENT_CLOSED | from/to status, reason when required, server effective time; M14.1 / closure M14.10 |
+| PARTICIPANT_REQUESTED, PARTICIPANT_JOINED, PARTICIPANT_DECLINED, PARTICIPANT_RELEASED, PARTICIPANT_CANCELLED | participation FK, org ID, previous/next status, reason; M14.1–2 |
+| COMMAND_NOMINATED, COMMAND_ACCEPTED, COMMAND_ASSIGNED, COMMAND_ENDED, COMMAND_REVOKED | assignment FK once created, role, org, effective interval; consent event references typed consent DTO without authority; M14.1–2 |
+| COMMAND_TRANSFER_REQUESTED, COMMAND_TRANSFER_DECLINED, COMMAND_TRANSFER_EXPIRED, COMMAND_TRANSFERRED, LEAD_ORGANIZATION_CHANGED | transfer FK added with M14.2, old/new assignment/org IDs, reason, effective time |
+| SECTOR_CREATED, SECTOR_UPDATED, SECTOR_DEACTIVATED | future sector FK, version, changed fields; M14.3 |
+| MAP_OBJECT_CREATED, MAP_OBJECT_UPDATED, MAP_OBJECT_DEACTIVATED, HYDRANT_LINKED | future typed subject FK, version and minimal kind/label; M14.3 |
+| UNIT_ASSIGNED, UNIT_STATUS_CHANGED, UNIT_RELEASED, CREW_JOINED, CREW_LEFT, RESOURCE_ALLOCATED, RESOURCE_RETURNED | future unit/crew/resource FK, from/to status or quantity, observed/server time; M14.4 |
+| TASK_CREATED, TASK_ISSUED, TASK_ACKNOWLEDGED, TASK_STARTED, TASK_BLOCKED, TASK_RESUMED, TASK_COMPLETED, TASK_FAILED, TASK_CANCELLED, TASK_REASSIGNED | future task FK, old/new state, assignee IDs, outcome/reason; M14.5 |
+| MOBILIZATION_REQUESTED, MOBILIZATION_ACCEPTED, MOBILIZATION_DECLINED, TURNOUT_RESPONDED | future mobilization/response FK, org/unit/person, response code; M14.6 |
+| OPERATIONAL_NOTE_ADDED, ATTACHMENT_REGISTERED | authorized text or attachment FK; no public URL; M14.7 |
+| EXTERNAL_EVENT_LINKED | internal incident and provider code, no raw payload; M14.9 |
+| INCIDENT_REPORT_SEALED, INCIDENT_REPORT_AMENDED | closure/report ID, revision/hash, reason; M14.10 |
+
+Codes are never translated in storage. SI/DE/default strings render codes/data.
+No emissions are implemented in M14.0. Its regex permits future stable codes;
+trusted append helper later whitelists code-specific typed payloads. Event data
+is bounded evidence, not a substitute for foreign keys or role checks.
+
+### 10. Concurrency, realtime and offline synchronization
+
+#### Locking and commit-time authorization
+
+Future commands acquire existing organization security locks for involved actor,
+target and resource-owner organizations in sorted UUID order, then relevant profile
+rows in sorted order, then the incident row `FOR UPDATE`, then subject rows in
+stable order. They re-read ACTIVE profile, active organization, exact membership,
+participation, role validity and expected versions under those locks. This
+coordinates with existing membership revocation; callers cannot authorize from a
+stale screen. Multi-org commands retry serialization failures using the same
+operation UUID, never by dropping expected-version checks. Unique receipt insert
+conflicts resolve to exact replay or OPERATION_REUSED. No network/provider call is
+performed while holding these database locks.
+
+Authorization reads are advisory, not a substitute for this transaction. M14.0
+intentionally cannot commit operations until M14.1 supplies these guards.
+Concurrent task completion/reassignment or command transfer/revocation must yield
+one committed result and one explicit conflict, never two owners or lost outcomes.
+
+#### Realtime and snapshots — M14.7
+
+Supabase authenticated private incident channels carry only
+`{incident_id,revision,timeline_sequence}` hints. Membership in a channel is
+authorized from the same current read helper. No public channel or globally
+subscribed table with client-side filtering. Channel revocation/expiry must
+disconnect clients; REST/RPC authorization is still checked on every fetch/write.
+Realtime may duplicate, reorder or lose hints; server tables and Room are truth.
+
+Initial entry requests an authorized snapshot manifest pinned to revision R and
+sequence S. Large units/tasks/map collections are keyset-paginated against that
+same pinned snapshot (server materialized private manifest, TTL5minutes, caller+
+incident+acting-org bound). An expired manifest restarts; the client cannot mix
+pages from unrelated revisions. M14.7 chooses a bounded manifest storage
+implementation and adds its cleanup then; no speculative cache tables now.
+After all pages commit in Room, request changes after R and timeline after S.
+
+`incident_changes` pages are ordered by `(revision,ordinal)`, never OFFSET. Each
+descriptor names an authorized entity/version or scope removal; fetch DTOs under
+current permissions and atomically reconcile to Room. Realtime hints only schedule
+this same path. If cursor is older than the30day change retention or scope changed,
+return reset_required, obtain a fresh snapshot, preserve local pending/attention
+records. Snapshot absence is not permission to erase unsynced rows. Duplicate DTOs
+use UUID/version. After a whole page is durably applied, advance cursor. Refresh
+cannot resurrect stale authority or overwrite a local pending operation.
+
+#### Android field operation classification — M14.8
+
+Reuse existing Room account isolation, WorkManager scheduling, serial queue
+processing, retry/acknowledgement history and attention handling. Incident cache
+keys include `(account_id,incident_id,acting_organization_id,entity_id)` where
+scope matters. Extend existing queue payload kinds and explicit incident scope;
+do not overload organization ID as incident ID, clone a second queue engine or
+change the meaning of existing hydrant operations. Queue ordering uses durable
+insertion order plus parent dependency: parent must be acknowledged before child.
+Separate incident commands need not block unrelated registry work, but a scoped
+conflict must stop dependent incident operations. Never automatically rebase
+authority-changing commands onto a newer version.
+
+| Classification | Operations | Offline behavior and server reconciliation |
+| --- | --- | --- |
+| SAFE_OFFLINE_QUEUE | Own task ACK/start/block/complete/fail; own unit departure/arrival/status observations; own turnout availability; task notes/photos/evidence | Persist original payload, operation/entity UUID, actor/account/org/incident, base version, observed time and dependencies atomically with local projection. Display pending, never delivered/accepted. Server rechecks current assignment/auth/state; stale or revoked→attention with preserved intent. |
+| ONLINE_PREFERRED | Low-risk operational notes, proposed non-command map annotations | May retain local proposal and queue with expected version; not authoritative COP until ack. No boundary/command edits under this category. |
+| ONLINE_REQUIRED | Incident create/activate/lifecycle/close, participation acceptance/release, role grants/revocation, lead/command transfer, unit ownership/allocation, task issue/reassignment, sector/boundary edits, resource reservations | No optimistic authority/ownership change. UI explains online verification required; a local unsent proposal may be retained but is not an actionable command. |
+
+Existing M3 organizational30day cached authorization continues unchanged for the
+registry, including7day/1day warnings. It does **not** create an incident command
+lease. Incident field cache additionally requires a server-verified read/own-task
+snapshot no older than24hours (default safety boundary for M14.8, explicit future
+policy change required). Effective expiry is the earlier of org snapshot expiry,
+incident lease expiry and session invalidation. Keystore-protected account/org
+authorization storage is reused. Offline role snapshots only explain cached
+assignments; they never authorize ONLINE_REQUIRED commands. No offline password
+authentication. Warn at2hours remaining for the incident cache lease separately
+from unchanged org warnings. After expiry, hide protected incident data and require
+online verification; retain encrypted/account-isolated queued evidence for retry.
+
+Successful online denial immediately invalidates incident scope/lease and hides
+its cache; it must never fall back to an earlier success. Sign-out/account/org
+switch cancels subscriptions/requests, clears visible state and location callbacks;
+generation tokens reject late results. Pending work remains tied to its original
+account and cannot upload as the next account. Cache eviction cannot delete
+pending attachments/operations. Assignment changes on another device may invalidate
+offline completion; preserve it for human review, never silently mark success or
+apply it to a different task.
+
+### 11. Notifications, communications and attachments
+
+M10 remains the only notification system. Future incident categories (for example
+INCIDENT_MOBILIZATION, INCIDENT_COMMAND, INCIDENT_TASK) extend existing
+`private.notification_categories`; existing preferences and user-editable policy
+remain in force. Do not invent a second device/token table, FCM worker or delivery
+log. Map an incident event to one existing org-scoped notification event per
+eligible recipient organization using a deterministic source key containing
+incident,event UUID and recipient org. Recipient resolver must check ACTIVE
+account/exact membership plus current incident role/task/unit/audience; extend the
+existing resolver in the delivering milestone, do not use inherited org readers.
+
+Recheck recipient eligibility at delivery, and again on tap/fetch. Payload contains
+only hint/event ID and a generic localized lock-screen message, never full incident
+location, victim names, private notes, precise GPS or storage URL. Notification
+opening navigates only after normal authorization; it neither grants access nor
+acknowledges a task. Persist transactionally generated notification event, deliver
+after commit using M10 leases/retries. FCM success is not operational acceptance.
+No M10 schema or delivery implementation is modified in M14.0.
+
+Operational messages are short scoped notes (incident/agency/unit), with append-only
+corrections. Critical orders use task commands and explicit acknowledgement, not
+chat alone. Message read receipts are optional later and cannot substitute for
+task acknowledgement. Private audience content never appears in incident-wide
+timeline or push. Reports must respect the same audience boundaries.
+
+Incident attachments reuse private Storage, authenticated loading/cache, staged
+files and stable UUID/object paths from the existing photo approach. They need
+their own incident/target FK metadata later, not an overloaded inspection_id or
+public bucket. Parent incident/task/message must commit before registration/upload;
+retry IDs/files remain stable; pending files are never cleaned as unowned. Allowed
+M14.7 file types initially prepared JPEG/WebP images≤10MiB and PDF≤20MiB, server
+validated MIME/content length; no executable/HTML uploads. Storage path includes
+incident/attachment UUID, never external URL authority. Short-lived signed fetch
+is issued only after current target authorization; cached files are partitioned by
+account and audience, hidden after revocation. No new storage policies/bucket now.
+
+### 12. External trigger / CAD / 112 contract
+
+M14.9 introduces provider adapters only when an official supported interface and
+credentials/data agreement exist. No invented112endpoint, scraping or undocumented
+live integration. Edge adapter verifies provider signature/mTLS or documented
+credential, timestamp/replay window and payload size (default256KiB) before parsing.
+Secrets stay in server secret storage and never enter logs/database payloads.
+
+Canonical normalized input: provider_code, external_event_id, external_message_id,
+provider_revision or immutable payload hash, occurred_at, type mapping, title,
+location/address, bounded details and configured receiving organization. The
+adapter resolves existing org/type mappings; external strings cannot create an
+ADMIN, member or command role. It calls the same incident command service with a
+registered integration principal, validated org allowlist and audit attribution;
+no unconstrained service-role table inserts. M14.9 must explicitly add this narrow
+principal contract without relaxing auth.uid()-bound human APIs.
+
+Unique provider/event mapping picks one internal UUID. Unique provider/message
+receipt makes repeated deliveries idempotent; a new revision updates only permitted
+source fields under expected version, never overwrites operator command state.
+Same message ID with different payload is quarantined; out-of-order versions are
+recorded but not applied. Without provider revisions, payload hashes dedupe and
+ambiguous updates require operator review. External cancel is a proposal, never
+automatic cancellation/closure of an active incident. Minimal dedupe IDs/hashes are
+long-lived; encrypted raw payload, if necessary for diagnosis, expires within72h.
+No raw personal dispatch narrative in shared logs or permanent metadata.
+
+### 13. Closure, reporting and retention
+
+M14.1 may stabilize an incident but cannot close it until M14.10 provides the
+closure command. Strict closure prerequisites: STABILIZED; current IC; no unresolved
+command/lead transfer; every unfinished task explicitly completed/failed/cancelled
+or referenced in an accepted outstanding-work disposition; every deployed unit
+released or explicitly acknowledged as transferred to a separately authorized
+continuing operation; final commander, actor, reason, outcome and server time.
+Disposition must not fabricate recipient completion. Closure atomically seals
+the final revision and lifecycle; private report generation can occur after commit
+against that immutable snapshot. Failure to render a PDF cannot undo closure or
+silently change its data.
+
+Configurable warnings: missing optional narrative, photo, agency response or final
+resource count. They require recorded acknowledgement but are not arbitrary hard
+blocks. Identity, authorization, immutable outcomes, unresolved handover and
+explicit disposition are strict, not configurable away. Future field validation
+may refine optional warnings through an explicit spec change.
+
+Report snapshot includes incident core/type labels, participant episodes, command
+intervals, sectors/map references, unit/crew/resource assignments, task outcomes,
+arrival/departure/release times, used hydrant UUID and historical code/location
+when necessary, attachment references, ordered timeline and closure actor/reason.
+Snapshots never become live registry sources or authorization grants. Later PDF,
+CSV/XLSX use existing export patterns with current historical read permissions;
+no M14.0 exporter. Amendments append reason/author/time and a linked new report
+version; original completed records remain immutable.
+
+| Data category | Retention / deletion contract |
+| --- | --- |
+| Incident core, participant/command history, timeline, task outcomes, receipt IDs, closures | Long-lived, no automatic TTL or ordinary hard delete; legal retention period configured by operator before production, not asserted as a statutory rule here |
+| Audit | Existing policy unchanged; security evidence not replaced by incident timeline |
+| Unit/vehicle/resource catalog | Deactivate; ownership/history FKs retained |
+| Shared operational attachments/messages | Follow incident policy and audience; explicit redaction/retention procedure, no silent deletion of pending evidence |
+| Incremental change descriptors | 30days; expired cursor forces full authorized snapshot |
+| Realtime hints/manifests | Transient; snapshot token TTL5min; no permanent duplicate event store |
+| GPS | Latest unit point expires15min; no trail by default; approved future trail≤24h |
+| Integration raw payload | ≤72h encrypted diagnostic retention; long-lived minimal dedupe mapping |
+| Notification delivery records | Existing M10 retention/policy; no extension to permanent incident history |
+
+All new foundational tables reject DELETE/TRUNCATE, timeline also rejects UPDATE.
+Future lawful maintenance is a separately authorized database procedure with
+retention/legal-hold review, anonymization where appropriate and independent audit;
+it is not an ordinary ADMIN UI action and must not cascade-delete history. No
+automatic purge job is added. Mutable episode state always produces immutable
+timeline/audit evidence through future commands.
+
+### 14. PlantUML architecture diagrams
+
+These diagrams are source contracts, not rendered/validated artifacts in M14.0.
+Dashed/future components do not imply an implementation already exists.
+
+#### 14.1 System / component architecture
+
+```plantuml
+@startuml
+component "Android Compose / ViewModel" as UI
+component "Existing repositories + future IncidentRepository" as Repo
+database "Room: account + org + incident scope (M14.8)" as Room
+component "Existing Sync Engine / WorkManager" as Sync
+component "Web SSR / incident presentation (M14.1+)" as Web
+component "Supabase Auth + RLS + narrow command RPCs" as API
+database "Postgres: incident aggregate + existing domain" as DB
+component "Private realtime hints (M14.7)" as RT
+component "M10 notification events / FCM delivery" as Push
+component "Existing RoadProvider / NAV2" as Route
+component "Official external adapter (M14.9)" as External
+UI --> Repo
+Repo --> Room
+Sync <--> Room
+Sync --> API
+Web --> API
+API --> DB
+DB ..> RT : committed revision hint
+RT ..> Sync : reconcile, not direct overwrite
+DB ..> Push : authorized event adapter
+Push ..> UI : hint only
+Repo ..> Route : future incident target adapter
+External ..> API : constrained integration command
+@enduml
+```
+
+#### 14.2 Core ER / future references
+
+```plantuml
+@startuml
+hide methods
+entity organizations { * id : UUID }
+entity profiles { * id : UUID }
+entity user_organizations {
+  * user_id : UUID
+  * organization_id : UUID
+  role : text
+}
+entity incident_types { * id : UUID }
+entity incidents {
+  * id : UUID
+  created_organization_id : UUID
+  lead_organization_id : UUID
+  version : bigint
+  revision : bigint
+  timeline_sequence : bigint
+}
+entity incident_participants {
+  * id : UUID
+  incident_id : UUID
+  organization_id : UUID
+  status : text
+}
+entity incident_role_assignments {
+  * id : UUID
+  participation_id : UUID
+  user_id : UUID
+  parent_assignment_id : UUID
+  role : text
+}
+entity incident_timeline {
+  * id : UUID
+  incident_id : UUID
+  sequence : bigint
+  operation_id : UUID
+}
+entity "incident_tasks (M14.5)" as tasks
+entity "incident_units (M14.4)" as units
+organizations ||--o{ user_organizations
+profiles ||--o{ user_organizations
+organizations ||--o{ incidents : creator / lead
+incident_types ||--o{ incidents
+incidents ||--o{ incident_participants
+organizations ||--o{ incident_participants
+incident_participants ||--o{ incident_role_assignments
+profiles ||--o{ incident_role_assignments
+incident_role_assignments |o--o{ incident_role_assignments : parent, same incident
+incidents ||--o{ incident_timeline
+incidents ||..o{ units
+incidents ||..o{ tasks
+@enduml
+```
+
+#### 14.3 Incident lifecycle
+
+```plantuml
+@startuml
+[*] --> DRAFT : create draft
+DRAFT --> ACTIVE : manager + accepted IC / activate
+DRAFT --> CANCELLED : creator manager / reason
+ACTIVE --> STABILIZED : IC / stabilize
+STABILIZED --> ACTIVE : IC / escalation reason
+STABILIZED --> CLOSED : IC / closure preconditions
+CLOSED --> [*]
+CANCELLED --> [*]
+note right of ACTIVE
+No direct ACTIVE to CLOSED/CANCELLED.
+No implicit commander from org ADMIN.
+end note
+@enduml
+```
+
+#### 14.4 Command assignment hierarchy
+
+```plantuml
+@startuml
+object "IC assignment [incident scope]" as IC
+object "Deputy assignment [bounded capabilities]" as Deputy
+object "Agency commander [org A]" as AgencyA
+object "Agency commander [org B]" as AgencyB
+object "Sector commander [sector S]" as Sector
+object "Unit leader [unit deployment U]" as Leader
+object "Responder [assigned tasks]" as Responder
+IC --> Deputy : explicit parent
+IC --> AgencyA
+IC --> AgencyB
+IC --> Sector
+AgencyA --> Leader
+Leader --> Responder
+Sector ..> Leader : explicit resource delegation
+note bottom of IC
+Same-incident parent FK; no cycles.
+Each assignment retains actor/time/history.
+Organization ancestry is a separate graph.
+Parent linkage alone grants no capability.
+end note
+@enduml
+```
+
+#### 14.5 Task lifecycle
+
+```plantuml
+@startuml
+[*] --> DRAFT
+DRAFT --> ISSUED : authorized issuer
+DRAFT --> CANCELLED : issuer + reason
+ISSUED --> ACKNOWLEDGED : recipient
+ACKNOWLEDGED --> IN_PROGRESS : recipient / dependencies satisfied
+ISSUED --> BLOCKED : recipient + reason
+ACKNOWLEDGED --> BLOCKED : recipient + reason
+IN_PROGRESS --> BLOCKED : recipient + reason
+BLOCKED --> ACKNOWLEDGED : recipient / acknowledged before work
+BLOCKED --> IN_PROGRESS : recipient / resumed work
+IN_PROGRESS --> COMPLETED : recipient + outcome
+IN_PROGRESS --> FAILED : recipient + reason
+ISSUED --> CANCELLED : issuer + reason
+ACKNOWLEDGED --> CANCELLED : issuer + reason
+IN_PROGRESS --> CANCELLED : issuer + reason
+BLOCKED --> CANCELLED : issuer + reason
+COMPLETED --> [*]
+FAILED --> [*]
+CANCELLED --> [*]
+@enduml
+```
+
+#### 14.6 Realtime / offline reconciliation
+
+```plantuml
+@startuml
+actor Firefighter
+participant "ViewModel / Repository" as Repo
+database Room
+participant "Existing Sync Engine" as Sync
+participant "Command / snapshot RPC" as API
+database Postgres
+participant "Private realtime" as RT
+Firefighter -> Repo : complete assigned task offline
+Repo -> Room : transaction: local projection + stable operation UUID
+Repo --> Firefighter : pending, not server-confirmed
+Sync -> Room : load ordered scoped pending operation
+Sync -> API : replay exact payload + expected version
+API -> Postgres : lock / live authority / receipt / domain / timeline
+alt authorized, current version
+  Postgres --> API : committed acknowledgement
+  API --> Sync : authoritative DTO + receipt
+  Sync -> Room : atomically acknowledge / preserve history
+  Postgres -> RT : revision hint
+else stale assignment or revoked access
+  API --> Sync : attention-required, no overwrite
+  Sync -> Room : retain original intent and payload
+end
+RT -> Sync : possibly duplicated or lost hint
+Sync -> API : changes_since cursor (or snapshot reset)
+API --> Sync : authorized page + cursor
+Sync -> Room : reconcile page then advance cursor
+@enduml
+```
+
+#### 14.7 Create / activate
+
+```plantuml
+@startuml
+actor "Creator-org manager" as Manager
+actor "Nominated commander" as IC
+participant "Future incident command RPCs" as API
+database Postgres
+Manager -> API : create_draft(operation UUID, incident UUID)
+API -> Postgres : lock org / validate membership / create draft
+API -> Postgres : creator participant + events + audit + receipt
+API --> Manager : committed DRAFT
+Manager -> API : nominate_initial_command(nominee UUID)
+API -> Postgres : durable expiring consent request
+IC -> API : accept_initial_command(consent UUID)
+API -> Postgres : record consent, no active role yet
+Manager -> API : activate(expected version, accepted consent)
+API -> Postgres : lock / recheck consent and membership
+API -> Postgres : ACTIVE + IC + events + audit + receipt atomically
+API --> Manager : committed ACTIVE
+@enduml
+```
+
+#### 14.8 Future mobilization
+
+```plantuml
+@startuml
+actor "Incident command" as IC
+participant "Mobilization RPC" as API
+database Postgres
+participant "Existing M10 delivery" as M10
+actor "Receiving agency manager" as Manager
+actor "Unit leader" as Leader
+IC -> API : request reinforcement
+API -> Postgres : authorized request + event + receipt
+Postgres -> M10 : org-scoped notification event
+M10 --> Manager : private hint, no authority granted
+Manager -> API : fetch authorized invitation / accept
+API -> Postgres : participation + accepted mobilization
+Leader -> API : turnout / departure / arrival
+API -> Postgres : scoped unit states + timeline + audit
+API --> Leader : server acknowledgements
+@enduml
+```
+
+#### 14.9 Explicit command transfer
+
+```plantuml
+@startuml
+actor "Outgoing IC" as Old
+actor "Incoming IC" as New
+participant "Transfer RPC" as API
+database Postgres
+Old -> API : request transfer(operation UUID, expected version)
+API -> Postgres : REQUESTED transfer; old IC stays current
+New -> API : accept(transfer UUID, expected versions)
+API -> Postgres : lock orgs/profiles/incident/transfer
+API -> Postgres : recheck current membership, lead consent, old IC
+alt valid
+  API -> Postgres : end old assignment, insert new IC
+  API -> Postgres : optional lead change + timeline + audit + receipt
+  API --> New : committed new authority
+else stale or revoked
+  API --> New : conflict / denied; no partial handover
+end
+@enduml
+```
+
+#### 14.10 Authorization decision flow
+
+```plantuml
+@startuml
+start
+:Resolve authenticated identity;
+if (ACTIVE profile and active exact acting-org membership?) then (yes)
+  if (Read-only draft manager exception?) then (yes)
+    :Permit bounded draft read;
+    stop
+  else (no)
+    if (Eligible incident participation?) then (yes)
+      if (Read request?) then (yes)
+        :Apply audience / target read gate;
+        stop
+      else (no)
+        :Lock scopes and incident;
+        :Recheck current role, participation and membership;
+        if (Explicit capability + target scope + version + transition valid?) then (yes)
+          :Commit domain + timeline + audit + receipt;
+          stop
+        else (no)
+          :Deny or preserve stale operation for attention;
+          stop
+        endif
+      endif
+    else (no)
+      :Deny; hierarchy/position is not participation;
+      stop
+    endif
+  endif
+else (no)
+  :Deny; no stale online-to-cache fallback;
+  stop
+endif
+@enduml
+```
+
+## Implementation
+
+### M14.0 delivery and migration boundary
+
+Migration: `supabase/migrations/20261006100000_incident_operations_foundation.sql`.
+It is additive after current main migrations. It does not alter existing tables,
+policies, functions, data or role semantics; new tables begin empty except the one
+reference type. It is **not applied** by this change. The spec is authoritative for
+future implementation but does not claim that planned APIs/entities exist today.
+
+Conceptual rollback before any later usage: revoke the two public read functions,
+drop new policies/functions/triggers and five tables in dependency order
+(timeline, roles, participants, incidents, types) in a separately reviewed migration.
+Do not ship an automatic destructive down migration. After operational records or
+later FKs exist, use a forward corrective migration and preserve history instead.
+No Room migration/version change or Android/Web scaffold is necessary in M14.0.
+
+### Dependency graph and integration order
+
+1. **M14.1 depends on M14.0.** Implement receipt/number/consent write primitives,
+   command locking and lifecycle/participant APIs, timeline append/audit, core UI.
+   Before any write grant, enforce same-incident immutable role identity/acyclic
+   parents, active lead participation, current-member IC and state transitions.
+   Include the deferred M9 qualified `wir.target` repository repair explicitly in
+   that milestone, not this one.
+2. **M14.2 depends on M14.1.** Implement command assignments, consented transfers,
+   multi-agency gates and command tree. Sector capability extension is designed
+   here but becomes usable only with M14.3 sector FKs.
+3. **M14.3 depends on M14.1/M14.2.** Add sectors/COP geometry and scope-specific
+   role FKs, authorized map read models. Initial refresh uses ordinary reads;
+   realtime wiring waits for M14.7.
+4. **M14.4 depends on M14.1/M14.2; sector placement additionally M14.3.** Add
+   inventory/deployment/crew/resources without duplicating existing rosters/users.
+5. **M14.5 depends on M14.3/M14.4.** Add typed targets, commands/task transitions,
+   dependencies and unit→target→action UX. No unrelated plan assignment changes.
+6. **M14.6 depends on M10-N and M14.2/M14.4/M14.5.** Mobilization/turnout,
+   dispatch/arrival/release and existing notification event/recipient adapters.
+7. **M14.7 depends on established M14.1–M14.6 entities.** Private scoped realtime,
+   snapshot/change contracts, communications and attachment scope. Consumers use
+   stable revisions; do not implement a parallel push or synchronization stack.
+8. **M14.8 depends on M14.1–M14.7 contracts and existing M3/M4/NAV foundations.**
+   Room cache/queue extensions, field UI, incident lease and reconnect behavior.
+9. **M14.9 depends on stable M14.1 lifecycle and an official external agreement.**
+   May develop independently of M14.8 after command/security contracts are stable;
+   integration never bypasses lifecycle or participant consent.
+10. **M14.10 depends on M14.1–M14.7 canonical history, plus M14.8 reconciliation
+    rules.** Closure/sealed reports/after-action exports. M14.9 is optional and
+    external data is included only when present and authorized.
+
+## Milestones
+
+| Milestone | Concrete deliverables | Exit boundary |
+| --- | --- | --- |
+| M14.1 Incident Core | Draft/list/detail/update/activate/stabilize/cancel; creator participation, invite preview/accept, IC nomination consent, receipt/numbering; Web list/detail and basic Android read if appropriate; M9 repo qualification repair | No full command-transfer, resources or task UI; closure still unavailable |
+| M14.2 Multi-agency + Command | Role assignment/revocation UI, scoped command tree, agency commander workflows, lead/IC handover with acceptance/history | No organization hierarchy write expansion; no admin override |
+| M14.3 COP / Map | Geometry validation, sectors/zones/markers/layers, authorized hydrant references, versioned edits, MapLibre projection | No duplicated hydrant store; realtime integration from M14.7 |
+| M14.4 Units / Vehicles / Crews / Resources | Owner-scoped inventory, incident deployments, temporary crew episodes, resource allocations, explicit leaders | No fleet maintenance/accounting; inspection teams remain inspection teams |
+| M14.5 Tasks + RTS Command UX | Typed tasks/targets/dependencies, acknowledgement/outcomes, scoped issue/reassign, selection/target/action confirmation | No gesture-only commands or automatic recipient acknowledgement |
+| M14.6 Mobilization | Reinforcement requests, org/unit/member responses, dispatch/turnout/departure/arrival/release, M10 adapters | Notification receipt is not turnout |
+| M14.7 Realtime / Communications | Private hints, consistent snapshots/change cursors, reconnect, bounded audience messages/private attachments | Not a public chat or second notification engine |
+| M14.8 Android Field Mode | Incident Room migrations/repository/UI, offline operations and incident read lease, location opt-in, existing map/navigation integration | No offline authority transfer; pending evidence preserved on conflict |
+| M14.9 External Integration | Official provider adapter, authenticated ingestion, mapping/dedupe/quarantine, constrained integration command identity | No fabricated112 API or scraping |
+| M14.10 Closure / Reports | Explicit dispositions, final commander/reason, sealed snapshot, PDF/CSV/XLSX/after-action/archive | No mutation of completed outcomes/history |
+
+## Gathering Results
+
+These are acceptance/evaluation targets for future authorized validation. **No
+tests, builds, lint, typecheck, CI, emulator, browser, Docker, migration execution
+or deployment were run for M14.0. No test files were added.**
+
+### Foundation acceptance
+
+- On an isolated later-approved database, apply the additive migration and check
+  every FK/CHECK/partial unique invariant with valid/invalid scoped records.
+  Confirm existing schema/data is unaffected and no example incidents exist.
+- Anonymous, inactive and unrelated accounts cannot read incident records;
+  inherited-only organization readers gain no access. Ordinary org ADMIN/MANAGER
+  has no IC capabilities. Current participant firefighters may read permitted
+  shared records; no client or service_role direct DML grants exist.
+- Read DTOs hide unauthorized/not-found uniformly, enforce acting org and stable
+  cursor ordering, clamp page sizes, and expose no private fields or secrets.
+- Duplicate active IC, lead participant, live participation or event tuple fails.
+  All operational deletion attempts fail, timeline update fails. Time-expired roles
+  give no capability even while reserving their history/unique slot.
+- M14.1 must supply audited write guards before exposing mutations; do not evaluate
+  the empty M14.0 database as if operational workflows were already implemented.
+
+### Subsequent milestone acceptance scenarios
+
+1. Create/activate with distinct manager and consenting commander. Wrong-org,
+   unaccepted nominee and concurrent membership revocation are rejected atomically.
+2. Two agencies participate without merging organization hierarchy or data access.
+   Agency commander cannot task another agency; sector commander cannot escape scope.
+3. Concurrent handovers yield one IC and one lead; lost response replay returns the
+   original acknowledgement with no duplicate assignment/event/notification.
+4. Task dependencies cannot cycle; issued task is not acknowledged by its issuer;
+   completed outcomes remain immutable; blocked/failed reasons remain reportable.
+5. Offline own-task completion survives process death with stable UUID/files. A
+   concurrent reassignment produces attention, retains evidence and never completes
+   the new assignee's task. No offline role grant or ownership change is possible.
+6. Reordered/duplicated/missed realtime hints converge using revisions; expired
+   cursors force authorized snapshot without deleting pending local operations.
+7. Sign-out/account/org switch cancels visible state/subscriptions/location and
+   ignores late results; online revocation invalidates cache immediately; incident
+   lease expiry does not weaken existing registry30day policy.
+8. COP geometry invalid/self-intersecting/oversized inputs fail. Existing hydrants
+   remain UUID references, private photos remain private, road failure never
+   produces invented geometry/time; existing routing capacity stays unchanged.
+9. Notification delivery cannot authorize or acknowledge commands; lock-screen
+   payloads reveal no sensitive incident data; current recipient check excludes
+   released users and uses existing M10 device/preferences/delivery behavior.
+10. Duplicate external delivery resolves to one UUID, out-of-order updates do not
+    overwrite command state, raw payload retention is bounded, no unofficial API.
+11. Closure handles unresolved work explicitly, records final authority and seals
+    a reproducible report revision. Optional narrative omissions warn without
+    bypassing strict transfer/authorization checks. History is not erased.
+
+Gather operator feedback on command clarity, acknowledgement latency, stale/pending
+indicators, handover safety and poor-connectivity use. Measure actual reconnect
+convergence and authorized scoped read size when later validation is permitted;
+do not claim performance guarantees or operational readiness from this unexecuted
+foundation. Validate SI/DE terminology with field operators before broad rollout.
+
+## Need Professional Help in Developing Your Architecture?
+
+Please contact me at [sammuti.com](https://sammuti.com) :)

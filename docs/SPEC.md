@@ -8,6 +8,10 @@ portal\
 **Central backend:** Supabase Cloud\
 **Languages (MVP):** Slovenian (`sl`) and German (`de`)
 
+**Incident Operations extension:** [SPEC-M14-Incident-Operations](SPEC-M14-INCIDENT-OPERATIONS.md)
+is the authoritative M14 architecture and milestone contract. Existing MVP behavior
+and authorization remain unchanged.
+
 ------------------------------------------------------------------------
 
 ## Background
