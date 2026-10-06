@@ -100,6 +100,8 @@ Deno.serve(async req => {
       const text = await response.text(); return text ? JSON.parse(text) : null;
     }
     const navigating = action === "NAVIGATE";
+    if (body.bearing != null && (!navigating || typeof body.bearing !== "number" || !Number.isFinite(body.bearing) || body.bearing < 0 || body.bearing >= 360))
+      throw new RoutingError("VALIDATION", 400);
     if (navigating && (!request.team_id || !Array.isArray(body.origin) || body.origin.length !== 2 ||
       !body.origin.every((v: unknown) => typeof v === "number" && Number.isFinite(v)) ||
       Math.abs(body.origin[0]) > 180 || Math.abs(body.origin[1]) > 90)) throw new RoutingError("ROUTE_COORDINATES");
@@ -107,11 +109,11 @@ Deno.serve(async req => {
     // Android and navigation retain their existing team-member contracts.
     const web = body.web === true;
     if (web && navigating) throw new RoutingError("VALIDATION", 400);
-    const prepared = await rpc(web ? "web_prepare_plan_routes" : "prepare_plan_routes", { organization: body.organization, request });
+    const prepared = await rpc(web ? "web_prepare_plan_routes" : navigating ? "prepare_navigation_route" : "prepare_plan_routes", { organization: body.organization, request });
     if (navigating && prepared.acknowledged) throw new RoutingError("CONFLICT", 409);
     const snapshot = navigating ? await rpc("read_inspection_plans", { organization: body.organization }) : null;
     const calculateRequest = (provider: RoadProvider) => navigating
-      ? navigationRoute(prepared.input, snapshot, body.origin, provider)
+      ? navigationRoute(prepared.input, snapshot, body.origin, provider, body.bearing ?? undefined)
       : calculate(prepared.input as Input, provider);
     if (!prepared.acknowledged) {
       const base = Deno.env.get("OSRM_BASE_URL"), username = Deno.env.get("OSRM_USERNAME"), password = Deno.env.get("OSRM_PASSWORD");
@@ -130,7 +132,7 @@ Deno.serve(async req => {
       }
       if (navigating) {
         // Authorization, version, completion and assignment are checked again after provider latency.
-        const current = await rpc("prepare_plan_routes", { organization: body.organization, request });
+        const current = await rpc("prepare_navigation_route", { organization: body.organization, request });
         if (JSON.stringify(current.input) !== JSON.stringify(prepared.input)) throw new RoutingError("CONFLICT", 409);
         return reply(results); // Ephemeral: never commit current GPS, session geometry or steps.
       }

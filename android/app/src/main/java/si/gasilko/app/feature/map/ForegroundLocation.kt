@@ -25,13 +25,15 @@ internal fun hasLocationPermission(context: Context) =
         context.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
 
 /** Collected only by STARTED foreground UI. No service, storage, or network/sync integration. */
-internal fun foregroundLocations(context: Context) = callbackFlow {
+internal fun foregroundLocations(context: Context, navigation: Boolean = false) = callbackFlow {
     val manager = context.getSystemService(LocationManager::class.java)
     if(manager == null) { trySend(LocationState(notice=LocationNotice.UNAVAILABLE)); close(); return@callbackFlow }
     var latest: Location? = null
     var registered = false
     var began = SystemClock.elapsedRealtime()
     val providers = mutableListOf<String>()
+    var requestedInterval=if(navigation)900L else 5_000L
+    var changedAt=0L
     fun publish() {
         if(!hasLocationPermission(context)) { latest=null; trySend(LocationState(notice=LocationNotice.DENIED)); close(); return }
         val enabled = try { providers.any { manager.isProviderEnabled(it) } }
@@ -48,7 +50,22 @@ internal fun foregroundLocations(context: Context) = callbackFlow {
         override fun onLocationChanged(location: Location) {
             // A future timestamp must not replace the last fix and suppress subsequent valid fixes.
             if(!freshLocation(location)) return
+            if(navigation && (location.accuracy>50f || SystemClock.elapsedRealtimeNanos()-location.elapsedRealtimeNanos>20_000_000_000L))return
+            val previous=latest
+            if(navigation && previous!=null) {
+                val seconds=(location.elapsedRealtimeNanos-previous.elapsedRealtimeNanos)/1e9
+                if(seconds>0 && previous.distanceTo(location)>seconds*80+previous.accuracy+location.accuracy)return
+            }
             if(latest == null || location.elapsedRealtimeNanos > latest!!.elapsedRealtimeNanos) latest=Location(location)
+            if(navigation) {
+                val interval=si.gasilko.app.feature.map.navigation.NavigationMotion.interval(si.gasilko.app.feature.map.navigation.NavigationMotion.speed(location))
+                val now=SystemClock.elapsedRealtime()
+                if(interval!=requestedInterval && now-changedAt>=3_000) {
+                    requestedInterval=interval;changedAt=now
+                    try { for(provider in providers)manager.requestLocationUpdates(provider,interval,0f,this,Looper.getMainLooper()) }
+                    catch(_: SecurityException) { latest=null;publish();return }
+                }
+            }
             publish()
         }
         override fun onProviderDisabled(provider: String) { latest=null; publish() }
@@ -62,7 +79,7 @@ internal fun foregroundLocations(context: Context) = callbackFlow {
         providers.addAll(listOf(LocationManager.NETWORK_PROVIDER, LocationManager.GPS_PROVIDER)
             .filter { it in manager.allProviders && (precise || it != LocationManager.GPS_PROVIDER) })
         for(provider in providers) {
-            manager.requestLocationUpdates(provider, 5_000L, 5f, listener, Looper.getMainLooper())
+            manager.requestLocationUpdates(provider, requestedInterval, if(navigation)0f else 5f, listener, Looper.getMainLooper())
             registered=true
             if(manager.isProviderEnabled(provider)) manager.getLastKnownLocation(provider)?.let(listener::onLocationChanged)
         }

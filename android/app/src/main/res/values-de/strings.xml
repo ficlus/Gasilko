@@ -440,4 +440,18 @@
     <string name="nav_off_ramp">Ausfahrt nehmen</string>
     <string name="nav_roundabout">Im Kreisverkehr der markierten Route folgen</string>
     <string name="nav_uturn">Wenden</string>
+    <string name="nav_wrong_way">Falsche Fahrtrichtung erkannt</string><string name="nav_animated_arrows">Animierte Richtungspfeile</string>
+    <string name="notifications_title">Benachrichtigungen</string>
+    <string name="notifications_assignment">Teamzuweisungen und Änderungen</string>
+    <string name="notifications_activation">Aktivierung von Plänen</string>
+    <string name="notifications_hydrant">Hydrantenwarnungen</string>
+    <string name="notifications_update">Eine Aktualisierung ist verfügbar. Gasilko öffnen.</string>
+    <string name="notifications_privacy">Benachrichtigungen ersetzen keine Zugriffsprüfung. Details sind erst in der App sichtbar.</string>
+    <string name="notifications_defaults">Zuweisungen und Aktivierungen sind standardmäßig eingeschaltet. Hydrantenwarnungen sind ausgeschaltet und nur für Leitung und Administration der eigenen Organisation vorgesehen.</string>
+    <string name="notifications_network">Einstellungen konnten nicht gespeichert oder geladen werden. Mit Verbindung erneut versuchen.</string>
+    <string name="notifications_enable">Benachrichtigungen auf diesem Gerät aktivieren</string>
+    <string name="notifications_denied">Benachrichtigungen sind nicht erlaubt. Die App bleibt nutzbar; die Berechtigung lässt sich in den Systemeinstellungen ändern.</string>
+    <string name="notifications_system_settings">Systemeinstellungen für Benachrichtigungen</string>
+    <string name="notifications_configuration">Push-Benachrichtigungen sind in dieser Version nicht konfiguriert.</string>
+    <string name="notifications_unavailable">Das Ziel ist für dieses Konto oder im lokalen Cache nicht verfügbar. Offenes Formular abschließen oder eine Verbindung herstellen und erneut versuchen.</string>
 </resources>

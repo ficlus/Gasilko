@@ -11,6 +11,7 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
     private val gateway = SupabaseAuthGateway.create(application, viewModelScope)
     private val repository = AuthRepository(gateway, viewModelScope)
     override fun onCleared() { hydrants?.photos?.clear(); gateway?.close(); super.onCleared() }
+    val notifications=gateway?.notifications(application)
     val access = si.gasilko.app.core.access.AccessRepository(gateway?.accessGateway())
     fun google() { viewModelScope.launch { repository.google() } }
     fun googleCallback(url: String) { viewModelScope.launch { repository.googleCallback(si.gasilko.app.core.auth.OAuthCallback.code(url, si.gasilko.app.BuildConfig.AUTH_REDIRECT_SCHEME)) } }

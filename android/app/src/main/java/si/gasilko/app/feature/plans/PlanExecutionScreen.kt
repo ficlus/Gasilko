@@ -71,7 +71,7 @@ fun PlanExecutionScreen(model: HydrantViewModel,query: HydrantQuery,initialPlan:
     val next=stops.firstOrNull { it.inspectionId==null && it.skipReason==null } ?: stops.firstOrNull { it.inspectionId==null }
     val route=data.routes.find { it.planId==plan?.id && it.teamId==selected }
     LaunchedEffect(plan?.id,selected,route?.valid) { if(route==null)map=false }
-    val remaining=stops.filter { it.inspectionId==null }.map { it.id }.toSet()
+    val remaining=stops.filter { it.inspectionId==null && it.skipReason==null }.map { it.id }.toSet()
     val navigationReady=route?.valid==true && stops.none { it.id in data.pendingItems } &&
         data.reassignmentRequests.none { it.context.planId==plan?.id }
     LaunchedEffect(plan,selected,route,remaining,navigationReady,view.error,canExecute) {

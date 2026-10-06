@@ -1,5 +1,6 @@
 package si.gasilko.app.feature.auth
 
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -26,6 +27,28 @@ fun AuthScreen(model: AuthViewModel = viewModel()) {
     val state by model.state.collectAsStateWithLifecycle()
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { model.refresh() }
     var requests by remember { mutableStateOf(false) }
+    var notifications by remember(state.account) { mutableStateOf(false) }
+    val destination by si.gasilko.app.core.notifications.NotificationTap.pending.collectAsStateWithLifecycle()
+    var unavailable by remember(destination) { mutableStateOf(false) }
+    var opening by remember(destination) { mutableStateOf(false) }
+    val notificationScope=rememberCoroutineScope()
+    fun openNotification() {
+        val target=destination ?: return
+        if(opening || state.route!=AuthRoute.ACTIVE)return
+        opening=true;unavailable=false
+        notificationScope.launch {
+            try {
+                val opened=target.account==state.account && model.hydrants?.openNotification(target.organization,target.entity,target.kind)==true
+                if(opened) { requests=false;notifications=false;si.gasilko.app.core.notifications.NotificationTap.clear() }
+                else unavailable=true
+            } catch(e: kotlinx.coroutines.CancellationException) { throw e }
+            catch(_: Exception) { unavailable=true }
+            finally { opening=false }
+        }
+    }
+    LaunchedEffect(destination,state.route,state.account) {
+        if(destination!=null && state.route==AuthRoute.ACTIVE)openNotification()
+    }
     // A permission/settings round trip re-verifies authorization. Retain navigation only,
     // while the protected screen and its location callbacks remain disposed during verification.
     val registryScreens=rememberSaveableStateHolder()
@@ -40,12 +63,25 @@ fun AuthScreen(model: AuthViewModel = viewModel()) {
     }
     LaunchedEffect(state.route) { if(state.route==AuthRoute.UNAUTHENTICATED || state.route==AuthRoute.ACTIVE) requests=false }
     Column {
+    if(state.route==AuthRoute.ACTIVE && model.notifications!=null)TextButton(onClick={notifications=true}) {
+        Text(stringResource(R.string.notifications_title))
+    }
+    if(destination!=null && state.route==AuthRoute.ACTIVE && unavailable) {
+        FieldBanner(stringResource(R.string.notifications_unavailable),FieldTone.WARNING)
+        Row {
+            TextButton(onClick={openNotification()},enabled=!opening) { Text(stringResource(R.string.map_retry)) }
+            TextButton(onClick={si.gasilko.app.core.notifications.NotificationTap.clear()}) { Text(stringResource(R.string.h_back)) }
+        }
+    }
     if(state.route == AuthRoute.ACTIVE && state.offline)
         FieldBanner(stringResource(R.string.auth_cached_authorization), modifier=Modifier.padding(horizontal=16.dp,vertical=8.dp))
     if(state.route == AuthRoute.ACTIVE && state.message in listOf(AuthMessage.OFFLINE_SEVEN_DAYS, AuthMessage.OFFLINE_ONE_DAY))
         FieldBanner(stringResource(if(state.message == AuthMessage.OFFLINE_ONE_DAY) R.string.auth_offline_one_day else R.string.auth_offline_seven_days), FieldTone.WARNING, Modifier.padding(16.dp))
     Box(Modifier.weight(1f)) {
-    if(requests && state.route in listOf(AuthRoute.ACTIVE,AuthRoute.PENDING_APPROVAL)) AccessScreen(model.access,{requests=false},{requests=false;model.signOut()},model::refresh)
+    if(notifications && state.route==AuthRoute.ACTIVE && model.notifications!=null) key(state.account) {
+        si.gasilko.app.core.notifications.NotificationSettings(model.notifications) { notifications=false }
+    }
+    else if(requests && state.route in listOf(AuthRoute.ACTIVE,AuthRoute.PENDING_APPROVAL)) AccessScreen(model.access,{requests=false},{requests=false;model.signOut()},model::refresh)
     else if(state.route == AuthRoute.ACTIVE && model.hydrants != null) registryScreens.SaveableStateProvider(state.account ?: "registry") {
         si.gasilko.app.feature.hydrants.presentation.HydrantScreen(model.hydrants,{requests=true},model::signOut)
     }

@@ -1,4 +1,7 @@
 project_id = "gasilko"
+[functions.notification-delivery]
+# Dedicated trusted scheduler secret is verified by the handler. No end-user send endpoint.
+verify_jwt = false
 [api]
 enabled = true
 port = 54321

@@ -65,11 +65,15 @@ internal fun NavigationScreen(session: NavigationSession,hydrants: List<Hydrant>
     targetPhoto: @Composable (Hydrant,Boolean,Boolean) -> Unit) {
     val state by session.state.collectAsStateWithLifecycle()
     var follow by rememberSaveable(state.plan,state.team) { mutableStateOf(true) }
+    val context=LocalContext.current
+    var animatedArrows by rememberSaveable { mutableStateOf(true) }
+    LaunchedEffect(state.routeRevision) { if(state.routeRevision>0)follow=true }
+    val displayLegs=remember(state.route) { state.route?.displayLegs() }
     val readyGuidance=!state.awaitingCompletion && state.routeSourceKey==state.sourceKey
     val guidance=if(readyGuidance)state.guidance else Guidance()
     val roadProgress=kotlin.math.floor(guidance.geometryMeters/NavigationPresentation.ROAD_UPDATE_METERS)*NavigationPresentation.ROAD_UPDATE_METERS
-    val route=remember(state.route,state.routeRevision,roadProgress) {
-        state.route?.let { it.mapRoute(state.organization,"navigation-${state.routeRevision}",remainingRoad(it.points,roadProgress)) }
+    val route=remember(state.route,state.routeRevision,roadProgress,readyGuidance) {
+        state.route?.let { it.mapRoute(state.organization,"navigation-${state.routeRevision}",if(readyGuidance)remainingRoad(displayLegs?.first.orEmpty(),roadProgress) else emptyList(),if(readyGuidance)displayLegs?.second.orEmpty() else it.points) }
     }?.let { it.copy(valid=readyGuidance && cached?.valid!=false) } ?: cached
     val target=state.route?.takeIf { readyGuidance }?.stops?.firstOrNull()
     val targetHydrant=hydrants.find { it.id==target?.hydrant && it.organization==state.organization }
@@ -103,11 +107,15 @@ internal fun NavigationScreen(session: NavigationSession,hydrants: List<Hydrant>
         completedHydrants=items.filter { it.inspectionId!=null }.map { it.hydrantId }.toSet(),
         routeHydrantIds=items.map { it.hydrantId }.toSet(),
         completedRouteNumbers=items.filter { it.inspectionId!=null && it.routeOrder!=null }.associate { it.hydrantId to it.routeOrder!! },
-        navigationMode=true,followUser=follow && state.locationReady,onUserPan={follow=false},onRecenter={follow=true},
+        navigationMode=true,animatedRouteArrows=animatedArrows,followUser=follow && state.locationReady,onUserPan={follow=false},onRecenter={follow=true},
         requestLocationKey=state.plan+state.team,
         onLocationUpdate={ fix -> if(fix==null || !fix.hasAccuracy())session.unavailable() else {
             val at=fix.elapsedRealtimeNanos/1_000_000
-            session.fix(GeoPoint(fix.latitude,fix.longitude),fix.accuracy,at,SystemClock.elapsedRealtime()-at)
+                        val connectivity=context.getSystemService(android.net.ConnectivityManager::class.java)
+            val connected=connectivity?.getNetworkCapabilities(connectivity.activeNetwork)
+                ?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_VALIDATED)==true
+            session.fix(GeoPoint(fix.latitude,fix.longitude),fix.accuracy,at,SystemClock.elapsedRealtime()-at,
+                NavigationMotion.speed(fix),NavigationMotion.bearing(fix),connected)
         } },
         navigationContent={
             OperationalCard(modifier=Modifier.fillMaxWidth().padding(horizontal=12.dp)) {
@@ -143,8 +151,13 @@ internal fun NavigationScreen(session: NavigationSession,hydrants: List<Hydrant>
                     state.awaitingCompletion->FieldBanner(stringResource(R.string.nav_wait_sync),FieldTone.WARNING)
                     !state.locationReady->FieldBanner(stringResource(R.string.nav_wait_location),FieldTone.WARNING)
                     state.error!=null->FieldBanner(stringResource(R.string.nav_reroute_failed)+" "+stringResource(errorLabel(state.error!!)),FieldTone.WARNING)
+                    state.wrongWay==WrongWay.CONFIRMED || state.wrongWay==WrongWay.REROUTING->FieldBanner(stringResource(if(state.busy)R.string.nav_recalculating else R.string.nav_wrong_way),FieldTone.WARNING)
                     guidance.offRoute->FieldBanner(stringResource(if(state.busy)R.string.nav_recalculating else R.string.nav_off_route),FieldTone.WARNING)
                     state.route?.legs.isNullOrEmpty()->Text(stringResource(R.string.nav_basic))
+                }
+                Row(verticalAlignment=androidx.compose.ui.Alignment.CenterVertically) {
+                    Switch(checked=animatedArrows,onCheckedChange={animatedArrows=it})
+                    Text(stringResource(R.string.nav_animated_arrows))
                 }
                 FlowRow(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
                     TextButton(onClick=session::stop) { Text(stringResource(R.string.nav_stop)) }
