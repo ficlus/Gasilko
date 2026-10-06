@@ -31,13 +31,39 @@ data class RegistryState(
     val confirmDeactivate: Boolean = false, val reloadId: String? = null,
     val inspectionDraft: InspectionDraft? = null, val inspectionSaved: Boolean = false,
     val showHistory: Boolean = false, val historyRefreshing: Boolean = false, val historyError: RegistryError? = null,
-    val planStop: PlanItem? = null, val executionPlanId: String? = null,
+    val planStop: PlanItem? = null, val executionPlanId: String? = null, val notificationPlanId: String? = null,
 ) { val manages get() = organization?.role?.manages == true; val writable get() = organization?.active == true }
 
 class HydrantViewModel(private val repository: HydrantRepository, private val injectedScope: CoroutineScope? = null): ViewModel() {
     private val scope get() = injectedScope ?: viewModelScope
     private val mutableState = MutableStateFlow(RegistryState())
     val state = mutableState.asStateFlow()
+    /** A push is only a navigation hint. Every read goes through the existing authorized repository. */
+    suspend fun openNotification(organization: String,entity: String,kind: String): Boolean {
+        val old=state.value
+        if(old.loading || old.mutating || old.form!=null || old.inspectionDraft!=null)return false
+        val stamp=generation
+        val organizations=repository.organizations()
+        val org=organizations.find { it.id==organization && it.active } ?: return false
+        hydrate { if(kind=="PLAN")repository.refreshPlans(org.id) else repository.refresh(org.id) }
+        val query=HydrantQuery(organization=org.id).normalized(org.role)
+        val hydrant=if(kind=="HYDRANT")repository.get(org.id,entity) else null
+        val plan=if(kind=="PLAN")repository.observePlans(org.id).first().let { data ->
+            data.plans.find { p -> p.id==entity && (org.role.manages || data.teams.any {
+                it.planId==p.id && it.active && it.teamId in data.executableTeams
+            }) }
+        } else null
+        if(kind=="PLAN" && (plan==null || (!org.role.manages && plan.status!="ACTIVE")))return false
+        val types=repository.types(org.id);val rows=repository.list(query)
+        if(stamp!=generation)return false
+        navigation.stop();photos.clear();generation++;job?.cancel();historyJob?.cancel()
+        repository.setActiveOrganization(org.id)
+        mutableState.value=RegistryState(organizations=organizations,organization=org,query=query,filterDraft=query,
+            types=types,rows=rows,selected=hydrant,notificationPlanId=plan?.id,
+            executionPlanId=plan?.takeIf { it.status=="ACTIVE" }?.id)
+        return true
+    }
+    fun consumeNotificationPlan() { mutableState.value=state.value.copy(notificationPlanId=null) }
     internal val navigation by lazy { NavigationSession(scope) { input -> teamAccess(input.organization) { repository.navigatePlan(input) } } }
     private suspend fun <T> teamAccess(org: String, action: suspend ()->T): T {
         val stamp=generation

@@ -23,6 +23,9 @@ android {
         fun quoted(value: String) = "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "").replace("\r", "") + "\""
         buildConfigField("String", "SUPABASE_URL", quoted(authUrl))
         buildConfigField("String", "SUPABASE_PUBLISHABLE_KEY", quoted(authKey))
+        listOf("APPLICATION_ID","PROJECT_ID","SENDER_ID","API_KEY").forEach { name ->
+            buildConfigField("String","FIREBASE_$name",quoted(providers.environmentVariable("ANDROID_FIREBASE_$name").orElse("").get()))
+        }
         // Public demo for the foundation; configure an approved provider for deployment.
         val mapStyle = providers.environmentVariable("ANDROID_MAP_STYLE_URL")
             .orElse("https://demotiles.maplibre.org/style.json").get()
@@ -40,6 +43,7 @@ android {
 kotlin { jvmToolchain(17) }
 kapt { arguments { arg("room.schemaLocation", "$projectDir/schemas") } }
 dependencies {
+    implementation("com.google.firebase:firebase-messaging:25.1.3")
     // Files only: private network retrieval remains behind the authorized repository.
     implementation("io.coil-kt.coil3:coil-compose:3.4.0")
     // OpenGL intentionally provides broad device compatibility; no Vulkan/multi-backend.

@@ -53,7 +53,7 @@ internal fun LocationControls(hydrants: List<Hydrant>, onLocation: (Location?) -
     onUseRequested: ()->Unit = {},
     locationOnly: Boolean = false, actionEnabled: Boolean = true, requestKey: String = "",
     additionalActions: @Composable () -> Unit = {}, requestLocationKey: String? = null,
-    centerLabel: Int = R.string.map_my_location) {
+    centerLabel: Int = R.string.map_my_location, navigation: Boolean = false) {
     val context=LocalContext.current
     val lifecycle=LocalLifecycleOwner.current.lifecycle
     var useRequested by rememberSaveable(requestKey) { mutableStateOf(false) }
@@ -78,10 +78,10 @@ internal fun LocationControls(hydrants: List<Hydrant>, onLocation: (Location?) -
         enabled=hasLocationPermission(context) && (!locationOnly || useRequested)
         if(enabled) { denied=false; permanent=false }
     }
-    LaunchedEffect(enabled,lifecycle,refresh,locationOnly && useRequested,locationOnly && actionEnabled) {
+    LaunchedEffect(enabled,lifecycle,refresh,locationOnly && useRequested,locationOnly && actionEnabled,navigation) {
         if(enabled && (!locationOnly || (useRequested && actionEnabled))) lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             try {
-                foregroundLocations(context.applicationContext).collect { value ->
+                foregroundLocations(context.applicationContext,navigation).collect { value ->
                     location=value
                     updateLocation(value.fix)
                     if(value.notice==LocationNotice.DENIED) { denied=true;enabled=false;onUnavailable() }

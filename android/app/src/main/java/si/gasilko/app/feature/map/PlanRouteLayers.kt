@@ -67,13 +67,27 @@ internal fun routeMapData(route: PlanRoute, completed: Set<String> = emptySet(),
     }.toString()
     return RouteMapData(route.planId+route.teamId+route.calculatedAt,collection(roads),collection(stops),points,numbers,roads.isNotEmpty(),stopCoordinates)
 }
-internal class PlanRouteLayers(private val style: Style) {
+internal class PlanRouteLayers(private val style: Style, private val lifecycle: androidx.lifecycle.Lifecycle) {
     companion object { const val STOP_LAYER="gasilko-route-stops" }
     private val roads=GeoJsonSource("gasilko-route-roads",HydrantMapLayers.EMPTY)
     private val stops=GeoJsonSource("gasilko-route-stops",HydrantMapLayers.EMPTY)
     private var lastRoads: String?=null
     private var lastStops: String?=null
     private val images=mutableSetOf<String>()
+    private var animate=false
+    private val arrows=SymbolLayer("gasilko-route-arrows","gasilko-route-roads")
+    private val animator=android.animation.ValueAnimator.ofFloat(0f,4f).apply {
+        duration=1200;repeatCount=android.animation.ValueAnimator.INFINITE
+        interpolator=android.view.animation.LinearInterpolator()
+        addUpdateListener { arrows.setProperties(iconOffset(arrayOf(it.animatedValue as Float,0f))) }
+    }
+    private fun animation() {
+        if(animate && lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)) {
+            if(!animator.isStarted)animator.start()
+        } else { animator.cancel();arrows.setProperties(iconOffset(arrayOf(0f,0f))) }
+    }
+    private val observer=androidx.lifecycle.LifecycleEventObserver { _,_ -> animation() }
+    fun close() { lifecycle.removeObserver(observer);animator.cancel();animator.removeAllUpdateListeners() }
     init {
         // Dedicated sources avoid mixed-geometry filtering; lines sit above the basemap, below stop numbers.
         style.addSource(roads);style.addSource(stops)
@@ -81,12 +95,22 @@ internal class PlanRouteLayers(private val style: Style) {
             lineColor(Color.WHITE),lineWidth(9f),lineOpacity(1f),visibility(Property.VISIBLE),
             lineCap(Property.LINE_CAP_ROUND),lineJoin(Property.LINE_JOIN_ROUND)))
         style.addLayer(LineLayer("gasilko-route-road","gasilko-route-roads").withProperties(
-            lineColor(Color.rgb(30,77,185)),lineWidth(5f),lineOpacity(1f),visibility(Property.VISIBLE),
+            lineColor(switchCase(eq(get("kind"),literal("future")),color(Color.rgb(190,40,40)),color(Color.rgb(30,77,185)))),lineWidth(5f),lineOpacity(1f),visibility(Property.VISIBLE),
             lineCap(Property.LINE_CAP_ROUND),lineJoin(Property.LINE_JOIN_ROUND)))
+        val arrow=Bitmap.createBitmap(24,24,Bitmap.Config.ARGB_8888)
+        val arrowPaint=Paint(Paint.ANTI_ALIAS_FLAG).apply { color=Color.WHITE;style=Paint.Style.STROKE;strokeWidth=4f }
+        Canvas(arrow).drawPath(android.graphics.Path().apply { moveTo(7f,5f);lineTo(15f,12f);lineTo(7f,19f) },arrowPaint)
+        style.addImage("gasilko-direction",arrow)
+        arrows.setFilter(eq(get("kind"),literal("active")))
+        arrows.setProperties(iconImage("gasilko-direction"),iconSize(0.7f),symbolPlacement(Property.SYMBOL_PLACEMENT_LINE),
+            symbolSpacing(80f),iconRotationAlignment(Property.ICON_ROTATION_ALIGNMENT_MAP),iconKeepUpright(false),iconAllowOverlap(true))
+        style.addLayer(arrows)
+        lifecycle.addObserver(observer)
         style.addLayer(SymbolLayer(STOP_LAYER,"gasilko-route-stops").withProperties(
             iconImage(get("icon")),iconSize(0.6f),iconAllowOverlap(true),iconIgnorePlacement(true)))
     }
-    fun update(data: RouteMapData?) {
+    fun update(data: RouteMapData?, animated: Boolean=false) {
+        animate=animated && data?.hasRoad==true;animation()
         val roadJson=data?.roads ?: HydrantMapLayers.EMPTY
         val stopJson=data?.stops ?: HydrantMapLayers.EMPTY
         if(lastRoads!=roadJson) { roads.setGeoJson(roadJson);lastRoads=roadJson }

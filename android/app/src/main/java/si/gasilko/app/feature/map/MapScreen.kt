@@ -65,7 +65,7 @@ fun MapScreen(onBack: () -> Unit, hydrants: List<Hydrant>, onOpenHydrant: ((Stri
     completedHydrants: Set<String> = emptySet(), routeHydrantIds: Set<String>? = null,
     completedRouteNumbers: Map<String,Int> = emptyMap(),
     onSelectStart: ((Double,Double)->Unit)? = null, initialStart: GeoPoint? = null,
-    navigationMode: Boolean=false, navigationContent: @Composable ()->Unit={},
+    navigationMode: Boolean=false, animatedRouteArrows: Boolean=true, navigationContent: @Composable ()->Unit={},
     onLocationUpdate: (Location?)->Unit={}, followUser: Boolean=false, onUserPan: ()->Unit={},
     onRecenter: ()->Unit={}, requestLocationKey: String?=null) {
     val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -77,6 +77,7 @@ fun MapScreen(onBack: () -> Unit, hydrants: List<Hydrant>, onOpenHydrant: ((Stri
     val selectingStart by rememberUpdatedState(onSelectStart!=null)
     var startPoint by remember { mutableStateOf(initialStart?.takeIf { it.valid }) }
     val currentRoute by rememberUpdatedState(routeData)
+    val animateRoute by rememberUpdatedState(navigationMode && animatedRouteArrows)
     val routeStops=remember(route) { route?.orderedStops().orEmpty().associateBy { it.hydrantId } }
     var fittedRoute by rememberSaveable { mutableStateOf<String?>(null) }
     var mapSize by remember { mutableStateOf(IntSize.Zero) }
@@ -142,7 +143,7 @@ fun MapScreen(onBack: () -> Unit, hydrants: List<Hydrant>, onOpenHydrant: ((Stri
             }
             if(dataLoading)LinearProgressIndicator(Modifier.fillMaxWidth())
             LocationControls(hydrants, onLocation={location=it;onLocationUpdate(it)}, onCenter={cancelFocus();centerRequested=true;onRecenter()},
-                requestLocationKey=requestLocationKey,
+                requestLocationKey=requestLocationKey,navigation=navigationMode,
                 centerLabel=if(navigationMode)R.string.nav_follow else R.string.map_my_location,
                 dataLoading=dataLoading,
                 onUseLocation=onAddHydrant?.let { { fix: Location ->
@@ -195,19 +196,19 @@ fun MapScreen(onBack: () -> Unit, hydrants: List<Hydrant>, onOpenHydrant: ((Stri
                             fun install(style: Style) {
                                 if(!released) {
                                     hydrantLayers=HydrantMapLayers(style); hydrantLayers?.update(currentData,currentSelection)
-                                    routeLayers=PlanRouteLayers(style);routeLayers?.update(currentRoute)
+                                    routeLayers?.close();routeLayers=PlanRouteLayers(style,lifecycle);routeLayers?.update(currentRoute,animateRoute)
                                     updateLocation(currentLocation,navigationMode)
                                     renderReady=true
                                 }
                             }
                             val fail: () -> Unit = {
                                 if(!released && !fallback) {
-                                    failed=true; loading=false;renderReady=false;hydrantLayers=null;routeLayers=null
+                                    failed=true; loading=false;renderReady=false;hydrantLayers=null;routeLayers?.close();routeLayers=null
                                     if(!fallback && readyMap != null) {
                                         fallback=true
                                         // Finish the SDK failure dispatch before replacing its style callback.
                                         post { if(!released) {
-                                            hydrantLayers=null;routeLayers=null
+                                            hydrantLayers=null;routeLayers?.close();routeLayers=null
                                             readyMap?.setStyle(Style.Builder().fromJson(HydrantMapLayers.OFFLINE_STYLE)) { install(it) }
                                         } }
                                     }
@@ -262,7 +263,7 @@ fun MapScreen(onBack: () -> Unit, hydrants: List<Hydrant>, onOpenHydrant: ((Stri
                         }
                     }, update={ view -> if(!view.released) {
                         view.hydrantLayers?.update(visibleData, selected?.id)
-                        view.routeLayers?.update(routeData)
+                        view.routeLayers?.update(routeData,navigationMode && animatedRouteArrows)
                         view.nativeMap?.style?.takeIf { it.isFullyLoaded }?.let { style -> StartPointLayer.update(style,startPoint) }
                         if(!navigationMode && renderReady && mapSize.width>0 && mapSize.height>0 && view.width>0 && view.height>0 && routeData!=null &&
                             fittedRoute!=routeData.key && routeData.points.isNotEmpty()) {
@@ -370,7 +371,7 @@ private class LifecycleMapView(context: Context, private val lifecycle: Lifecycl
         if(locationStyle !== style) { locationStyle=style;lastLocation=null }
         try {
             if(!component.isLocationComponentActivated) {
-                component.activateLocationComponent(LocationComponentActivationOptions.builder(context,style).useDefaultLocationEngine(false).build())
+                component.activateLocationComponent(LocationComponentActivationOptions.builder(context,style).useDefaultLocationEngine(false).locationComponentOptions(org.maplibre.android.location.LocationComponentOptions.builder(context).trackingAnimationDurationMultiplier(if(navigation)0.4f else 1.1f).build()).build())
                 component.cameraMode=CameraMode.NONE
                 component.renderMode=RenderMode.NORMAL
             }
@@ -419,7 +420,7 @@ private class LifecycleMapView(context: Context, private val lifecycle: Lifecycl
         lastLocation=null;locationStyle=null
         nativeMap=null
         hydrantLayers=null
-        routeLayers=null
+        routeLayers?.close();routeLayers=null
         lifecycle.removeObserver(observer)
         context.applicationContext.unregisterComponentCallbacks(memory)
         stop()

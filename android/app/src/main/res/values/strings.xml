@@ -440,4 +440,18 @@
     <string name="nav_off_ramp">Zapeljite na izvoz</string>
     <string name="nav_roundabout">V krožišču sledite označeni poti</string>
     <string name="nav_uturn">Polkrožno obrnite</string>
+    <string name="nav_wrong_way">Zaznana napačna smer vožnje</string><string name="nav_animated_arrows">Animirane smerne puščice</string>
+    <string name="notifications_title">Obvestila</string>
+    <string name="notifications_assignment">Dodelitve in spremembe ekip</string>
+    <string name="notifications_activation">Aktivacija načrtov</string>
+    <string name="notifications_hydrant">Opozorila o hidrantih</string>
+    <string name="notifications_update">Na voljo je nova posodobitev. Odprite Gasilko.</string>
+    <string name="notifications_privacy">Obvestila ne nadomeščajo preverjanja dostopa. Podrobnosti so vidne šele v aplikaciji.</string>
+    <string name="notifications_defaults">Dodelitve in aktivacije so privzeto vklopljene. Opozorila o hidrantih so privzeto izklopljena in so namenjena vodjem ter skrbnikom njihove organizacije.</string>
+    <string name="notifications_network">Nastavitev ni bilo mogoče shraniti ali naložiti. Poskusite znova s povezavo.</string>
+    <string name="notifications_enable">Omogoči obvestila v tej napravi</string>
+    <string name="notifications_denied">Obvestila niso dovoljena. Delo v aplikaciji lahko nadaljujete; dovoljenje spremenite v sistemskih nastavitvah.</string>
+    <string name="notifications_system_settings">Sistemske nastavitve obvestil</string>
+    <string name="notifications_configuration">Potisna obvestila v tej različici niso konfigurirana.</string>
+    <string name="notifications_unavailable">Cilj ni na voljo za trenutni račun ali v lokalnem predpomnilniku. Zaključite odprti obrazec oziroma se povežite in poskusite znova.</string>
 </resources>

@@ -41,7 +41,7 @@ internal class NavigationCamera {
         if (width <= 0 || height <= 0) return
         val now = SystemClock.elapsedRealtime()
         val resized = viewport != (width to height)
-        if (!force && !resized && (cameraFix == fix.elapsedRealtimeNanos || now - animatedAt < 1_000)) return
+        if (!force && !resized && cameraFix == fix.elapsedRealtimeNanos) return
         cameraFix = fix.elapsedRealtimeNanos
         animatedAt = now
         viewport = width to height
@@ -49,6 +49,6 @@ internal class NavigationCamera {
             .target(LatLng(fix.latitude, fix.longitude)).bearing(heading ?: 0.0)
             .zoom(16.5).tilt(35.0)
             // Positive top padding anchors the vehicle at 66% of the unobscured map height.
-            .padding(0.0, height * 0.32, 0.0, 0.0).build()), 1_000)
+            .padding(0.0, height * 0.32, 0.0, 0.0).build()), if(force)300 else 200)
     }
 }

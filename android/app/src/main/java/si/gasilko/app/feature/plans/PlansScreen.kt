@@ -57,6 +57,8 @@ private fun planDraft(p: InspectionPlan, data: PlanData) = PlanDraft(p.id,p.vers
 fun PlansScreen(model: HydrantViewModel,query: HydrantQuery,back: ()->Unit) {
     val registry by model.state.collectAsStateWithLifecycle()
     var execution by remember { mutableStateOf(registry.executionPlanId) }
+    val requestedPlan=remember { registry.notificationPlanId }
+    LaunchedEffect(Unit) { model.consumeNotificationPlan() }
     if(!registry.manages || execution!=null) {
         PlanExecutionScreen(model,query,execution) { execution=null;if(!registry.manages)back() }
         return
@@ -154,6 +156,12 @@ fun PlansScreen(model: HydrantViewModel,query: HydrantQuery,back: ()->Unit) {
     BackHandler(onBack=::leave)
     LaunchedEffect(query.organization) { refresh() }
     val data=observed.data
+    var openedNotification by remember { mutableStateOf(false) }
+    LaunchedEffect(data,requestedPlan) {
+        if(!openedNotification && requestedPlan!=null)data.plans.find { it.id==requestedPlan }?.let {
+            draft=planDraft(it,data);openedNotification=true
+        }
+    }
     val d=draft
     val hasPendingHydrants=observed.candidates.hydrants.any { it.id in (d?.hydrants ?: emptySet()) && it.version==0L }
     val editable=d?.editable==true && !busy && pending==null && assigning==null && routing==null && activating==null

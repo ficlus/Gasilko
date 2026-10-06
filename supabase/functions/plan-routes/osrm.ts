@@ -85,8 +85,10 @@ export class OsrmRoutingProvider implements RoadProvider {
     }
     return { times: data.durations, distances: data.distances };
   }
-  async route(points: Point[], navigation = false): Promise<RoadPath> {
-    const data = await this.get("route", points, `overview=full&geometries=geojson&steps=${navigation}&alternatives=false`);
+  async route(points: Point[], navigation = false, originBearing?: number): Promise<RoadPath> {
+    const heading = originBearing === undefined ? "" : "&bearings=" +
+      [Math.round(originBearing % 360) + ",45", ...points.slice(1).map(() => "")].join(";");
+    const data = await this.get("route", points, `overview=full&geometries=geojson&steps=${navigation}&alternatives=false${heading}`);
     const route: Route | undefined = data.routes?.[0];
     const snapped = data.waypoints?.map((w: { location: Point }) => w.location);
     if (!route || !positive(route.distance) || !positive(route.duration) || route.geometry?.type !== "LineString" ||

@@ -15,7 +15,7 @@ class MainActivity : ComponentActivity() {
             statusBarStyle=SystemBarStyle.light(android.graphics.Color.TRANSPARENT,android.graphics.Color.TRANSPARENT),
             navigationBarStyle=SystemBarStyle.light(android.graphics.Color.TRANSPARENT,android.graphics.Color.TRANSPARENT))
         if (savedInstanceState == null) intent.dataString?.let { ViewModelProvider(this)[AuthViewModel::class.java].googleCallback(it) }
-        setContent { GasilkoTheme { AuthScreen() } }
+        if(savedInstanceState==null)si.gasilko.app.core.notifications.NotificationTap.accept(intent) GasilkoTheme { AuthScreen() } }
     }
-    override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); intent.dataString?.let { ViewModelProvider(this)[AuthViewModel::class.java].googleCallback(it) } }
+    override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent);si.gasilko.app.core.notifications.NotificationTap.accept(intent); intent.dataString?.let { ViewModelProvider(this)[AuthViewModel::class.java].googleCallback(it) } }
 }

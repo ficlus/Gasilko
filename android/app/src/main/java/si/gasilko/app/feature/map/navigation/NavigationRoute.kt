@@ -6,10 +6,11 @@ import si.gasilko.app.feature.map.domain.NearbyHydrants
 import si.gasilko.app.feature.plans.PlanRoute
 import java.util.UUID
 
-data class NavigationRequest(val organization: String,val plan: String,val team: String,val version: Long,val origin: GeoPoint) {
+data class NavigationRequest(val organization: String,val plan: String,val team: String,val version: Long,val origin: GeoPoint,val bearing: Double?=null) {
     fun arguments()=buildJsonObject {
         put("organization",organization)
         put("origin",buildJsonArray { add(origin.longitude);add(origin.latitude) })
+        bearing?.takeIf { it.isFinite() && it in 0.0..360.0 }?.let { put("bearing",it) }
         put("request",buildJsonObject {
             put("id",plan);put("team_id",team);put("version",version);put("operation_id",UUID.randomUUID().toString());put("action","NAVIGATE")
         })
@@ -21,13 +22,17 @@ data class NavigationLeg(val meters: Double,val seconds: Double,val steps: List<
 data class NavigationStop(val item: String,val hydrant: String,val code: String?,val original: GeoPoint,val snapped: GeoPoint,val order: Int)
 data class NavigationRoute(val plan: String,val team: String,val version: Long,val provider: String,val meters: Double,
     val seconds: Double,val points: List<GeoPoint>,val legs: List<NavigationLeg>,val stops: List<NavigationStop>) {
-    fun mapRoute(org: String,key: String,roadPoints: List<GeoPoint> = points)=PlanRoute(plan,org,team,provider,"car",key,meters,seconds,
+    fun mapRoute(org: String,key: String,roadPoints: List<GeoPoint> = points, futurePoints: List<GeoPoint> = emptyList())=PlanRoute(plan,org,team,provider,"car",key,meters,seconds,
         buildJsonObject {
             put("type","FeatureCollection")
             put("features",buildJsonArray {
                 if(roadPoints.size>1)add(buildJsonObject {
-                    put("type","Feature");put("properties",buildJsonObject { put("kind","road") })
+                    put("type","Feature");put("properties",buildJsonObject { put("kind","active") })
                     put("geometry",buildJsonObject { put("type","LineString");put("coordinates",JsonArray(roadPoints.map { it.json() })) })
+                })
+                if(futurePoints.size>1)add(buildJsonObject {
+                    put("type","Feature");put("properties",buildJsonObject { put("kind","future") })
+                    put("geometry",buildJsonObject { put("type","LineString");put("coordinates",JsonArray(futurePoints.map { it.json() })) })
                 })
                 stops.forEach { stop -> add(buildJsonObject {
                     put("type","Feature");put("properties",buildJsonObject {
@@ -37,6 +42,16 @@ data class NavigationRoute(val plan: String,val team: String,val version: Long,v
                 }) }
             })
         }.toString(),buildJsonArray { stops.forEach { add(buildJsonObject { put("hydrant",it.hydrant);put("code",it.code);put("order",it.order) }) } }.toString(),true)
+}
+/** Provider leg geometry determines the active waypoint, never straight-line interpolation between stops. */
+internal fun NavigationRoute.displayLegs(): Pair<List<GeoPoint>,List<GeoPoint>> {
+    fun List<NavigationLeg>.line()=flatMap { it.steps.flatMap { step -> step.points } }
+        .fold(mutableListOf<GeoPoint>()) { out,p -> if(out.lastOrNull()!=p)out.add(p);out }
+    val active=legs.take(1).line()
+    if(active.size>=2)return active to legs.drop(1).line()
+    val target=stops.firstOrNull()?.snapped ?: return points to emptyList()
+    val split=points.indices.minByOrNull { NearbyHydrants.distance(points[it],target) } ?: return points to emptyList()
+    return points.take(split+1) to points.drop(split)
 }
 /** Trim only the travelled prefix of the provider's road line. Stop coordinates stay untouched. */
 internal fun remainingRoad(points: List<GeoPoint>,travelled: Double): List<GeoPoint> {

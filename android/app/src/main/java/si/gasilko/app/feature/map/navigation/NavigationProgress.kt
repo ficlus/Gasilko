@@ -19,7 +19,7 @@ internal object NavigationThresholds {
 }
 internal data class Guidance(val meters: Double=0.0,val next: NavigationStep?=null,val step: Int=0,
     val toManeuver: Double=0.0,val remaining: Double=0.0,val seconds: Double=0.0,val arrived: Boolean=false,val offRoute: Boolean=false,
-    val toTarget: Double=Double.POSITIVE_INFINITY,val geometryMeters: Double=0.0)
+    val toTarget: Double=Double.POSITIVE_INFINITY,val geometryMeters: Double=0.0,val expectedBearing: Double?=null)
 private data class Segment(val a: GeoPoint,val b: GeoPoint,val start: Double,val length: Double,
     val geometryStart: Double,val geometryLength: Double)
 
@@ -86,9 +86,18 @@ internal class NavigationProgress(private val route: NavigationRoute) {
         val geometryProgress=segment?.let {
             it.geometryStart+it.geometryLength*((progress-it.start)/it.length).coerceIn(0.0,1.0)
         } ?: geometryLength
+        val matched=nearest?.second ?: progress
+        fun pointAt(meters: Double): GeoPoint? {
+            val s=segments.firstOrNull { it.start+it.length>=meters } ?: segments.lastOrNull() ?: return null
+            val f=((meters-s.start)/s.length).coerceIn(0.0,1.0)
+            return GeoPoint(s.a.latitude+(s.b.latitude-s.a.latitude)*f,s.a.longitude+(s.b.longitude-s.a.longitude)*f)
+        }
+        val a=pointAt(matched);val b=pointAt(min(length,matched+NavigationMotion.LOOK_AHEAD))
+        val expected=if(deviation<=NavigationThresholds.OFF_ROUTE_METERS && a!=null && b!=null && NearbyHydrants.distance(a,b)>=8)
+            NavigationMotion.direction(a,b) else null
         return Guidance(progress,next,index,(starts.getOrNull(index)?.minus(progress) ?: (length-progress)).coerceAtLeast(0.0),
             (route.meters-progress).coerceAtLeast(0.0),(route.seconds-usedSeconds).coerceAtLeast(0.0),arrived,
             badSamples>=NavigationThresholds.OFF_ROUTE_SAMPLES && at-(badSince ?: at)>=NavigationThresholds.OFF_ROUTE_MILLIS,
-            accessDistance,geometryProgress)
+            accessDistance,geometryProgress,expected)
     }
 }

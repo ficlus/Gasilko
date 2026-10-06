@@ -9,7 +9,7 @@ export interface RoadProvider {
   readonly name: string;
   snap(points: Point[]): Promise<Point[]>;
   matrix(points: Point[]): Promise<Matrix>;
-  route(points: Point[], navigation?: boolean): Promise<RoadPath>;
+  route(points: Point[], navigation?: boolean, originBearing?: number): Promise<RoadPath>;
 }
 export class RoutingError extends Error {
   constructor(readonly code: string, readonly status = 422) { super(code); }
