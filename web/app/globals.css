@@ -1,5 +1,12 @@
 :root { font-family: system-ui, sans-serif; color: #122d35; background: #f3f6f7; }
 body { margin: 0; }
+/* Incident Core reuses the existing registry/admin cards and field controls. */
+.incident-area .incident-form { max-width: 52rem; margin-block: 1rem; }
+.incident-area fieldset { min-width: 0; }
+.incident-area dialog { max-height: 85dvh; overflow: auto; }
+.incident-area .incident-prose { white-space: pre-wrap; overflow-wrap: anywhere; }
+.incident-area .actions { margin-block: .75rem; }
+.incident-area nav { flex-wrap: wrap; }
 main { max-width: 48rem; margin: 12vh auto; padding: 2rem; }
 h1 { font-size: clamp(2rem, 5vw, 3rem); }
 p { line-height: 1.6; }
