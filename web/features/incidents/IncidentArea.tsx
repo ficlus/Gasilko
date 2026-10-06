@@ -5,7 +5,8 @@ import {useEffect,useRef,useState,type FormEvent} from 'react';
 import type {Locale} from '../../lib/i18n';
 import {browserClient} from '../../lib/supabase/browser';
 import {incidentText} from '../../lib/incidents/messages';
-import {incidentPriorities,incidentSeverities,incidentStates,mutationNames,type Candidate,type Core,type Entry,type Incident,type IncidentRow,type InboxItem,type Mutation,type Receipt,type Timeline} from '../../lib/incidents/model';
+import {incidentPriorities,incidentSeverities,incidentStates,mutationNames,type Candidate,type CommandRequest,type Core,type Entry,type Incident,type IncidentRow,type InboxItem,type Mutation,type Receipt,type Timeline} from '../../lib/incidents/model';
+import {CommandSection,CommandRequests} from './CommandSection';
 
 class IncidentError extends Error {}
 async function rpc<T>(name:string,args:Record<string,unknown>,signal?:AbortSignal,expectedAccount?:string):Promise<T> {
@@ -13,7 +14,7 @@ async function rpc<T>(name:string,args:Record<string,unknown>,signal?:AbortSigna
  const result=await response.json();if(!response.ok)throw new IncidentError(result.error??'SERVER');return result.data as T;
 }
 type RequestState={action:Mutation;args:Record<string,unknown>;storageKey:string};
-type Confirmation={action:Mutation;payload:Record<string,unknown>;incident:string;version:string;org:string};
+type Confirmation={action:Mutation;payload:Record<string,unknown>;incident:string;version:string;org:string;description?:string};
 const emptyCore:Core={title:'',summary:'',incident_type_id:'',priority:'NORMAL',severity:'UNKNOWN',latitude:'',longitude:'',address:'',unknown_location_reason:''};
 export function IncidentArea({locale,account,destination,initialOrg}:{locale:Locale;account:string;destination?:string;initialOrg?:string}) {
  const t=incidentText(locale),router=useRouter();
@@ -24,12 +25,14 @@ export function IncidentArea({locale,account,destination,initialOrg}:{locale:Loc
  const [core,setCore]=useState<Core>(emptyCore),[editing,setEditing]=useState(false),[busy,setBusy]=useState(false);
  const [confirmation,setConfirmation]=useState<Confirmation|null>(null),[reason,setReason]=useState(''),[pending,setPending]=useState<RequestState|null>(null);
  const [sessionValid,setSessionValid]=useState(true);
+ const [commandInbox,setCommandInbox]=useState<CommandRequest[]>([]);
  const alive=useRef(true),sending=useRef(false),coreLoaded=useRef(false);
  const isNew=destination==='new',isList=!destination;
  const url=(id?:string,acting=org)=>`/${locale}/incidents${id?'/'+id:''}${acting?'?org='+encodeURIComponent(acting):''}`;
  const date=(value:string|null|undefined)=>value?new Date(value).toLocaleString(locale==='de'?'de-DE':'sl-SI'): '—';
  const safeError=(e:unknown)=>{
   const code=e instanceof IncidentError?e.message:'SERVER';
+  if(['INVALID_COMMAND_HIERARCHY','INVALID_COMMAND_ROLE','INVALID_COMMAND_CANDIDATE','TRANSFER_NOT_CURRENT','TRANSFER_EXPIRED','TRANSFER_ALREADY_PENDING','LEAD_TRANSFER_REQUIRES_CONSENT','COMMANDER_STILL_VALID','PARTICIPANT_HAS_ACTIVE_COMMAND'].includes(code))return code;
   return code==='STALE_VERSION'?'stale':code==='NOT_AUTHORIZED'?'noAccess':code==='EXPIRED'?'expired':code==='VALIDATION_FAILED'?'invalid':
    code==='OPERATION_REUSED'?'reused':['INVALID_TRANSITION','INVALID_COMMANDER','INVALID_PARTICIPANT','INCIDENT_TERMINAL','INVALID_STATE'].includes(code)?'rejected':'error';
  };
@@ -37,7 +40,7 @@ export function IncidentArea({locale,account,destination,initialOrg}:{locale:Loc
  useEffect(()=>{
   const listener=browserClient()?.auth.onAuthStateChange((event,session)=>{
    if(event==='SIGNED_OUT'||(session&&session.user.id!==account)){
-    alive.current=false;setSessionValid(false);setDetail(null);setRows([]);setTimeline(null);setEntry(null);setConfirmation(null);
+    alive.current=false;setSessionValid(false);setDetail(null);setRows([]);setTimeline(null);setEntry(null);setCommandInbox([]);setConfirmation(null);
     router.replace(`/${locale}/account`);router.refresh();
    }
   });return()=>listener?.data.subscription.unsubscribe();
@@ -50,6 +53,12 @@ export function IncidentArea({locale,account,destination,initialOrg}:{locale:Loc
   }).catch(e=>{if(!ac.signal.aborted){setEntry(null);setError(safeError(e));}}).finally(()=>{if(!ac.signal.aborted)setLoading(false);});
   return()=>ac.abort();
  },[refresh,initialOrg]);
+ useEffect(()=>{
+  const ac=new AbortController();setCommandInbox([]);
+  if(isList)rpc<CommandRequest[]>('incident_command_inbox',{},ac.signal,account)
+   .then(value=>{if(!ac.signal.aborted)setCommandInbox(value);}).catch(e=>{if(!ac.signal.aborted)setError(safeError(e));});
+  return()=>ac.abort();
+ },[refresh,isList,account]);
  useEffect(()=>{
   if(!entry||!org)return;const ac=new AbortController();
   setError('');setLoading(true);setRows([]);setDetail(null);setTimeline(null);
@@ -84,7 +93,7 @@ export function IncidentArea({locale,account,destination,initialOrg}:{locale:Loc
    // retains the exact operation/payload for retry, never silently rebased.
    if(e instanceof IncidentError&&e.message!=='SERVER'){
     setPending(null);try{sessionStorage.removeItem(request.storageKey);}catch{/* optional retry key storage */}
-    if(e.message==='NOT_AUTHORIZED'||e.message==='EXPIRED'){setDetail(null);setRows([]);setTimeline(null);setConfirmation(null);}
+    if(e.message==='NOT_AUTHORIZED'||e.message==='EXPIRED'){setDetail(null);setRows([]);setTimeline(null);setCommandInbox([]);setConfirmation(null);}
    }
   } finally {sending.current=false;if(alive.current)setBusy(false);}
  }
@@ -101,8 +110,8 @@ export function IncidentArea({locale,account,destination,initialOrg}:{locale:Loc
    await send({action,args:{...base,p_operation:operation},storageKey});
   }catch{sending.current=false;setBusy(false);setError('error');}
  }
- function ask(action:Mutation,payload:Record<string,unknown>={},item?:InboxItem) {
-  if(busy||pending)return;setReason('');setConfirmation({action,payload,incident:item?.incident_id??detail?.id??'',version:item?.version??detail?.version??'0',org:item?.organization_id??org});
+ function ask(action:Mutation,payload:Record<string,unknown>={},item?:InboxItem,description?:string) {
+  if(busy||pending)return;setReason('');setConfirmation({action,payload,incident:item?.incident_id??detail?.id??'',version:item?.version??detail?.version??'0',org:item?.organization_id??org,description});
  }
  function submitCore(e:FormEvent) {
   e.preventDefault();const absent=core.latitude.trim()===''&&core.longitude.trim()==='';
@@ -133,6 +142,7 @@ export function IncidentArea({locale,account,destination,initialOrg}:{locale:Loc
   {pending&&<section className="admin-notice"><p>{t('pending')}</p><button disabled={busy} onClick={()=>void send(pending)}>{t('retry')}</button></section>}
   {entry?.organizations.length===0&&<p>{t('noOrg')}</p>}
   {isList&&entry&&<>
+   {commandInbox.length>0&&<section className="admin-card"><h2>{t('commandInbox')}</h2><p>{t('commandInboxLimit')}</p><CommandRequests locale={locale} items={commandInbox} disabled={busy||!!pending} onAction={ask}/></section>}
    {(entry.invitations.length>0||entry.nominations.length>0)&&<section className="admin-card"><h2>{t('inbox')}</h2><p>{t('inboxLimit')}</p>
     {entry.nominations.map(item=><article className="web-row" key={item.id}><strong>{item.reference_number} · {item.title}</strong><p>{t('commander')} · {date(item.expires_at)}</p>
      <button disabled={busy||!!pending} onClick={()=>ask('consent',{consent_id:item.id},item)}>{t('consent')}</button></article>)}
@@ -152,7 +162,7 @@ export function IncidentArea({locale,account,destination,initialOrg}:{locale:Loc
   {detail&&<>
    <header className="admin-card"><p>{detail.reference_number}</p><h2>{detail.title}</h2><span className="admin-badge">{t(detail.status)}</span>
     <p>{t('priority')}: {t(detail.priority)} · {t('severity')}: {t(detail.severity)} · {detail.type.names[locale]??detail.type.code}</p>
-    <p>{t('lead')}: {detail.lead_name}</p><p>{t('created')}: {date(detail.created_at)} · {t('started')}: {date(detail.started_at??detail.declared_at)}</p>
+    <p>{t('lead')}: {detail.lead_name}</p><p>{t('commander')}: {detail.commander?.name??t('noCommander')}</p><p>{t('created')}: {date(detail.created_at)} · {t('started')}: {date(detail.started_at??detail.declared_at)}</p>
     {['CLOSED','CANCELLED'].includes(detail.status)?<p>{t('terminal')}</p>:!Object.values(detail.actions).some(Boolean)&&<p>{t('readOnly')}</p>}
    </header>
    <section className="admin-card"><h2>{t('summary')}</h2><p className="incident-prose">{detail.summary||'—'}</p><h3>{t('location')}</h3><p>{detail.latitude===null?detail.unknown_location_reason:`${detail.latitude}, ${detail.longitude}`}</p><p>{detail.address}</p>
@@ -163,6 +173,7 @@ export function IncidentArea({locale,account,destination,initialOrg}:{locale:Loc
     {detail.nomination&&<p>{t('nomination')}: {detail.nomination.name} · {t(detail.nomination.status)} · {date(detail.nomination.expires_at)}</p>}
     {detail.actions.nominate&&<><p>{t('consentNotice')}</p><CandidatePicker key={`member/${detail.id}/${detail.version}`} locale={locale} org={org} incident={detail.id} kind="MEMBER" disabled={busy||!!pending} onChoose={id=>ask('nominate',{user_id:id})}/></>}
    </section>
+   {detail.status!=='DRAFT'&&<CommandSection key={`${account}/${org}/${detail.id}/${detail.version}`} locale={locale} account={account} org={org} incident={detail} disabled={busy||!!pending} read={rpc} onAction={ask}/>}
    <section className="admin-card"><h2>{t('participants')}</h2>{detail.participants.length<=1&&<p>{t('noParticipant')}</p>}
     {detail.participants.map(p=><article className="web-row" key={p.id}><strong>{p.name}</strong><p>{t(p.status)} · {t(p.agency_role)}</p>{p.end_reason&&<p>{p.end_reason}</p>}
      <div className="actions">{p.can_consent_release&&<button disabled={busy||!!pending} onClick={()=>ask('consent_release',{participant_id:p.id})}>{t('consent_release')}</button>}
@@ -176,8 +187,11 @@ export function IncidentArea({locale,account,destination,initialOrg}:{locale:Loc
    </section>
   </>}
   {confirmation&&<ConfirmationDialog title={t(confirmation.action)} text={t('confirmation')} busy={busy||!!pending} onDismiss={()=>setConfirmation(null)}>
+   {confirmation.description&&<p>{confirmation.description}</p>}
+   {confirmation.action==='recover_command'&&<p role="alert">{t('recoveryWarning')}</p>}
    <form onSubmit={e=>{e.preventDefault();void mutate(confirmation.action,{...confirmation.payload,...(reason?{reason}: {})},confirmation.incident,confirmation.version,confirmation.org);}}>
-    {['reactivate','close','cancel','decline','consent_release','release'].includes(confirmation.action)&&<label>{t('reason')}<textarea required maxLength={2000} value={reason} onChange={e=>setReason(e.target.value)}/></label>}
+    {['reactivate','close','cancel','decline','consent_release','release','transfer_command','recover_command','end_role','decline_command','cancel_command'].includes(confirmation.action)&&<label>{t('reason')}<textarea required maxLength={2000} value={reason} onChange={e=>setReason(e.target.value)}/></label>}
+    {['transfer_command','recover_command','accept_command','consent_lead'].includes(confirmation.action)&&<label><input type="checkbox" required/>{t('commandSafetyConfirm')}</label>}
     <div className="actions"><button disabled={busy||!!pending} type="submit">{t('confirm')}</button><button disabled={busy||!!pending} type="button" onClick={()=>setConfirmation(null)}>{t('dismiss')}</button></div>
    </form>{error&&<p role="alert">{t(error)}</p>}{error==='stale'&&!pending&&<button onClick={()=>{setConfirmation(null);reload();}}>{t('refresh')}</button>}{pending&&<><p>{t('pending')}</p><button disabled={busy} onClick={()=>void send(pending)}>{t('retry')}</button></>}
   </ConfirmationDialog>}
