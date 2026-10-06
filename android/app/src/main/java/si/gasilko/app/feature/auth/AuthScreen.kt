@@ -1,6 +1,7 @@
 package si.gasilko.app.feature.auth
 
 import kotlinx.coroutines.launch
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.KeyboardOptions

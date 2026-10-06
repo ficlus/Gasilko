@@ -32,7 +32,8 @@ import si.gasilko.app.feature.hydrants.domain.*
 import si.gasilko.app.feature.hydrants.data.*
 
 class SupabaseAuthGateway(private val client: SupabaseClient, scope: CoroutineScope, context: Context) : AuthGateway {
-    private val notificationContext=context.applicationContext OfflineAuthorization(context.applicationContext)
+    private val offline = OfflineAuthorization(context.applicationContext)
+    private val notificationContext = context.applicationContext
     private fun account() = client.auth.currentUserOrNull()?.id ?: throw AuthFailure(AuthMessage.EXPIRED)
     override fun accountId() = client.auth.currentUserOrNull()?.id
     override fun usingOfflineAuthorization() = offlineAccount != null && offlineAccount == accountId()
@@ -67,7 +68,9 @@ class SupabaseAuthGateway(private val client: SupabaseClient, scope: CoroutineSc
     } catch (_: Exception) { throw AuthFailure(AuthMessage.ERROR) }
     override suspend fun startGoogle() = request { notifications(notificationContext).detach();invalidateAuthorization(); client.auth.awaitInitialization(); client.auth.signInWith(Google); Unit }
     override suspend fun completeGoogle(code: String) = request { client.auth.awaitInitialization(); client.auth.exchangeCodeForSession(code); Unit }
-    fun notifications(context: Context)=si.gasilko.app.core.notifications.NotificationRepository(client,context.applicationContext) = si.gasilko.app.core.access.SupabaseAccessGateway(client)
+    fun accessGateway() = si.gasilko.app.core.access.SupabaseAccessGateway(client)
+    fun notifications(context: Context) =
+        si.gasilko.app.core.notifications.NotificationRepository(client, context.applicationContext)
     fun hydrantRepository(context: Context): si.gasilko.app.feature.hydrants.domain.HydrantRepository {
         val scheduler = si.gasilko.app.core.sync.HydrantSyncScheduler(context)
         val transport = si.gasilko.app.feature.hydrants.data.SupabaseRegistryTransport(client)

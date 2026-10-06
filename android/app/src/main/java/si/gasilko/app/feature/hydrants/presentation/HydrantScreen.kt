@@ -96,7 +96,8 @@ fun HydrantScreen(model: HydrantViewModel, requestAccess: ()->Unit = {}, signOut
         mutableStateOf<HydrantQuery?>(model.navigation.state.value.takeIf { it.active && it.organization==state.organization?.id }
             ?.let { state.query.copy(organization=it.organization) })
     }
-    var planEntry by remember { mutableIntStateOf(0) }(model,model.photoScope,state.organization?.id) { mutableStateOf(false) }
+    var planEntry by remember { mutableIntStateOf(0) }
+    var showTeams by remember(model,model.photoScope,state.organization?.id) { mutableStateOf(false) }
     var showConflicts by remember(state.organization?.id) { mutableStateOf(false) }
     var conflictSequence by remember(state.organization?.id) { mutableStateOf<Long?>(null) }
     LaunchedEffect(model) { if(!model.photos.state.value.busy)model.refresh() }

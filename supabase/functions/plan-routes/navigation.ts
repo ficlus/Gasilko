@@ -11,9 +11,11 @@ export async function navigationRoute(input: Input, snapshot: any, origin: Point
   for (const row of snapshot.items ?? []) if (row.plan_id === input.id && row.team_id === input.teams[0] &&
     Number.isInteger(row.route_order) && row.route_order > 0) order.set(row.id, row.route_order);
   // Keep the authoritative remaining stop order. No matrix, optimization or team mutation here.
-  const actionable = new Set((snapshot.items ?? []).filter((i: any) => i.plan_id === input.id && i.active && !i.inspection_id && !i.skipped_at && i.team_id === input.teams[0]).map((i: any) => i.id));((a, b) => (order.get(a.id) ?? Infinity) - (order.get(b.id) ?? Infinity) ||
+  const actionable = new Set((snapshot.items ?? []).filter((i: any) => i.plan_id === input.id && i.active && !i.inspection_id && !i.skipped_at && i.team_id === input.teams[0]).map((i: any) => i.id));
+  const items = input.items.filter(i => actionable.has(i.id)).sort((a, b) => (order.get(a.id) ?? Infinity) - (order.get(b.id) ?? Infinity) ||
     a.hydrant.localeCompare(b.hydrant));
-  if (!items.length) throw new RoutingError("ROUTE_ASSIGNMENTS"); = [origin, ...items.map(i => [i.longitude, i.latitude] as Point)];
+  if (!items.length) throw new RoutingError("ROUTE_ASSIGNMENTS");
+  const points: Point[] = [origin, ...items.map(i => [i.longitude, i.latitude] as Point)];
   if (input.returnToStart && input.latitude !== null && input.longitude !== null) points.push([input.longitude, input.latitude]);
   if (points.length > 100) throw new RoutingError("ROUTE_LIMIT");
   const snapped = await provider.snap(points);

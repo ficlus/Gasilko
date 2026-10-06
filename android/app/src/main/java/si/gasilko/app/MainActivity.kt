@@ -14,8 +14,11 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState); enableEdgeToEdge(
             statusBarStyle=SystemBarStyle.light(android.graphics.Color.TRANSPARENT,android.graphics.Color.TRANSPARENT),
             navigationBarStyle=SystemBarStyle.light(android.graphics.Color.TRANSPARENT,android.graphics.Color.TRANSPARENT))
-        if (savedInstanceState == null) intent.dataString?.let { ViewModelProvider(this)[AuthViewModel::class.java].googleCallback(it) }
-        if(savedInstanceState==null)si.gasilko.app.core.notifications.NotificationTap.accept(intent) GasilkoTheme { AuthScreen() } }
+        if (savedInstanceState == null) {
+            intent.dataString?.let { ViewModelProvider(this)[AuthViewModel::class.java].googleCallback(it) }
+            si.gasilko.app.core.notifications.NotificationTap.accept(intent)
+        }
+        setContent { GasilkoTheme { AuthScreen() } }
     }
     override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent);si.gasilko.app.core.notifications.NotificationTap.accept(intent); intent.dataString?.let { ViewModelProvider(this)[AuthViewModel::class.java].googleCallback(it) } }
 }
