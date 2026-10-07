@@ -160,7 +160,7 @@ begin
    v_role_name:='INCIDENT_COMMANDER'; v_parent:=null;
    if p_action='TRANSFER' and v_target_user=v_ic.user_id and v_target_org=v_ic.organization_id then raise exception 'INVALID_COMMAND_CANDIDATE'; end if;
    v_cross:=v_target_org<>v_i.lead_organization_id;
-   if p_action='TRANSFER' and coalesce(p_payload->>'mode','')<>case when v_cross then 'LEAD_AND_COMMAND' else 'COMMAND' end then raise exception 'LEAD_TRANSFER_REQUIRES_CONSENT'; end if;
+   if p_action='TRANSFER' and coalesce(p_payload->>'mode','')<>(case when v_cross then 'LEAD_AND_COMMAND' else 'COMMAND' end) then raise exception 'LEAD_TRANSFER_REQUIRES_CONSENT'; end if;
   end if;
   -- Expiry is a terminal historical state; reads also derive EXPIRED before a
   -- new request causes this lazy materialization. No scheduler required.
