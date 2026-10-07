@@ -25,9 +25,11 @@ export const mutationNames = {
  offer_role:'incident_offer_role',end_role:'incident_end_role',transfer_command:'incident_request_command_transfer',
  recover_command:'incident_request_command_recovery',accept_command:'incident_accept_command_request',
  decline_command:'incident_decline_command_request',cancel_command:'incident_cancel_command_request',consent_lead:'incident_consent_lead_transfer',
+ sector_create:'incident_create_sector',sector_update:'incident_update_sector',sector_deactivate:'incident_deactivate_sector',
+ object_put:'incident_put_map_object',object_deactivate:'incident_deactivate_map_object',hydrant_link:'incident_link_hydrant',hydrant_unlink:'incident_unlink_hydrant',
 } as const;
 export type Mutation = keyof typeof mutationNames;
-export type CommandRole = {id:string;user_id:string;name:string|null;organization_id:string;organization_name:string;role:string;parent_id:string|null;valid:boolean;can_end:boolean;created_at:string};
-export type CommandRequest = InboxItem & {name:string|null;organization_name:string;outgoing_name:string|null;lead_name:string;kind:string;role:string;status:string;reason:string|null;created_at:string;transfer_lead:boolean;lead_consented:boolean;can_accept:boolean;can_cancel:boolean;can_lead_consent:boolean};
-export type CommandHistory = {id:string;name:string|null;organization_name:string;role:string;status:string;parent_id:string|null;valid_from:string;ended_at:string|null;reason:string|null;assigned_by:string|null;created_at:string};
-export type CommandView = {version:string;valid_commander:boolean;operational:boolean;can_assign:boolean;can_transfer:boolean;can_recover:boolean;roles:CommandRole[];history:CommandHistory[];requests:CommandRequest[]};
+export type CommandRole = {sector_id:string|null;sector_name:string|null} & {id:string;user_id:string;name:string|null;organization_id:string;organization_name:string;role:string;parent_id:string|null;valid:boolean;can_end:boolean;created_at:string};
+export type CommandRequest = {sector_id:string|null;sector_name:string|null} & InboxItem & {name:string|null;organization_name:string;outgoing_name:string|null;lead_name:string;kind:string;role:string;status:string;reason:string|null;created_at:string;transfer_lead:boolean;lead_consented:boolean;can_accept:boolean;can_cancel:boolean;can_lead_consent:boolean};
+export type CommandHistory = {sector_id:string|null;sector_name:string|null} & {id:string;name:string|null;organization_name:string;role:string;status:string;parent_id:string|null;valid_from:string;ended_at:string|null;reason:string|null;assigned_by:string|null;created_at:string};
+export type CommandView = {version:string;valid_commander:boolean;operational:boolean;can_assign:boolean;can_transfer:boolean;can_recover:boolean;sectors:{id:string;code:string;name:string}[];roles:CommandRole[];history:CommandHistory[];requests:CommandRequest[]};

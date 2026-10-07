@@ -50,7 +50,7 @@ language sql stable security definer set search_path='' as $$
  join public.inspection_plans plan on plan.id=pt.plan_id and plan.organization_id=pt.organization_id
  where tm.user_id=person and tm.organization_id=e.organization_id and tm.active and t.active and pt.active
  and pt.plan_id=e.entity_id and plan.status in ('DRAFT','PLANNED','ACTIVE')
- and (cardinality(e.teams)=0 or tm.team_id=any(e.teams)))));
+ and (cardinality(e.teams)=0 or tm.team_id=any(e.teams))))));
 $$;
 create function public.notification_preferences(request jsonb default '{}'::jsonb) returns jsonb
 language plpgsql security definer set search_path='' as $$

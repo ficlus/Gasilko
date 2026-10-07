@@ -1512,6 +1512,169 @@ concurrent revocation and acceptance; invalid-IC recovery versus valid-IC refusa
 closure and participant cleanup; account/org switching; and SI/DE presentation.
 These changes are unexecuted implementation, not evidence of operational readiness.
 
+## M14.3 implemented Common Operational Picture
+
+M14.3 adds three forward migrations:
+`20261006150000_incident_cop_geometry.sql`,
+`20261006151000_incident_sector_command.sql`, and
+`20261006152000_incident_cop_api.sql`. Earlier M14 migrations remain unchanged.
+
+### Authoritative entities and bounded geometry
+
+- `incident_sectors`: UUID and same-incident identity, immutable incident-local
+  uppercase code (1–64, letters/digits/underscore/hyphen), name (1–200), optional
+  Polygon, active flag, actor/timestamp metadata, positive entity version and
+  changed_revision. Code uniqueness includes inactive history.
+- `incident_map_objects`: UUID, incident, fixed kind, required useful label
+  (1–200), description (0–4000), Geometry, optional same-incident sector FK,
+  active flag and the same version/actor metadata. No speculative organization
+  ownership field is introduced. Editing cannot change object kind.
+- `incident_hydrant_links`: UUID, incident, canonical hydrant FK, purpose
+  WATER_SUPPLY/REFERENCE, active flag and version/actor/revision metadata.
+  Unlink deactivates only the relationship. Relinking creates a new episode;
+  partial uniqueness prevents duplicate active incident/hydrant/purpose links.
+  No coordinates, registry status, inspection or photo copies are stored.
+
+All three public tables enable RLS, prohibit direct client/service-role writes,
+and reject DELETE/TRUNCATE. Scoped RPC DTOs replace unrestricted table SELECT.
+Deactivation and incident closure retain records and geometry. Existing receipt
+payloads retain exact mutation input; timeline/audit contain bounded identifiers,
+versions and change metadata instead of duplicating whole geometries.
+
+Geometry is JSONB GeoJSON Geometry with only type/coordinates keys, WGS84
+[longitude, latitude], exactly two numeric ordinates, longitude [-180,180] and
+latitude [-90,90]. Point, LineString and Polygon only; reject Features, collections,
+multi-geometries, CRS, Z/M and custom properties. Limit each encoded JSONB geometry
+to 64 KiB and 2000 pairs across all rings. Lines need two points; polygon rings
+need four including exact closure. Reject consecutive duplicates, zero-area rings,
+collinear backtracking, nonadjacent edge intersections/touches, crossing rings,
+holes outside the exterior, nested/overlapping holes, and edges crossing the
+dateline (>180 degrees longitude change). No simplification, rounding or wrapping.
+
+Private immutable numeric segment helpers have empty search_path and no client
+execution. Pairwise intersection is O(N²), bounded by N<=2000 across the complete
+geometry, with bounding-box rejection first. This is conservative operational
+validation, not full GIS topology. No PostGIS, spatial types, geometry package,
+Turf or drawing dependency is added.
+
+| Kind | Geometry |
+|---|---|
+| COMMAND_POST, STAGING, WATER_SOURCE, ACCESS_POINT, NOTE | Point |
+| HAZARD | Point or Polygon |
+| PERIMETER | LineString or Polygon |
+| Sector | NULL or Polygon |
+
+Active incident limits are 100 sectors, 1000 objects, 500 links, and 2 MiB of
+combined sector/object geometry. Writes enforce limits under the incident lock.
+The active snapshot is complete, never silently truncated. Inactive history
+remains stored; this is not the M14.7 change-feed/snapshot protocol.
+
+### Scope and command integration
+
+IC and Deputy receive MANAGE_COP for incident-wide sector/object/link management
+in ACTIVE/STABILIZED incidents. This explicitly activates the previously deferred
+Deputy COP capability without granting command handover/lifecycle rights.
+Organization MANAGER/ADMIN alone receives no operational COP rights. Agency
+Commander and OPERATOR map writes remain deferred/read-only because no
+FK-backed agency/operator object ownership contract is introduced.
+
+SECTOR_COMMANDER is an explicit temporal assignment using existing M14.2 offers.
+Assignments and consents gain same-incident sector_id FKs; only sector roles may
+carry that scope. One ACTIVE commander per sector, with the existing per-person
+role uniqueness also retained. Candidate acceptance is required; parent is the
+current IC. Creation/acceptance require an active sector; effective authority
+additionally checks current sector activity. The storage identity guard includes
+sector_id. Transfer/recovery reissues descendant episodes with sector_id intact;
+closure ends roles but leaves COP entities intact.
+
+A Sector Commander may edit only the explicitly assigned active sector and manage
+objects explicitly assigned to it. They cannot create/deactivate sectors, link
+hydrants, edit incident-wide objects or move another sector's objects into their
+scope. Object updates authorize BOTH previous and proposed scope. Geometry never
+infers containment/authority. Sector deactivation refuses live role rows with
+SECTOR_HAS_ACTIVE_COMMAND and requires explicit role cleanup first.
+
+### Authorization, revisions and receipts
+
+Narrow public mutations are incident_create_sector, incident_update_sector,
+incident_deactivate_sector, incident_put_map_object,
+incident_deactivate_map_object, incident_link_hydrant and incident_unlink_hydrant.
+The private transaction reuses M14.1 receipts and advisory-lock namespace:
+operation lock, sorted relevant organization/security locks, sorted profile locks,
+incident row lock, then target entity row lock. Actors come only from auth.uid().
+No client actor/capability/event/table names are accepted.
+
+Creates use stable UUIDs; updates/deactivation require expected entity version.
+All COP commands also require expected incident core version. Conflicts return
+STALE_VERSION, never merge geometry. Exact retries replay existing receipts;
+different input under one UUID returns OPERATION_REUSED. JSONB canonicalization
+normalizes object key order but never reorders vertices or rounds coordinates.
+The existing receipt request bound increases to 96 KiB solely to fit a legal
+64 KiB geometry plus its bounded labels/envelope; there is no separate receipt.
+
+Under the incident row lock, changed_revision is set to current revision+1.
+The same transaction calls append_incident_event with ordinal 1, committing that
+exact revision, then writes audit and receipt. Core and entity versions advance
+once. Timeline sequence remains independent; failed commands roll back all effects.
+Stable sector/object/link create/update/deactivate events are localized.
+
+incident_cop returns explicit incident, sector, object and link DTOs plus action
+flags, versions and minimal command names. Primary location comes from incidents.
+Its canonical hydrant join is SECURITY INVOKER and uses existing hydrant RLS;
+unreadable hydrants produce a redacted link with no hydrant fields/UUID. The private
+mutation guard also checks the existing member/admin/Web read predicates.
+incident_cop_hydrants is invoker/RLS-bound, searches code/address/description in
+the acting organization and returns at most 30 active hydrants. No incident role
+widens registry data access and no service-role fetch/public GeoJSON is used.
+
+### Web projection and editing
+
+Incident detail includes a persistent COP section alongside the existing command
+and timeline sections. Native MapLibre GL JS stays at 6.11.2, using the existing
+same-origin worker/shared assets, configurable NEXT_PUBLIC_MAP_STYLE_URL,
+attribution, navigation controls and localized style error/retry behavior.
+
+Namespaced GeoJSON sources separate primary location, sectors, operational
+markers, hazards/perimeters, canonical linked hydrants and unsaved drawing.
+Visibility toggles, kind/text labels and the existing hydrant status palette
+supplement color. Feature selection resolves the ID against trusted DTOs rather
+than treating MapLibre properties as permission evidence. Camera starts at the
+incident location, otherwise geometry/hydrant bounds, otherwise Slovenia.
+A stable map instance receives batched source updates; scope changes remove it.
+
+Drawing uses clicks for Point, LineString and Polygon, explicit Finish/Undo/Cancel,
+and whole-geometry replacement. A keyboard-editable GeoJSON field and complete
+entity lists/forms provide a non-map interface. Optional sector boundaries may be
+cleared. Drawing, selection, pan and toggles never write operational data.
+Save/deactivate/link/unlink use the existing confirmation and stable operation
+retry mechanism; unsaved geometry remains only in React state.
+
+On STALE_VERSION, the editor preserves local input, fetches the current COP and
+shows local geometry alongside current authoritative entity data. The user must
+explicitly choose re-edit with the current version before confirming again.
+Revoked access clears the COP/editor; account/org/incident changes remount scope
+and cancel outstanding reads. SI/DE labels cover actions, shapes, kinds, errors,
+sector command scope and drawing instructions.
+
+### Explicit historical repair and validation boundary
+
+The only historical migration edit is the requested missing closing parenthesis
+in private.notification_recipient in 20261005140000_notifications.sql:
+M10 historical migration bootstrap syntax repair; live DB already manually
+corrected (per the task); no behavior change. No extra notification repair
+migration, Firebase/FCM setup, scheduler or delivery deployment.
+
+No tests were added/run; no build, lint, typecheck, CI, browser smoke test,
+migration execution, deployment, Android validation or Oracle/OSRM commands.
+Manual checks remain necessary before deployment: geometry limits/topology and
+dateline cases; each kind/type pair; scoped role consent and transfer; sector
+deactivation guards; exact retry/stale geometry; cross-org hydrant privacy;
+terminal read-only behavior; account/org switching; map style/worker lifecycle;
+pointer drawing and keyboard/list equivalents; SI/DE presentation.
+Units, vehicles, crews, resources, tasks, RTS, mobilization, realtime, chat, Android
+Incident Mode, GPS, offline COP, CAD/112, reports, QR and routing changes remain
+deferred. This implementation has not been executed or validated.
+
 ## Need Professional Help in Developing Your Architecture?
 
 Please contact me at [sammuti.com](https://sammuti.com) :)
