@@ -1,3 +1,4 @@
+import {OperationalInventory} from '@/features/operational/OperationalInventory';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { dictionary, isLocale } from '@/lib/i18n';
@@ -45,6 +46,7 @@ export default async function OrganizationAdmin({ params, searchParams }: {
     </> : null}
     {['users','organizations','types','audit'].includes(section)&&<Administration key={organization.id+':'+section} locale={locale} root={organization.id} section={section}/>}
     {section==='dashboard'&&<AdministrationDashboard key={organization.id} locale={locale} root={organization.id}/>}
+    {section === 'inventory' && <OperationalInventory key={organization.id} locale={locale} org={organization.id}/>}
     {section === 'exchange' && <Exchange key={organization.id} locale={locale} root={organization.id}/>}
     {section === 'teams' && <Teams key={organization.id} locale={locale} root={organization.id}/>}
     {section === 'plans' && <Plans key={organization.id} locale={locale} root={organization.id} initialId={planId}/>}
