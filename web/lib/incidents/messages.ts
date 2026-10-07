@@ -1,3 +1,4 @@
+import {operationalText} from '../operational/messages';
 import type {Locale} from '../i18n';
 const sl = {
  copTitle:"Operativna slika · zemljevid intervencije",
@@ -106,7 +107,7 @@ const sl = {
  combinedTransfer:"Predaja vodenja IN vodilne organizacije. Potrebni sta odobritev vodstva prejemne organizacije in sprejem novega vodje.",
  leadWaiting:"Čaka odobritev MANAGER/ADMIN prejemne organizacije.",
  leadApproved:"Prejemna organizacija je odobrila prevzem; veljavnost bo znova preverjena ob sprejemu.",
- capabilityNotice:"Povezave prikazujejo poveljevanje, ne dedovanja pooblastil. Namestnik ureja povzetek in operativno sliko ter vabi organizacije. Vodja sektorja ureja samo svoj izrecno dodeljeni sektor. Vodja organizacije predstavlja le svojo organizacijo; upravljanje njenih enot in nalog pride pozneje. Organizacijski ADMIN ni samodejno vodja intervencije.",
+ capabilityNotice:"Povezave prikazujejo poveljevanje, ne dedovanja pooblastil. Namestnik ureja povzetek in operativno sliko ter vabi organizacije. Vodja sektorja ureja samo svoj izrecno dodeljeni sektor. Vodja organizacije upravlja enote in sredstva svoje organizacije. Vodja enote potrebuje izrecno sprejeto pooblastilo za svojo enoto. Organizacijski ADMIN ni samodejno vodja intervencije.",
  recoveryWarning:"Ni veljavnega vodje. Samodejna zamenjava ni dovoljena. MANAGER/ADMIN vodilne organizacije lahko z obvezno obrazložitvijo predlaga obnovitev; izbrana oseba mora izrecno sprejeti. Veljavnega vodje ni mogoče obiti.",
  commandSafetyConfirm:"Preveril/-a sem osebo, organizacijo in vpliv na poveljevanje ter izrecno potrjujem dejanje.",
  INCIDENT_COMMANDER:"Vodja intervencije",
@@ -281,7 +282,7 @@ const de:Record<keyof typeof sl,string> = {
  combinedTransfer:"Übergabe der Einsatzleitung UND der Federführung. Genehmigung der empfangenden Organisation und Annahme durch die neue Einsatzleitung erforderlich.",
  leadWaiting:"Genehmigung durch MANAGER/ADMIN der empfangenden Organisation ausstehend.",
  leadApproved:"Empfangende Organisation hat zugestimmt; Berechtigung wird bei Annahme erneut geprüft.",
- capabilityNotice:"Verbindungen zeigen die Struktur, keine Vererbung von Befugnissen. Stellvertretung bearbeitet Zusammenfassung, Lagebild und Einladungen. Sektorleitung bearbeitet nur ihren ausdrücklich zugewiesenen Sektor. Organisationsführung vertritt nur die eigene Organisation; Einheiten und Aufgaben folgen später. Organisations-ADMIN ist nicht automatisch Einsatzleitung.",
+ capabilityNotice:"Verbindungen zeigen die Struktur, keine Vererbung von Befugnissen. Stellvertretung bearbeitet Zusammenfassung, Lagebild und Einladungen. Sektorleitung bearbeitet nur ihren ausdrücklich zugewiesenen Sektor. Organisationsführung verwaltet Einheiten und Ressourcen der eigenen Organisation. Einheitsführung benötigt eine ausdrücklich angenommene Befugnis für ihre Einheit. Organisations-ADMIN ist nicht automatisch Einsatzleitung.",
  recoveryWarning:"Keine gültige Einsatzleitung. Kein automatischer Ersatz. MANAGER/ADMIN der federführenden Organisation darf mit Begründung eine Wiederherstellung vorschlagen; die Person muss ausdrücklich zustimmen. Gültige Einsatzleitung kann nicht umgangen werden.",
  commandSafetyConfirm:"Ich habe Person, Organisation und Auswirkungen auf die Führung geprüft und bestätige die Aktion ausdrücklich.",
  INCIDENT_COMMANDER:"Einsatzleitung",
@@ -349,4 +350,4 @@ const de:Record<keyof typeof sl,string> = {
  PARTICIPANT_RELEASED:'Beteiligung beendet',INCIDENT_ACTIVATED:'Einsatz aktiviert',INCIDENT_STABILIZED:'Einsatz stabilisiert',
  INCIDENT_REACTIVATED:'Einsatz erneut aktiviert',INCIDENT_CLOSED:'Einsatz abgeschlossen',INCIDENT_CANCELLED:'Entwurf storniert',
 };
-export function incidentText(locale:Locale) { const messages=locale==='de'?de:sl; return (key:string)=>messages[key as keyof typeof sl]??messages.event; }
+export function incidentText(locale:Locale) { const messages=locale==='de'?de:sl; return (key:string)=>messages[key as keyof typeof sl]??(operationalText(locale)(key)!==key?operationalText(locale)(key):messages.event); }

@@ -1,4 +1,6 @@
 'use client';
+import {IncidentResources} from './IncidentResources';
+import {resourceErrors,resourceMutations} from '../../lib/operational/model';
 import Link from 'next/link';
 import {useRouter} from 'next/navigation';
 import {useEffect,useRef,useState,type FormEvent} from 'react';
@@ -29,13 +31,14 @@ export function IncidentArea({locale,account,destination,initialOrg}:{locale:Loc
  const [sessionValid,setSessionValid]=useState(true);
  const [commandInbox,setCommandInbox]=useState<CommandRequest[]>([]);
  const [copFeedback,setCopFeedback]=useState<CopFeedback>({sequence:0,kind:'saved'});
+ const [resourceFeedback,setResourceFeedback]=useState<CopFeedback>({sequence:0,kind:'saved'});
  const alive=useRef(true),sending=useRef(false),coreLoaded=useRef(false);
  const isNew=destination==='new',isList=!destination;
  const url=(id?:string,acting=org)=>`/${locale}/incidents${id?'/'+id:''}${acting?'?org='+encodeURIComponent(acting):''}`;
  const date=(value:string|null|undefined)=>value?new Date(value).toLocaleString(locale==='de'?'de-DE':'sl-SI'): '—';
  const safeError=(e:unknown)=>{
   const code=e instanceof IncidentError?e.message:'SERVER';
-  if((copErrors as readonly string[]).includes(code))return code;
+  if(([...copErrors,...resourceErrors] as readonly string[]).includes(code))return code;
   if(['INVALID_COMMAND_HIERARCHY','INVALID_COMMAND_ROLE','INVALID_COMMAND_CANDIDATE','TRANSFER_NOT_CURRENT','TRANSFER_EXPIRED','TRANSFER_ALREADY_PENDING','LEAD_TRANSFER_REQUIRES_CONSENT','COMMANDER_STILL_VALID','PARTICIPANT_HAS_ACTIVE_COMMAND'].includes(code))return code;
   return code==='STALE_VERSION'?'stale':code==='NOT_AUTHORIZED'?'noAccess':code==='EXPIRED'?'expired':code==='VALIDATION_FAILED'?'invalid':
    code==='OPERATION_REUSED'?'reused':['INVALID_TRANSITION','INVALID_COMMANDER','INVALID_PARTICIPANT','INCIDENT_TERMINAL','INVALID_STATE'].includes(code)?'rejected':'error';
@@ -90,12 +93,14 @@ export function IncidentArea({locale,account,destination,initialOrg}:{locale:Loc
    if(!alive.current)return;
    setPending(null);setConfirmation(null);setReason('');setNotice('saved');setEditing(false);
    if(copMutations.includes(request.action))setCopFeedback(v=>({sequence:v.sequence+1,kind:'saved'}));
+   if((resourceMutations as readonly string[]).includes(request.action))setResourceFeedback(v=>({sequence:v.sequence+1,kind:'saved'}));
    if(request.action==='create')router.push(url(receipt.incident_id,request.args.p_acting_organization_id as string));
    else {setCursor(0);setRefresh(n=>n+1);}
   } catch(e) {
    if(!alive.current)return;setError(safeError(e));
    if(copMutations.includes(request.action)&&e instanceof IncidentError&&e.message==='STALE_VERSION')setCopFeedback(v=>({sequence:v.sequence+1,kind:'stale'}));
-   if(e instanceof IncidentError&&['NOT_AUTHORIZED','EXPIRED'].includes(e.message))setCopFeedback(v=>({sequence:v.sequence+1,kind:'blocked'}));
+   if((resourceMutations as readonly string[]).includes(request.action)&&e instanceof IncidentError&&e.message==='STALE_VERSION')setResourceFeedback(v=>({sequence:v.sequence+1,kind:'stale'}));
+   if(e instanceof IncidentError&&['NOT_AUTHORIZED','EXPIRED'].includes(e.message)){setCopFeedback(v=>({sequence:v.sequence+1,kind:'blocked'}));setResourceFeedback(v=>({sequence:v.sequence+1,kind:'blocked'}));}
    // A domain rejection is final. A transport/server failure is ambiguous and
    // retains the exact operation/payload for retry, never silently rebased.
    if(e instanceof IncidentError&&e.message!=='SERVER'){
@@ -194,6 +199,7 @@ export function IncidentArea({locale,account,destination,initialOrg}:{locale:Loc
    </section>
   </>}
   {!isList&&!isNew&&destination&&org&&<IncidentCop key={`${account}/${org}/${destination}`} locale={locale} account={account} org={org} incidentId={destination} refresh={refresh} feedback={copFeedback} disabled={busy||!!pending} read={rpc} onAction={ask}/>}
+  {!isList&&!isNew&&destination&&org&&<IncidentResources key={`${account}/${org}/${destination}`} locale={locale} account={account} org={org} incidentId={destination} refresh={refresh} feedback={resourceFeedback} disabled={busy||!!pending} read={rpc} onAction={ask}/>}
   {confirmation&&<ConfirmationDialog title={t(confirmation.action)} text={t('confirmation')} busy={busy||!!pending} onDismiss={()=>setConfirmation(null)}>
    {confirmation.description&&<p>{confirmation.description}</p>}
    {confirmation.action==='recover_command'&&<p role="alert">{t('recoveryWarning')}</p>}

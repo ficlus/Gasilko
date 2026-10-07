@@ -18,6 +18,14 @@ export type Candidate = {id:string;name:string};
 export type Core = {title:string;summary:string;incident_type_id:string;severity:string;priority:string;latitude:string;longitude:string;address:string;unknown_location_reason:string};
 export type Receipt = {incident_id:string;operation_id:string;version:string;revision:string;timeline_sequence:string};
 export const mutationNames = {
+ deploy_unit:'incident_deploy_unit',
+ update_unit_status:'incident_update_unit_status',
+ assign_unit_sector:'incident_assign_unit_sector',
+ add_crew_member:'incident_add_crew_member',
+ remove_crew_member:'incident_remove_crew_member',
+ allocate_resource:'incident_allocate_resource',
+ transition_resource_allocation:'incident_transition_resource_allocation',
+
  create:'incident_create_draft',edit:'incident_update_summary',nominate:'incident_nominate_initial_command',consent:'incident_accept_initial_command',
  invite:'incident_request_participation',accept:'incident_accept_participation',decline:'incident_decline_participation',
  consent_release:'incident_consent_release',release:'incident_release_participation',activate:'incident_activate',stabilize:'incident_stabilize',
@@ -29,7 +37,7 @@ export const mutationNames = {
  object_put:'incident_put_map_object',object_deactivate:'incident_deactivate_map_object',hydrant_link:'incident_link_hydrant',hydrant_unlink:'incident_unlink_hydrant',
 } as const;
 export type Mutation = keyof typeof mutationNames;
-export type CommandRole = {sector_id:string|null;sector_name:string|null} & {id:string;user_id:string;name:string|null;organization_id:string;organization_name:string;role:string;parent_id:string|null;valid:boolean;can_end:boolean;created_at:string};
-export type CommandRequest = {sector_id:string|null;sector_name:string|null} & InboxItem & {name:string|null;organization_name:string;outgoing_name:string|null;lead_name:string;kind:string;role:string;status:string;reason:string|null;created_at:string;transfer_lead:boolean;lead_consented:boolean;can_accept:boolean;can_cancel:boolean;can_lead_consent:boolean};
-export type CommandHistory = {sector_id:string|null;sector_name:string|null} & {id:string;name:string|null;organization_name:string;role:string;status:string;parent_id:string|null;valid_from:string;ended_at:string|null;reason:string|null;assigned_by:string|null;created_at:string};
-export type CommandView = {version:string;valid_commander:boolean;operational:boolean;can_assign:boolean;can_transfer:boolean;can_recover:boolean;sectors:{id:string;code:string;name:string}[];roles:CommandRole[];history:CommandHistory[];requests:CommandRequest[]};
+export type CommandRole = {unit_assignment_id:string|null;unit_name:string|null;sector_id:string|null;sector_name:string|null} & {id:string;user_id:string;name:string|null;organization_id:string;organization_name:string;role:string;parent_id:string|null;valid:boolean;can_end:boolean;created_at:string};
+export type CommandRequest = {unit_assignment_id:string|null;unit_name:string|null;sector_id:string|null;sector_name:string|null} & InboxItem & {name:string|null;organization_name:string;outgoing_name:string|null;lead_name:string;kind:string;role:string;status:string;reason:string|null;created_at:string;transfer_lead:boolean;lead_consented:boolean;can_accept:boolean;can_cancel:boolean;can_lead_consent:boolean};
+export type CommandHistory = {unit_assignment_id:string|null;unit_name:string|null;sector_id:string|null;sector_name:string|null} & {id:string;name:string|null;organization_name:string;role:string;status:string;parent_id:string|null;valid_from:string;ended_at:string|null;reason:string|null;assigned_by:string|null;created_at:string};
+export type CommandView = {version:string;valid_commander:boolean;operational:boolean;can_assign:boolean;can_transfer:boolean;can_recover:boolean;units:{id:string;name:string;organization_id:string;parent_id:string}[];sectors:{id:string;code:string;name:string}[];roles:CommandRole[];history:CommandHistory[];requests:CommandRequest[]};

@@ -1675,6 +1675,201 @@ Units, vehicles, crews, resources, tasks, RTS, mobilization, realtime, chat, And
 Incident Mode, GPS, offline COP, CAD/112, reports, QR and routing changes remain
 deferred. This implementation has not been executed or validated.
 
+
+## M14.4 implemented operational resources
+
+Five forward migrations after M14.3:
+- `20261007100000_operational_inventory_schema.sql`
+- `20261007101000_operational_inventory_api.sql`
+- `20261007102000_incident_unit_command.sql`
+- `20261007103000_incident_resource_commands.sql`
+- `20261007104000_incident_resource_reads.sql`
+
+Earlier migrations, including the historical notification repair, are unchanged.
+
+### Ownership, reference configuration and inventory
+
+Vehicle, reusable unit, incident deployment, crew episode, stock and allocation
+remain distinct identities. Inspection teams/plans are not involved. Vehicles,
+units and stock retain permanent organization ownership. Incident command never
+grants inventory administration.
+
+Four small code-keyed reference tables are operational_vehicle_categories,
+operational_capabilities, operational_resource_types and
+operational_units_of_measure. Codes are bounded language-neutral uppercase text;
+names require Slovenian/German labels. Only OTHER vehicle/resource types and EACH
+are seeded. Capabilities start empty and optional. These are generic MVP values,
+not an official classification. No client configuration writes or new dependency.
+
+Vehicles have UUID, owner, callsign (1–80), name (1–200), category FK, optional
+registration (<=80), active, AVAILABLE/UNAVAILABLE readiness, seats/water litres
+(nonnegative integers), actors, timestamps and positive version. Active callsigns
+are organization-unique. Readiness is independent of deployment status.
+Normalized vehicle/unit capability relations reference the same validated catalogue;
+changes deactivate/reactivate relations and are included in inventory audit.
+
+Units have UUID, owner, callsign/name, VEHICLE_CREW/RESCUE_TEAM/DRONE_TEAM/
+MEDICAL_TEAM/OTHER kind, optional same-org vehicle FK, active and standard audit/
+version columns. A live deployment blocks unit deactivation and vehicle/kind
+replacement. Vehicle deactivation/unavailability is blocked while used by a live
+deployment; runtime breakdown is an explicit incident-unit transition. The locked
+deployment command also rejects simultaneous use of the same physical vehicle by
+different inventory units.
+
+Resources have UUID, owner, name, resource-type/unit-of-measure FKs, active and
+nonnegative numeric total_quantity, plus standard audit/version columns. Quantity
+is finite, below 10^12 and up to three decimal places. An individual item can be
+quantity one. No serial-number, warehouse or accounting subsystem.
+Master reductions below RESERVED+DEPLOYED allocations fail. Live allocations also
+block deactivation and type/unit changes.
+
+Inventory reads/writes require exact active organization MANAGER/ADMIN, including
+active account/membership checks. Hierarchy writes and operational roles confer
+nothing. Separate narrow vehicle/unit/resource upserts cover create/edit/state,
+using stable UUID, expected version and complete bounded payload. M8.4's existing
+immutable web_administration_operations audit receipts and advisory namespace 842
+are reused: action is namespaced OPERATIONAL_*, matching actor/org/request replays,
+changed input rejects. No new receipt table or incident revision for stock edits.
+Permanent audit contains before/after plus operation/request/result.
+
+Inventory UI joins the current administration shell, with Vehicles/Units/Resources,
+search/pagination, own-org vehicle search, validated capability/config selectors,
+explicit review, frozen ambiguous retries and a current-vs-local stale re-edit.
+Registration is restricted to this exact-org DTO. The shared incident projection
+never includes registration, email, phone, HR/medical/licence data.
+
+### Deployment, crew and command
+
+incident_units records a deployment UUID, incident/participant/owner/unit composite
+FKs, optional same-incident sector, status, assign/status/end actors/times, reason,
+version and changed_revision. A partial unique index on unit_id excludes only
+RELEASED/UNAVAILABLE, preventing double deployment. New deployment requires active
+unit, ACTIVE participant/owner, and active AVAILABLE vehicle if attached.
+
+M14.4 manually records an already-present unit as ON_SCENE. It does not dispatch.
+Supported transitions: ON_SCENE -> RETURNING or UNAVAILABLE; RETURNING -> RELEASED
+or UNAVAILABLE. UNAVAILABLE requires a reason. Both terminal states require explicit
+crew-ending confirmation, no ACTIVE Unit Leader role, and no live attached resource
+allocation. Remaining ACTIVE crew episodes end atomically with individual CREW_LEFT
+evidence. Return/unavailable/release have no automatic inventory availability change.
+Future use creates a fresh deployment UUID. REQUESTED/DISPATCHED/EN_ROUTE vocabulary
+is reserved for M14.6; ASSIGNED for M14.5 tasking. No current actions use those states.
+
+Crew references existing profiles and the deployment's exact owner membership:
+LEADER/DRIVER/RESPONDER/SPECIALIST, ACTIVE/LEFT, joined/left actors/times, version and
+changed_revision. Join rechecks active profile, exact membership, owner,
+participation and nonterminal deployment under locks. Unique incident/user while
+ACTIVE prevents double crew membership. Leave preserves the episode and refuses
+an ACTIVE Unit Leader role until explicitly ended. LEADER crew label grants no
+authority. No duplicate people or membership edits.
+
+UNIT_LEADER extends existing role assignments and private command consents with
+a real same-incident unit_assignment_id FK. Only UNIT_LEADER carries that FK;
+SECTOR_COMMANDER still carries sector_id only. One ACTIVE Unit Leader per deployment.
+A named current ACTIVE crew member of the owner organization must accept the existing
+24-hour command offer; pending offers grant no power. Current effective Agency
+Commander of the owner is the preferred parent, otherwise effective IC. Sector
+location never determines this parent. Role effectiveness additionally checks current
+crew, exact membership and nonterminal deployment. Only the existing IC command
+grant/end workflow issues or ends these offers/roles; no new consent subsystem.
+
+IC transfer/recovery preserves both sector_id and unit_assignment_id in successor
+episodes, processes agency parents before unit leaders, and rechecks unit/crew
+eligibility. Original assignment identities remain immutable. Inbox, tree, history
+and confirmations show explicit unit scope; Unit Leader candidates are a bounded
+current-crew query. Parent links do not inherit authorization.
+
+### Resource allocations and authority
+
+incident_resource_allocations references stock, incident, participant/owner and
+optional same-owner incident unit through composite FKs. Positive quantity, status,
+allocation/end actors/times, version and changed_revision belong to the episode.
+Quantity/resource/owner/target are immutable; corrections end and create an episode.
+
+RESERVED -> DEPLOYED -> RETURNED; RESERVED -> CANCELLED; DEPLOYED -> CONSUMED.
+Terminal allocations never reset. All live allocations across incidents count
+against stock. Resource row locks plus organization locks serialize allocation and
+inventory edits. CONSUMED atomically decreases total_quantity by allocation.quantity,
+increments the stock version, writes stock audit and makes the allocation terminal
+within the same receipt transaction. Exact replay cannot consume twice.
+RETURNED/CANCELLED free reserved capacity without changing total_quantity.
+
+| Actor | Deployment / sector moves / new reservations | Unit status / crew / existing allocation transitions |
+|---|---|---|
+| IC | Incident-wide ACTIVE participant inventory | Incident-wide |
+| Agency Commander | Own participating organization | Own organization |
+| Sector Commander | No pulling inventory or changing sectors | Only units explicitly in their active sector and allocations attached to those units |
+| Unit Leader | No deployment, sector assignment or reservation | Own current deployment/crew and allocations already attached to it |
+| Deputy alone | None | None |
+| MANAGER/ADMIN or ordinary member alone | None | Read shared authorized incident DTOs |
+
+The narrow target-aware helpers combine current account, exact acting org,
+participation, effective role and target owner/unit checks. Existing MANAGE_COP
+and Deputy COP rights are unchanged. No authorization comes from capabilities,
+crew labels, geometry or inventory readiness. Terminal incidents are historical
+read-only; ACTIVE/STABILIZED permit scoped operations; DRAFT cannot deploy.
+
+Participant release is guarded against open deployments/crew/resources/Unit Leader
+roles. Closure checks resources before the existing role cleanup; it cannot silently
+release units or consume/return stock. Sector deactivation also requires its live
+units to move or end. Cleanup is explicit; no automatic succession or role revocation.
+
+### Transaction, read model and Web integration
+
+Incident commands reuse private.incident_operation_receipts and advisory namespace
+141. Lock order remains operation, sorted involved organizations/security locks,
+sorted actor/candidate/crew/command profiles, incident row, relevant inventory rows,
+then deployment/allocation rows. Organization locks also serialize cross-incident
+physical vehicle/unit use and readiness edits. Current live authorization is
+rechecked before effects; stale core/entity versions fail. New episode UUIDs and
+exact retries preserve identity. One aggregate revision per accepted command;
+individual entity versions and timeline sequences remain distinct. changed_revision
+matches that committed revision, including all crew ended by one release.
+
+Timeline adds typed unit_assignment_id/crew_member_id/resource_allocation_id FKs,
+at most one subject overall. Trusted event writer selects subject from its bounded
+typed event DTO. Events are UNIT_ASSIGNED, UNIT_STATUS_CHANGED, UNIT_SECTOR_CHANGED,
+UNIT_RELEASED, CREW_JOINED/LEFT and RESOURCE_ALLOCATED/DEPLOYED/RETURNED/CONSUMED/
+CANCELLED. Existing audit is reused. No inventory edit is an incident timeline event.
+Episode identity guards and no-delete/no-truncate triggers preserve history.
+All new public tables enable RLS with no client/service-role direct DML or broad
+SELECT; narrow caller-authorized DTO RPCs are the read boundary.
+
+Hard active limits: 500 deployed units/incident, 50 crew/unit and 2000 live resource
+allocations/incident. Writes reject overflow, never silently truncate live state.
+Incident overview returns all live units/allocations plus 50 terminal units and
+allocations per history page. Crew history is separately paged by 50.
+Inventory pages contain 50 rows; unit/resource candidates at most 50, crew/leader
+candidates 30. Searches require authorized organization/unit scope. No national
+inventory scan or per-row client fetch.
+
+Incident detail gains Units & Resources using the existing confirmation, account
+binding, stable retry and authoritative refresh flow. Manual on-scene wording,
+sector selection, safe status controls, crew lists/join/leave/history, allocation
+quantities and consume confirmation are localized in SI/DE. Consumption confirmation
+names quantity/unit/resource and target; release explicitly confirms ending crew.
+Resource stale responses preserve unsaved input until explicit current-version
+re-edit. Unit cards refresh by authoritative version. COP draft feedback remains
+separate so a resource save does not erase an unsaved map drawing.
+Account/org/incident changes remount scoped state; aborted/revoked reads clear
+resource/crew candidates. Forms/buttons/lists use visible labels and keyboard input.
+
+M14.5 has stable unit-assignment FK targets and explicit Unit Leader authority, but
+no task tables/actions. M14.6 retains future status vocabulary without dispatch,
+mobilization, turnout or notifications. No unit location is fabricated. COP geometry,
+hydrants, inspection teams, routing, Android/offline caches, realtime, chat,
+attachments, GPS, CAD/112, reports, fleet maintenance, warehouse/accounting,
+Firebase/SMTP/QR/M11–M13/FIX work remain unchanged/deferred.
+
+No tests added/run; no build, lint, typecheck, CI, browser/emulator/device validation,
+Docker/Supabase-local/migration execution, deployment or Oracle/OSRM work.
+Runtime behavior is unverified implementation. Before deployment, an independently
+authorized verification must cover exact-org and target-role denial paths,
+competing deployment/crew/stock/leader operations, inventory readiness races,
+lost-response consumption retries, stale editing, command transfer with unit
+scopes, explicit cleanup/close/release, privacy, pagination, account/org switching,
+and SI/DE controls.
+
 ## Need Professional Help in Developing Your Architecture?
 
 Please contact me at [sammuti.com](https://sammuti.com) :)
