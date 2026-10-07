@@ -2,10 +2,11 @@ import {NextResponse} from 'next/server';
 import {serverClient} from '../../../lib/supabase/server';
 import {loadAccount} from '../../../lib/auth/load';
 import {mutationNames} from '../../../lib/incidents/model';
+import {copErrors} from '../../../lib/incidents/cop';
 
-const reads = ['incident_entry','incident_list','incident_context','incident_timeline_page','incident_candidates','incident_command_candidates','incident_command_view','incident_command_inbox'];
+const reads = ['incident_entry','incident_list','incident_context','incident_timeline_page','incident_candidates','incident_command_candidates','incident_command_view','incident_command_inbox','incident_cop','incident_cop_hydrants'];
 const safeErrors = new Set(['NOT_AUTHORIZED','STALE_VERSION','INVALID_TRANSITION','INVALID_COMMANDER','INVALID_PARTICIPANT','INCIDENT_TERMINAL','OPERATION_REUSED','VALIDATION_FAILED','INVALID_STATE',
- 'INVALID_COMMAND_HIERARCHY','INVALID_COMMAND_ROLE','INVALID_COMMAND_CANDIDATE','TRANSFER_NOT_CURRENT','TRANSFER_EXPIRED','TRANSFER_ALREADY_PENDING','LEAD_TRANSFER_REQUIRES_CONSENT','COMMANDER_STILL_VALID','PARTICIPANT_HAS_ACTIVE_COMMAND']);
+ 'INVALID_COMMAND_HIERARCHY','INVALID_COMMAND_ROLE','INVALID_COMMAND_CANDIDATE','TRANSFER_NOT_CURRENT','TRANSFER_EXPIRED','TRANSFER_ALREADY_PENDING','LEAD_TRANSFER_REQUIRES_CONSENT','COMMANDER_STILL_VALID','PARTICIPANT_HAS_ACTIVE_COMMAND',...copErrors]);
 export async function POST(request:Request) {
  const headers={'Cache-Control':'no-store'};
  if(request.headers.get('origin')!==new URL(request.url).origin) return NextResponse.json({error:'NOT_AUTHORIZED'},{status:403,headers});
@@ -14,7 +15,7 @@ export async function POST(request:Request) {
  const expectedAccount=request.headers.get('X-Gasilko-Account');
  if(expectedAccount){const {data:{user}}=await client.auth.getUser();if(!user||user.id!==expectedAccount)return NextResponse.json({error:'EXPIRED'},{status:403,headers});}
  try {
-  const text=await request.text();if(text.length>40000)return NextResponse.json({error:'VALIDATION_FAILED'},{status:400,headers});
+  const text=await request.text();if(new TextEncoder().encode(text).length>131072)return NextResponse.json({error:'VALIDATION_FAILED'},{status:400,headers});
   const input=JSON.parse(text) as {name?:unknown;args?:unknown};
   if(typeof input.name!=='string'||![...reads,...Object.values(mutationNames)].includes(input.name)||!input.args||typeof input.args!=='object'||Array.isArray(input.args))
    return NextResponse.json({error:'VALIDATION_FAILED'},{status:400,headers});

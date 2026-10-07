@@ -7,6 +7,8 @@ import {browserClient} from '../../lib/supabase/browser';
 import {incidentText} from '../../lib/incidents/messages';
 import {incidentPriorities,incidentSeverities,incidentStates,mutationNames,type Candidate,type CommandRequest,type Core,type Entry,type Incident,type IncidentRow,type InboxItem,type Mutation,type Receipt,type Timeline} from '../../lib/incidents/model';
 import {CommandSection,CommandRequests} from './CommandSection';
+import {IncidentCop} from './IncidentCop';
+import {copErrors,copMutations,type CopFeedback} from '../../lib/incidents/cop';
 
 class IncidentError extends Error {}
 async function rpc<T>(name:string,args:Record<string,unknown>,signal?:AbortSignal,expectedAccount?:string):Promise<T> {
@@ -26,12 +28,14 @@ export function IncidentArea({locale,account,destination,initialOrg}:{locale:Loc
  const [confirmation,setConfirmation]=useState<Confirmation|null>(null),[reason,setReason]=useState(''),[pending,setPending]=useState<RequestState|null>(null);
  const [sessionValid,setSessionValid]=useState(true);
  const [commandInbox,setCommandInbox]=useState<CommandRequest[]>([]);
+ const [copFeedback,setCopFeedback]=useState<CopFeedback>({sequence:0,kind:'saved'});
  const alive=useRef(true),sending=useRef(false),coreLoaded=useRef(false);
  const isNew=destination==='new',isList=!destination;
  const url=(id?:string,acting=org)=>`/${locale}/incidents${id?'/'+id:''}${acting?'?org='+encodeURIComponent(acting):''}`;
  const date=(value:string|null|undefined)=>value?new Date(value).toLocaleString(locale==='de'?'de-DE':'sl-SI'): '—';
  const safeError=(e:unknown)=>{
   const code=e instanceof IncidentError?e.message:'SERVER';
+  if((copErrors as readonly string[]).includes(code))return code;
   if(['INVALID_COMMAND_HIERARCHY','INVALID_COMMAND_ROLE','INVALID_COMMAND_CANDIDATE','TRANSFER_NOT_CURRENT','TRANSFER_EXPIRED','TRANSFER_ALREADY_PENDING','LEAD_TRANSFER_REQUIRES_CONSENT','COMMANDER_STILL_VALID','PARTICIPANT_HAS_ACTIVE_COMMAND'].includes(code))return code;
   return code==='STALE_VERSION'?'stale':code==='NOT_AUTHORIZED'?'noAccess':code==='EXPIRED'?'expired':code==='VALIDATION_FAILED'?'invalid':
    code==='OPERATION_REUSED'?'reused':['INVALID_TRANSITION','INVALID_COMMANDER','INVALID_PARTICIPANT','INCIDENT_TERMINAL','INVALID_STATE'].includes(code)?'rejected':'error';
@@ -85,10 +89,13 @@ export function IncidentArea({locale,account,destination,initialOrg}:{locale:Loc
    try{sessionStorage.removeItem(request.storageKey);}catch{/* Stable in-memory request still covers this session. */}
    if(!alive.current)return;
    setPending(null);setConfirmation(null);setReason('');setNotice('saved');setEditing(false);
+   if(copMutations.includes(request.action))setCopFeedback(v=>({sequence:v.sequence+1,kind:'saved'}));
    if(request.action==='create')router.push(url(receipt.incident_id,request.args.p_acting_organization_id as string));
    else {setCursor(0);setRefresh(n=>n+1);}
   } catch(e) {
    if(!alive.current)return;setError(safeError(e));
+   if(copMutations.includes(request.action)&&e instanceof IncidentError&&e.message==='STALE_VERSION')setCopFeedback(v=>({sequence:v.sequence+1,kind:'stale'}));
+   if(e instanceof IncidentError&&['NOT_AUTHORIZED','EXPIRED'].includes(e.message))setCopFeedback(v=>({sequence:v.sequence+1,kind:'blocked'}));
    // A domain rejection is final. A transport/server failure is ambiguous and
    // retains the exact operation/payload for retry, never silently rebased.
    if(e instanceof IncidentError&&e.message!=='SERVER'){
@@ -186,6 +193,7 @@ export function IncidentArea({locale,account,destination,initialOrg}:{locale:Loc
     <div className="actions">{String(cursor)!=='0'&&<button onClick={()=>setCursor(0)}>{t('older')}</button>}{timeline&&timeline.events.length===30&&<button onClick={()=>setCursor(timeline.events[timeline.events.length-1].sequence)}>{t('later')}</button>}</div>
    </section>
   </>}
+  {!isList&&!isNew&&destination&&org&&<IncidentCop key={`${account}/${org}/${destination}`} locale={locale} account={account} org={org} incidentId={destination} refresh={refresh} feedback={copFeedback} disabled={busy||!!pending} read={rpc} onAction={ask}/>}
   {confirmation&&<ConfirmationDialog title={t(confirmation.action)} text={t('confirmation')} busy={busy||!!pending} onDismiss={()=>setConfirmation(null)}>
    {confirmation.description&&<p>{confirmation.description}</p>}
    {confirmation.action==='recover_command'&&<p role="alert">{t('recoveryWarning')}</p>}
