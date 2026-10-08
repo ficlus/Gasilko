@@ -1,0 +1,913 @@
+Implement one PR:
+
+M14.4.1 — Operational Workspace Foundation
+
+Base this work on the current main branch after M14.4 / PR #57 is merged.
+
+This milestone is an integration and operational UX milestone.
+
+It MUST NOT redesign the existing M14 domain model.
+
+The goal is to turn the current incident detail page into the foundation of a real map-first incident command workspace before M14.5 adds tasking / RTS-style commands.
+
+==================================================
+CORE ARCHITECTURE RULE
+==================================================
+
+Preserve all existing domain and business semantics.
+
+Do not redesign or bypass:
+
+- authoritative tables,
+- incident lifecycle/state machines,
+- command authority,
+- incident participant rules,
+- Unit Leader rules,
+- sector command rules,
+- RLS,
+- authorization,
+- audit,
+- idempotency,
+- optimistic concurrency,
+- existing canonical hydrant identity,
+- inventory ownership,
+- routing-provider boundaries,
+- Android/offline contracts.
+
+However, integration-safe changes to previous presentation/read modules are ALLOWED AND EXPECTED.
+
+You may:
+
+- extract shared map/presentation infrastructure,
+- add bounded authorized read adapters,
+- add contextual actions,
+- compose existing domains into one operational workspace,
+- add optional presentation hooks to existing components,
+- reuse authoritative RPCs/APIs from another view.
+
+Do NOT copy/fork business logic.
+
+Cross-module mutations MUST call the original authoritative API/RPC and preserve its authorization, concurrency and audit semantics.
+
+==================================================
+VERY IMPORTANT FUTURE RTS PRINCIPLE
+==================================================
+
+This milestone prepares the UI architecture for future RTS-style command interaction, but DOES NOT implement the command/task engine yet.
+
+The future model is:
+
+select entity/entities
+    ->
+choose command/action
+    ->
+choose target
+    ->
+confirm intent
+    ->
+authoritative server command
+    ->
+execution / acknowledgement / telemetry later
+
+Do not implement tactical actions such as:
+
+- EXTINGUISH,
+- DEFEND,
+- RECON,
+- WATER SUPPLY,
+- SEARCH,
+- RESCUE
+
+as hard-coded commands in this milestone.
+
+Future tactical actions will be configurable Action Definitions.
+
+Do not invent a command vocabulary now.
+
+Also preserve this future architecture principle:
+
+COMMAND INTENT != EXECUTION PLAN != TELEMETRY
+
+Example for future use:
+
+COMMAND:
+"move Unit A to Point X"
+
+NAVIGATION EXECUTION:
+current planned route / ETA
+
+TELEMETRY:
+actual GPS position
+
+Do not conflate these concepts.
+
+No GPS or navigation-session implementation belongs in this PR.
+
+==================================================
+1. INCIDENT WORKSPACE — MAP FIRST
+==================================================
+
+Refactor the ACTIVE / STABILIZED incident experience into a proper operational workspace.
+
+The current long vertical IncidentArea must no longer make the user scroll through metadata, command, participants and timeline before reaching the COP.
+
+For ACTIVE and STABILIZED incidents, implement a map-first desktop workspace conceptually like:
+
+┌────────────────────────────────────────────────────────────────────┐
+│ INC-2026-...  ACTIVE | type | lead org | commander | attention    │
+├─────────────────┬────────────────────────────┬─────────────────────┤
+│ OPERATIONAL     │                            │ SELECTED            │
+│                 │                            │                     │
+│ Command         │                            │ entity details      │
+│ Sectors         │            MAP             │ status              │
+│ Units           │                            │ context actions     │
+│ Crews           │                            │                     │
+│ Resources       │                            │                     │
+│ Participants    │                            │                     │
+├─────────────────┴────────────────────────────┴─────────────────────┤
+│ Requests / command inbox / timeline / history                     │
+└────────────────────────────────────────────────────────────────────┘
+
+This is conceptual, not a requirement for exact pixel dimensions.
+
+Requirements:
+
+- Map is the primary operational surface.
+- Existing incident metadata remains accessible.
+- Command hierarchy remains accessible.
+- M14.4 units / crews / resources become part of the operational left pane.
+- Timeline/history becomes secondary and must not push the map below a large page.
+- Existing command inbox/request functionality remains accessible.
+- Existing COP functionality remains fully available.
+- Do not remove any existing M14.0–M14.4 capability.
+- Do not change authorization merely because the controls move.
+
+DRAFT incidents may retain a more form/setup-oriented layout.
+
+CLOSED / CANCELLED incidents must remain historical/read-only.
+
+Responsive behavior:
+
+Desktop:
+- operational pane,
+- map,
+- selected entity pane.
+
+Tablet:
+- map remains primary,
+- side panes may collapse/drawer.
+
+Mobile:
+- no requirement to emulate a desktop RTS UI,
+- use tabs/drawers/stacking as appropriate,
+- all information and actions must remain accessible.
+
+No drag/drop-only workflow.
+
+==================================================
+2. SHARED OPERATIONAL MAP FOUNDATION
+==================================================
+
+Extract a reusable MapLibre infrastructure component.
+
+Suggested conceptual name:
+
+OperationalMapCanvas
+
+Do NOT create a 2000-line MegaMap component.
+
+OperationalMapCanvas should own infrastructure only:
+
+- MapLibre map instance lifecycle,
+- worker initialization,
+- style initialization,
+- NavigationControl,
+- resize handling,
+- map errors/retry,
+- map loaded state,
+- center/zoom/fit behavior,
+- viewport/bounds events,
+- generic click dispatch,
+- selection visual ordering hooks,
+- deterministic operational layer ordering.
+
+Business-specific rendering remains in domain layers/components.
+
+Conceptually:
+
+OperationalMapCanvas
+|
++-- HydrantLayer
++-- IncidentHydrantLayer
++-- SectorLayer
++-- TacticalObjectLayer
++-- later UnitLayer
++-- later TaskLayer
++-- later TrackingLayer
+
+Do not implement future Unit GPS / Task / Tracking layers yet.
+
+Do not upgrade MapLibre or add a new mapping dependency.
+
+Use the existing MapLibre GL JS version already present in the project.
+
+Do not replace the existing RoadProvider.
+
+Do not make browser -> Oracle/OSRM direct calls.
+
+==================================================
+3. MAP LAYER PRIORITY CONTRACT
+==================================================
+
+Introduce/document a deterministic operational layer-order concept.
+
+Use approximately:
+
+BASE
+- basemap
+
+CONTEXT
+- authorized background hydrants
+- future contextual infrastructure
+
+AREAS
+- incident sectors
+- hazard/area tactical objects
+
+OPERATIONS
+- linked incident hydrants
+- tactical objects
+
+FUTURE OPERATIONS
+- units
+- tasks
+- routes
+
+ATTENTION
+- future critical alerts / SOS
+
+SELECTION
+- currently selected entity
+
+Do not implement future data merely to populate these groups.
+
+The purpose is to stop future milestones from inventing random layer ordering.
+
+==================================================
+4. AUTHORIZED BACKGROUND HYDRANTS ON INCIDENT MAP
+==================================================
+
+This is a required feature.
+
+Today the COP shows hydrants primarily after they are explicitly linked to the incident.
+
+For operational awareness, the incident map must also be able to show ordinary canonical hydrants that the current user is ALREADY authorized to read through the existing Hydrants authorization model.
+
+Important:
+
+INCIDENT PARTICIPATION MUST NOT GRANT HYDRANT REGISTRY ACCESS.
+
+Do NOT broaden hydrant RLS.
+
+Do NOT expose another organization's hydrants merely because that organization participates in the same incident.
+
+Background hydrants must use the same effective read scope that the existing Hydrants module uses.
+
+Use a bounded viewport-based read.
+
+Requirements:
+
+- query by visible map bounds,
+- debounce viewport changes,
+- bounded result count,
+- active hydrants by default unless existing hydrant semantics require otherwise,
+- preserve canonical hydrant UUID,
+- no hydrant copies inside incident tables.
+
+Background hydrants:
+
+- subtle/smaller visual representation,
+- preserve permanent hydrant status,
+- should not visually imply that they belong to the incident,
+- labels only when useful / selected / sufficient zoom.
+
+Incident-linked hydrants:
+
+- use the SAME canonical hydrant,
+- render stronger than background hydrants,
+- appear above the background layer,
+- display incident context separately from permanent hydrant status.
+
+Important visual rule:
+
+DO NOT overload one color with multiple meanings.
+
+Permanent hydrant status and incident relationship must use different visual channels.
+
+For example:
+
+marker fill/interior:
+- canonical hydrant status
+
+outer ring / secondary marker affordance:
+- incident relationship/purpose
+
+Do not make a linked hydrant lose its canonical status semantics.
+
+==================================================
+5. HYDRANT SELECTION AND CONTEXT
+==================================================
+
+Clicking a background hydrant should select the canonical hydrant and show it in the right-side Selected Entity pane.
+
+At minimum show authorized data such as:
+
+- identifier/name,
+- status,
+- type if already part of authorized DTO,
+- relevant organization display context,
+- existing incident link state.
+
+Existing authoritative actions may be surfaced contextually.
+
+Examples where permitted:
+
+- Open hydrant details
+- Link as WATER_SUPPLY
+- Link as REFERENCE
+- Unlink existing incident relationship
+
+Do not duplicate link/unlink business logic.
+
+Use the existing authoritative incident hydrant APIs/RPCs.
+
+Do not add unauthorized hydrant information to incident shared DTOs.
+
+Do not expose private data simply because the hydrant is selected.
+
+Navigation is NOT implemented in this milestone.
+
+The UI may be architected so a future Navigate action can be added, but do not introduce a fake/stub navigation workflow.
+
+==================================================
+6. SELECTED ENTITY MODEL
+==================================================
+
+Add a small presentation-level selected-entity contract suitable for the operational workspace.
+
+It should support CURRENT entities such as:
+
+- INCIDENT_SECTOR
+- TACTICAL_OBJECT / MAP_OBJECT
+- HYDRANT
+- INCIDENT_UNIT
+- RESOURCE / ALLOCATION where useful
+
+This is a UI/presentation contract.
+
+It must NOT become an authorization engine.
+
+It must NOT duplicate authoritative domain entities.
+
+Selecting an item from:
+
+- map,
+- unit/resource list,
+- sector list,
+
+should be able to drive the same Selected Entity pane.
+
+Only one selected entity is required for this milestone.
+
+Do not implement:
+
+- multi-selection,
+- Ctrl/Shift selection,
+- lasso,
+- box selection,
+
+yet.
+
+However, do not architect the selection state in a way that makes future multi-selection impossible.
+
+==================================================
+7. CONTEXT ACTION CONTRACT
+==================================================
+
+Introduce a small presentation-level context action model.
+
+Conceptually it may contain:
+
+- stable action id,
+- localized label,
+- icon/visual category if useful,
+- enabled,
+- disabled reason,
+- requires confirmation,
+- execute handler or action descriptor.
+
+This is PRESENTATION ONLY.
+
+Authorization still happens server-side.
+
+Never decide security based only on:
+
+enabled = true
+
+The server remains authoritative.
+
+Do not create one universal generic mutation endpoint.
+
+Context actions must call the original domain API/RPC.
+
+Examples of existing-domain context actions that MAY be exposed:
+
+Sector:
+- edit existing allowed properties,
+- existing command/sector operations where already supported.
+
+Hydrant:
+- details,
+- link/unlink using existing incident hydrant logic.
+
+Incident Unit:
+- view crew,
+- existing M14.4 sector assignment,
+- existing M14.4 legal status transitions,
+- existing Unit Leader workflow entry point.
+
+Resource Allocation:
+- existing legal lifecycle actions.
+
+Do not implement M14.5 tasks here.
+
+==================================================
+8. M14.4 UNITS / CREWS / RESOURCES IN WORKSPACE
+==================================================
+
+Integrate the M14.4 operational resource UI into the map-first incident workspace.
+
+Do not redesign the M14.4 data model.
+
+Left operational pane should make it easy to inspect:
+
+- active incident units,
+- unit status,
+- sector assignment,
+- crew,
+- Unit Leader,
+- relevant allocations/resources.
+
+Selecting a unit from the list should show it in the Selected Entity pane.
+
+IMPORTANT:
+
+M14.4 has no GPS.
+
+Therefore:
+
+- do NOT invent map coordinates for units,
+- do NOT place units on the map just because they exist,
+- do NOT infer unit location from sector geometry,
+- do NOT infer unit location from organization/vehicle/home station,
+- do NOT create fake "ON_SCENE" positions.
+
+A unit may be selected from the left pane without having a map marker.
+
+This is intentional preparation for future live telemetry.
+
+==================================================
+9. FUTURE MOVEMENT / GPS COMPATIBILITY
+==================================================
+
+Do not implement GPS, routing or navigation sessions now.
+
+But ensure the UI architecture does not conflate:
+
+unit identity
+with
+unit position.
+
+Future behavior will be:
+
+incident unit
+    +
+latest telemetry position
+    +
+optional active navigation execution
+    +
+command target
+
+These are separate concepts.
+
+A future unit marker must come from real telemetry/provenance, never from manually dragging a database unit row on the map.
+
+Do not implement drag-to-move.
+
+==================================================
+10. FUTURE RTS SELECTION COMPATIBILITY
+==================================================
+
+The map should conceptually support future state modes such as:
+
+NORMAL
+SELECTING
+TARGETING
+
+but only NORMAL/single-select interaction is required now.
+
+Do NOT implement a generic tactical command palette yet.
+
+Do NOT hard-code future tactical command names.
+
+M14.5 will define the configurable command/action model.
+
+The architecture created now should make this future flow possible:
+
+select unit(s)
+    ->
+select Action Definition
+    ->
+enter target mode
+    ->
+select point/sector/hydrant/map object/etc.
+    ->
+confirm
+    ->
+server-authoritative command
+
+No implementation of that flow yet.
+
+==================================================
+11. SECTOR CODE INPUT UX FIX
+==================================================
+
+Fix the existing Sector permanent/stable code input.
+
+The database contract remains authoritative and unchanged.
+
+While typing:
+
+- convert a-z to A-Z immediately,
+- allow only:
+  A-Z
+  0-9
+  _
+  -
+- invalid characters must not remain in the field,
+- enforce the existing max length (64),
+- preserve user cursor behavior reasonably,
+- do not silently change the actual database rule.
+
+Examples:
+
+sektor-a
+-> SEKTOR-A
+
+sector_1
+-> SECTOR_1
+
+"Sector A"
+-> SECTORA
+
+Provide a specific localized validation message where needed.
+
+Do not return a misleading generic coordinate validation message for an invalid sector code.
+
+SI and DE required.
+
+==================================================
+12. PERFORMANCE
+==================================================
+
+Do NOT turn the workspace into one giant query.
+
+Preserve/combine bounded reads.
+
+Conceptually:
+
+Incident Core:
+small / always available
+
+Operational summary:
+small
+
+COP objects/sectors:
+incident bounded
+
+Background hydrants:
+viewport bounded
+
+Units/resources:
+bounded existing M14.4 reads
+
+Timeline/history:
+lazy/secondary
+
+Selected entity:
+on demand when useful
+
+Do not make incident_context return thousands of hydrants/resources/history records.
+
+Avoid unnecessary rerenders of MapLibre.
+
+Viewport hydrant reads should not fire continuously during every map movement.
+
+Use an appropriate debounce similar to existing Hydrants map behavior.
+
+==================================================
+13. VISUAL PRIORITY
+==================================================
+
+Avoid map clutter.
+
+Always/high priority:
+- selected entity,
+- sector boundaries/labels,
+- command post / important tactical objects where applicable,
+- linked incident hydrants.
+
+Context:
+- background hydrants,
+- normal tactical context.
+
+Background hydrants should not display labels for every point at wide zoom.
+
+Selection must remain visible above ordinary map layers.
+
+Status must never rely on color alone.
+
+Preserve accessible text/status in panels/tooltips/popups.
+
+==================================================
+14. AUTHORIZATION
+==================================================
+
+This PR must not broaden operational authority.
+
+Examples:
+
+- IC remains governed by existing incident capability rules.
+- Agency Commander remains organization scoped.
+- Sector Commander remains sector scoped.
+- Unit Leader remains unit_assignment scoped.
+- ordinary participants remain read-only except where existing rules explicitly allow otherwise.
+- admin/manager inventory permissions do not become incident command permissions.
+- incident participation does not grant permanent hydrant registry access.
+
+Every mutation must remain server-authoritative.
+
+UI visibility is not security.
+
+==================================================
+15. LOCALIZATION
+==================================================
+
+Provide Slovenian and German strings for all newly visible UI.
+
+Do not expose raw stable/domain codes where an existing localized label exists.
+
+Do not translate stable database codes themselves.
+
+==================================================
+16. NO SCHEMA REDESIGN
+==================================================
+
+Prefer no new database tables in this milestone.
+
+A small read RPC/helper may be added only if genuinely required for secure/bounded composition and if existing authorized Hydrants reads cannot be safely reused.
+
+If adding a new read RPC:
+
+- it must be bounded,
+- RLS/authorization semantics must match the existing source domain,
+- it must not grant extra rights because of incident membership,
+- no direct browser privileged access,
+- no service-role key in Web.
+
+Do not create a parallel incident hydrant registry.
+
+==================================================
+17. DO NOT IMPLEMENT
+==================================================
+
+Explicitly out of scope:
+
+- M14.5 tasks,
+- task dependencies,
+- configurable Action Definitions,
+- tactical command engine,
+- command queue,
+- multi-select,
+- lasso selection,
+- box selection,
+- unit drag/drop,
+- live GPS,
+- telemetry history,
+- navigation sessions,
+- route preview,
+- ETA,
+- rerouting,
+- route constraints,
+- water shuttle,
+- convoy navigation,
+- realtime,
+- chat,
+- attachments,
+- dispatch,
+- turnout,
+- mobilization,
+- Android Incident Mode,
+- QR,
+- CAD/112,
+- reports,
+- drone control,
+- Firebase setup/delivery,
+- NAV3,
+- Oracle changes,
+- OSRM changes,
+- unrelated dashboard redesign,
+- main product navigation regrouping,
+- Exchange redesign,
+- Inspections redesign,
+- global search.
+
+Those belong to later milestones.
+
+==================================================
+18. EXISTING FIXES / HISTORICAL MIGRATIONS
+==================================================
+
+Do not revert existing historical migration repairs already present in main, including the manually repaired parenthesized CASE expressions used by incident command transfer validation.
+
+Do not edit historical migrations unless absolutely necessary for a newly discovered bootstrap correctness issue.
+
+This milestone should not re-run or redeploy earlier migrations.
+
+==================================================
+19. IMPLEMENTATION QUALITY
+==================================================
+
+Prefer small components with explicit boundaries.
+
+Avoid turning:
+
+IncidentArea.tsx
+
+into another giant component.
+
+Suggested conceptual structure may include components similar to:
+
+IncidentWorkspace
+OperationalSidebar
+OperationalMap
+SelectedEntityPanel
+OperationalBottomPanel
+OperationalMapCanvas
+HydrantContextLayer
+IncidentCopLayers
+
+Names are suggestions, not mandatory.
+
+Reuse current domain components where that produces clean composition.
+
+Refactor presentation where needed, but preserve domain behavior.
+
+==================================================
+20. SPEC
+==================================================
+
+Update:
+
+docs/SPEC-M14-INCIDENT-OPERATIONS.md
+
+Document:
+
+- map-first ACTIVE/STABILIZED workspace,
+- background authorized hydrant context,
+- canonical-vs-incident-linked hydrant distinction,
+- selected entity/context-action presentation model,
+- map layer priority,
+- no fake unit positions,
+- command intent != execution plan != telemetry,
+- future configurable action definitions,
+- future multi-select/targeting compatibility,
+- performance/read boundaries.
+
+Be explicit that this milestone does not yet implement Tasks, tactical commands, GPS or navigation execution.
+
+==================================================
+21. MANUAL ACCEPTANCE SCENARIOS
+==================================================
+
+Include a manual verification checklist covering at least:
+
+A. Active incident opens map-first workspace.
+
+B. Draft incident remains usable for setup.
+
+C. Existing M14.3 sector and tactical-object creation/editing still works.
+
+D. Existing linked hydrants still work.
+
+E. Background hydrants appear only if the viewer already has hydrant read authority.
+
+F. Incident membership alone does not expose another organization's hydrants.
+
+G. Linking a background hydrant uses the same canonical UUID.
+
+H. Linked hydrant remains visually distinguishable from background context.
+
+I. Permanent hydrant status remains visible after linking.
+
+J. Sector click selects sector and populates Selected Entity pane.
+
+K. Hydrant click selects hydrant and populates Selected Entity pane.
+
+L. Unit list selection populates Selected Entity pane without inventing a map coordinate.
+
+M. Existing M14.4 legal unit/resource actions still work.
+
+N. Unauthorized actions remain unavailable/server rejected.
+
+O. Sector code automatically uppercases and filters invalid characters.
+
+P. SI strings work.
+
+Q. DE strings work.
+
+R. Timeline/history remains accessible without dominating the workspace.
+
+S. Map does not refetch background hydrants continuously during every pointer movement.
+
+T. CLOSED/CANCELLED remain read-only.
+
+==================================================
+22. VALIDATION / DELIVERY BOUNDARY
+==================================================
+
+One PR only.
+
+Do not merge it.
+
+Do not deploy it.
+
+Do not apply migrations.
+
+Do not run:
+
+- tests,
+- builds,
+- lint,
+- typecheck,
+- CI,
+- browser automation,
+- Supabase migration deployment,
+- Edge Function deployment,
+- Android build,
+- Oracle changes.
+
+Do not add tests in this milestone unless implementation absolutely requires a tiny compile-time helper test; otherwise add none.
+
+Use [skip ci] if that is the repository convention for these Codex PRs.
+
+At the end:
+
+1. Create the PR.
+2. Give a detailed source-level implementation summary.
+3. List every changed file.
+4. Clearly distinguish:
+   - presentation refactors,
+   - read/API changes,
+   - any SQL changes,
+   - authorization behavior,
+   - performance behavior.
+5. State all deferred features explicitly.
+6. Provide the manual verification checklist.
+7. State clearly:
+   - no tests run,
+   - no build run,
+   - no lint run,
+   - no typecheck run,
+   - no CI run,
+   - no deployment,
+   - no migration applied.
+8. Stop after creating the PR.
+
+==================================================
+SUCCESS CRITERIA
+==================================================
+
+The milestone succeeds if:
+
+- an ACTIVE/STABILIZED incident now feels like one operational workspace rather than a long milestone-by-milestone form,
+- the map is the primary incident surface,
+- M14.4 units/resources fit naturally into that workspace,
+- authorized nearby hydrants provide real operational context without broadening access,
+- canonical hydrants are not duplicated,
+- existing M14.0–M14.4 authority remains authoritative,
+- the map foundation can support future unit/task/tracking layers,
+- selected-object/context-action architecture exists,
+- no fake unit location is introduced,
+- no tactical command model is prematurely hard-coded,
+- M14.5 can add RTS-style task/command interaction without another fundamental Incident UI redesign.
