@@ -1,0 +1,814 @@
+Implement one PR:
+
+M14.4.2 — Cross-Module Operational Integration
+
+Base this work on current main after merged PR #58 / M14.4.1.
+
+This milestone connects the already-correct Gasilko domains so the product behaves like one operational application instead of separate milestone-built modules.
+
+This is NOT M14.5.
+
+Do not implement tasks, tactical commands, GPS, navigation sessions, realtime or dispatch.
+
+==================================================
+CORE ARCHITECTURE RULE
+==================================================
+
+Preserve all existing domain/business semantics.
+
+Do not redesign or bypass:
+
+- hydrant identity/status/inspection rules,
+- planning lifecycle,
+- incident lifecycle,
+- command hierarchy,
+- sector authority,
+- M14.4 units/crew/resources,
+- inventory ownership,
+- RLS,
+- authorization,
+- audit,
+- idempotency,
+- optimistic concurrency,
+- routing-provider boundaries,
+- Android/offline contracts.
+
+Integration-safe changes to previous modules are ALLOWED AND EXPECTED.
+
+Cross-module functionality must reuse the original authoritative API/RPC.
+
+Do not fork/copy business logic into an "integration service".
+
+UI/context/deep-link state never grants authority.
+
+==================================================
+1. GOAL
+==================================================
+
+After this milestone a user should be able to move naturally between:
+
+HYDRANT
+<-> MAP
+<-> INCIDENT
+<-> PLAN
+<-> TEAM / INCIDENT CREW
+<-> AUDIT
+
+without manually navigating back through unrelated menus and searching for the same entity again.
+
+Canonical source entities must remain canonical.
+
+Example:
+
+One hydrant UUID
+-> Hydrant registry
+-> Plan membership
+-> Incident hydrant link
+-> Audit event
+-> Deep link
+
+Never copy the hydrant simply because it appears in another domain.
+
+==================================================
+2. CANONICAL ENTITY LINK REGISTRY
+==================================================
+
+Create a small shared presentation/navigation abstraction for canonical entity links.
+
+Suggested concept:
+
+EntityRef
+
+{
+  type
+  id
+  context?
+}
+
+Current supported types should include only entities that actually exist now:
+
+- HYDRANT
+- PLAN
+- INCIDENT
+- INCIDENT_SECTOR
+- INCIDENT_MAP_OBJECT
+- INCIDENT_UNIT
+- OPERATIONAL_UNIT
+- OPERATIONAL_VEHICLE
+- TEAM
+- ORGANIZATION
+
+Add others only when genuinely required by current implemented flows.
+
+Provide shared helpers conceptually similar to:
+
+entityHref(...)
+entityLabel(...)
+parseEntityRef(...)
+
+Do not create a database table for this.
+
+Do not make this an authorization system.
+
+A generated link is only navigation intent.
+The destination still performs its normal authoritative access check.
+
+Avoid scattered manual URL construction where the new registry is appropriate.
+
+==================================================
+3. DEEP-LINKABLE INCIDENT SELECTION
+==================================================
+
+Extend the M14.4.1 Incident Workspace so a URL may optionally open an existing incident and select an entity.
+
+For example conceptually:
+
+/incidents/{incident}?selected=hydrant:{uuid}
+
+/incidents/{incident}?selected=unit:{incidentUnitUuid}
+
+/incidents/{incident}?selected=sector:{uuid}
+
+Exact URL encoding may differ if a cleaner existing route convention exists.
+
+Requirements:
+
+- validate type/id strictly;
+- invalid/deleted/inaccessible selection must fail closed and leave the incident workspace usable;
+- do not reveal existence of unauthorized entities;
+- URL selection does not grant authority;
+- changing selection should be able to update URL without full-page navigation where appropriate;
+- normal direct incident opening still works;
+- account/org/incident changes clear incompatible selection.
+
+This becomes the future target for Notifications, QR and Android links.
+
+Do not implement Firebase/QR/Android in this PR.
+
+==================================================
+4. OPERATIONAL TARGET V1
+==================================================
+
+Introduce a minimal cross-module OperationalTarget presentation/domain-adapter contract.
+
+Do NOT implement navigation execution yet.
+
+Supported V1 target kinds:
+
+- HYDRANT
+- INCIDENT_MAP_OBJECT
+- INCIDENT_SECTOR
+- COORDINATE
+
+Conceptually:
+
+OperationalTarget {
+  kind
+  entityId?
+  incidentId?
+  coordinate?
+}
+
+The target contract represents:
+
+"this is the operational thing/location the user means"
+
+It does NOT represent:
+
+- a route,
+- a GPS position,
+- a navigation session,
+- a command,
+- a task.
+
+Provide bounded resolvers only where current data can legitimately resolve a location.
+
+Examples:
+
+HYDRANT
+-> canonical hydrant coordinates after existing read authorization
+
+INCIDENT_MAP_OBJECT
+-> existing authorized geometry
+
+INCIDENT_SECTOR
+-> geometry/reference, not an invented unit position
+
+COORDINATE
+-> explicit lon/lat
+
+Use GeoJSON/WGS84 longitude, latitude conventions already used by Gasilko.
+
+Do not add UNIT as a spatial target yet merely because incident units exist.
+M14.4 units still have no authoritative live position.
+
+==================================================
+5. HYDRANT DETAIL — OPERATIONAL CONTEXT
+==================================================
+
+Improve the existing ordinary Hydrant detail without changing hydrant domain semantics.
+
+Add bounded, authorized cross-domain context such as:
+
+- show on map,
+- active/relevant plan references the viewer is allowed to read,
+- active/relevant incident references where this canonical hydrant is linked and the viewer can read that incident.
+
+Do not expose inaccessible plan/incident identifiers.
+
+Do not make incident participation grant hydrant access.
+
+Do not make hydrant access grant incident access.
+
+Each reference must independently satisfy its source domain read rules.
+
+Suggested Hydrant detail presentation:
+
+HYDRANT H-123
+WORKING
+
+[SHOW ON MAP]
+
+Operational context:
+- Plan X
+- INC-2026-123 · WATER_SUPPLY
+
+Only display contexts the viewer is authorized to read.
+
+Do not create one giant reverse-reference query.
+Use bounded reads.
+
+==================================================
+6. HYDRANT -> ACTIVE INCIDENT ACTION
+==================================================
+
+Where the viewer has BOTH:
+
+- hydrant read permission, and
+- existing authoritative incident COP mutation authority,
+
+allow a convenient action from Hydrant context/detail:
+
+"Link to incident"
+
+The action must:
+
+- choose only incidents the user is authorized to read/manage;
+- use existing incident_hydrant_link authoritative command/API;
+- preserve canonical hydrant UUID;
+- require existing expected version / operation UUID semantics;
+- support existing purposes such as WATER_SUPPLY / REFERENCE;
+- not invent a new incident write path.
+
+If multiple active incidents are available, show an explicit selection.
+
+Do not silently choose an incident.
+
+If no authorized active/stabilized incident exists, do not show an unusable mutation action.
+
+==================================================
+7. HYDRANT -> PLAN INTEGRATION
+==================================================
+
+Allow useful Plan integration without changing Planning semantics.
+
+From Hydrant detail/map/context, where the existing Planning API permits it:
+
+- show authorized relevant plan membership;
+- offer "Add to plan" only for a plan state where adding hydrants is already legal;
+- require explicit plan selection;
+- call the original authoritative Planning API/RPC;
+- preserve plan versions/concurrency/idempotency;
+- do not auto-activate/re-route a plan.
+
+Do not invent a parallel "plan hydrant link" mechanism.
+
+If the hydrant already belongs to the selected plan, show that state rather than duplicate it.
+
+==================================================
+8. PLAN MAP — BACKGROUND HYDRANT CONTEXT
+==================================================
+
+Improve the existing Plan editing/detail map using the same architectural principle as the incident workspace:
+
+BACKGROUND:
+authorized canonical hydrants
+
+PLAN:
+hydrants actually included in this plan
+
+The same hydrant must not render as two independent identities.
+
+Requirements:
+
+- existing authorized viewport read scope;
+- bounded/debounced;
+- permanent hydrant status preserved;
+- plan hydrants visually stronger/different from background;
+- background hydrant click -> select/context;
+- if current plan is editable and caller has authority:
+  "Add to this plan"
+  uses existing Planning mutation;
+- no authorization inferred from map visibility;
+- no giant all-hydrants request.
+
+Prefer reuse of M14.4.1 map infrastructure where cleanly applicable.
+
+Do not perform a broad rewrite of every map component merely for code purity.
+
+==================================================
+9. SHARED MAP INFRASTRUCTURE — INCREMENTAL REUSE
+==================================================
+
+M14.4.1 introduced OperationalMapCanvas.
+
+Reuse it where this milestone naturally benefits:
+
+- Incident already uses it;
+- Plan map may adopt it if this can be done without changing Plan behavior.
+
+Do not force Exchange/Inspections/other modules onto it in this PR.
+
+Do not create MegaMap.tsx.
+
+Map infrastructure stays generic.
+
+Business layers stay domain-specific.
+
+==================================================
+10. TEAM -> INCIDENT CREW PREFILL
+==================================================
+
+Inspection/operational Teams and Incident Crew remain DIFFERENT domains.
+
+Never model:
+
+team == incident unit
+or
+team membership == active incident crew membership
+
+However provide a safe integration shortcut where useful:
+
+"Use team as crew template"
+
+Expected behavior:
+
+1. user chooses an existing authorized team;
+2. current team members are read;
+3. eligible people are shown as a PREVIEW/PREFILL;
+4. caller confirms who should join the selected incident unit;
+5. each resulting crew relationship is created through existing authoritative M14.4 crew operations;
+6. current membership/participation/profile eligibility is rechecked by the server;
+7. failures are shown per member;
+8. no automatic ongoing synchronization exists.
+
+After creation:
+
+Team lifecycle and Incident Crew lifecycle are completely independent.
+
+Later edits to a Team must NOT mutate an already-created incident crew.
+
+Do not create new users/memberships/profiles.
+
+Do not silently assign UNIT_LEADER.
+
+Crew LEADER descriptive role must remain separate from UNIT_LEADER authority.
+
+==================================================
+11. BULK CREW PREFILL SAFETY
+==================================================
+
+If implementing multiple crew joins from one confirmation:
+
+- do not introduce one privileged bulk SQL shortcut that bypasses existing rules;
+- use stable per-member operation UUIDs;
+- preserve retry/idempotency behavior;
+- do not automatically retry ambiguous writes with new operation IDs;
+- partial success must be clearly reported;
+- one failed member must not falsely display all members as joined.
+
+A small orchestration endpoint is acceptable if it calls the authoritative domain operations safely.
+
+Do not duplicate M14.4 eligibility logic in the browser.
+
+==================================================
+12. AUDIT -> ENTITY CONTEXT
+==================================================
+
+Improve audit usability by linking audit records back to existing canonical entities when the record already contains sufficient canonical identity.
+
+Examples:
+
+HYDRANT_STATUS_CHANGED
+-> Open hydrant
+
+incident unit/resource event
+-> Open incident workspace with selected unit/allocation context where possible
+
+PLAN event
+-> Open plan
+
+ORGANIZATION event
+-> Open organization context where authorized
+
+Requirements:
+
+- links use EntityRef/entityHref;
+- do not parse arbitrary human audit descriptions to guess identity;
+- only link when a stable canonical id/type is genuinely present;
+- destination rechecks authorization;
+- audit remains immutable evidence, not an operational command engine.
+
+Do not redesign the audit schema unless absolutely required.
+
+==================================================
+13. CONTEXT ACTIONS
+==================================================
+
+Reuse the M14.4.1 ContextAction presentation contract.
+
+Existing entity-specific actions may now include cross-domain entries.
+
+Hydrant example:
+
+- Details
+- Show on map
+- Link to incident
+- Add to plan
+
+Plan hydrant:
+
+- Details
+- Remove from plan (only existing legal operation)
+- Incident context where authorized
+
+Incident hydrant:
+
+- Details
+- Unlink
+- Open canonical hydrant
+
+Team:
+
+- Use as crew template
+
+These are presentation actions.
+
+Server authorization remains authoritative.
+
+Do not create a generic execute-any-action RPC.
+
+==================================================
+14. "SHOW ON MAP"
+==================================================
+
+Provide a consistent cross-module "Show on map" experience for supported entities with known canonical geometry.
+
+For a Hydrant:
+
+- open the existing authorized map experience;
+- center/select the canonical hydrant;
+- do not require the user to search for it again.
+
+For Incident-linked entities:
+
+- open the corresponding incident workspace and select the entity.
+
+Do not implement route guidance.
+
+"Show on map" != "Navigate".
+
+Do not add a fake navigation button that has no execution model.
+
+==================================================
+15. DO NOT IMPLEMENT REAL NAVIGATION YET
+==================================================
+
+OperationalTarget V1 prepares for future movement/navigation.
+
+This milestone must NOT implement:
+
+- route computation,
+- RoadProvider route calls,
+- ETA,
+- navigation session,
+- turn-by-turn,
+- driver navigation,
+- unit live route,
+- rerouting,
+- GPS,
+- telemetry,
+- route sharing with command,
+- water shuttle,
+- convoy.
+
+Preserve the architecture:
+
+COMMAND INTENT
+!=
+EXECUTION PLAN
+!=
+TELEMETRY
+
+A later movement milestone will build on OperationalTarget.
+
+==================================================
+16. DO NOT HARDCODE TACTICAL ACTIONS
+==================================================
+
+Do not add hard-coded commands such as:
+
+EXTINGUISH
+DEFEND
+SEARCH
+RECON
+RESCUE
+ESTABLISH_WATER_SUPPLY
+
+These belong to the future configurable Action Definition model.
+
+Do not add MOVE_TO as a command yet either.
+
+OperationalTarget exists independently from Tasks/Commands.
+
+==================================================
+17. AUTHORIZATION MATRIX
+==================================================
+
+Cross-domain UI must respect both sides of every relationship.
+
+Examples:
+
+Hydrant -> Incident:
+requires hydrant READ
+AND existing incident link authority for mutation.
+
+Hydrant -> Plan:
+requires hydrant READ
+AND existing plan mutation authority.
+
+Team -> Crew:
+requires team READ
+AND existing incident crew mutation authority.
+
+Audit -> Entity:
+requires audit READ
+AND destination entity READ.
+
+No permission implication is transitive.
+
+Specifically:
+
+incident access
+!= hydrant registry access
+
+hydrant registry access
+!= plan write
+
+inventory admin
+!= incident command
+
+team membership
+!= incident crew authority
+
+entity URL
+!= entity permission
+
+==================================================
+18. PERFORMANCE / BOUNDS
+==================================================
+
+Do not create a giant integration endpoint.
+
+Use bounded reads.
+
+Recommended limits:
+
+- reverse incident references: bounded/recent active first;
+- plan references: bounded;
+- selectable active incidents/plans: bounded;
+- Team members: bounded according to existing realistic team limits;
+- viewport hydrants: retain existing bounded/debounced behavior.
+
+Do not load unrelated domains when their panel/action is not visible.
+
+Avoid N+1 per map marker.
+
+==================================================
+19. LOCALIZATION / ACCESSIBILITY
+==================================================
+
+All new visible UI in Slovenian and German.
+
+Use semantic buttons/forms/lists.
+
+No color-only meaning.
+
+No drag/drop-only action.
+
+Cross-domain disabled actions should have understandable reasons where appropriate.
+
+Avoid raw technical codes when a localized label already exists.
+
+Stable DB codes remain language-neutral.
+
+==================================================
+20. NO PRODUCT-SHELL REDESIGN
+==================================================
+
+Do NOT implement yet:
+
+- Dashboard Action Center,
+- top-level navigation regrouping,
+- active-incident global banner,
+- Account page redesign,
+- Inspections redesign,
+- Exchange redesign,
+- global search.
+
+Those belong to later integration milestones.
+
+==================================================
+21. SQL / DATABASE POLICY
+==================================================
+
+Prefer no new tables.
+
+Small forward migration(s) are allowed only if a secure/bounded read adapter genuinely cannot be implemented using existing authoritative data/contracts.
+
+Do NOT edit historical applied migrations.
+
+If SQL is required:
+
+- forward migration only;
+- narrow RPC/read helper;
+- explicit grants;
+- empty search_path for security definer;
+- no service-role Web dependency;
+- no new parallel auth model;
+- no source-domain authority widening.
+
+Do not introduce a generic cross-domain relationship table.
+
+Canonical relationships continue to live in their owning domains.
+
+==================================================
+22. SPEC UPDATE
+==================================================
+
+Update:
+
+docs/SPEC-M14-INCIDENT-OPERATIONS.md
+
+and other existing SPEC documentation only where appropriate.
+
+Document:
+
+- EntityRef / canonical deep links;
+- OperationalTarget V1;
+- cross-domain authorization intersection;
+- Hydrant <-> Incident integration;
+- Hydrant <-> Plan integration;
+- Team -> crew snapshot/prefill semantics;
+- audit entity navigation;
+- Show on map != Navigate;
+- no transitive authority;
+- no duplicated canonical entities.
+
+Preserve:
+
+COMMAND INTENT != EXECUTION PLAN != TELEMETRY.
+
+==================================================
+23. MANUAL ACCEPTANCE CHECKLIST
+==================================================
+
+Include at least:
+
+A. Ordinary authorized hydrant user opens Hydrant detail.
+
+B. "Show on map" selects the same canonical hydrant.
+
+C. Hydrant detail shows only plans the caller may read.
+
+D. Hydrant detail shows only incidents the caller may read.
+
+E. Incident participation alone does not expose unauthorized hydrants.
+
+F. Hydrant read alone does not expose unauthorized incident metadata.
+
+G. Authorized commander can link a hydrant from hydrant context using the existing COP mutation.
+
+H. Unauthorized user cannot link merely because the action is visible/client state is manipulated.
+
+I. Hydrant can be added to an editable authorized plan through existing Planning logic.
+
+J. Duplicate plan membership is not created.
+
+K. Plan map distinguishes background authorized hydrants from plan hydrants.
+
+L. Plan background viewport queries remain bounded/debounced.
+
+M. Team -> crew template shows a preview.
+
+N. Ineligible team member fails safely without creating an invalid crew relationship.
+
+O. Team changes after confirmation do not mutate incident crew.
+
+P. No UNIT_LEADER is created implicitly.
+
+Q. Audit canonical link opens the intended entity when authorized.
+
+R. Audit link does not reveal inaccessible entity information.
+
+S. Incident deep link selects sector/hydrant/unit correctly.
+
+T. Invalid/inaccessible deep-link selection leaves the workspace usable and does not leak existence.
+
+U. SI labels.
+
+V. DE labels.
+
+W. Account/org switch clears stale cross-domain context.
+
+X. Existing M14.4.1 Incident workspace/COP behavior remains intact.
+
+Y. Existing M14.4 unit/crew/resource behavior remains intact.
+
+Z. CLOSED/CANCELLED incident remains read-only.
+
+==================================================
+24. VALIDATION / DELIVERY BOUNDARY
+==================================================
+
+One PR only.
+
+Do not merge it.
+
+Do not deploy it.
+
+Do not apply migrations.
+
+Do not run:
+
+- tests,
+- builds,
+- lint,
+- typecheck,
+- CI,
+- browser automation,
+- migrations,
+- Edge Function deployment,
+- Android build,
+- Oracle changes.
+
+Do not add tests.
+
+Use [skip ci] if that remains repository convention.
+
+At the end:
+
+1. Create the PR.
+2. List every changed file.
+3. Give detailed source-level summary.
+4. Separate:
+   - shared navigation/entity changes,
+   - Hydrant integration,
+   - Planning integration,
+   - Incident integration,
+   - Team/Crew integration,
+   - Audit integration,
+   - API/read changes,
+   - SQL changes if any.
+5. State authorization behavior explicitly.
+6. State performance/bounds explicitly.
+7. List all deferred features.
+8. Include manual acceptance checklist.
+9. State clearly:
+   - no tests run,
+   - no build,
+   - no lint,
+   - no typecheck,
+   - no CI,
+   - no browser automation,
+   - no migrations applied,
+   - no deployment.
+10. Stop after PR creation.
+
+==================================================
+SUCCESS CRITERIA
+==================================================
+
+M14.4.2 succeeds if Gasilko behaves measurably more like one application:
+
+- users can follow canonical entities across modules without re-searching;
+- hydrants remain one canonical object across Registry, Plan and Incident;
+- Plans can use nearby authorized hydrant context;
+- Incident can reuse hydrant functionality without changing Hydrant authority;
+- Teams can accelerate crew setup without becoming Incident Crew;
+- Audit can lead back to canonical operational context;
+- deep links can identify an incident entity safely;
+- OperationalTarget provides the future navigation/command target abstraction;
+- authorization remains owned by each original domain;
+- no new tactical command vocabulary is prematurely hard-coded;
+- M14.5 can now add Tasks/Commands and RTS interaction on top of stable integrated product foundations.
