@@ -1870,6 +1870,132 @@ lost-response consumption retries, stale editing, command transfer with unit
 scopes, explicit cleanup/close/release, privacy, pagination, account/org switching,
 and SI/DE controls.
 
+
+## M14.4.1 implemented Operational Workspace Foundation
+
+### Presentation composition
+
+ACTIVE and STABILIZED incident detail uses a map-first workspace: a compact
+identity/status/type/lead/commander header, operational pane, COP map and selected
+entity pane. The operational pane composes the existing command, participants,
+core metadata/lifecycle, sector/object/link, and M14.4 unit/crew/resource controls.
+Command requests and command history project into the secondary bottom area.
+Timeline pages load only when opened, independently of core/COP/resource reads.
+DRAFT keeps a setup-oriented stacked layout; CLOSED/CANCELLED retain the existing
+server-derived read-only controls. Tablet/mobile reflow preserves every action;
+there is no drag/drop-only interaction.
+
+Presentation slots relocate existing domain components instead of cloning their
+mutation logic. SelectedEntity contains a kind and identity only (sector, map
+object, canonical hydrant, incident unit or allocation); it is not an authorization
+DTO. Lists and map clicks drive one selection. Components resolve that identity
+against their current authorized DTOs. ContextAction describes localized
+presentation, enabled/disabled explanation, confirmation requirement and handler.
+Mutating handlers enter the original domain confirmation/operation pipeline:
+original RPC, expected versions, stable operation UUID/payload, audit and retry
+semantics remain authoritative. Unit/crew/allocation forms are reused in the
+selected pane, not reimplemented. Account/org/incident keys reset workspace state.
+
+### Map infrastructure and layer contract
+
+OperationalMapCanvas owns the MapLibre instance, same-origin worker, configured
+style, controls/attribution, load/error/retry, ResizeObserver, initial camera fit,
+debounced bounds and generic click dispatch. CopRendering owns incident and
+canonical context GeoJSON sources and rendering. MapLibre/dependencies and the
+ordinary registry/plan map remain at their existing versions and behavior.
+
+Operational domain ordering above BASE is deterministic:
+CONTEXT (authorized registry points), AREAS (sectors and hazard/perimeter areas),
+OPERATIONS (linked canonical hydrants and tactical objects), reserved
+FUTURE_OPERATIONS, reserved ATTENTION, then SELECTION/unsaved drawing.
+Reserved groups have no new data or placeholder layers.
+Background points are smaller, with labels only from zoom 16. Linked points
+suppress their background duplicate by canonical UUID. Fill retains permanent
+hydrant status; a blue outer ring indicates incident relationship; a separate
+violet selection outline does not replace the status fill. Panels expose status
+and purpose as localized text. Selection is rendered above ordinary layers.
+Map retry recreates infrastructure; normal DTO/selection updates update sources
+without remounting or repeatedly fitting the camera.
+
+### Authorized hydrant context and detail entry
+
+POST /api/hydrant-context is a small authenticated, same-origin, account-bound,
+no-store read adapter over the existing hydrants SELECT/RLS contract. It accepts
+finite valid viewport bounds, reads active hydrants ordered by canonical UUID,
+and returns at most 500 plus an overflow indication (501-row query). Related
+organization/type display data is RLS-bound too. It has no incident argument,
+service credential, new SQL function or authorization helper. Effective ordinary
+membership and hierarchical Web read policies remain the source of read scope.
+An incident participant gets no extra permanent registry access.
+
+Bounds settle for 300 ms at moveend; the context hook also debounces/cancels
+requests and suppresses obsolete responses. It does not query during pointer
+movement or fetch a country-sized registry. Errors clear background results.
+Explicit refresh rechecks existing permissions. No realtime or polling is added.
+Linked private/redacted hydrants continue to use the existing incident_cop DTO;
+background data is never added to shared incident tables or DTOs.
+
+The selected hydrant panel shows available code/UUID, status, address/description,
+authorized organization/type context and current link purpose. Existing link and
+unlink APIs receive the same canonical UUID and original confirmation/version
+envelope. A keyboard-selectable viewport list complements marker selection.
+Details enter the existing ordinary registry or authorized Web detail screen;
+the existing Web detail component accepts a validated hydrant deep-link parameter.
+Both destinations reauthorize reads and mutations independently.
+
+### Resource identity and future interaction boundaries
+
+Unit selection comes from the M14.4 deployment list, with status, sector, crew,
+leader and existing legal controls. Allocation selection reuses lifecycle controls.
+No unit marker, coordinate, home-station guess or sector-derived position is
+created. Unit identity is not position.
+
+COMMAND INTENT != EXECUTION PLAN != TELEMETRY.
+Future unit markers require real telemetry/provenance; navigation execution and
+command targets remain separate. This milestone implements only normal single
+selection. Future multi-select/targeting can extend identity references and
+presentation actions, but tactical actions must come from future configurable
+Action Definitions. No command vocabulary, Tasks, targeting engine, GPS,
+navigation sessions, route preview or movement is implemented here.
+
+### Sector code and storage boundary
+
+Sector code input uppercases ASCII a-z, strips characters outside A-Z/0-9/_/-,
+limits length to 64 and restores the cursor relative to accepted characters.
+The existing first-character alphanumeric rule remains; SI/DE validation names
+the code problem rather than coordinates. Stored stable codes are not translated.
+No schema, RLS, SQL or historical migration changes; no database migration needed.
+Android, offline contracts, inventory ownership and RoadProvider are unchanged.
+
+### Manual acceptance checklist (not executed)
+
+- [ ] A. ACTIVE/STABILIZED opens with the map as primary surface.
+- [ ] B. DRAFT setup, nomination and activation remain usable.
+- [ ] C. Sector and tactical-object create/edit/draw/stale re-edit still work.
+- [ ] D. Existing linked hydrants remain accessible under existing permissions.
+- [ ] E. Background points match existing registry read authority.
+- [ ] F. Incident membership alone exposes no other organization's registry data.
+- [ ] G. Background link uses the original canonical hydrant UUID.
+- [ ] H. Linked ring and background marker remain distinguishable.
+- [ ] I. Permanent status fill/text survives linking and selection.
+- [ ] J. Sector map/list selection populates the selected pane.
+- [ ] K. Hydrant map/list selection exposes context, links and existing details.
+- [ ] L. Unit selection shows crew/leader without inventing a map position.
+- [ ] M. Existing legal unit/crew/resource actions and command offers still work.
+- [ ] N. Unauthorized, stale and ambiguous-retry mutations retain original behavior.
+- [ ] O. Sector code typing/paste/cursor, leading punctuation and 64-character limit.
+- [ ] P. Slovenian strings and accessible action labels.
+- [ ] Q. German strings and narrow/landscape layouts.
+- [ ] R. Timeline/inbox/history accessible without pushing the map down.
+- [ ] S. Viewport requests debounce, cancel, cap results and do not fire on pointer movement.
+- [ ] T. CLOSED/CANCELLED remain historical/read-only.
+- [ ] Account/org/incident switching, sign-out and revoked access clear scoped views.
+- [ ] Style failure/retry, resize, attribution and repeated selection preserve map lifecycle.
+
+No tests added/run, build, lint, typecheck, CI, browser automation, deployment,
+migration application, Android build or Oracle/OSRM operations were performed.
+Source review only; compilation and runtime acceptance remain unverified.
+
 ## Need Professional Help in Developing Your Architecture?
 
 Please contact me at [sammuti.com](https://sammuti.com) :)

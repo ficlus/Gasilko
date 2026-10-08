@@ -1,6 +1,16 @@
 import {operationalText} from '../operational/messages';
 import type {Locale} from '../i18n';
 const sl = {
+ workspaceOperations:"Operativni pregled",
+ workspaceClear:"Počisti izbor",
+ workspaceSelect:"Izberite objekt na zemljevidu ali enoto/sredstvo na seznamu.",
+ workspaceHydrants:"Hidranti iz dovoljenega registra",
+ workspaceMarkerLegend:"Barva notranjosti: stalno stanje hidranta. Moder obroč: povezava z intervencijo. Vijoličen obris: izbor.",
+ workspaceHydrantError:"Kontekst registra ni na voljo. Pravice intervencije ne omogočajo dodatnega dostopa do hidrantov.",
+ workspaceHydrantLimit:"Prikazanih je največ 500 hidrantov. Približajte zemljevid za ožji izbor.",
+ workspaceNotLinked:"Ni povezan s to intervencijo.",
+ workspaceSectorCode:"Oznaka mora imeti 1–64 znakov: A–Z, 0–9, _ ali -. Prvi znak mora biti črka ali številka.",
+ workspaceNoPosition:"Enota nima podatka o položaju. Izbor je ne postavi na zemljevid.",
  copTitle:"Operativna slika · zemljevid intervencije",
  copAuthority:"Zemljevid je prikaz potrjenih podatkov. Risanje še ni shranjeno; spremembo morate izrecno potrditi.",
  copLocation:"Primarna lokacija intervencije",
@@ -176,6 +186,16 @@ const sl = {
  INCIDENT_REACTIVATED:'Intervencija ponovno aktivirana',INCIDENT_CLOSED:'Intervencija zaključena',INCIDENT_CANCELLED:'Osnutek preklican',
 };
 const de:Record<keyof typeof sl,string> = {
+ workspaceOperations:"Operative Übersicht",
+ workspaceClear:"Auswahl aufheben",
+ workspaceSelect:"Objekt auf der Karte oder Einheit/Ressource in der Liste auswählen.",
+ workspaceHydrants:"Hydranten aus dem berechtigten Register",
+ workspaceMarkerLegend:"Innenfarbe: dauerhafter Hydrantenstatus. Blauer Ring: Einsatzverknüpfung. Violette Kontur: Auswahl.",
+ workspaceHydrantError:"Registerkontext nicht verfügbar. Einsatzberechtigungen gewähren keinen zusätzlichen Hydrantenzugriff.",
+ workspaceHydrantLimit:"Höchstens 500 Hydranten werden angezeigt. Für einen kleineren Ausschnitt näher heranzoomen.",
+ workspaceNotLinked:"Nicht mit diesem Einsatz verknüpft.",
+ workspaceSectorCode:"Die Kennung muss 1–64 Zeichen enthalten: A–Z, 0–9, _ oder -. Das erste Zeichen muss ein Buchstabe oder eine Ziffer sein.",
+ workspaceNoPosition:"Für diese Einheit liegt keine Position vor. Die Auswahl setzt sie nicht auf die Karte.",
  copTitle:"Lagebild · Einsatzkarte",
  copAuthority:"Die Karte zeigt bestätigte Daten. Zeichnungen sind noch nicht gespeichert; Änderungen ausdrücklich bestätigen.",
  copLocation:"Primärer Einsatzort",

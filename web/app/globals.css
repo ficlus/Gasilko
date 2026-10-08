@@ -142,3 +142,46 @@ button:disabled { opacity: .6; cursor: wait; }
 .exchange .actions{flex-wrap:wrap}.exchange button{min-height:44px}.exchange .admin-card{margin-block:1rem;overflow-wrap:anywhere}
 .exchange-table{max-width:100%;overflow:auto}.exchange table{width:100%;border-collapse:collapse}.exchange th,.exchange td{padding:.7rem;text-align:start;border-bottom:1px solid #d8dce0;vertical-align:top}
 .exchange dl{margin:0}.exchange dt{font-weight:600}.exchange dd{margin:0 0 .6rem;overflow-wrap:anywhere}.exchange details{padding:.7rem 0}.exchange code{overflow-wrap:anywhere}
+
+/* M14.4.1: domain components project into one map-first workspace. */
+.registry-main:has(.incident-workspace){max-width:100rem;margin:1rem auto;padding-inline:1rem}
+.incident-workspace{min-width:0}
+.workspace-header{display:flex;align-items:center;flex-wrap:wrap;gap:.45rem 1rem;border-top:4px solid #a5212b}
+.workspace-header h2,.workspace-header p{margin:.25rem 0}
+.workspace-header h2{font-size:1.3rem}
+.workspace-header [role=alert]{flex-basis:100%;color:#9c202a}
+.workspace-grid{display:grid;grid-template-columns:minmax(13rem,1fr) minmax(22rem,2.6fr) minmax(15rem,1.15fr);gap:.75rem;align-items:start}
+.workspace-grid>*{min-width:0}
+.workspace-operational,.workspace-selected{max-height:calc(100dvh - 13rem);overflow:auto;overscroll-behavior:contain;padding:.6rem;background:#f4f6f7;border:1px solid #d5dfe2;border-radius:.7rem}
+.workspace-selected{overflow-wrap:anywhere}
+.workspace-selected>h3{margin:.25rem 0 .6rem}
+.workspace-section{min-width:0;border-bottom:1px solid #d5dfe2;padding:.4rem 0}
+.workspace-section>summary{font-weight:700;cursor:pointer;min-height:44px;padding:.6rem;overflow-wrap:anywhere}
+.workspace-section>.admin-card{padding:.5rem;border:0;box-shadow:none}
+.workspace-operational .admin-card>h2,.workspace-operational .admin-card>h3{font-size:1rem}
+.workspace-operational .web-row{padding:.65rem}
+.workspace-operational .web-row span,.workspace-operational .web-row small{display:block}
+.workspace-map .cop-surface{padding:.6rem;margin:0}
+.workspace-map .cop-surface>h2{font-size:1.05rem;margin:.2rem 0}
+.workspace-map .cop-surface>p{font-size:.85rem;margin:.4rem 0}
+.workspace-map .web-map{height:58dvh;min-height:350px}
+.workspace-grid .actions{display:flex;flex-wrap:wrap;gap:.4rem}
+.workspace-grid button,.workspace-bottom button{min-height:44px;white-space:normal;overflow-wrap:anywhere}
+.workspace-grid input:not([type=checkbox]),.workspace-grid select,.workspace-grid textarea{max-width:100%;width:100%;box-sizing:border-box}
+.workspace-grid label{overflow-wrap:anywhere}
+.workspace-map-legend{color:#36434b}
+.workspace-bottom{margin-top:.75rem;border:1px solid #d5dfe2;border-radius:.7rem;padding:.5rem 1rem}
+.workspace-bottom .workspace-section{max-height:32rem;overflow:auto}
+@media(max-width:75rem){
+ .workspace-grid{grid-template-columns:minmax(13rem,1fr) minmax(0,2.5fr)}
+ .workspace-selected{grid-column:2;max-height:28rem}
+ .workspace-operational{grid-column:1;grid-row:1 / span 2;max-height:85dvh}
+}
+@media(max-width:48rem){
+ .workspace-grid{display:flex;flex-direction:column}
+ .workspace-map{order:0;width:100%}
+ .workspace-selected{order:1;width:100%;max-height:none}
+ .workspace-operational{order:2;width:100%;max-height:none}
+ .workspace-map .web-map{height:55dvh;min-height:300px}
+ .registry-main:has(.incident-workspace){padding-inline:.5rem}
+}

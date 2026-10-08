@@ -1,5 +1,6 @@
 'use client';
 import {useEffect,useRef,useState,type FormEvent,type ReactNode} from 'react';
+import {WorkspaceSlot,WorkspaceSection} from './workspace';
 import type {Locale} from '../../lib/i18n';
 import {incidentText} from '../../lib/incidents/messages';
 import type {Candidate,CommandRequest,CommandRole,CommandView,Incident,Mutation,InboxItem} from '../../lib/incidents/model';
@@ -98,7 +99,9 @@ export function CommandSection({locale,account,org,incident,disabled,read,onActi
      <button disabled={!selected||!targetValid||(mode==='offer_role'&&(!chosenParent||(role==='SECTOR_COMMANDER'&&!sector)||(role==='UNIT_LEADER'&&!unitScope)))} onClick={propose}>{t(mode)}</button>
     </>}
    </fieldset>}
+   <WorkspaceSlot name="bottom"><WorkspaceSection title={t('commandInbox')+' · '+view.requests.length}>
    <h3>{t('commandInbox')}</h3><p>{t('commandInboxLimit')}</p><CommandRequests locale={locale} items={view.requests.map(r=>({...r,organization_id:org}))} disabled={disabled} onAction={onAction}/>
+   </WorkspaceSection><WorkspaceSection title={t('commandHistory')}>
    <h3>{t('commandHistory')}</h3>{view.history.length===0&&<p>{t('noEvents')}</p>}
    {view.history.map(h=><article className="web-row" key={h.id}><strong>{h.name??'—'} · {t(h.role)}</strong><p>{h.organization_name} · {t(h.status)}</p>
     {h.unit_name&&<p>{t('UNIT_LEADER')}: {h.unit_name}</p>}
@@ -106,6 +109,7 @@ export function CommandSection({locale,account,org,incident,disabled,read,onActi
     <p>{new Date(h.valid_from).toLocaleString(locale)} — {h.ended_at?new Date(h.ended_at).toLocaleString(locale):'—'}</p>
     <p>{t('assignedBy')}: {h.assigned_by??'—'}</p><p>{h.reason==='COMMAND_HIERARCHY_REBASED'?t('hierarchyRebased'):h.reason==='COMMAND_TRANSFER'?t('transfer_command'):h.reason}</p></article>)}
    <div className="actions">{page&&<button onClick={()=>setPage(null)}>{t('first')}</button>}{view.history.length===50&&<button onClick={()=>{const last=view.history[view.history.length-1];setPage({id:last.id,created:last.created_at});}}>{t('more')}</button>}</div>
+   </WorkspaceSection></WorkspaceSlot>
   </>}
  </section>;
 }
