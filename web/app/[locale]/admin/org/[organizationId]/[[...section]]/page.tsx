@@ -15,7 +15,7 @@ import { Exchange } from '@/features/exchange/Exchange';
 export const dynamic = 'force-dynamic';
 export default async function OrganizationAdmin({ params, searchParams }: {
   params: Promise<{ locale: string; organizationId: string; section?: string[] }>;
-  searchParams: Promise<{plan?:string}>;
+  searchParams: Promise<{plan?:string;hydrant?:string}>;
 }) {
   const { locale, organizationId, section: segments } = await params;
   if (!isLocale(locale) || !/^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(organizationId) || (segments?.length ?? 0) > 1) notFound();
@@ -24,6 +24,7 @@ export default async function OrganizationAdmin({ params, searchParams }: {
   const t = dictionary(locale);
   const query = await searchParams;
   const planId = typeof query.plan === 'string' && /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(query.plan) ? query.plan : undefined;
+  const hydrantId = typeof query.hydrant === 'string' && /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(query.hydrant) ? query.hydrant : undefined;
   const { context, user } = await adminContext(locale, organizationId.toLowerCase());
   if (!context) return <main><h1>{t.adminShell}</h1><p role="alert">{t.adminUnavailable}</p><SessionControls locale={locale}/></main>;
   const organization = context.organizations.find(org => org.id === organizationId.toLowerCase() && org.id === context.selected);
@@ -51,7 +52,7 @@ export default async function OrganizationAdmin({ params, searchParams }: {
     {section === 'teams' && <Teams key={organization.id} locale={locale} root={organization.id}/>}
     {section === 'plans' && <Plans key={organization.id} locale={locale} root={organization.id} initialId={planId}/>}
     {section === 'dashboard' && <PlanningDashboard key={organization.id} locale={locale} root={organization.id}/>}
-    {['dashboard','hydrants','map','inspections'].includes(section) && <AdminHydrants key={organization.id+':'+section} locale={locale} root={organization.id} section={section}/>}
+    {['dashboard','hydrants','map','inspections'].includes(section) && <AdminHydrants key={organization.id+':'+section+':'+(hydrantId??'')} locale={locale} root={organization.id} section={section} initialId={section==='hydrants'?hydrantId:undefined}/>}
     <p><Link href={'/' + locale + '/requests'}>{t.currentRequests}</Link></p>
   </AdminShell>;
 }

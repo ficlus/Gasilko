@@ -1,15 +1,18 @@
 'use client';
 import {useEffect,useRef,useState,type FormEvent} from 'react';
+import {incidentText} from '../../lib/incidents/messages';
 import type {Locale} from '../../lib/i18n';
 import {operationalText} from '../../lib/operational/messages';
 import type {Resources,ResourceCandidate,Unit,Allocation} from '../../lib/operational/model';
 import type {Mutation,InboxItem} from '../../lib/incidents/model';
 import type {CopFeedback} from '../../lib/incidents/cop';
 import type {CommandAction} from './CommandSection';
+import {useWorkspace,WorkspaceSlot,WorkspaceSection} from './workspace';
 
 type Read=<T>(name:string,args:Record<string,unknown>,signal?:AbortSignal,account?:string)=>Promise<T>;
 type Props={locale:Locale;account:string;org:string;incidentId:string;refresh:number;feedback:CopFeedback;disabled:boolean;read:Read;onAction:CommandAction};
 export function IncidentResources({locale,account,org,incidentId,refresh,feedback,disabled,read,onAction}:Props){
+ const workspace=useWorkspace();
  const t=operationalText(locale);
  const [view,setView]=useState<Resources|null>(null),[error,setError]=useState(''),[page,setPage]=useState(0),[reload,setReload]=useState(0);
  const [owner,setOwner]=useState(''),[mode,setMode]=useState<'UNIT'|'RESOURCE'>('UNIT'),[candidate,setCandidate]=useState<ResourceCandidate|null>(null);
@@ -42,15 +45,20 @@ export function IncidentResources({locale,account,org,incidentId,refresh,feedbac
   else ask('allocate_resource',{id,resource_id:candidate.id,quantity,unit_assignment_id:unit||null},[candidate.name,quantity,t(candidate.unit_of_measure_code??''),view?.units.find(u=>u.id===unit)?.callsign??t('none')].join(' · '));
  }
  if(blocked)return <section className="admin-card"><p role="alert">{t(error||'NOT_AUTHORIZED')}</p></section>;
- return <section className="admin-card"><h2>{t('resourcesTitle')}</h2><p>{t('bounded')}</p>
+ return <WorkspaceSlot name="operational"><WorkspaceSection title={t('resourcesTitle')} open><section className="admin-card"><h2>{t('resourcesTitle')}</h2><p>{t('bounded')}</p>
   {error&&<p role="alert">{t(error)}</p>}{!view&&<p role="status">{t('loading')}</p>}
   {stale&&<aside role="alert"><p>{t('stale')}</p><button disabled={disabled||!view} onClick={()=>{setStale(false);setCandidate(null);setNewId('');}}>{t('reedit')}</button></aside>}
   {view&&<>
    <p>{t('version')}: {view.version}</p><button disabled={disabled} onClick={()=>setReload(v=>v+1)}>{t('refresh')}</button>
    <h3>{t('UNIT')}</h3>{!view.units.length&&<p>{t('empty')}</p>}
-   {view.units.map(u=><UnitCard key={u.id+':'+u.version} unit={u} view={view} locale={locale} locked={locked} account={account} scope={scope} read={read} ask={ask} onError={fail}/>)}
+   {workspace&&view.units.map(u=><button className="web-row" key={u.id} onClick={()=>workspace.select({kind:'INCIDENT_UNIT',id:u.id})}>
+    <strong>{u.callsign} · {u.name}</strong><span>{t(u.status)} · {u.sector_name??t('none')}</span>
+    <small>{t('crew')}: {u.crew.length} · {t('UNIT_LEADER')}: {u.leader?.name??t('none')}</small></button>)}
+   {view.units.filter(u=>!workspace||(workspace.selected?.kind==='INCIDENT_UNIT'&&workspace.selected.id===u.id)).map(u=><WorkspaceSlot name="selectedPane" key={u.id}><div><p>{incidentText(locale)('workspaceNoPosition')}</p><UnitCard key={u.id+':'+u.version} unit={u} view={view} locale={locale} locked={locked} account={account} scope={scope} read={read} ask={ask} onError={fail}/></div></WorkspaceSlot>)}
    <h3>{t('RESOURCE')}</h3>{!view.allocations.length&&<p>{t('empty')}</p>}
-   {view.allocations.map(a=><AllocationCard key={a.id} allocation={a} locale={locale} locked={locked} ask={ask}/>)}
+   {workspace&&view.allocations.map(a=><button className="web-row" key={a.id} onClick={()=>workspace.select({kind:'ALLOCATION',id:a.id})}>
+    <strong>{a.name}</strong><span>{a.quantity} {t(a.unit_of_measure_code)} · {t(a.status)}</span><small>{a.unit_name??a.organization_name}</small></button>)}
+   {view.allocations.filter(a=>!workspace||(workspace.selected?.kind==='ALLOCATION'&&workspace.selected.id===a.id)).map(a=><WorkspaceSlot name="selectedPane" key={a.id}><AllocationCard key={a.id} allocation={a} locale={locale} locked={locked} ask={ask}/></WorkspaceSlot>)}
    <div className="actions"><button disabled={!page||disabled} onClick={()=>setPage(v=>v-1)}>{t('previous')}</button><span>{t('history')} · {page+1}</span><button disabled={!view.history_more||disabled} onClick={()=>setPage(v=>v+1)}>{t('next')}</button></div>
    {!!view.organizations.length&&<fieldset disabled={locked}><legend>{t('deploy_unit')} / {t('allocate_resource')}</legend>
     <label>{t('organization')}<select value={owner} onChange={e=>{setOwner(e.target.value);setCandidate(null);setNewId('');setUnit('');}}>{view.organizations.map(o=><option key={o.id} value={o.id}>{o.name}</option>)}</select></label>
@@ -67,7 +75,7 @@ export function IncidentResources({locale,account,org,incidentId,refresh,feedbac
     </>}
    </fieldset>}
   </>}
- </section>;
+ </section></WorkspaceSection></WorkspaceSlot>;
 }
 function CandidateSearch({locale,name,args,account,read,onChoose,onError}:{locale:Locale;name:string;args:Record<string,unknown>;account:string;read:Read;onChoose:(c:ResourceCandidate)=>void;onError:(e:unknown)=>void}){
  const t=operationalText(locale),[query,setQuery]=useState(''),[rows,setRows]=useState<ResourceCandidate[]>([]),[busy,setBusy]=useState(false),controller=useRef<AbortController|null>(null);
