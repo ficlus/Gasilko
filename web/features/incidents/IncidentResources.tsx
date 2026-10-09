@@ -7,11 +7,12 @@ import type {Resources,ResourceCandidate,Unit,Allocation} from '../../lib/operat
 import type {Mutation,InboxItem} from '../../lib/incidents/model';
 import type {CopFeedback} from '../../lib/incidents/cop';
 import type {CommandAction} from './CommandSection';
+import {TeamCrewTemplate,type CrewOutcomes} from './TeamCrewTemplate';
 import {useWorkspace,WorkspaceSlot,WorkspaceSection} from './workspace';
 
 type Read=<T>(name:string,args:Record<string,unknown>,signal?:AbortSignal,account?:string)=>Promise<T>;
-type Props={locale:Locale;account:string;org:string;incidentId:string;refresh:number;feedback:CopFeedback;disabled:boolean;read:Read;onAction:CommandAction};
-export function IncidentResources({locale,account,org,incidentId,refresh,feedback,disabled,read,onAction}:Props){
+type Props={crewOutcomes:CrewOutcomes;locale:Locale;account:string;org:string;incidentId:string;refresh:number;feedback:CopFeedback;disabled:boolean;read:Read;onAction:CommandAction};
+export function IncidentResources({crewOutcomes,locale,account,org,incidentId,refresh,feedback,disabled,read,onAction}:Props){
  const workspace=useWorkspace();
  const t=operationalText(locale);
  const [view,setView]=useState<Resources|null>(null),[error,setError]=useState(''),[page,setPage]=useState(0),[reload,setReload]=useState(0);
@@ -33,6 +34,13 @@ export function IncidentResources({locale,account,org,incidentId,refresh,feedbac
    .catch(e=>{if(!ac.signal.aborted){setView(null);fail(e);}});
   return()=>ac.abort();
  },[account,org,incidentId,refresh,page,reload,read]);
+ useEffect(()=>{
+  const target=workspace?.selected;if(!target||!['INCIDENT_UNIT','ALLOCATION'].includes(target.kind)||blockedRef.current)return;
+  const ac=new AbortController();
+  void read<number>('incident_resource_selection_page',{p_incident_id:incidentId,p_acting_organization_id:org,p_kind:target.kind==='INCIDENT_UNIT'?'UNIT':'ALLOCATION',p_id:target.id},ac.signal,account)
+   .then(value=>{if(!ac.signal.aborted&&!blockedRef.current)setPage(value);}).catch(e=>{if(!ac.signal.aborted)fail(e);});
+  return()=>ac.abort();
+ },[workspace?.selected?.kind,workspace?.selected?.id,account,org,incidentId,read]);
  const locked=disabled||stale||blocked||!view;
  function ask(action:Mutation,payload:Record<string,unknown>,description:string){
   if(!view||locked)return;
@@ -49,12 +57,13 @@ export function IncidentResources({locale,account,org,incidentId,refresh,feedbac
   {error&&<p role="alert">{t(error)}</p>}{!view&&<p role="status">{t('loading')}</p>}
   {stale&&<aside role="alert"><p>{t('stale')}</p><button disabled={disabled||!view} onClick={()=>{setStale(false);setCandidate(null);setNewId('');}}>{t('reedit')}</button></aside>}
   {view&&<>
+   {workspace?.selected&&((workspace.selected.kind==='INCIDENT_UNIT'&&!view.units.some(u=>u.id===workspace.selected?.id))||(workspace.selected.kind==='ALLOCATION'&&!view.allocations.some(a=>a.id===workspace.selected?.id)))&&<WorkspaceSlot name="selectedPane"><p>{incidentText(locale)('copMissing')}</p></WorkspaceSlot>}
    <p>{t('version')}: {view.version}</p><button disabled={disabled} onClick={()=>setReload(v=>v+1)}>{t('refresh')}</button>
    <h3>{t('UNIT')}</h3>{!view.units.length&&<p>{t('empty')}</p>}
    {workspace&&view.units.map(u=><button className="web-row" key={u.id} onClick={()=>workspace.select({kind:'INCIDENT_UNIT',id:u.id})}>
     <strong>{u.callsign} · {u.name}</strong><span>{t(u.status)} · {u.sector_name??t('none')}</span>
     <small>{t('crew')}: {u.crew.length} · {t('UNIT_LEADER')}: {u.leader?.name??t('none')}</small></button>)}
-   {view.units.filter(u=>!workspace||(workspace.selected?.kind==='INCIDENT_UNIT'&&workspace.selected.id===u.id)).map(u=><WorkspaceSlot name="selectedPane" key={u.id}><div><p>{incidentText(locale)('workspaceNoPosition')}</p><UnitCard key={u.id+':'+u.version} unit={u} view={view} locale={locale} locked={locked} account={account} scope={scope} read={read} ask={ask} onError={fail}/></div></WorkspaceSlot>)}
+   {view.units.filter(u=>!workspace||(workspace.selected?.kind==='INCIDENT_UNIT'&&workspace.selected.id===u.id)).map(u=><WorkspaceSlot name="selectedPane" key={u.id}><div><p>{incidentText(locale)('workspaceNoPosition')}</p><UnitCard key={u.id+':'+u.version} unit={u} view={view} locale={locale} locked={locked} account={account} scope={scope} read={read} ask={ask} onError={fail}/><TeamCrewTemplate key={u.id} locale={locale} account={account} org={org} incidentId={incidentId} unit={u} locked={locked} read={read} ask={ask} outcomes={crewOutcomes}/></div></WorkspaceSlot>)}
    <h3>{t('RESOURCE')}</h3>{!view.allocations.length&&<p>{t('empty')}</p>}
    {workspace&&view.allocations.map(a=><button className="web-row" key={a.id} onClick={()=>workspace.select({kind:'ALLOCATION',id:a.id})}>
     <strong>{a.name}</strong><span>{a.quantity} {t(a.unit_of_measure_code)} · {t(a.status)}</span><small>{a.unit_name??a.organization_name}</small></button>)}

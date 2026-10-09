@@ -1,4 +1,5 @@
 'use client';
+import {HydrantOperationalContext} from './HydrantOperationalContext';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
@@ -80,6 +81,7 @@ export function RegistryView({ locale, controller, switchOrg }: { locale: Locale
     </>}
     {current && (controller.mode === 'detail' || s.conflict) && <>
       <h2>{s.conflict ? t.hLatest : t.hDetails}: {current.code ?? t.hMissing}</h2><DetailFields locale={locale} h={current} types={s.types} t={t}/>
+      {controller.mode === 'detail' && !blocked && !s.error && <HydrantOperationalContext key={current.id} locale={locale} hydrant={current}/>}
       {controller.mode === 'detail' && <div className="registry-detail-actions">
         {writable && (current.active || manager) && <StatusForm key={`${current.id}/${current.version}/${s.conflict}`} current={current.status} t={t} blocked={blocked} save={status => void controller.status(status)}/>}
         {manager && writable && <div className="actions">{!blocked && <Link href={`${root}/${current.id}/edit${query}`}>{t.hEdit}</Link>}<button disabled={blocked} onClick={() => void controller.requestActive()}>{current.active ? t.hDeactivate : t.hReactivate}</button></div>}

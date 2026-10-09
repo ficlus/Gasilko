@@ -13,7 +13,7 @@ export type Incident = IncidentRow & {summary:string;incident_type_id:string;lat
  actions:Record<string,boolean>;participants:Participant[];
  nomination:{id:string;user_id:string;name:string|null;status:string;expires_at:string}|null;
  commander:{id:string;name:string|null;user_id:string;status:string;valid:boolean;ended_at:string|null}|null};
-export type Timeline = {events:{id:string;sequence:string|number;event_code:string;recorded_at:string;actor_name:string|null;actor_organization_name:string;subject_name:string|null;data:{reason?:string|null;user_id?:string;organization_id?:string}}[];high_watermark:string|number};
+export type Timeline = {events:{id:string;sequence:string|number;event_code:string;recorded_at:string;actor_name:string|null;actor_organization_name:string;subject_name:string|null;data:{reason?:string|null;user_id?:string;organization_id?:string;unit_assignment_id?:string;resource_allocation_id?:string}}[];high_watermark:string|number};
 export type Candidate = {id:string;name:string};
 export type Core = {title:string;summary:string;incident_type_id:string;severity:string;priority:string;latitude:string;longitude:string;address:string;unknown_location_reason:string};
 export type Receipt = {incident_id:string;operation_id:string;version:string;revision:string;timeline_sequence:string};

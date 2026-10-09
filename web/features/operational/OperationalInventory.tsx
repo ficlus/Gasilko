@@ -1,5 +1,6 @@
 'use client';
 import {useEffect,useRef,useState,type FormEvent} from 'react';
+import type {EntityRef} from '../../lib/operational/entity';
 import {useRouter} from 'next/navigation';
 import type {Locale} from '../../lib/i18n';
 import {browserClient} from '../../lib/supabase/browser';
@@ -14,9 +15,9 @@ type Pending={kind:Kind;p_operation:string;p_organization_id:string;p_payload:Re
 const fields:Record<Kind,string[]>={VEHICLE:['callsign','name','category_code','registration','availability','seats','water_litres'],UNIT:['callsign','name','unit_kind','vehicle_id'],RESOURCE:['name','resource_type_code','unit_of_measure_code','total_quantity']};
 const kinds=['VEHICLE_CREW','RESCUE_TEAM','DRONE_TEAM','MEDICAL_TEAM','OTHER'];
 const configs:Record<string,string>={category_code:'operational_vehicle_categories',resource_type_code:'operational_resource_types',unit_of_measure_code:'operational_units_of_measure'};
-export function OperationalInventory({locale,org}:{locale:Locale;org:string}){
+export function OperationalInventory({locale,org,initialEntity}:{locale:Locale;org:string;initialEntity?:EntityRef}){
  const t=operationalText(locale),router=useRouter();
- const [account,setAccount]=useState(''),[kind,setKind]=useState<Kind>('VEHICLE'),[query,setQuery]=useState(''),[page,setPage]=useState(0),[refresh,setRefresh]=useState(0);
+ const [account,setAccount]=useState(''),[kind,setKind]=useState<Kind>(initialEntity?.type==='OPERATIONAL_UNIT'?'UNIT':'VEHICLE'),[query,setQuery]=useState(''),[page,setPage]=useState(0),[refresh,setRefresh]=useState(0);
  const [data,setData]=useState<Page|null>(null),[error,setError]=useState(''),[draft,setDraft]=useState<Item|null>(null),[review,setReview]=useState(false),[busy,setBusy]=useState(false);
  const [pending,setPending]=useState<Pending|null>(null),[stale,setStale]=useState(false),[serverItem,setServerItem]=useState<Item|null>(null);
  const [vehicleQuery,setVehicleQuery]=useState(''),[vehicles,setVehicles]=useState<Item[]>([]);
@@ -37,6 +38,13 @@ export function OperationalInventory({locale,org}:{locale:Locale;org:string}){
    .then(r=>{if(!ac.signal.aborted&&!blocked.current)setVehicles(r.rows.filter(v=>v.active));}).catch(e=>{if(!ac.signal.aborted)failure(e);});
   return()=>ac.abort();
  },[account,org,kind,vehicleQuery,draft?.id]);
+ useEffect(()=>{
+  if(!account||blocked.current||!initialEntity||!['OPERATIONAL_UNIT','OPERATIONAL_VEHICLE'].includes(initialEntity.type)||kind!==(initialEntity.type==='OPERATIONAL_UNIT'?'UNIT':'VEHICLE'))return;
+  const ac=new AbortController();
+  void inventoryRpc<Item>('operational_inventory_item',{p_organization_id:org,p_kind:initialEntity.type==='OPERATIONAL_UNIT'?'UNIT':'VEHICLE',p_id:initialEntity.id},account,ac.signal)
+   .then(item=>{if(!ac.signal.aborted&&!blocked.current)begin(item);}).catch(e=>{if(!ac.signal.aborted)failure(e);});
+  return()=>ac.abort();
+ },[account,org,initialEntity?.id,kind]);
  function begin(item?:Item){setDraft(item?{...item,capabilities:[...(item.capabilities??[])]}:{id:crypto.randomUUID(),version:'0',active:true,name:'',callsign:'',category_code:'OTHER',registration:'',availability:'AVAILABLE',seats:0,water_litres:0,unit_kind:'OTHER',vehicle_id:null,resource_type_code:'OTHER',unit_of_measure_code:'EACH',total_quantity:'0',capabilities:[]});setStale(false);setServerItem(null);setReview(false);setError('');}
  async function send(){
   if(!draft||sending.current||blocked.current)return;sending.current=true;setBusy(true);setError('');

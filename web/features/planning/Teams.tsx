@@ -34,8 +34,8 @@ function TeamEditor({root,locale,scope,id,onBack}:{root:string;locale:Locale;sco
  <section className="admin-card"><h2>{t.pParticipation}</h2>{detail.plans.map(p=><p key={p.id}><Link href={`/${locale}/admin/org/${root}/plans?plan=${p.id}`}>{p.name}</Link> · {stateLabel(t,p.status)}</p>)}{!detail.plans.length&&<p>{t.hNoMatches}</p>}</section></>}
  </section>;
 }
-export function Teams({root,locale}:{root:string;locale:Locale}){
- const t=dictionary(locale),{scope,error,revision,reload}=usePlanningScope(root,locale),[rows,setRows]=useState<Team[]>([]),[page,setPage]=useState(0),[more,setMore]=useState(false),[search,setSearch]=useState(''),[state,setState]=useState(''),[owner,setOwner]=useState(''),[failure,setFailure]=useState(''),[editing,setEditing]=useState<string|null|undefined>(undefined);
+export function Teams({root,locale,initialId}:{root:string;locale:Locale;initialId?:string}){
+ const t=dictionary(locale),{scope,error,revision,reload}=usePlanningScope(root,locale),[rows,setRows]=useState<Team[]>([]),[page,setPage]=useState(0),[more,setMore]=useState(false),[search,setSearch]=useState(''),[state,setState]=useState(''),[owner,setOwner]=useState(''),[failure,setFailure]=useState(''),[editing,setEditing]=useState<string|null|undefined>(initialId);
  useEffect(()=>{if(!scope||editing!==undefined)return;let live=true;const timer=setTimeout(()=>{void planningRpc<Page<Team>>('web_teams',{root,page,search,state,owner:owner||null}).then(r=>{if(live){setRows(r.rows);setMore(r.more);setFailure('');}}).catch(e=>{if(live){setRows([]);setFailure(planningError(locale,e));}});},300);return()=>{live=false;clearTimeout(timer);};},[root,scope,page,search,state,owner,revision,editing,locale]);
  if(!scope)return <p role="status">{error||t.loading}</p>;
  if(editing!==undefined)return <TeamEditor key={editing??'new'} root={root} locale={locale} scope={scope} id={editing} onBack={()=>{setEditing(undefined);reload();}}/>;

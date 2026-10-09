@@ -1,3 +1,4 @@
+import {isUuid} from '../../../lib/operational/entity';
 import {NextResponse} from 'next/server';
 import {serverClient} from '../../../lib/supabase/server';
 import {loadAccount} from '../../../lib/auth/load';
@@ -13,7 +14,13 @@ export async function POST(request:Request){
  if(authError||!user||request.headers.get('X-Gasilko-Account')!==user.id)return NextResponse.json({error:'EXPIRED'},{status:403,headers});
  try{
   const text=await request.text();if(text.length>512)return NextResponse.json({error:'INVALID_QUERY'},{status:400,headers});
-  const {bounds}=JSON.parse(text) as {bounds:unknown};
+  const {bounds,id}=JSON.parse(text) as {bounds:unknown;id:unknown};
+  if(id!==undefined){
+   if(!isUuid(id))return NextResponse.json({error:'INVALID_QUERY'},{status:400,headers});
+   const {data,error}=await client.from('hydrants').select('id,organization_id,code,status,latitude,longitude,address,location_description,organization:organizations(name),type:hydrant_types(code,name,names,organization_id)').eq('id',id).maybeSingle().abortSignal(request.signal);
+   if(error)return NextResponse.json({error:'UNAVAILABLE'},{status:503,headers});
+   return NextResponse.json({hydrant:data},{headers});
+  }
   if(!Array.isArray(bounds)||bounds.length!==4||!bounds.every(n=>typeof n==='number'&&Number.isFinite(n))
    ||bounds[0]<-180||bounds[2]>180||bounds[1]<-90||bounds[3]>90||bounds[0]>bounds[2]||bounds[1]>bounds[3])
    return NextResponse.json({error:'INVALID_QUERY'},{status:400,headers});

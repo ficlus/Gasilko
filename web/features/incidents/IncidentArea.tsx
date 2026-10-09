@@ -1,6 +1,7 @@
 'use client';
 import {IncidentLayout,WorkspaceSection} from './workspace';
 import {IncidentTimeline} from './IncidentTimeline';
+import type {CrewOutcomes} from './TeamCrewTemplate';
 import {IncidentResources} from './IncidentResources';
 import {resourceErrors,resourceMutations} from '../../lib/operational/model';
 import Link from 'next/link';
@@ -33,6 +34,7 @@ export function IncidentArea({locale,account,destination,initialOrg}:{locale:Loc
  const [sessionValid,setSessionValid]=useState(true);
  const [commandInbox,setCommandInbox]=useState<CommandRequest[]>([]);
  const [copFeedback,setCopFeedback]=useState<CopFeedback>({sequence:0,kind:'saved'});
+ const [crewOutcomes,setCrewOutcomes]=useState<CrewOutcomes>({});
  const [resourceFeedback,setResourceFeedback]=useState<CopFeedback>({sequence:0,kind:'saved'});
  const alive=useRef(true),sending=useRef(false),coreLoaded=useRef(false);
  const isNew=destination==='new',isList=!destination;
@@ -89,6 +91,7 @@ export function IncidentArea({locale,account,destination,initialOrg}:{locale:Loc
 
  async function send(request:RequestState) {
   if(sending.current)return;sending.current=true;setBusy(true);setError('');setNotice('');setPending(request);
+  if(request.action==='add_crew_member'){const payload=request.args.p_payload as {user_id:string;unit_assignment_id:string};setCrewOutcomes(v=>({...v,[payload.unit_assignment_id+':'+payload.user_id]:{state:'pending'}}));}
   try {
    const receipt=await rpc<Receipt>(mutationNames[request.action],request.args,undefined,account);
    try{sessionStorage.removeItem(request.storageKey);}catch{/* Stable in-memory request still covers this session. */}
@@ -96,10 +99,12 @@ export function IncidentArea({locale,account,destination,initialOrg}:{locale:Loc
    setPending(null);setConfirmation(null);setReason('');setNotice('saved');setEditing(false);
    if(copMutations.includes(request.action))setCopFeedback(v=>({sequence:v.sequence+1,kind:'saved'}));
    if((resourceMutations as readonly string[]).includes(request.action))setResourceFeedback(v=>({sequence:v.sequence+1,kind:'saved'}));
+   if(request.action==='add_crew_member'){const payload=request.args.p_payload as {user_id:string;unit_assignment_id:string};const person=payload.unit_assignment_id+':'+payload.user_id;setCrewOutcomes(v=>({...v,[person]:{state:'saved'}}));}
    if(request.action==='create')router.push(url(receipt.incident_id,request.args.p_acting_organization_id as string));
    else {setRefresh(n=>n+1);}
   } catch(e) {
    if(!alive.current)return;setError(safeError(e));
+   if(request.action==='add_crew_member'){const payload=request.args.p_payload as {user_id:string;unit_assignment_id:string};const person=payload.unit_assignment_id+':'+payload.user_id;setCrewOutcomes(v=>({...v,[person]:{state:e instanceof IncidentError&&e.message!=='SERVER'?'failed':'pending',error:safeError(e)}}));}
    if(copMutations.includes(request.action)&&e instanceof IncidentError&&e.message==='STALE_VERSION')setCopFeedback(v=>({sequence:v.sequence+1,kind:'stale'}));
    if((resourceMutations as readonly string[]).includes(request.action)&&e instanceof IncidentError&&e.message==='STALE_VERSION')setResourceFeedback(v=>({sequence:v.sequence+1,kind:'stale'}));
    if(e instanceof IncidentError&&['NOT_AUTHORIZED','EXPIRED'].includes(e.message)){setCopFeedback(v=>({sequence:v.sequence+1,kind:'blocked'}));setResourceFeedback(v=>({sequence:v.sequence+1,kind:'blocked'}));}
@@ -204,7 +209,7 @@ export function IncidentArea({locale,account,destination,initialOrg}:{locale:Loc
    </>}
    secondary={<IncidentTimeline locale={locale} account={account} org={org} incident={detail.id} revision={refresh} read={rpc}/>}>
    <IncidentCop key={`${account}/${org}/${detail.id}`} locale={locale} account={account} org={org} incidentId={detail.id} refresh={refresh} feedback={copFeedback} disabled={loading||busy||!!pending} read={rpc} onAction={ask}/>
-   <IncidentResources key={`${account}/${org}/${detail.id}`} locale={locale} account={account} org={org} incidentId={detail.id} refresh={refresh} feedback={resourceFeedback} disabled={loading||busy||!!pending} read={rpc} onAction={ask}/>
+   <IncidentResources crewOutcomes={crewOutcomes} key={`${account}/${org}/${detail.id}`} locale={locale} account={account} org={org} incidentId={detail.id} refresh={refresh} feedback={resourceFeedback} disabled={loading||busy||!!pending} read={rpc} onAction={ask}/>
   </IncidentLayout>}
   {confirmation&&<ConfirmationDialog title={t(confirmation.action)} text={t('confirmation')} busy={busy||!!pending} onDismiss={()=>setConfirmation(null)}>
    {confirmation.description&&<p>{confirmation.description}</p>}

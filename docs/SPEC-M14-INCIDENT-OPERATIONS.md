@@ -1996,6 +1996,165 @@ No tests added/run, build, lint, typecheck, CI, browser automation, deployment,
 migration application, Android build or Oracle/OSRM operations were performed.
 Source review only; compilation and runtime acceptance remain unverified.
 
+## M14.4.2 implemented Cross-Module Operational Integration
+
+### Canonical navigation and location intent
+
+EntityRef is a presentation reference: strict supported type, canonical UUID and
+optional validated organization/incident context. entityHref, entityLabel and
+parseEntityRef centralize links for hydrants, plans, incidents, sectors, map
+objects, deployed units, allocations, inventory units/vehicles, teams and
+organizations. A URL carries intent only. It cannot grant domain read or write
+access. No relationship table or duplicate source entity is introduced.
+
+ACTIVE/STABILIZED workspace selection can be addressed with
+`selected=HYDRANT:<uuid>`, `INCIDENT_SECTOR:<uuid>`,
+`INCIDENT_MAP_OBJECT:<uuid>`, `INCIDENT_UNIT:<uuid>` or
+`ALLOCATION:<uuid>`. Optional org selects the existing acting context.
+Normal selection uses history replacement, with query/history changes reflected
+in the current workspace. Typed IDs resolve against authorized DTOs; an absent
+or inaccessible selection exposes no alternate existence result. Existing
+account/org/incident remounts clear incompatible UI state. Hydrants outside the
+viewport use an exact one-record read under the registry's own RLS, never incident
+authority. Sector/object/hydrant selection fits only authorized geometry.
+
+OperationalTarget V1 supports HYDRANT, INCIDENT_MAP_OBJECT, INCIDENT_SECTOR and
+explicit COORDINATE. Its pure resolver consumes already-authorized, bounded DTOs
+and finite WGS84 [longitude, latitude] values. Missing sector geometry stays
+missing. A unit is not a spatial target. Show on map is not Navigate:
+COMMAND INTENT != EXECUTION PLAN != TELEMETRY.
+
+### Hydrant and planning integration
+
+Ordinary and administrative hydrant details have a shared lazy operational
+context panel. Show on map uses OperationalMapCanvas and the selected canonical
+hydrant; missing coordinates are explained. Plan and incident references load
+independently only while the panel is open. Each source domain authorizes itself,
+in addition to hydrant READ. Incident candidates are ACTIVE/STABILIZED and require
+the original MANAGE_COP capability in a currently valid acting organization.
+The user explicitly chooses an incident, then chooses the existing link purpose
+and confirms through incident_link_hydrant. Version, operation UUID, receipt,
+audit and ambiguous retry handling remain owned by IncidentArea.
+
+Editable DRAFT/PLANNED plan candidates require the current exact-organization
+management helper and the same hydrant organization. Already-included hydrants
+are indicated. Add to plan opens the existing PlanDetail/PlanEditor, preselects
+one authorized hydrant, and requires the existing review/save. The original
+web_planning_write SAVE owns selection validity, version, idempotency and route
+invalidation. No direct item write, automatic activation, assignment or routing
+is added. Canonical plan links have a small caller-RLS read destination for
+ordinary readers, with paged stops and the existing management entry where
+authorized; the admin shell's permission boundary is not widened.
+
+Plan detail background hydrants reuse web_hydrants viewport scope. Original plan
+stops win UUID deduplication and retain original status/progress styling; smaller
+background points and a text legend identify context. Route fit ignores background
+points. Selecting background allows details and, in an editable authorized plan,
+the original editor/review flow. Editor selection remains visible outside the
+viewport without copying source hydrants. Existing route geometry, providers,
+lifecycle, assignments and execution behavior are unchanged. No broad map rewrite.
+
+### Team snapshot to crew and audit navigation
+
+The selected incident unit offers an optional team template. Team READ and the
+original incident unit CREW authority are intersected. Active teams and current
+members are paged; the preview reports current candidate eligibility without
+replacing commit-time checks. The user confirms each person separately through
+the existing add_crew_member envelope, with a stable relationship UUID and
+RESPONDER descriptive role. There is no bulk command, new user/membership,
+UNIT_LEADER assignment or ongoing team/crew synchronization.
+
+The parent incident mutation pipeline continues to freeze operation UUID,
+expected version and payload for ambiguous retries. UI outcomes are scoped to
+unit/person; one member's failure does not mark siblings successful. Successful
+server acknowledgements and refreshed crew DTOs determine joined state. An
+explicit preview refresh can start a new snapshot only while no ambiguous
+operation is locked. Later team edits have no effect on incident crew records.
+
+AuditEntityLink maps whitelisted entity_type/entity_id and existing structured
+resource-event unit_assignment_id/resource_allocation_id fields. It never parses
+free-text descriptions, alters audit evidence or treats a link as authorization.
+Incident timeline uses the same adapter. Destinations reauthorize independently.
+
+### Read boundaries and database delivery
+
+Forward migration:
+`supabase/migrations/20261008150000_operational_integration_reads.sql`.
+
+It adds three bounded read projections: hydrant_plan_context,
+hydrant_incident_context and incident_team_template, plus
+incident_resource_selection_page, which finds the existing history page for a
+deep-linked unit/allocation without replacing the incident_resources reader. Existing readers do not
+provide bounded ordinary-reader reverse references, capability-filtered incident
+candidates or a bounded team snapshot intersected with crew authority. These
+adapters reuse private.incident_hydrant_readable, existing plan/team SELECT scope,
+private.can_manage_organization, private.can_read_incident,
+private.incident_acting_member, private.has_incident_capability and
+private.can_manage_incident_unit. Empty search_path and explicit authenticated
+execute grants are used. There are no new tables, policies, write RPCs, source
+ownership rules, service credentials or historical migration edits.
+
+The existing same-origin/account-bound/no-store hydrant-context endpoint adds
+an exact UUID read, preserving caller RLS and neutral missing results. The
+incident API allowlist adds only team and selection-page reads. Read-only plan destinations also
+use caller RLS, including joined hydrants. No transitive access: hydrant access
+is not incident command, incident participation is not registry access, inventory
+management is not incident authority, and team membership is not crew authority.
+
+Bounds: reverse references and candidates each return 25 plus an overflow flag
+(26-row query); template pages return 30 plus a flag (31-row query); ordinary plan
+links page 50 stops (51-row query). Plan maps retain the existing web_hydrants
+viewport cap of 2,000 and 300 ms debounce; incident context retains the 500 cap
+and existing debounce. Exact hydrant targets read at most one row. No per-marker
+reverse-reference reads, new polling, subscriptions or all-registry fetches.
+Templates and cross-domain panels load lazily; aborted/obsolete results are ignored.
+
+### Delivery limitations and deferred work
+
+Source review only; compilation, SQL execution and runtime acceptance are
+unverified. The forward migration must be reviewed/applied separately before
+using its read projections. This PR does not apply it. Historical resource selections locate their page under incident authorization,
+then reuse the original bounded resource/history DTO and action flags.
+Crew joins deliberately require per-person confirmation, not one bulk action.
+
+Deferred: Tasks/commands, Action Definitions/tactical engines, multi-select/lasso/box/targeting, GPS/telemetry, navigation sessions, route computation/preview/ETA/rerouting/constraints, driver guidance, water shuttle/convoy, realtime/chat/attachments, dispatch/turnout/mobilization, Android Incident Mode, Firebase/SMTP/QR/CAD/112, reports/drone features, NAV3, Oracle/OSRM/routing capacity, M11–M13/FIX work, Dashboard Action Center/global incident banner/navigation regrouping, Account/Inspections/Exchange redesign and global search.
+
+No tests added/run, build, lint, typecheck, CI, browser automation, migrations
+applied, deployment, Android build or Oracle changes.
+
+### M14.4.2 manual acceptance checklist (not executed)
+
+- [ ] A. An ordinary authorized hydrant user can open Hydrant detail.
+- [ ] B. Show on map highlights the same canonical hydrant UUID and coordinates.
+- [ ] C. Hydrant detail exposes only readable plan references.
+- [ ] D. Hydrant detail exposes only readable incident references.
+- [ ] E. Incident participation alone does not expose unauthorized hydrants.
+- [ ] F. Hydrant READ alone does not expose unauthorized incident metadata.
+- [ ] G. An authorized commander chooses an incident and links through the original COP confirmation, with WATER_SUPPLY or REFERENCE.
+- [ ] H. Manipulated client state cannot bypass authoritative link authorization.
+- [ ] I. Add to plan enters the existing editable planning form and original SAVE.
+- [ ] J. An existing plan member is indicated and is not duplicated.
+- [ ] K. Plan/background markers are distinguishable, status remains visible and canonical IDs are deduplicated.
+- [ ] L. Plan background queries debounce, remain bounded and do not run for every marker.
+- [ ] M. Team-to-crew opens a current, paged preview and explicit per-person confirmation.
+- [ ] N. Ineligible/revoked members fail safely; failures identify the affected person.
+- [ ] O. Later team changes do not mutate an already-created incident crew.
+- [ ] P. No UNIT_LEADER authority is assigned by the template.
+- [ ] Q. Audit links navigate to the canonical entity/incident unit/allocation when authorized.
+- [ ] R. Audit links reveal no additional inaccessible destination data.
+- [ ] S. Incident deep links select sector, hydrant and unit; browser history and same-incident links update selection.
+- [ ] T. Invalid/inaccessible selections leave the workspace usable without an existence distinction.
+- [ ] U. Slovenian labels and keyboard controls.
+- [ ] V. German labels, narrow layouts and wrapping.
+- [ ] W. Account/org/incident changes and sign-out clear old context; late requests do not repopulate it.
+- [ ] X. Existing M14.4.1 COP drawing, linking, selection, map retry and attribution remain usable.
+- [ ] Y. Existing M14.4 unit, crew, resource, stale-version and ambiguous retry behavior remains intact.
+- [ ] Z. CLOSED/CANCELLED incidents remain read-only.
+- [ ] Additional: lost-response crew join retry preserves the same operation/payload; acknowledged siblings remain joined.
+- [ ] Additional: planning concurrency rejection does not lose the frozen selection; no automatic activation, assignment or rerouting.
+- [ ] Additional: no coordinates, map style failure, revoked hydrant read, empty candidates and capped result sets are understandable.
+
+
 ## Need Professional Help in Developing Your Architecture?
 
 Please contact me at [sammuti.com](https://sammuti.com) :)

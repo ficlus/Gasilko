@@ -1,3 +1,4 @@
+import {isUuid,parseEntityRef} from '@/lib/operational/entity';
 import {OperationalInventory} from '@/features/operational/OperationalInventory';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
@@ -15,7 +16,7 @@ import { Exchange } from '@/features/exchange/Exchange';
 export const dynamic = 'force-dynamic';
 export default async function OrganizationAdmin({ params, searchParams }: {
   params: Promise<{ locale: string; organizationId: string; section?: string[] }>;
-  searchParams: Promise<{plan?:string;hydrant?:string}>;
+  searchParams: Promise<{plan?:string;hydrant?:string;team?:string;entity?:string;addHydrant?:string}>;
 }) {
   const { locale, organizationId, section: segments } = await params;
   if (!isLocale(locale) || !/^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(organizationId) || (segments?.length ?? 0) > 1) notFound();
@@ -47,9 +48,9 @@ export default async function OrganizationAdmin({ params, searchParams }: {
     </> : null}
     {['users','organizations','types','audit'].includes(section)&&<Administration key={organization.id+':'+section} locale={locale} root={organization.id} section={section}/>}
     {section==='dashboard'&&<AdministrationDashboard key={organization.id} locale={locale} root={organization.id}/>}
-    {section === 'inventory' && <OperationalInventory key={organization.id} locale={locale} org={organization.id}/>}
+    {section === 'inventory' && <OperationalInventory key={organization.id+':'+(query.entity??'')} locale={locale} org={organization.id} initialEntity={parseEntityRef(query.entity,{organizationId:organization.id})??undefined}/>}
     {section === 'exchange' && <Exchange key={organization.id} locale={locale} root={organization.id}/>}
-    {section === 'teams' && <Teams key={organization.id} locale={locale} root={organization.id}/>}
+    {section === 'teams' && <Teams key={organization.id+':'+(query.team??'')} locale={locale} root={organization.id} initialId={isUuid(query.team)?query.team:undefined}/>}
     {section === 'plans' && <Plans key={organization.id} locale={locale} root={organization.id} initialId={planId}/>}
     {section === 'dashboard' && <PlanningDashboard key={organization.id} locale={locale} root={organization.id}/>}
     {['dashboard','hydrants','map','inspections'].includes(section) && <AdminHydrants key={organization.id+':'+section+':'+(hydrantId??'')} locale={locale} root={organization.id} section={section} initialId={section==='hydrants'?hydrantId:undefined}/>}

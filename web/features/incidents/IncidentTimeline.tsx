@@ -1,4 +1,5 @@
 'use client';
+import {AuditEntityLink} from '../operational/AuditEntityLink';
 import {useEffect,useState} from 'react';
 import type {Locale} from '../../lib/i18n';
 import {incidentText} from '../../lib/incidents/messages';
@@ -17,7 +18,7 @@ export function IncidentTimeline({locale,account,org,incident,revision,read}:{lo
   {error?<p role="alert">{t('unavailable')}</p>:!timeline?<p>{t('loading')}</p>:<>
    {!timeline.events.length&&<p>{t('noEvents')}</p>}
    <ol>{timeline.events.map(event=><li key={event.id}><strong>{t(event.event_code)}</strong>{event.subject_name&&<p>{event.subject_name}</p>}
-    <p>{new Date(event.recorded_at).toLocaleString(locale)} · {event.actor_name??'—'} · {event.actor_organization_name}</p>{event.data.reason&&<p>{event.data.reason}</p>}</li>)}</ol>
+    <p>{new Date(event.recorded_at).toLocaleString(locale)} · {event.actor_name??'—'} · {event.actor_organization_name}</p>{event.data.reason&&<p>{event.data.reason}</p>}<AuditEntityLink locale={locale} row={{entity_type:'incidents',entity_id:incident,organization_id:org,new_data:{event:event.data}}}/></li>)}</ol>
    <div className="actions">{String(cursor)!=='0'&&<button onClick={()=>setCursor(0)}>{t('older')}</button>}
     {timeline.events.length===30&&<button onClick={()=>setCursor(timeline.events[timeline.events.length-1].sequence)}>{t('later')}</button>}</div>
   </>}
