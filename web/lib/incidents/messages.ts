@@ -1,3 +1,4 @@
+import {taskText} from '../operational/taskMessages';
 import {operationalText} from '../operational/messages';
 import type {Locale} from '../i18n';
 const sl = {
@@ -370,4 +371,4 @@ const de:Record<keyof typeof sl,string> = {
  PARTICIPANT_RELEASED:'Beteiligung beendet',INCIDENT_ACTIVATED:'Einsatz aktiviert',INCIDENT_STABILIZED:'Einsatz stabilisiert',
  INCIDENT_REACTIVATED:'Einsatz erneut aktiviert',INCIDENT_CLOSED:'Einsatz abgeschlossen',INCIDENT_CANCELLED:'Entwurf storniert',
 };
-export function incidentText(locale:Locale) { const messages=locale==='de'?de:sl; return (key:string)=>messages[key as keyof typeof sl]??(operationalText(locale)(key)!==key?operationalText(locale)(key):messages.event); }
+export function incidentText(locale:Locale) { const messages=locale==='de'?de:sl; return (key:string)=>messages[key as keyof typeof sl]??(taskText(locale)(key)!==key?taskText(locale)(key):undefined)??(operationalText(locale)(key)!==key?operationalText(locale)(key):messages.event); }

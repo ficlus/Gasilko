@@ -1,4 +1,6 @@
 'use client';
+import {IncidentTasks} from './IncidentTasks';
+import {taskErrors,taskMutations} from '../../lib/operational/tasks';
 import {IncidentLayout,WorkspaceSection} from './workspace';
 import {IncidentTimeline} from './IncidentTimeline';
 import type {CrewOutcomes} from './TeamCrewTemplate';
@@ -35,6 +37,7 @@ export function IncidentArea({locale,account,destination,initialOrg}:{locale:Loc
  const [commandInbox,setCommandInbox]=useState<CommandRequest[]>([]);
  const [copFeedback,setCopFeedback]=useState<CopFeedback>({sequence:0,kind:'saved'});
  const [crewOutcomes,setCrewOutcomes]=useState<CrewOutcomes>({});
+ const [taskFeedback,setTaskFeedback]=useState<CopFeedback>({sequence:0,kind:'saved'});
  const [resourceFeedback,setResourceFeedback]=useState<CopFeedback>({sequence:0,kind:'saved'});
  const alive=useRef(true),sending=useRef(false),coreLoaded=useRef(false);
  const isNew=destination==='new',isList=!destination;
@@ -42,7 +45,7 @@ export function IncidentArea({locale,account,destination,initialOrg}:{locale:Loc
  const date=(value:string|null|undefined)=>value?new Date(value).toLocaleString(locale==='de'?'de-DE':'sl-SI'): '—';
  const safeError=(e:unknown)=>{
   const code=e instanceof IncidentError?e.message:'SERVER';
-  if(([...copErrors,...resourceErrors] as readonly string[]).includes(code))return code;
+  if(([...copErrors,...resourceErrors,...taskErrors] as readonly string[]).includes(code))return code;
   if(['INVALID_COMMAND_HIERARCHY','INVALID_COMMAND_ROLE','INVALID_COMMAND_CANDIDATE','TRANSFER_NOT_CURRENT','TRANSFER_EXPIRED','TRANSFER_ALREADY_PENDING','LEAD_TRANSFER_REQUIRES_CONSENT','COMMANDER_STILL_VALID','PARTICIPANT_HAS_ACTIVE_COMMAND'].includes(code))return code;
   return code==='STALE_VERSION'?'stale':code==='NOT_AUTHORIZED'?'noAccess':code==='EXPIRED'?'expired':code==='VALIDATION_FAILED'?'invalid':
    code==='OPERATION_REUSED'?'reused':['INVALID_TRANSITION','INVALID_COMMANDER','INVALID_PARTICIPANT','INCIDENT_TERMINAL','INVALID_STATE'].includes(code)?'rejected':'error';
@@ -70,7 +73,7 @@ export function IncidentArea({locale,account,destination,initialOrg}:{locale:Loc
    .then(value=>{if(!ac.signal.aborted)setCommandInbox(value);}).catch(e=>{if(!ac.signal.aborted)setError(safeError(e));});
   return()=>ac.abort();
  },[refresh,isList,account]);
- useEffect(()=>{setDetail(null);setConfirmation(null);coreLoaded.current=false;},[org]);
+ useEffect(()=>{setDetail(null);setConfirmation(null);setTaskFeedback({sequence:0,kind:'saved'});coreLoaded.current=false;},[org]);
  useEffect(()=>{
   if(!entry||!org)return;const ac=new AbortController();
   setError('');setLoading(true);setRows([]);
@@ -97,6 +100,7 @@ export function IncidentArea({locale,account,destination,initialOrg}:{locale:Loc
    try{sessionStorage.removeItem(request.storageKey);}catch{/* Stable in-memory request still covers this session. */}
    if(!alive.current)return;
    setPending(null);setConfirmation(null);setReason('');setNotice('saved');setEditing(false);
+   if((taskMutations as readonly string[]).includes(request.action))setTaskFeedback(v=>({sequence:v.sequence+1,kind:'saved'}));
    if(copMutations.includes(request.action))setCopFeedback(v=>({sequence:v.sequence+1,kind:'saved'}));
    if((resourceMutations as readonly string[]).includes(request.action))setResourceFeedback(v=>({sequence:v.sequence+1,kind:'saved'}));
    if(request.action==='add_crew_member'){const payload=request.args.p_payload as {user_id:string;unit_assignment_id:string};const person=payload.unit_assignment_id+':'+payload.user_id;setCrewOutcomes(v=>({...v,[person]:{state:'saved'}}));}
@@ -105,9 +109,10 @@ export function IncidentArea({locale,account,destination,initialOrg}:{locale:Loc
   } catch(e) {
    if(!alive.current)return;setError(safeError(e));
    if(request.action==='add_crew_member'){const payload=request.args.p_payload as {user_id:string;unit_assignment_id:string};const person=payload.unit_assignment_id+':'+payload.user_id;setCrewOutcomes(v=>({...v,[person]:{state:e instanceof IncidentError&&e.message!=='SERVER'?'failed':'pending',error:safeError(e)}}));}
+   if((taskMutations as readonly string[]).includes(request.action)&&e instanceof IncidentError&&['STALE_VERSION','INVALID_ACTION_DEFINITION'].includes(e.message))setTaskFeedback(v=>({sequence:v.sequence+1,kind:'stale'}));
    if(copMutations.includes(request.action)&&e instanceof IncidentError&&e.message==='STALE_VERSION')setCopFeedback(v=>({sequence:v.sequence+1,kind:'stale'}));
    if((resourceMutations as readonly string[]).includes(request.action)&&e instanceof IncidentError&&e.message==='STALE_VERSION')setResourceFeedback(v=>({sequence:v.sequence+1,kind:'stale'}));
-   if(e instanceof IncidentError&&['NOT_AUTHORIZED','EXPIRED'].includes(e.message)){setCopFeedback(v=>({sequence:v.sequence+1,kind:'blocked'}));setResourceFeedback(v=>({sequence:v.sequence+1,kind:'blocked'}));}
+   if(e instanceof IncidentError&&['NOT_AUTHORIZED','EXPIRED'].includes(e.message)){setTaskFeedback(v=>({sequence:v.sequence+1,kind:'blocked'}));setCopFeedback(v=>({sequence:v.sequence+1,kind:'blocked'}));setResourceFeedback(v=>({sequence:v.sequence+1,kind:'blocked'}));}
    // A domain rejection is final. A transport/server failure is ambiguous and
    // retains the exact operation/payload for retry, never silently rebased.
    if(e instanceof IncidentError&&e.message!=='SERVER'){
@@ -209,10 +214,11 @@ export function IncidentArea({locale,account,destination,initialOrg}:{locale:Loc
    </>}
    secondary={<IncidentTimeline locale={locale} account={account} org={org} incident={detail.id} revision={refresh} read={rpc}/>}>
    <IncidentCop key={`${account}/${org}/${detail.id}`} locale={locale} account={account} org={org} incidentId={detail.id} refresh={refresh} feedback={copFeedback} disabled={loading||busy||!!pending} read={rpc} onAction={ask}/>
+   <IncidentTasks key={`${account}/${org}/${detail.id}`} locale={locale} account={account} org={org} incidentId={detail.id} version={detail.version} operational={['ACTIVE','STABILIZED'].includes(detail.status)} refresh={refresh} feedback={taskFeedback} disabled={loading||busy||!!pending} read={rpc} onAction={ask}/>
    <IncidentResources crewOutcomes={crewOutcomes} key={`${account}/${org}/${detail.id}`} locale={locale} account={account} org={org} incidentId={detail.id} refresh={refresh} feedback={resourceFeedback} disabled={loading||busy||!!pending} read={rpc} onAction={ask}/>
   </IncidentLayout>}
   {confirmation&&<ConfirmationDialog title={t(confirmation.action)} text={t('confirmation')} busy={busy||!!pending} onDismiss={()=>setConfirmation(null)}>
-   {confirmation.description&&<p>{confirmation.description}</p>}
+   {confirmation.description&&<p className="incident-prose">{confirmation.description}</p>}
    {confirmation.action==='recover_command'&&<p role="alert">{t('recoveryWarning')}</p>}
    <form onSubmit={e=>{e.preventDefault();void mutate(confirmation.action,{...confirmation.payload,...(reason?{reason}: {})},confirmation.incident,confirmation.version,confirmation.org);}}>
     {['reactivate','close','cancel','decline','consent_release','release','transfer_command','recover_command','end_role','decline_command','cancel_command'].includes(confirmation.action)&&<label>{t('reason')}<textarea required maxLength={2000} value={reason} onChange={e=>setReason(e.target.value)}/></label>}

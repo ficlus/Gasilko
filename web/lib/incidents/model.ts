@@ -18,6 +18,7 @@ export type Candidate = {id:string;name:string};
 export type Core = {title:string;summary:string;incident_type_id:string;severity:string;priority:string;latitude:string;longitude:string;address:string;unknown_location_reason:string};
 export type Receipt = {incident_id:string;operation_id:string;version:string;revision:string;timeline_sequence:string};
 export const mutationNames = {
+ issue_task:'incident_issue_task',transition_task_assignment:'incident_transition_task_assignment',cancel_task:'incident_cancel_task',
  deploy_unit:'incident_deploy_unit',
  update_unit_status:'incident_update_unit_status',
  assign_unit_sector:'incident_assign_unit_sector',

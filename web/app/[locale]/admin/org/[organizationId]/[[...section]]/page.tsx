@@ -1,3 +1,4 @@
+import {ActionCatalog} from '@/features/operational/ActionCatalog';
 import {isUuid,parseEntityRef} from '@/lib/operational/entity';
 import {OperationalInventory} from '@/features/operational/OperationalInventory';
 import Link from 'next/link';
@@ -49,6 +50,7 @@ export default async function OrganizationAdmin({ params, searchParams }: {
     {['users','organizations','types','audit'].includes(section)&&<Administration key={organization.id+':'+section} locale={locale} root={organization.id} section={section}/>}
     {section==='dashboard'&&<AdministrationDashboard key={organization.id} locale={locale} root={organization.id}/>}
     {section === 'inventory' && <OperationalInventory key={organization.id+':'+(query.entity??'')} locale={locale} org={organization.id} initialEntity={parseEntityRef(query.entity,{organizationId:organization.id})??undefined}/>}
+    {section === 'inventory' && <ActionCatalog key={organization.id} locale={locale} org={organization.id}/>}
     {section === 'exchange' && <Exchange key={organization.id} locale={locale} root={organization.id}/>}
     {section === 'teams' && <Teams key={organization.id+':'+(query.team??'')} locale={locale} root={organization.id} initialId={isUuid(query.team)?query.team:undefined}/>}
     {section === 'plans' && <Plans key={organization.id} locale={locale} root={organization.id} initialId={planId}/>}

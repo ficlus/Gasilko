@@ -7,7 +7,7 @@ import type {Locale} from '../../lib/i18n';
 import {incidentText} from '../../lib/incidents/messages';
 
 // Identity references only; DTOs and permissions remain owned by their domain readers.
-export type SelectedEntity={kind:'INCIDENT_SECTOR'|'MAP_OBJECT'|'HYDRANT'|'INCIDENT_UNIT'|'ALLOCATION';id:string};
+export type SelectedEntity={kind:'INCIDENT_SECTOR'|'MAP_OBJECT'|'HYDRANT'|'INCIDENT_UNIT'|'TASK'|'ALLOCATION';id:string};
 export type ContextAction={id:string;label:string;enabled:boolean;disabledReason?:string;requiresConfirmation:boolean;execute:()=>void};
 // execute opens the existing domain confirmation when requiresConfirmation is true.
 export function ContextActions({actions}:{actions:ContextAction[]}){
@@ -31,7 +31,7 @@ export function IncidentWorkspace({locale,header,operations,secondary,children}:
   const url=new URL(window.location.href),incidentId=url.pathname.split('/').at(-1);
   const ref=parseEntityRef(url.searchParams.get('selected'),{incidentId,organizationId:url.searchParams.get('org')??undefined});
   const kind=ref?.type==='INCIDENT_MAP_OBJECT'?'MAP_OBJECT':ref?.type;
-  setSelected(current=>ref&&kind&&['INCIDENT_SECTOR','MAP_OBJECT','HYDRANT','INCIDENT_UNIT','ALLOCATION'].includes(kind)?{kind:kind as SelectedEntity['kind'],id:ref.id}:!url.searchParams.has('selected')&&current?.id==='primary'?current:null);
+  setSelected(current=>ref&&kind&&['INCIDENT_SECTOR','MAP_OBJECT','HYDRANT','INCIDENT_UNIT','TASK','ALLOCATION'].includes(kind)?{kind:kind as SelectedEntity['kind'],id:ref.id}:!url.searchParams.has('selected')&&current?.id==='primary'?current:null);
  }
  useEffect(()=>{fromUrl();window.addEventListener('popstate',fromUrl);return()=>window.removeEventListener('popstate',fromUrl);},[query.get('selected'),query.get('org')]);
  function select(entity:SelectedEntity|null){

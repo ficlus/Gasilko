@@ -185,3 +185,12 @@ button:disabled { opacity: .6; cursor: wait; }
  .workspace-map .web-map{height:55dvh;min-height:300px}
  .registry-main:has(.incident-workspace){padding-inline:.5rem}
 }
+
+/* M14.5A: command priority always includes text; color is supplementary. */
+.task-priority{display:inline-block;border:1px solid currentColor;border-radius:.4rem;padding:.2rem .45rem;background:#edf1f3;color:#263c45}
+.task-priority[data-priority=HIGH]{background:#fff2cc;color:#684600;border-width:2px}
+.task-priority[data-priority=CRITICAL]{background:#fce8e9;color:#8c1824;border-width:2px}
+.task-editor fieldset,.action-catalog fieldset{min-width:0;margin-block:.7rem}
+.task-editor label,.action-catalog label{margin-block:.45rem}
+.task-editor label:has(input[type=checkbox]),.action-catalog label:has(input[type=checkbox]){display:flex;align-items:center;gap:.6rem}
+.action-catalog input,.action-catalog select{min-width:0;max-width:100%;box-sizing:border-box}
