@@ -1,0 +1,1257 @@
+# Gasilko — M14.5B RTS Map Interaction
+
+Implement **M14.5B — RTS Map Interaction** in the existing Gasilko monorepo.
+
+Repository: `ficlus/Gasilko`
+
+Base on current `main` AFTER merged and verified **PR #60 — M14.5A Tasks + Configurable Action / Command Engine**.
+
+If M14.5A is not present in the checked-out branch, STOP and report. Do not recreate it.
+
+This is an **implementation-only** milestone.
+
+## 0. Efficient inspection and integration policy
+
+Inspect only the relevant existing implementation:
+
+- M14.3 COP, sectors, tactical objects and canonical hydrant links.
+- M14.4 incident units, crew members and resource read models.
+- M14.4.1 map-first IncidentWorkspace, `OperationalMapCanvas`, business map layers, `SelectedEntity` and `ContextActions`.
+- M14.4.2 `EntityRef`, `OperationalTarget`, incident deep links and `incident_resource_selection_page`.
+- M14.5A action definitions, immutable versions, task recipients, targets, task creation UI, task lifecycle, task confirmation and the authoritative RPCs.
+- Relevant Web CSS, SI/DE messages and M14 SPEC.
+
+Useful known entry points (verify actual paths and adapt to current source):
+
+- `web/features/incidents/IncidentArea.tsx`
+- `web/features/incidents/IncidentCop.tsx`
+- `web/features/incidents/CopMap.tsx`
+- `web/features/incidents/workspace.tsx`
+- `web/features/incidents/IncidentTasks.tsx`
+- `web/lib/operational/tasks.ts`
+- `web/lib/operational/target.ts`
+- `web/lib/operational/entity.ts`
+- `web/app/api/incidents/route.ts`
+- `docs/SPEC-M14-INCIDENT-OPERATIONS.md`
+
+Do not re-audit Android, M8/M9, routing, Oracle, notifications or unrelated modules.
+
+### Critical integration policy
+
+Preserve the existing domain/business semantics, authorization, RLS, task lifecycle, idempotency, audit and command hierarchy.
+
+**Integration-safe changes to previous presentation modules ARE ALLOWED AND EXPECTED.**
+
+You may:
+
+- refactor the existing task form into reusable components;
+- extend existing workspace state with an RTS interaction session;
+- add controlled map interaction modes;
+- reuse existing read models and authoritative APIs;
+- add presentation-only map overlays;
+- extend context actions;
+- add keyboard shortcuts and responsive controls.
+
+Do not copy/fork existing business logic, task issuance, target resolution or authorization.
+
+Do not create a second RTS command engine.
+
+Do not create a `MegaMap` component.
+
+---
+
+## 1. Main goal
+
+Turn M14.5A's form-based multi-recipient task engine into a fast, tactical, map-first command interaction workflow.
+
+Desired operator flow:
+
+**Select recipients → Choose configured action → Select target → Review → Explicitly confirm → Issue task → View status.**
+
+The commander should not need to leave the active incident map or repeatedly search for already selected units.
+
+Support:
+
+1. Single selection.
+2. Ctrl/Cmd multi-selection.
+3. Shift range selection in ordered lists.
+4. Rectangle/box selection on the map.
+5. Freehand/lasso selection on the map.
+6. Persistent in-workspace selection summary.
+7. Configurable action command palette.
+8. Target acquisition from map click or existing objects.
+9. Bulk task issuance through M14.5A.
+10. Read-only command-intent overlays.
+11. Keyboard shortcuts.
+12. Responsive mouse, keyboard and touch interaction.
+13. Clear eligible/ineligible recipient feedback.
+14. Existing task detail and execution status integration.
+
+The result must feel like one operational command workspace, not another independent feature page.
+
+---
+
+## 2. Non-negotiable architectural principle
+
+**COMMAND INTENT != EXECUTION PLAN != TELEMETRY**
+
+Example:
+
+Commander orders:
+
+> GVC-1, move to point X.
+
+This creates a command/task assignment.
+
+It does NOT:
+
+- move GVC-1's map marker;
+- change its actual position;
+- create a GPS observation;
+- mark the unit EN_ROUTE;
+- calculate road routing;
+- create a navigation session;
+- generate ETA;
+- infer arrival;
+- assume the command has been acknowledged.
+
+A unit without an authoritative actual position must remain without a physical position marker.
+
+A sector assignment is NOT the physical unit location.
+
+A polygon centroid is NOT a unit position.
+
+A vehicle's permanent inventory location is NOT the current location of its deployed incident unit.
+
+This milestone is primarily about **command interaction and visualization of intent**, not movement execution.
+
+---
+
+## 3. Reuse M14.5A as the only authoritative engine
+
+M14.5A already provides:
+
+- versioned SYSTEM and organization Action Definitions;
+- immutable action versions;
+- configurable labels and parameter definitions;
+- native behavior kernel;
+- multi-recipient tasks;
+- independently managed assignment episodes;
+- recipient and target validation;
+- command authorization;
+- optimistic concurrency;
+- durable operation receipts/idempotency;
+- task history, timeline and audit;
+- confirmation/retry behavior.
+
+Preserve all of it.
+
+The existing native behaviors remain:
+
+- `NONE`
+- `MOVE_TO`
+- `HOLD_POSITION`
+- `WITHDRAW_TO`
+- `REQUEST_STATUS`
+
+Do not add tactical-specific SQL/TS branches for:
+
+- RECON
+- FIRE_SUPPRESSION
+- SEARCH
+- RESCUE
+- ESTABLISH_WATER_SUPPLY
+- SECURE_AREA
+- LOGISTICS
+
+Those are configured Action Definitions, not hardcoded behaviors.
+
+The RTS UI must discover currently available actions from the existing action catalog.
+
+No special UI code such as `if action.code === 'FIRE_SUPPRESSION'` to decide eligibility, target support or behavior.
+
+Use the configured native behavior, target types, recipient types, parameters and acknowledgement requirements.
+
+---
+
+## 4. RTS interaction state
+
+Add a small, explicit interaction state model to the existing IncidentWorkspace or a closely scoped controller.
+
+Suggested conceptual model:
+
+```ts
+type RtsMode =
+  | 'NORMAL'
+  | 'SELECT_BOX'
+  | 'SELECT_LASSO'
+  | 'CHOOSE_TARGET';
+
+type RecipientSelection = {
+  type: 'INCIDENT_UNIT' | 'INCIDENT_CREW_MEMBER';
+  id: string;
+};
+
+type RtsSession = {
+  mode: RtsMode;
+  recipients: RecipientSelection[];
+  actionVersionId: string | null;
+  target: ExistingOperationalTarget | null;
+};
+```
+
+These are conceptual interfaces. Reuse actual existing M14.5A types rather than creating incompatible duplicates.
+
+Rules:
+
+- RTS selection is local presentation state, not a new database relationship.
+- Preserve the existing `SelectedEntity` and single-entity deep-link behavior.
+- Do not overload the URL with a large list of recipients.
+- One selected detail entity may coexist with an RTS multi-selection.
+- Store recipient identity as **type + ID**, not display name or map feature ID.
+- Clear transient RTS state when incident, acting organization or authenticated account changes.
+- Prevent selection from leaking between incident contexts.
+- Cancelling the flow must not modify task or unit data.
+- Refreshing read data must not silently change the meaning of an already prepared command.
+- Navigation away from the workspace must not accidentally issue a command.
+
+Existing ordinary map interaction remains available in NORMAL mode.
+
+---
+
+## 5. Recipient eligibility and identity
+
+Supported task recipients are exactly those already supported by M14.5A:
+
+- `INCIDENT_UNIT`
+- `INCIDENT_CREW_MEMBER`
+
+Distinguish:
+
+- deployed incident unit = possible recipient;
+- active matching crew member = possible recipient;
+- permanent vehicle inventory record = not automatically a recipient;
+- hydrant = target, not recipient;
+- sector = target/context, not recipient;
+- tactical map object = target, not recipient;
+- inspection team = not an incident unit;
+- resource allocation = not automatically a task recipient.
+
+Reuse the existing authorized recipient read API.
+
+Relevant existing read patterns include:
+
+- `incident_task_recipients`
+- `incident_resource_selection_page`
+
+Do not introduce a new unbounded incident-wide personnel download.
+
+Display at least:
+
+- recipient name/callsign;
+- recipient type;
+- owning organization/agency;
+- current incident sector where available;
+- incident/deployment state where available;
+- selection state;
+- command eligibility;
+- concise ineligibility reason when safely known.
+
+**Server authority is final.**
+
+The UI may prefilter using already authorized read-model information, but it must never treat visible geometry, organizational ADMIN/MANAGER membership or a selected map object as proof of command authority.
+
+Preserve M14.5A authority:
+
+- IC incident-wide scope;
+- Agency Commander own-agency scope;
+- Sector Commander explicit sector scope;
+- Unit Leader own-unit/crew scope;
+- no automatic Deputy promotion;
+- no inherited organizational WRITE authority;
+- no authority inferred from geographic polygon containment.
+
+Do not expose hidden recipients merely to provide an "ineligible" row.
+
+If backend eligibility cannot be determined safely from the existing API, show an appropriately neutral state and rely on authoritative validation before issuance.
+
+---
+
+## 6. Single selection
+
+Normal interaction:
+
+- Click incident unit in the operational list → select it.
+- Click eligible physical unit marker on the map → select it, if such an authoritative position exists.
+- Click ordinary object without RTS selection modifier → preserve existing `SelectedEntity` and contextual actions.
+- Clicking blank map in NORMAL mode must preserve the existing map behavior and must not issue commands.
+
+Selected recipients should be visually obvious.
+
+Display a compact summary such as:
+
+```text
+SELECTED RECIPIENTS: 3
+
+GVC-1    PGD A
+GVC-2    PGD A
+GVV-1    PGD B
+
+[Clear] [Choose action]
+```
+
+The summary must not pretend that recipient selection means the user has authority to command all selected recipients.
+
+---
+
+## 7. Ctrl/Cmd and Shift multi-selection
+
+Desktop:
+
+- Ctrl/Cmd + click toggles an individual recipient.
+- Ordinary click selects a single recipient.
+- Shift + click in a stable, ordered recipient list selects the contiguous range.
+- Shift range must only apply to the currently loaded ordered list.
+- Do not silently select recipients from unloaded server-side pages.
+- Preserve selected recipients when searching or paging, provided the incident context is unchanged.
+- Use stable recipient identity, never list indexes.
+
+Show selected count.
+
+Respect the existing M14.5A maximum of **100 unique recipients per task**.
+
+If selection would exceed 100:
+
+- do not silently truncate;
+- retain the valid existing selection;
+- explain the limit in SI/DE.
+
+Provide:
+
+- Clear selection;
+- Remove individual recipient;
+- Select visible eligible recipients where appropriate.
+
+No "select all incident recipients" using an unbounded hidden backend query.
+
+---
+
+## 8. Rectangle / box selection
+
+Add an explicit **Box Select** map tool.
+
+The user activates the tool, then drags a screen-space rectangle across the map.
+
+Use MapLibre projection or its existing map layer feature query to identify **currently displayed, authorized, actual unit-position features** within the rectangle.
+
+Do NOT synthesize unit coordinates to make units selectable.
+
+Rules:
+
+- The tool must work with actual rendered recipient features only.
+- Do not select hydrants, sectors, map objects or permanent vehicles as recipients.
+- Do not select a unit merely because its sector polygon overlaps the rectangle.
+- Do not select units hidden by authorization.
+- Do not select units that exist only in a text list but have no actual map location.
+- Deduplicate by recipient type + canonical ID.
+- Disable map dragging/panning only while the selection gesture owns the pointer.
+- Restore normal map controls after completion/cancellation.
+- Do not interfere with existing sector/map-object drawing tools.
+
+If current M14 implementation has no authoritative physical unit positions, box selection must:
+
+- remain architecturally ready for future position layers;
+- not fabricate selectable markers;
+- show a clear localized empty/unavailable explanation;
+- leave normal list-based selection fully usable.
+
+This is preferable to fake position markers.
+
+---
+
+## 9. Lasso selection
+
+Add a freehand lasso tool using pointer coordinates in the rendered map viewport.
+
+Suggested algorithm:
+
+1. On pointer down, start collecting local screen coordinates.
+2. Sample movement sufficiently for a usable polygon without excessive points.
+3. Show a temporary lasso outline.
+4. On pointer release, close the local screen-space polygon.
+5. Evaluate authorized visible recipient marker screen coordinates using a standard point-in-polygon algorithm.
+6. Deduplicate selected recipients.
+7. Merge or replace selection according to the explicit interaction mode.
+8. Remove the temporary lasso geometry.
+
+Prefer screen/pixel geometry for the selection gesture. This is UI selection, not geographic GIS geometry.
+
+Do not persist the lasso to `incident_map_objects`.
+
+Do not create a new spatial table or PostGIS dependency.
+
+Do not accidentally select all units whose sector geometries intersect the lasso.
+
+Apply a bounded point/vertex sampling approach and avoid expensive calculations on every pointer move.
+
+If no actual unit markers exist, the lasso simply selects none, with appropriate explanation.
+
+---
+
+## 10. Selection toolbar and group behavior
+
+Provide a compact contextual toolbar while recipients are selected.
+
+Suggested actions:
+
+- Choose action
+- Remove recipient
+- Clear selection
+- Box select
+- Lasso select
+
+Display counts:
+
+```text
+Selected: 7
+Eligible for chosen action: 5
+Unavailable/ineligible: 2
+```
+
+After choosing an Action Definition, eligibility may change according to:
+
+- configured recipient types;
+- active deployment;
+- recipient command availability;
+- current authorized command scope;
+- other existing M14.5A validation rules.
+
+Never silently discard recipients because the chosen action does not support them.
+
+Show which recipients cannot be included and why, where safe.
+
+Before issuing the task, require the user to explicitly remove/resolve invalid recipients or otherwise return to selection.
+
+A visual group is only a temporary selection set.
+
+Do not create a persistent command formation, deployment group, crew relationship or hierarchy link in this milestone.
+
+---
+
+## 11. Configurable command palette
+
+Create a fast **command palette** integrated into IncidentWorkspace.
+
+It must read from the **existing M14.5A versioned Action Definitions**.
+
+Do not hardcode tactical actions.
+
+Suggested UI:
+
+```text
+ISSUE COMMAND
+
+Selected: 3 recipients
+
+Search action...
+
+Reconnaissance
+Fire suppression
+Establish water supply
+Search
+Rescue
+...
+
+[Select action]
+```
+
+Actual entries come from the authorized catalog, not this example list.
+
+Requirements:
+
+- Search by localized label and code.
+- SI/DE labels.
+- Show relevant native behavior.
+- Show acknowledgement requirement.
+- Show active action version.
+- Show required target type(s).
+- Display supported recipient types.
+- Indicate when chosen recipients are incompatible.
+- Render configurable parameters using existing `ParameterInputs`.
+- Reuse existing catalog paging/limits.
+- Do not load the entire organization/national catalog without bounds.
+- Do not allow ordinary users to edit Action Definitions from this palette.
+
+If an action version becomes stale/unavailable during preparation, preserve user intent but require explicit refresh/reselection before confirmation.
+
+Never silently switch an action to a different version.
+
+---
+
+## 12. Reuse the existing task editor and confirmation pipeline
+
+M14.5A already has an `IncidentTasks` form and command confirmation system.
+
+Do not implement another task creation flow with separate validation rules.
+
+Refactor as needed so both:
+
+1. the original form-based flow;
+2. the new RTS map-first flow;
+
+reuse the same task draft, editor, parameter validation, recipient handling, review and issue-command pipeline.
+
+The new interaction must eventually call the existing M14.5A authoritative issue mutation.
+
+Preserve:
+
+- one parent task;
+- independent recipient assignments;
+- immutable Action Definition version reference;
+- canonical target validation;
+- optimistic version requirements;
+- durable operation UUID;
+- exact-payload retry;
+- existing receipts;
+- timeline/audit;
+- existing confirmation dialog;
+- existing error mapping.
+
+No second `create_task` or parallel `issue_task` implementation.
+
+Do not issue a task when the user merely selects an action or clicks a target.
+
+---
+
+## 13. Target selection mode
+
+Add explicit **Choose Target on Map** mode after an Action Definition is chosen.
+
+Supported existing M14.5A target types:
+
+- `NONE`
+- `HYDRANT`
+- `INCIDENT_MAP_OBJECT`
+- `INCIDENT_SECTOR`
+- `COORDINATE`
+
+The selected Action Definition determines which target types are allowed.
+
+The interface must never offer a target type that the selected action version disallows.
+
+### Target acquisition
+
+Hydrant click:
+
+- use existing canonical hydrant UUID;
+- reuse existing authorized hydrant/map data;
+- preserve ordinary hydrant status;
+- no hydrant record copy.
+
+Sector click:
+
+- preserve existing sector UUID;
+- preserve sector geometry semantics;
+- do not reinterpret sector as a point.
+
+Tactical map object click:
+
+- preserve canonical same-incident object UUID;
+- preserve original geometry type.
+
+Free coordinate click:
+
+- use MapLibre geographic coordinates;
+- store WGS84 longitude/latitude in the correct order;
+- use the existing `OperationalTarget` representation;
+- display the coordinates before confirmation.
+
+`NONE` target:
+
+- supported only where Action Definition allows it;
+- no map click required.
+
+### Point-only native behaviors
+
+For:
+
+- `MOVE_TO`
+- `WITHDRAW_TO`
+
+the target must resolve to an actual point under the existing M14.5A rules.
+
+A sector polygon is NOT converted to its centroid.
+
+A line/polygon tactical object is NOT silently converted to a point.
+
+If a target is invalid, show a localized explanation and allow correction.
+
+Client-side checks improve UX; server validation remains authoritative.
+
+### Map mode safety
+
+During target selection:
+
+- show visible target-acquisition cursor/crosshair;
+- distinguish target selection from normal object selection;
+- keep existing pan/zoom usable;
+- provide Cancel target selection;
+- Escape exits target mode;
+- prevent accidental map-object editing/drawing;
+- prevent accidental command issuance;
+- do not persist a new tactical object for a free coordinate click.
+
+Do not infer authorization from the clicked geometry.
+
+---
+
+## 14. Target preview
+
+When the user chooses a target, display a lightweight preview.
+
+For coordinate or point target:
+
+- target marker;
+- target label/type;
+- coordinates where useful.
+
+For polygon/line targets:
+
+- highlight existing geometry;
+- label the referenced object;
+- do not draw a misleading point at its center.
+
+If the chosen action is point-only, reject unsupported geometry.
+
+Target preview is local UI state until the task is issued.
+
+Do not persist target draft changes to the incident COP.
+
+Do not change the canonical hydrant, sector or tactical object.
+
+---
+
+## 15. Intent overlays and command arrows
+
+Add an **intent visualization layer** using existing map infrastructure.
+
+This is NOT a navigation/telemetry layer.
+
+Show:
+
+- selected target marker;
+- active target preview;
+- optionally existing task target snapshots;
+- selected task highlight;
+- task priority/status badge where appropriate;
+- optional command-intent relationship visualization.
+
+### Critical source-position rule
+
+Never draw an arrow beginning at a fabricated unit position.
+
+If a unit has no authoritative current physical position:
+
+- do not invent a marker;
+- do not use sector centroid;
+- do not use a station/inventory coordinate;
+- do not use an arbitrary origin;
+- do not draw a fake movement trajectory.
+
+Instead use the recipient list/command panel and a real target marker.
+
+If the source model already contains an authorized, real, sufficiently identified physical position, a dashed **intent line** may connect source and target.
+
+A dashed intent line:
+
+- is not an OSRM route;
+- is not a predicted trajectory;
+- is not actual movement;
+- is not ETA;
+- must be labeled as command intent.
+
+Keep the default conservative: no source position means no arrow.
+
+Do not create a new location/telemetry model in this PR merely to enable arrows.
+
+### Task history and target snapshots
+
+For already issued tasks, use the stored target snapshots from M14.5A.
+
+Do not rewrite historical targets when current hydrant/sector/map-object geometry changes.
+
+Show a visual distinction between:
+
+- draft target;
+- issued task target;
+- completed/cancelled historical task.
+
+Do not show every historical task overlay by default.
+
+---
+
+## 16. Rendering layers and visual semantics
+
+Reuse `OperationalMapCanvas`.
+
+Keep business layers independent.
+
+Suggested layers:
+
+```text
+Basemap
+Background hydrants
+Incident-linked hydrants
+Sector geometry
+Tactical objects
+Actual positions, when independently available
+Task target snapshots
+Draft target preview
+RTS selection overlays
+Critical attention
+Selected entity highlight
+```
+
+Do not put all domain rendering into one giant component.
+
+Preserve:
+
+- hydrant permanent status;
+- incident linked-water-source meaning;
+- sector styling;
+- tactical object styling;
+- existing selected entity;
+- existing drawing functionality.
+
+Use different visual channels for:
+
+- object identity;
+- permanent status;
+- organization;
+- incident relationship;
+- task state;
+- command priority;
+- temporary selection.
+
+Do not use a single marker color to communicate several unrelated meanings.
+
+Important status and priority indicators must not be color-only.
+
+Avoid excessive map labels.
+
+Selected/high-priority elements should remain readable.
+
+---
+
+## 17. Fast command interaction
+
+The goal is operational speed with explicit safety boundaries.
+
+Expected happy path:
+
+1. Select 3 incident units.
+2. Open command palette.
+3. Choose configured action.
+4. Click authorized map target.
+5. Review recipient/target/parameter summary.
+6. Confirm once.
+7. One authoritative multi-recipient task is created.
+8. Existing task panel shows recipient execution states.
+
+Do not make the operator repeat selected recipient search in the original task form.
+
+Do not require a route calculation.
+
+Do not require GPS.
+
+Do not open a different application screen.
+
+Preserve context after issuance where helpful:
+
+- map camera position;
+- selected task;
+- relevant incident pane;
+- status feedback.
+
+Do not auto-issue a second task on rapid double-click.
+
+---
+
+## 18. Confirmation and command issuance
+
+The final confirmation must clearly display:
+
+- incident reference;
+- acting organization;
+- selected Action Definition and exact version;
+- native behavior;
+- requires-acknowledgement setting;
+- recipient count;
+- each recipient name/type/organization;
+- action target and coordinates/reference;
+- task priority;
+- configured parameter values;
+- title;
+- notes;
+- any unsupported/invalid recipient state.
+
+The user must explicitly confirm issuance.
+
+Do not silently drop recipients during submission.
+
+Reuse M14.5A limits, including maximum 100 unique recipient assignments.
+
+Reuse the existing `issue_task` mutation and operation receipt pipeline.
+
+Use exactly one parent task with recipient assignment episodes, not N separate tasks created through a loop.
+
+If a current M14.5A API constraint requires a different behavior, preserve that existing API and clearly report the limitation; do not silently invent a weaker bulk issuance path.
+
+---
+
+## 19. Lifecycle display
+
+After issuance, allow quick access to existing task detail.
+
+Preserve exact existing M14.5A assignment states and transitions:
+
+- ISSUED
+- ACKNOWLEDGED
+- IN_PROGRESS
+- BLOCKED
+- COMPLETED
+- UNABLE
+- CANCELLED
+
+Do not add new statuses.
+
+Show each recipient's independent state.
+
+Show task aggregate outcome only according to existing backend semantics.
+
+Commander may issue/cancel within authority but may not impersonate a recipient acknowledgement or execution result.
+
+Retain existing task controls for properly authorized executing users.
+
+A task's target and parameters must stay associated with the immutable action version and the issued task snapshot.
+
+No optimistic UI transition should pretend that server-side execution has already succeeded.
+
+---
+
+## 20. Failure and concurrency handling
+
+Preserve M14.5A operation semantics.
+
+### Stale versions
+
+If incident/task/action/recipient state becomes stale:
+
+- display a clear localized conflict message;
+- retain the operator's draft selection and intent where safe;
+- refresh authoritative data;
+- require explicit review/reconfirmation;
+- do not silently replay a changed payload under the old operation ID.
+
+### Ambiguous transport failure
+
+If the server may have committed a command but the response was lost:
+
+- preserve the exact original payload and operation ID;
+- allow an idempotent retry using existing infrastructure;
+- do not generate a new task UUID merely because the request timed out;
+- do not create duplicate assignments.
+
+### Authorization loss
+
+If incident membership or command authority becomes invalid:
+
+- stop the issuance flow;
+- clear inaccessible read data;
+- never continue with cached authorization;
+- display an appropriate SI/DE explanation.
+
+### Incident closure
+
+For terminal incidents:
+
+- preserve historical viewing;
+- disable issuance and mutation controls;
+- do not delete historical task overlays.
+
+For released units or invalid crew membership:
+
+- honor existing server-side guards.
+
+### Partially loaded data
+
+If the catalog/recipient data cannot load:
+
+- show retry or explicit unavailable state;
+- do not silently treat unknown recipients as authorized.
+
+---
+
+## 21. Keyboard shortcuts
+
+Implement practical shortcuts within the existing IncidentWorkspace.
+
+Suggested:
+
+- `Esc`: cancel target mode / selection gesture / dismiss palette, in that order.
+- `Ctrl/Cmd + K`: open command palette.
+- `B`: activate box selection when not typing.
+- `L`: activate lasso selection when not typing.
+- `Ctrl/Cmd + A`: select currently visible eligible recipient rows ONLY when focus is in the relevant recipient list.
+- `Delete`/`Backspace`: remove selected recipient only in an explicitly focused selection UI, not globally.
+- `Enter`: advance an explicit dialog/form step where appropriate.
+
+Important:
+
+- Never capture shortcuts while typing in input, textarea, select or editable elements.
+- Do not break browser shortcuts.
+- Do not issue tasks through a single global keyboard shortcut.
+- Do not conflict with existing MapLibre drawing shortcuts.
+- Visible UI controls must offer every essential action independently of shortcuts.
+
+Add concise localized shortcut hints.
+
+---
+
+## 22. Responsive and touch behavior
+
+The command workspace must remain usable on:
+
+- desktop command PC;
+- laptop;
+- landscape tablet;
+- smaller screens where practical.
+
+Desktop:
+
+- existing left operational pane;
+- central map;
+- right selected/action pane;
+- optional compact selection toolbar.
+
+Tablet/mobile:
+
+- map remains usable;
+- command palette can use responsive drawer/panel;
+- recipient list selection remains fully functional;
+- box/lasso tools have explicit toggle buttons;
+- touch does not accidentally trigger command issuance;
+- no hover-only essential controls.
+
+Prioritize efficient interaction without replacing the existing design system.
+
+Do not add a large UI framework.
+
+Use existing React, TypeScript, CSS and MapLibre dependencies.
+
+---
+
+## 23. Performance requirements
+
+Keep the incident workspace responsive at realistic incident scale.
+
+Target scenarios:
+
+- dozens of deployed units;
+- hundreds of active personnel across organizations;
+- multiple command sectors;
+- hundreds of hydrants in the map background;
+- numerous active tasks;
+- up to 100 recipients in one task.
+
+Requirements:
+
+- Preserve existing bounded/paginated incident task reads.
+- Preserve authorized viewport hydrant queries.
+- Reuse existing candidate pagination.
+- Do not download all national organizations/resources.
+- Do not query task detail separately for every map marker.
+- Do not recreate MapLibre instance when selection changes.
+- Do not rebuild all geographic layers on every pointer movement.
+- Box/lasso geometry should stay transient and local.
+- Use stable keys and canonical recipient IDs.
+- Avoid repeated identical catalog/candidate reads during rapid interaction.
+- Debounce search requests appropriately.
+- Cancel/ignore stale responses when incident/org/query changes.
+- Clean up pointer handlers and map listeners on unmount/mode change.
+- Keep large recipient sets out of URL query strings.
+- No persistence of temporary selection geometry.
+
+Prefer incremental integration into existing components over creating a new parallel application.
+
+---
+
+## 24. Security and privacy
+
+Preserve the existing organization and incident authorization system.
+
+Organization ADMIN or MANAGER does NOT imply Incident Commander authority.
+
+Hierarchy READ does NOT imply incident command WRITE.
+
+A selected map geometry does NOT confer authority.
+
+Do not use a UI visibility check as an authorization boundary.
+
+All task issue/transition/cancellation mutations continue through authoritative existing backend RPCs.
+
+No service-role key or secret in browser code.
+
+Never expose an unauthorized recipient to provide nicer selection UX.
+
+Do not return precise position data through a new API merely to support lasso selection.
+
+Do not broaden hydrant permissions because a hydrant is used as a task target.
+
+Preserve canonical entity identities and historical snapshots.
+
+---
+
+## 25. Accessibility and localization
+
+Support both:
+
+- Slovenian;
+- German.
+
+Localize:
+
+- box select;
+- lasso select;
+- target mode;
+- command palette;
+- selected count;
+- invalid recipients;
+- selection limit;
+- action eligibility;
+- selected target;
+- command review;
+- conflict/retry;
+- disabled action reasons;
+- task status;
+- keyboard hints.
+
+Do not display raw internal enum names or database error codes when an existing user-friendly message exists.
+
+Use semantic buttons, keyboard focus, visible selection states and accessible labels.
+
+Support reduced-motion preferences for temporary overlays where practical.
+
+---
+
+## 26. Database and API constraints
+
+**Prefer ZERO database migrations for M14.5B.**
+
+M14.5A already provides the authoritative multi-recipient command engine. This milestone is intended to make that engine usable from the map.
+
+Do not add tables for:
+
+- RTS selection;
+- lasso/box polygons;
+- temporary command drafts;
+- fake unit positions;
+- calculated routes;
+- navigation sessions;
+- ETA;
+- predicted location.
+
+Reuse existing APIs.
+
+If an essential read capability is genuinely missing, first inspect existing authorized readers and determine whether a small bounded adapter is sufficient.
+
+Only add a forward-only migration if strictly necessary for an otherwise impossible requirement.
+
+If one is necessary:
+
+- create a new timestamped migration;
+- preserve all historical migrations;
+- preserve RLS/security;
+- do not apply it;
+- clearly document the reason.
+
+Do not invent endpoint/RPC names without inspecting actual source.
+
+Do not modify previously applied migrations.
+
+---
+
+## 27. Out of scope
+
+Do NOT implement:
+
+- GPS telemetry.
+- Live unit tracking.
+- Fake unit positions.
+- Command-triggered marker movement.
+- NavigationSession.
+- ETA / remaining distance.
+- RoadProvider/OSRM/GraphHopper routing.
+- Routing constraints or closures.
+- Automatic arrival detection.
+- Android changes.
+- Dispatch, turnout or mobilization.
+- Unit reassignment outside existing task semantics.
+- Task dependencies.
+- Persistent tactical formations/groups.
+- Operational chat.
+- Realtime channel infrastructure.
+- FCM/notifications.
+- CAD/112.
+- Drone flight/navigation.
+- Wildfire simulation.
+- A new business-domain task engine.
+- A new hardcoded tactical action registry.
+- Organization hierarchy redesign.
+- Dashboard/Inspections/Exchange redesign.
+- Oracle/Caddy/NAV3 modifications.
+- New large UI dependencies.
+
+Future movement/navigation execution will use task assignment IDs and keep navigation state separate from command intent.
+
+---
+
+## 28. Manual acceptance criteria — implementation targets only
+
+Implement so the user can later manually verify:
+
+1. A deployed incident unit can be selected from the operational list.
+2. Multiple units can be selected with Ctrl/Cmd.
+3. Shift range selects only visible, ordered recipient rows.
+4. Selection persists appropriately across recipient paging/search.
+5. Box/lasso modes exist and do not interfere with map panning/drawing.
+6. Box/lasso select only actual authorized recipient-position features, never fake sector locations.
+7. Units without GPS/current physical positions remain selectable through lists.
+8. Permanent vehicles/hydrants/sectors are not selectable as task recipients.
+9. Selection limit 100 is enforced without silent truncation.
+10. Command palette loads configured M14.5A Action Definitions.
+11. New organization-defined actions work without tactical-code hardcoding.
+12. Action-version identity is preserved.
+13. Unsupported recipient types are visibly excluded from issuance, without hidden silent removal.
+14. Target click can select a canonical hydrant.
+15. Target click can select an incident sector.
+16. Target click can select a tactical map object.
+17. Free coordinate target uses WGS84 longitude/latitude.
+18. `MOVE_TO`/`WITHDRAW_TO` reject non-point targets.
+19. No polygon-to-centroid conversion occurs.
+20. Target preview does not change persisted map objects.
+21. No unit marker moves after task issuance.
+22. No fake arrow/trajectory is generated for a unit without an actual position.
+23. Original M14.5A task form still works.
+24. RTS and original form share authoritative issuance behavior.
+25. One bulk command creates one parent task and independent assignments.
+26. Existing confirmation lists all recipients, target, version, parameters and priority.
+27. Task issuance remains idempotent on exact retries.
+28. Stale versions require explicit review.
+29. Task selection opens existing task detail.
+30. Assignment statuses remain independent and server authoritative.
+31. Terminal incidents are read-only.
+32. Unauthorized commands remain rejected server-side.
+33. Deep-linked selected entity continues to work.
+34. Background hydrant/linked hydrant/sector layers remain intact.
+35. Esc cancels temporary modes without issuing.
+36. Keyboard shortcuts do not run while typing.
+37. Tablet/touch selection and palette remain usable.
+38. SI labels work.
+39. DE labels work.
+40. No migration, Edge Function or app is deployed by Codex.
+
+These are intended **manual acceptance scenarios for the user**, not instructions for Codex to execute tests.
+
+---
+
+## 29. Documentation
+
+Update `docs/SPEC-M14-INCIDENT-OPERATIONS.md` to document:
+
+- M14.5B RTS selection interaction;
+- temporary multi-selection model;
+- configurable command palette;
+- authorized recipient selection;
+- target acquisition;
+- intent overlay semantics;
+- original command/task backend reuse;
+- accessibility and SI/DE;
+- explicit distinction between command intent, navigation execution and telemetry;
+- future Movement/Navigation Execution milestone boundary.
+
+Keep existing SPEC history and the M14.5A design intact.
+
+---
+
+## 30. Implementation constraints — strict
+
+Implementation only.
+
+Do not add or run tests.
+
+Do not run:
+
+- build;
+- lint;
+- typecheck;
+- CI;
+- browser automation;
+- emulator;
+- Docker;
+- manual smoke verification;
+- runtime verification;
+- deployment checks.
+
+Do not apply SQL migrations.
+
+Do not deploy Edge Functions.
+
+Do not deploy Web or Android.
+
+Do not inspect completed implementation for validation after coding beyond what is necessary to author the changes.
+
+The user will perform source review, SQL application and verification manually.
+
+Do not modify corporate-local Android/KAPT/Gradle settings.
+
+Do not rewrite unrelated milestones.
+
+Reuse existing dependencies where possible.
+
+Prefer no new dependencies.
+
+Create **ONE PR ONLY**.
+
+Do not merge.
+
+Use `[skip ci]` in the implementation commit message where appropriate.
+
+Stop after implementing and creating the PR.
+
+---
+
+## 31. PR summary requirements
+
+Provide a concise but technically useful PR description covering:
+
+1. Files/components changed.
+2. How RTS selection state integrates into existing IncidentWorkspace.
+3. Single/Ctrl/Shift/box/lasso selection behavior.
+4. Recipient identification and authorized read model.
+5. Configurable Action Definition palette integration.
+6. Target acquisition and point-only validation.
+7. Shared M14.5A task draft/confirmation/issuance pipeline.
+8. Task/assignment status display integration.
+9. Intent overlay and no-fake-position guarantees.
+10. Map interaction conflicts and cancellation handling.
+11. Keyboard/accessibility behavior.
+12. Performance limits.
+13. SI/DE coverage.
+14. Any new migration, or explicitly state none.
+15. Anything intentionally deferred to Movement/Navigation Execution.
+16. Explicit confirmation that tests/build/lint/typecheck/CI were not executed.
+17. Explicit confirmation that no migration/function/app was deployed.
+
+**Create ONE PR. Do not merge. Do not validate.**
+
