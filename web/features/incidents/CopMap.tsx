@@ -1,6 +1,11 @@
 'use client';
 import {useEffect,useRef} from 'react';
 import {type Map,type GeoJSONSource} from 'maplibre-gl';
+import {useRts} from './rtsSession';
+import {useWorkspace} from './workspace';
+import {RtsMapInteraction} from './RtsMapInteraction';
+import {TaskIntentLayers} from './TaskIntentLayers';
+import type {TaskTarget} from '../../lib/operational/tasks';
 import {resolveTarget} from '../../lib/operational/target';
 import type {Locale} from '../../lib/i18n';
 import {incidentText} from '../../lib/incidents/messages';
@@ -15,6 +20,7 @@ const ids=['cop-primary','cop-sectors','cop-markers','cop-zones','cop-hydrants',
 const features=(items:{id:string;geometry:Geometry;label:string;kind?:string;status?:string}[])=>({type:'FeatureCollection' as const,
  features:items.map(i=>({type:'Feature' as const,id:i.id,geometry:i.geometry,properties:{id:i.id,label:i.label,kind:i.kind??'',status:i.status??''}}))});
 export default function CopMap(props:Props){
+ const rts=useRts(),workspace=useWorkspace();
  const c=props.cop,primary:Position|null=c.incident.longitude!==null&&c.incident.latitude!==null?[c.incident.longitude,c.incident.latitude]:null;
  const selectedKind=c.sectors.some(s=>s.id===props.selected)?'INCIDENT_SECTOR':c.objects.some(o=>o.id===props.selected)?'INCIDENT_MAP_OBJECT':'HYDRANT';
  const selectedGeometry=resolveTarget(selectedKind==='HYDRANT'?{kind:selectedKind,entityId:props.selected}:{kind:selectedKind,entityId:props.selected,incidentId:c.incident.id},{cop:c,hydrants:props.contextHydrants});
@@ -22,11 +28,36 @@ export default function CopMap(props:Props){
   ...c.links.flatMap(l=>l.hydrant?.longitude!=null&&l.hydrant.latitude!=null?[[l.hydrant.longitude,l.hydrant.latitude] as Position]:[])];
  return <OperationalMapCanvas locale={props.locale} label={incidentText(props.locale)('copTitle')} initialPoints={points} onBounds={props.onBounds}
   onClick={(map,event)=>{
+   if(rts?.mode==='SELECT_BOX'||rts?.mode==='SELECT_LASSO')return;
+   if(rts?.mode==='CHOOSE_TARGET'){
+    if(rts.locked||rts.copEditing||!rts.enabled||!rts.action)return;
+    const kind=rts.mapTargetKind;
+    if(!rts.action.configuration.target_types.includes(kind)){rts.setMessage('wrongTarget');return;}
+    let target:TaskTarget|null=null,label='';
+    if(kind==='COORDINATE'){target={kind,coordinate:[event.lngLat.lng,event.lngLat.lat]};label=target.coordinate.join(', ');}
+    else {
+     const prefixes=kind==='HYDRANT'?['cop-hydrants-','context-hydrants-']:kind==='INCIDENT_SECTOR'?['cop-sectors-']:kind==='INCIDENT_MAP_OBJECT'?['cop-markers-','cop-zones-']:[];
+     const layers=map.getStyle().layers.filter(l=>prefixes.some(prefix=>l.id.startsWith(prefix))).map(l=>l.id);
+     const id=layers.length?map.queryRenderedFeatures(event.point,{layers}).find(f=>typeof f.properties?.id==='string')?.properties?.id:null;
+     if(typeof id==='string'){
+      if(kind==='HYDRANT'){const h=c.links.find(l=>l.hydrant?.id===id)?.hydrant??props.contextHydrants.find(h=>h.id===id);if(h){target={kind,entityId:id};label=h.code??id;}}
+      else if(kind==='INCIDENT_SECTOR'){const sector=c.sectors.find(s=>s.id===id);if(sector){target={kind,entityId:id,incidentId:c.incident.id};label=sector.code+' · '+sector.name;}}
+      else if(kind==='INCIDENT_MAP_OBJECT'){const object=c.objects.find(o=>o.id===id);if(object){target={kind,entityId:id,incidentId:c.incident.id};label=object.label;}}
+     }
+    }
+    const geometry=target&&target.kind!=='NONE'?resolveTarget(target,{cop:c,hydrants:props.contextHydrants}):null;
+    if(!target||!geometry){rts.setMessage('wrongTarget');return;}
+    if(['MOVE_TO','WITHDRAW_TO'].includes(rts.action.configuration.native_behavior)&&geometry.type!=='Point'){rts.setMessage('pointRequired');return;}
+    rts.setTarget(target,geometry,label);return;
+   }
    if(props.drawing){props.onPoint([event.lngLat.lng,event.lngLat.lat]);return;}
+   const taskLayers=map.getStyle().layers.filter(l=>l.id.startsWith('rts-task-target-')).map(l=>l.id);
+   const task=taskLayers.length?map.queryRenderedFeatures(event.point,{layers:taskLayers}).find(f=>f.properties?.id===rts?.intent?.id):null;
+   if(task&&rts?.intent){workspace?.select({kind:'TASK',id:rts.intent.id});return;}
    const clickable=map.getStyle().layers.filter(l=>(l.id.startsWith('cop-')||l.id.startsWith('context-'))&&!l.id.startsWith('cop-draft')).map(l=>l.id);
    const id=map.queryRenderedFeatures(event.point,{layers:clickable}).find(f=>typeof f.properties?.id==='string')?.properties?.id;
    if(typeof id==='string')props.onSelect(id);
-  }}>{map=><CopRendering map={map} props={props}/>}</OperationalMapCanvas>;
+  }}>{map=><><CopRendering map={map} props={props}/><TaskIntentLayers map={map} locale={props.locale}/><RtsMapInteraction map={map} locale={props.locale}/></>}</OperationalMapCanvas>;
 }
 function CopRendering({map,props}:{map:Map;props:Props}){
  const fitted=useRef('');

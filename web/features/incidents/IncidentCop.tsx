@@ -8,6 +8,7 @@ import type {CommandAction} from './CommandSection';
 import type {CopLayers} from './CopMap';
 import {isUuid} from '../../lib/operational/entity';
 import type {ContextHydrant} from '../../lib/hydrants/viewport';
+import {useRts} from './rtsSession';
 import {useWorkspace,WorkspaceSlot,WorkspaceSection,ContextActions} from './workspace';
 import {HydrantDetailsAction} from './HydrantDetailsAction';
 import {useHydrantContext} from './useHydrantContext';
@@ -17,7 +18,7 @@ type Read=<T>(name:string,args:Record<string,unknown>,signal?:AbortSignal,accoun
 type Draft={type:'sector'|'object';id:string;version:string;incidentVersion:string;code:string;label:string;description:string;kind:MapKind;sector:string;geometry:Geometry|null};
 type Candidate={id:string;code:string|null;address:string|null;status:string};
 export function IncidentCop({locale,account,org,incidentId,refresh,feedback,disabled,read,onAction}:{locale:Locale;account:string;org:string;incidentId:string;refresh:number;feedback:CopFeedback;disabled:boolean;read:Read;onAction:CommandAction}){
- const workspace=useWorkspace();
+ const workspace=useWorkspace(),rts=useRts();
  const t=incidentText(locale),[cop,setCop]=useState<Cop|null>(null),[loading,setLoading]=useState(false),[error,setError]=useState('');
  const [epoch,setEpoch]=useState(0),[localSelected,setLocalSelected]=useState(''),[draft,setDraft]=useState<Draft|null>(null),[stale,setStale]=useState(false);
  const [drawing,setDrawing]=useState<Geometry['type']|null>(null),[vertices,setVertices]=useState<Position[]>([]);
@@ -41,7 +42,7 @@ export function IncidentCop({locale,account,org,incidentId,refresh,feedback,disa
   const ac=new AbortController();readController.current=ac;setLoading(true);setError('');
   read<Cop>('incident_cop',{p_incident_id:incidentId,p_acting_organization_id:org},ac.signal,account)
    .then(value=>{if(!ac.signal.aborted)setCop(value);})
-   .catch(e=>{if(!ac.signal.aborted){setCop(null);setError('unavailable');if(e instanceof Error&&['NOT_AUTHORIZED','EXPIRED'].includes(e.message)){searchController.current?.abort();setDraft(null);setVertices([]);setCandidates([]);setSelected('');setDrawing(null);}}})
+   .catch(e=>{if(!ac.signal.aborted){setCop(null);setError('unavailable');if(e instanceof Error&&['NOT_AUTHORIZED','EXPIRED'].includes(e.message)){rts?.revoke();searchController.current?.abort();setDraft(null);setVertices([]);setCandidates([]);setSelected('');setDrawing(null);}}})
    .finally(()=>{if(!ac.signal.aborted)setLoading(false);});
   return()=>ac.abort();
  },[incidentId,org,account,refresh,epoch,read]);
@@ -52,9 +53,10 @@ export function IncidentCop({locale,account,org,incidentId,refresh,feedback,disa
   else {readController.current?.abort();searchController.current?.abort();setCop(null);setDraft(null);setCandidates([]);setDrawing(null);setVertices([]);setLoading(false);setFinding(false);}
  },[feedback]);
  useEffect(()=>()=>searchController.current?.abort(),[]);
- const locked=disabled||loading,actionLocked=locked||!!draft;
+ useEffect(()=>{rts?.setCopEditing(!!draft||!!drawing);return()=>rts?.setCopEditing(false);},[!!draft,!!drawing,rts?.setCopEditing]);
+ const locked=disabled||loading||!!rts?.locked,actionLocked=locked||!!draft||(rts?.mode??'NORMAL')!=='NORMAL';
  function begin(type:'sector'|'object',id?:string){
-  if(!cop)return;const s=cop.sectors.find(x=>x.id===id),o=cop.objects.find(x=>x.id===id);
+  if(!cop||locked||(rts?.mode??'NORMAL')!=='NORMAL')return;const s=cop.sectors.find(x=>x.id===id),o=cop.objects.find(x=>x.id===id);
   const value:Draft={type,id:id??crypto.randomUUID(),version:s?.version??o?.version??'0',incidentVersion:cop.incident.version,code:s?.code??'',
    label:s?.name??o?.label??'',description:o?.description??'',kind:o?.kind??'NOTE',sector:o?.sector_id??(cop.can_manage?'':cop.sectors.find(x=>x.can_edit)?.id??''),geometry:s?.geometry??o?.geometry??null};
   setDraft(value);setCoordinateText(value.geometry?JSON.stringify(value.geometry):'');setStale(false);setDrawing(null);setVertices([]);

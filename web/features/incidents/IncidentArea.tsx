@@ -183,7 +183,7 @@ export function IncidentArea({locale,account,destination,initialOrg}:{locale:Loc
   </>}
   {isNew&&entry?.organizations.find(o=>o.id===org)?.can_create&&<><p>{t('draftIdentity')}</p>{coreForm}</>}
   {isNew&&entry&&!entry.organizations.find(o=>o.id===org)?.can_create&&<p>{t('noAccess')}</p>}
-  {detail&&<IncidentLayout key={`${account}/${org}/${detail.id}`} locale={locale} operational={['ACTIVE','STABILIZED'].includes(detail.status)}
+  {detail&&<IncidentLayout key={`${account}/${org}/${detail.id}`} locale={locale} operational={['ACTIVE','STABILIZED'].includes(detail.status)} locked={loading||busy||!!pending||!!confirmation} onAccessLost={()=>{setDetail(null);setError('noAccess');}}
    header={<header className="admin-card workspace-header"><p>{detail.reference_number}</p><h2>{detail.title}</h2><span className="admin-badge">{t(detail.status)}</span>
     <p>{t('priority')}: {t(detail.priority)} · {t('severity')}: {t(detail.severity)} · {detail.type.names[locale]??detail.type.code}</p>
     <p>{t('lead')}: {detail.lead_name}</p><p>{t('commander')}: {detail.commander?.name??t('noCommander')}</p>
@@ -214,7 +214,7 @@ export function IncidentArea({locale,account,destination,initialOrg}:{locale:Loc
    </>}
    secondary={<IncidentTimeline locale={locale} account={account} org={org} incident={detail.id} revision={refresh} read={rpc}/>}>
    <IncidentCop key={`${account}/${org}/${detail.id}`} locale={locale} account={account} org={org} incidentId={detail.id} refresh={refresh} feedback={copFeedback} disabled={loading||busy||!!pending} read={rpc} onAction={ask}/>
-   <IncidentTasks key={`${account}/${org}/${detail.id}`} locale={locale} account={account} org={org} incidentId={detail.id} version={detail.version} operational={['ACTIVE','STABILIZED'].includes(detail.status)} refresh={refresh} feedback={taskFeedback} disabled={loading||busy||!!pending} read={rpc} onAction={ask}/>
+   <IncidentTasks key={`${account}/${org}/${detail.id}`} locale={locale} account={account} org={org} incidentId={detail.id} version={detail.version} incidentReference={detail.reference_number} organizationName={entry?.organizations.find(o=>o.id===org)?.name??org} operational={['ACTIVE','STABILIZED'].includes(detail.status)} refresh={refresh} feedback={taskFeedback} disabled={loading||busy||!!pending} read={rpc} onAction={ask}/>
    <IncidentResources crewOutcomes={crewOutcomes} key={`${account}/${org}/${detail.id}`} locale={locale} account={account} org={org} incidentId={detail.id} refresh={refresh} feedback={resourceFeedback} disabled={loading||busy||!!pending} read={rpc} onAction={ask}/>
   </IncidentLayout>}
   {confirmation&&<ConfirmationDialog title={t(confirmation.action)} text={t('confirmation')} busy={busy||!!pending} onDismiss={()=>setConfirmation(null)}>
