@@ -8,12 +8,14 @@ import type {Mutation,InboxItem} from '../../lib/incidents/model';
 import type {CopFeedback} from '../../lib/incidents/cop';
 import type {CommandAction} from './CommandSection';
 import {TeamCrewTemplate,type CrewOutcomes} from './TeamCrewTemplate';
+import {useRts} from './rtsSession';
+import {recipientKey,type RtsRecipient} from '../../lib/operational/rts';
 import {useWorkspace,WorkspaceSlot,WorkspaceSection} from './workspace';
 
 type Read=<T>(name:string,args:Record<string,unknown>,signal?:AbortSignal,account?:string)=>Promise<T>;
 type Props={crewOutcomes:CrewOutcomes;locale:Locale;account:string;org:string;incidentId:string;refresh:number;feedback:CopFeedback;disabled:boolean;read:Read;onAction:CommandAction};
 export function IncidentResources({crewOutcomes,locale,account,org,incidentId,refresh,feedback,disabled,read,onAction}:Props){
- const workspace=useWorkspace();
+ const workspace=useWorkspace(),rts=useRts();
  const t=operationalText(locale);
  const [view,setView]=useState<Resources|null>(null),[error,setError]=useState(''),[page,setPage]=useState(0),[reload,setReload]=useState(0);
  const [owner,setOwner]=useState(''),[mode,setMode]=useState<'UNIT'|'RESOURCE'>('UNIT'),[candidate,setCandidate]=useState<ResourceCandidate|null>(null);
@@ -23,7 +25,7 @@ export function IncidentResources({crewOutcomes,locale,account,org,incidentId,re
  const scope={p_incident_id:incidentId,p_acting_organization_id:org};
  const blockedRef=useRef(false);
  function fail(e:unknown){const code=e instanceof Error?e.message:'SERVER';setError(code);
-  if(['NOT_AUTHORIZED','EXPIRED'].includes(code)){blockedRef.current=true;setBlocked(true);setView(null);setCandidate(null);acRef.current?.abort();}}
+  if(['NOT_AUTHORIZED','EXPIRED'].includes(code)){rts?.revoke();blockedRef.current=true;setBlocked(true);setView(null);setCandidate(null);acRef.current?.abort();}}
  useEffect(()=>{if(feedback.kind==='blocked'){blockedRef.current=true;setBlocked(true);setView(null);setCandidate(null);acRef.current?.abort();}
   if(feedback.kind==='stale'){setStale(true);setReload(v=>v+1);}
   if(feedback.kind==='saved'){setCandidate(null);setNewId('');setManual(false);}
@@ -52,6 +54,12 @@ export function IncidentResources({crewOutcomes,locale,account,org,incidentId,re
   if(mode==='UNIT'){if(!manual)return;ask('deploy_unit',{id,unit_id:candidate.id,sector_id:sector||null},[t('manualOnScene'),candidate.callsign,candidate.name,view?.organizations.find(o=>o.id===owner)?.name,view?.sectors.find(s=>s.id===sector)?.name].filter(Boolean).join(' · '));}
   else ask('allocate_resource',{id,resource_id:candidate.id,quantity,unit_assignment_id:unit||null},[candidate.name,quantity,t(candidate.unit_of_measure_code??''),view?.units.find(u=>u.id===unit)?.callsign??t('none')].join(' · '));
  }
+ const selectableUnits:RtsRecipient[]=(view?.units??[]).map(u=>({
+  id:u.id,type:'INCIDENT_UNIT',name:u.callsign+' · '+u.name,organization_id:u.organization_id,organization_name:u.organization_name,
+  sector_id:u.sector_id,sector_name:u.sector_name,status:u.status,
+  assignmentId:rts?.recipients.find(r=>r.type==='INCIDENT_UNIT'&&r.id===u.id)?.assignmentId??u.id,
+  eligibility:['RELEASED','UNAVAILABLE'].includes(u.status)?'UNAVAILABLE':'UNKNOWN'
+ }));
  if(blocked)return <section className="admin-card"><p role="alert">{t(error||'NOT_AUTHORIZED')}</p></section>;
  return <WorkspaceSlot name="operational"><WorkspaceSection title={t('resourcesTitle')} open><section className="admin-card"><h2>{t('resourcesTitle')}</h2><p>{t('bounded')}</p>
   {error&&<p role="alert">{t(error)}</p>}{!view&&<p role="status">{t('loading')}</p>}
@@ -60,7 +68,10 @@ export function IncidentResources({crewOutcomes,locale,account,org,incidentId,re
    {workspace?.selected&&((workspace.selected.kind==='INCIDENT_UNIT'&&!view.units.some(u=>u.id===workspace.selected?.id))||(workspace.selected.kind==='ALLOCATION'&&!view.allocations.some(a=>a.id===workspace.selected?.id)))&&<WorkspaceSlot name="selectedPane"><p>{incidentText(locale)('copMissing')}</p></WorkspaceSlot>}
    <p>{t('version')}: {view.version}</p><button disabled={disabled} onClick={()=>setReload(v=>v+1)}>{t('refresh')}</button>
    <h3>{t('UNIT')}</h3>{!view.units.length&&<p>{t('empty')}</p>}
-   {workspace&&view.units.map(u=><button className="web-row" key={u.id} onClick={()=>workspace.select({kind:'INCIDENT_UNIT',id:u.id})}>
+   {workspace&&view.units.map(u=><button className="web-row rts-recipient" key={u.id}
+    aria-pressed={rts?.recipients.some(r=>r.type==='INCIDENT_UNIT'&&r.id===u.id)??false}
+    onClick={e=>{workspace.select({kind:'INCIDENT_UNIT',id:u.id});const row=selectableUnits.find(r=>r.id===u.id);
+     if(row&&rts?.enabled)rts.pick({...row,assignmentId:rts.recipients.find(r=>recipientKey(r)===recipientKey(row))?.assignmentId??crypto.randomUUID()},selectableUnits.map(r=>({...r,assignmentId:rts.recipients.find(p=>recipientKey(p)===recipientKey(r))?.assignmentId??crypto.randomUUID()})),{list:'units:'+page,toggle:e.ctrlKey||e.metaKey,range:e.shiftKey});}}>
     <strong>{u.callsign} · {u.name}</strong><span>{t(u.status)} · {u.sector_name??t('none')}</span>
     <small>{t('crew')}: {u.crew.length} · {t('UNIT_LEADER')}: {u.leader?.name??t('none')}</small></button>)}
    {view.units.filter(u=>!workspace||(workspace.selected?.kind==='INCIDENT_UNIT'&&workspace.selected.id===u.id)).map(u=><WorkspaceSlot name="selectedPane" key={u.id}><div><p>{incidentText(locale)('workspaceNoPosition')}</p><UnitCard key={u.id+':'+u.version} unit={u} view={view} locale={locale} locked={locked} account={account} scope={scope} read={read} ask={ask} onError={fail}/><TeamCrewTemplate key={u.id} locale={locale} account={account} org={org} incidentId={incidentId} unit={u} locked={locked} read={read} ask={ask} outcomes={crewOutcomes}/></div></WorkspaceSlot>)}

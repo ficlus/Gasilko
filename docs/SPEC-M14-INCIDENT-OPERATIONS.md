@@ -2282,3 +2282,99 @@ realtime/chat/attachments, Android Incident Field Mode, Firebase delivery,
 CAD/112, reports/drone control, global search/dashboard/navigation regrouping,
 Exchange/Inspections redesign. Task dependencies and reassignment remain future
 work, not hidden behavior in this command engine.
+
+
+## M14.5B — RTS map interaction (Web)
+
+M14.5B adds a workspace-local interaction session to the existing M14.5A task
+editor. The M14.5A deferral of RTS interaction is historical; this section
+describes the newly implemented presentation scope. The authoritative command
+engine, hierarchy, action versions, task/assignment lifecycle, receipts and RLS
+remain unchanged.
+
+### Selection and issuance
+
+The account / acting-organization / incident keyed workspace owns the temporary
+recipient selection, chosen immutable action version, target preview and map
+interaction mode. Canonical recipient identity is `type + id` for
+`INCIDENT_UNIT` and `INCIDENT_CREW_MEMBER`; a deployed unit's inventory vehicle,
+sector or resource allocation is not a recipient identity. SelectedEntity and
+its single-entity URL remain independent.
+
+The authorized recipient page and existing operational unit list support
+single selection, Ctrl/Cmd toggles and Shift ranges confined to the currently
+loaded ordered list. Search/page changes retain selection. Touch users have an
+explicit multi-select toggle; select-visible, remove and clear are available.
+The existing 100-recipient limit rejects an oversized selection without
+truncating or changing the previous selection. The summary distinguishes
+eligible, unknown, unavailable and action-incompatible recipients without
+discarding them. Selected-only eligibility lookups reuse
+`incident_task_recipients`, with cancellation, a bounded cache and at most four
+in flight; no hidden incident-wide personnel download is introduced.
+
+The flow is **select → configured action → target → review → explicit
+confirmation → existing issue_task → task detail**. Both the original New Task
+entry and the RTS palette use the same IncidentTasks draft, ParameterInputs,
+review and IncidentArea confirmation/operation-receipt path. The catalog remains
+paged and search is debounced; the palette does not edit action definitions.
+Configuration changes never silently replace the selected version. Stale
+preparation retains intent and requires explicit reselection/reconfirmation.
+The existing exact-payload ambiguous retry remains unchanged. Selection, action
+choice and target clicks never write a task, acknowledgement or unit state.
+
+### Map safety and target semantics
+
+NORMAL, SELECT_BOX, SELECT_LASSO and CHOOSE_TARGET are explicit presentation
+modes. Target mode uses only configured target kinds and the existing authorized
+COP/hydrant projections: canonical hydrant, same-incident sector/object or WGS84
+`[longitude, latitude]`. Point-only native behaviors reject lines/polygons
+rather than using centroids. A free coordinate creates no COP object. Server
+recipient/target/command validation remains final.
+
+Rectangle/lasso gestures use bounded screen-space samples and explicit adapters
+for independently authorized actual-position point layers only. The current
+M14.4 resource model exposes **no authoritative physical unit/crew positions**,
+so no such layer is registered: these tools explain the absence of positions,
+never select sector/hydrant geometry as recipients, and retain list selection.
+No coordinates, actual markers, GPS, trajectories or station/sector substitutes
+are fabricated. Future actual-position layers must explicitly provide the
+canonical recipient mapping before the selection adapter can use them.
+
+Gesture overlays are temporary; owned pointer handlers, capture, animation
+frames and temporarily disabled map handlers are released on completion,
+cancellation, mode change and unmount. Target mode retains pan/zoom. COP editing
+and RTS target/gesture modes are mutually exclusive.
+
+A separate intent renderer shows draft target geometry and the selected issued
+task's stored target snapshot. Draft, open and historical intent are distinct,
+with localized text plus priority/status badges. Historical geometry never
+resolves against subsequently changed live objects. There are no source arrows
+without actual source positions, no routing, automatic deployment-state changes
+or inference of movement/arrival. Map camera and existing domain layers remain
+independent of task acknowledgement.
+
+### Interaction and lifecycle
+
+Ctrl/Cmd+K opens the shared palette; B/L select the gesture tool; Escape cancels
+the current RTS mode before closing the editor. Ctrl/Cmd+A is scoped to the
+loaded recipient list. Delete/Backspace removes only an explicitly focused
+selection-summary row. Typing, composition, modal confirmation and COP editing
+suppress RTS shortcuts. There is no keyboard shortcut for task issuance.
+
+Scope changes/unmount clear transient state; explicit authorization loss clears
+selection, draft and protected incident detail. Pending confirmation locks RTS
+changes, and server acknowledgement selects the task detail with existing
+per-recipient lifecycle controls. Failed reads remain neutral and actionable.
+SI/DE strings, text labels, focus outlines, wrapping controls and narrow-screen
+layouts are provided without adding a UI or map dependency.
+
+### Delivery boundary
+
+No schema/API/RLS, Supabase or Room migration, Android change or dependency is
+required by M14.5B. M14.6 movement/routing/navigation/telemetry execution,
+persistent groups and additional lifecycle states remain deferred.
+
+This milestone is implementation-only by explicit request. No tests were
+added/modified or run; no build, lint, typecheck, CI, browser automation,
+runtime/smoke verification, migrations or deployment checks were performed.
+The assignment's manual acceptance scenarios remain unexecuted operator checks.
