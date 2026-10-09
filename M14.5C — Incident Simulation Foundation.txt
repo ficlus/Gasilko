@@ -1,0 +1,1407 @@
+# GASILKO — M14.5C INCIDENT SIMULATION FOUNDATION
+
+Implement **M14.5C — Incident Simulation Foundation** in the existing Gasilko monorepo.
+
+Repository: `ficlus/Gasilko`
+
+Base on current `main` AFTER merged:
+
+- PR #57 — M14.4 Units / Vehicles / Crews / Resources
+- PR #58 — M14.4.1 Operational Workspace
+- PR #59 — M14.4.2 Cross-Module Integration
+- PR #60 — M14.5A Tasks + Configurable Action / Command Engine
+- PR #61 — M14.5B RTS Map Interaction
+
+If PR #61 functionality is not present, STOP and report. Do not recreate previous milestones.
+
+This is an **implementation-only milestone**.
+
+The user will manually review the PR, apply SQL migrations, perform functional verification and merge.
+
+Do not run tests, build, lint, typecheck, CI, browser automation, runtime verification or deployments.
+
+---
+
+## 1. Objective
+
+Create a practical, isolated **incident training and simulation environment** that lets an authorized operator:
+
+1. Set up a training incident.
+2. Add or select virtual incident units.
+3. Define their initial geographic positions.
+4. Display those positions on the existing incident operational map.
+5. Select simulated units using M14.5B RTS interaction, including box/lasso.
+6. Manually change simulated positions and selected simulation conditions.
+7. Use the existing M14.5A command interface against correctly provisioned training-unit recipients.
+8. Observe issued commands separately from simulated positions.
+9. Pause, resume, reset and terminate a simulation.
+10. Prepare the architecture for future autonomous movement and task-response simulation.
+
+The simulator is not a replacement for incident operations.
+
+It is a **training/test data source** integrated into the existing operational UI.
+
+The first milestone must be useful without GPS hardware, Android clients or external routing services.
+
+---
+
+## 2. Mandatory architectural principle
+
+**COMMAND INTENT != EXECUTION PLAN != TELEMETRY**
+
+Three different concepts must remain separate.
+
+### Command intent
+
+The commander issues a real M14.5A task, for example:
+
+`MOVE_TO → coordinate X`
+
+This is an instruction.
+
+Issuing the instruction must not change the unit's location.
+
+### Execution plan
+
+A future NavigationSession will determine route geometry, ETA, reroutes and navigation progress.
+
+This is reserved for M14.5D.
+
+### Position/telemetry
+
+A unit's position is an independent observation.
+
+In training mode it may be generated or manually updated by the simulator.
+
+In real operations it must come from an authorized real location/telemetry source.
+
+Never write simulated positions into a real location stream without explicit simulation provenance and isolation.
+
+Never reinterpret a sector assignment, hydrant position, task target, station coordinate or vehicle inventory record as actual unit position.
+
+---
+
+## 3. Scope and repository inspection
+
+Inspect only relevant existing code:
+
+- Incident core lifecycle and permissions.
+- M14.3 COP and geometry.
+- M14.4 inventory, incident units, crew and sector relationships.
+- M14.4.1 shared OperationalMapCanvas.
+- M14.4.2 shared operational entity/target adapters.
+- M14.5A task/action definitions, recipient authorization and task lifecycle.
+- M14.5B RTS selection, map-layer adapter and command palette.
+- Existing Web API/RPC, SI/DE localization and style patterns.
+- Relevant SQL/RLS/operation receipts.
+- Existing M14 SPEC.
+
+Known entry points to verify:
+
+```text
+web/features/incidents/IncidentArea.tsx
+web/features/incidents/IncidentResources.tsx
+web/features/incidents/IncidentCop.tsx
+web/features/incidents/CopMap.tsx
+web/features/incidents/RtsMapInteraction.tsx
+web/features/incidents/rtsSession.tsx
+web/features/incidents/workspace.tsx
+
+web/lib/operational/
+web/features/map/OperationalMapCanvas.tsx
+
+supabase/migrations/
+docs/SPEC-M14-INCIDENT-OPERATIONS.md
+```
+
+Adapt to actual repository structure.
+
+Do not inspect or refactor unrelated Android, NAV3, Oracle, import/export or Web administration functionality.
+
+Do not introduce another incident/task/resource engine.
+
+---
+
+## 4. Critical isolation requirement
+
+**Simulation must never be confused with a real intervention.**
+
+The preferred deployment model is a separate Supabase **staging/training project**, separate from production.
+
+Implement the simulator as **disabled by default**.
+
+Require a server-authoritative simulation enablement guard.
+
+Suggested requirements:
+
+- A protected backend setting explicitly enables simulation.
+- Normal organization ADMIN/MANAGER cannot activate simulation globally.
+- UI configuration alone is not sufficient.
+- Production must remain disabled unless a trusted operator explicitly changes its protected environment configuration.
+- Simulation write RPCs recheck the backend guard.
+- Browser-provided `simulation=true` is not an authorization mechanism.
+- Simulation is only available for incidents explicitly enrolled as training incidents.
+- An existing live incident cannot be silently converted into a simulation.
+- A simulation cannot silently become a live incident.
+
+Document staging configuration without installing, configuring or deploying it.
+
+Do not use the existing production Supabase project as a default training database.
+
+Do not expose service-role credentials or backend configuration secrets.
+
+---
+
+## 5. Training incident model
+
+Prefer to reuse the existing incident domain for training operations rather than creating a second incompatible incident engine.
+
+Introduce a clearly isolated **SimulationScenario** linked to one existing incident.
+
+Conceptually:
+
+```ts
+type SimulationScenario = {
+  id: string;
+  incidentId: string;
+  title: string;
+  kind: string;
+  seed: number;
+  status: 'DRAFT' | 'RUNNING' | 'PAUSED' | 'FINISHED';
+  version: string;
+};
+```
+
+This interface is conceptual.
+
+Reuse repository naming conventions.
+
+Requirements:
+
+- One simulation scenario belongs to exactly one incident.
+- An ordinary live incident has no simulation scenario.
+- One incident must not be associated with multiple active simulation scenarios.
+- Simulator actions require both the scenario association and server-side simulation enablement.
+- Scenario identity remains stable.
+- Scenario changes are auditable.
+- Reset must not delete or rewrite historical M14 incident task records.
+- No implicit transfer of simulation objects into production.
+
+Use the existing incident create/participant/commander-consent lifecycle whenever possible.
+
+Do not bypass M14.1/M14.2 business constraints to create a convenient demo incident.
+
+If automated training-incident setup is impossible without violating those constraints, provide a clear guided setup using the existing authorized workflows.
+
+---
+
+## 6. Training scenario templates
+
+Provide an initial scenario picker.
+
+Suggested presets:
+
+### A. Structure fire
+
+Example initial resources:
+
+- GVC-1
+- GVC-2
+- GVV-1
+- Command unit
+- Support team
+
+Typical map setup:
+
+- incident center;
+- two staging locations;
+- several unit starting positions;
+- optionally a hazard or command-post reference.
+
+### B. Wildfire
+
+Example:
+
+- 6–8 response units;
+- two sectors;
+- multiple road-access points;
+- spread-out starting positions.
+
+Do not simulate fire spread yet.
+
+### C. Traffic accident
+
+Example:
+
+- rescue vehicle;
+- fire engine;
+- command unit;
+- medical team;
+- road-access location.
+
+### D. Empty sandbox
+
+Operator manually chooses:
+
+- starting location;
+- units;
+- unit positions.
+
+Templates are training fixtures, not a new hardcoded incident taxonomy.
+
+Do not add permanent firefighting action definitions in this milestone.
+
+All tactical commands continue to come from the configurable M14.5A catalog.
+
+---
+
+## 7. Deterministic scenario generation
+
+Use a stable seed-based fixture placement algorithm.
+
+Input:
+
+```text
+scenario seed
+scenario center longitude/latitude
+scenario template
+selected/created training units
+```
+
+Output:
+
+```text
+deterministic starting positions
+deterministic unit ordering
+deterministic labels
+```
+
+The same seed and template should reproduce the same starting layout, subject to the same underlying fixture inputs.
+
+Suggested initial placement:
+
+- within a bounded configurable radius from the incident center;
+- avoid invalid coordinates;
+- do not place points outside WGS84 bounds;
+- use `[longitude, latitude]` consistently;
+- do not silently generate physical GPS observations;
+- do not claim that generated locations are road-snapped.
+
+These are **test starting coordinates**, not actual positions and not routes.
+
+Do not call routing or geocoding services during fixture generation.
+
+---
+
+## 8. Reuse existing operational units
+
+M14.4 distinguishes:
+
+```text
+operational_units
+    permanent organizational identity
+
+incident_units
+    deployment episode in one incident
+```
+
+Keep these separate.
+
+A simulated map marker must reference an existing eligible **incident_units.id** where the operator intends to test the real M14.5A task pipeline.
+
+Do not identify simulated recipients by:
+
+- display name;
+- callsign alone;
+- permanent vehicle ID;
+- MapLibre feature ID;
+- sector ID.
+
+Suggested identity:
+
+```text
+scenario_id
+incident_unit_id
+```
+
+For an isolated staging/training organization, provide a convenient bounded fixture workflow using existing authoritative inventory and incident-unit APIs.
+
+Do not create permanent operational units by bypassing normal organization authorization or audit.
+
+Do not modify genuine vehicle inventory in order to create test positions.
+
+Do not allocate real stock, consume equipment or change production availability.
+
+A training unit must remain distinguishable from genuine organizational resources through the training environment and scenario context.
+
+---
+
+## 9. Virtual personnel
+
+Support a useful training-unit roster presentation.
+
+Examples:
+
+```text
+GVC-1
+  Unit leader
+  Driver
+  Responder 1
+  Responder 2
+
+GVV-1
+  Unit leader
+  Driver
+  Responder
+```
+
+Important:
+
+The existing `incident_crew_members` table references actual authenticated application profiles.
+
+Do not create fake `auth.users`, fake JWTs or fabricated profile identities merely to fill a visual roster.
+
+For M14.5C:
+
+- incident units are the primary fully integrated RTS recipients;
+- actual training accounts may participate as crew members through existing authorized processes;
+- purely virtual crew names may exist only as clearly marked scenario presentation data, if useful;
+- virtual display-only crew members must not be passed to M14.5A as real `INCIDENT_CREW_MEMBER` recipients.
+
+Document this limitation.
+
+The future autonomous simulator must use an explicit trusted training execution model, never impersonation of real users.
+
+---
+
+## 10. Simulation position model
+
+Introduce an independent, authoritative-for-training **simulation position model**.
+
+Do not add fake GPS coordinates directly to:
+
+- `operational_units`;
+- `operational_vehicles`;
+- `incident_units`;
+- `incident_tasks`;
+- `incident_task_assignments`.
+
+Suggested persisted projection:
+
+```text
+simulation_unit_positions
+
+scenario_id
+incident_unit_id
+longitude
+latitude
+heading_degrees
+speed_mps
+observed_at
+updated_by
+version
+```
+
+Include the necessary foreign keys, incident consistency checks, indexes and RLS.
+
+Position source must always be unambiguous:
+
+```text
+SIMULATED
+```
+
+Never present this as ordinary live GPS.
+
+Suggested optional attributes:
+
+```text
+accuracy_m
+position_state
+```
+
+Do not invent a real sensor accuracy. A simulated accuracy, if represented, must explicitly be a scenario parameter.
+
+Use server timestamps for authoritative mutation ordering.
+
+Validate:
+
+- longitude -180 to 180;
+- latitude -90 to 90;
+- finite numeric coordinates;
+- heading 0 to less than 360;
+- nonnegative finite speed;
+- reasonable maximum accepted values;
+- same-scenario/same-incident association.
+
+Prefer a single current-position projection per simulated incident unit.
+
+Do not store a full GPS trail in `incident_units`.
+
+---
+
+## 11. Simulation events and history
+
+Keep position history separate from incident business history.
+
+Suggested append-only table:
+
+```text
+simulation_events
+
+id
+scenario_id
+sequence
+event_type
+incident_unit_id (nullable)
+payload
+actor_user_id
+created_at
+operation_id
+```
+
+Event types conceptually include:
+
+```text
+SCENARIO_CREATED
+UNIT_ADDED
+POSITION_SET
+POSITION_MOVED
+UNIT_REMOVED
+SIMULATION_STARTED
+SIMULATION_PAUSED
+SIMULATION_RESUMED
+SIMULATION_RESET
+SIMULATION_FINISHED
+```
+
+Adapt exact representation to the existing audit conventions.
+
+Requirements:
+
+- events are immutable;
+- no physical deletion of historical events through ordinary UI;
+- bounded reads;
+- operation UUID for idempotent mutations;
+- retries must not duplicate events;
+- no sensitive auth data in payload;
+- no full incident/task payload duplication.
+
+Simulation history is not a replacement for:
+
+- incident timeline;
+- audit log;
+- task assignment history;
+- operational notifications.
+
+Keep these concepts distinct.
+
+---
+
+## 12. Database security and server commands
+
+Implement a narrow, explicit simulation command API.
+
+Conceptual operations:
+
+```text
+create_scenario
+attach_training_unit
+set_unit_position
+reset_unit_position
+remove_unit_from_scenario
+start_scenario
+pause_scenario
+resume_scenario
+finish_scenario
+reset_scenario_positions
+```
+
+Use actual project RPC naming and conventions.
+
+All writes must:
+
+1. Authenticate the actor using `auth.uid()`.
+2. Check the actor's active account.
+3. Check backend simulation enablement.
+4. Verify the incident is an authorized training scenario.
+5. Check incident participation and appropriate operational command authority.
+6. Check the referenced incident unit belongs to the same scenario incident.
+7. Reject terminal or invalid deployment relationships where applicable.
+8. Use optimistic concurrency.
+9. Use durable idempotency where appropriate.
+10. Write simulation history/audit.
+11. Return bounded safe DTOs.
+
+No broad `authenticated` INSERT/UPDATE/DELETE grants on simulation tables.
+
+Prefer RPC-controlled writes and RLS-protected reads.
+
+Use existing SECURITY DEFINER conventions, explicit object qualifications and safe `search_path`.
+
+Do not grant write authority based on map geometry or permanent organization ADMIN status alone.
+
+---
+
+## 13. Actor permissions
+
+Differentiate:
+
+### Simulation controller
+
+An authorized human operator who can create/control a training scenario.
+
+The role must be explicitly scoped to the training incident and protected environment.
+
+Do not introduce an unrestricted global ADMIN role.
+
+### Training commander
+
+An actual authenticated user holding a valid M14 incident command assignment in the training incident.
+
+May issue task commands according to existing M14.5A rules.
+
+### Training viewer
+
+Can view only scenarios/positions permitted by the existing incident authorization model and simulation read policies.
+
+Cannot move virtual units merely because they can read the map.
+
+Simulation controller privileges do not automatically imply authority to issue real M14.5A commands.
+
+A simulation control action must not silently grant Incident Commander or Unit Leader.
+
+---
+
+## 14. Simulation workspace entry
+
+Add an explicit entry point to the existing Web incident experience when backend simulation functionality is enabled.
+
+Suggested:
+
+```text
+TRAINING / SIMULATION
+```
+
+A training incident must display a persistent banner:
+
+```text
+SIMULACIJA — NI RESNIČNA INTERVENCIJA
+```
+
+German equivalent required.
+
+The banner should remain visible:
+
+- on the incident list;
+- on the incident detail;
+- in the command workspace;
+- during task creation;
+- on the map;
+- on the simulation control panel.
+
+Use text/icon/pattern, not color alone.
+
+A simulation must never look identical to a live incident.
+
+Do not use browser-only detection to classify an incident as training.
+
+Backend scenario metadata is authoritative.
+
+---
+
+## 15. Simulation setup workflow
+
+Provide a practical wizard or compact setup panel.
+
+Suggested workflow:
+
+1. Select a training incident or create one through the existing authorized incident flow.
+2. Choose a scenario preset.
+3. Choose the incident center and initial map extent.
+4. Select suitable staging inventory/incident units or create dedicated training fixtures through approved existing commands.
+5. Assign initial positions.
+6. Review participants and permissions.
+7. Activate the scenario.
+
+Avoid presenting fake fixture creation success before the actual backend commands succeed.
+
+For partial setup failures:
+
+- display exactly what succeeded;
+- preserve retry identifiers;
+- do not recreate duplicate incident units;
+- offer resume/retry;
+- do not silently force invalid command roles.
+
+If a required participation/command/consent step needs a human action, show that step instead of bypassing it.
+
+---
+
+## 16. Sample unit presets
+
+Provide compact reusable fixture presets for the staging environment.
+
+Example:
+
+```text
+Small response
+  3 units
+
+Structure fire
+  5 units
+
+Large response
+  10 units
+
+Stress layout
+  30 units
+```
+
+Keep fixture creation bounded and deliberate.
+
+Respect existing unique callsign and deployment constraints.
+
+When using existing inventory APIs, distinguish between:
+
+- permanent unit fixture;
+- incident deployment episode;
+- simulation position.
+
+These are three different objects.
+
+No double deployment of the same permanent operational unit.
+
+---
+
+## 17. Simulation map layer
+
+Integrate into the existing `OperationalMapCanvas`.
+
+Create a separate business layer, conceptually:
+
+```text
+SimulationUnitPositionLayer
+```
+
+Do not build a separate full MapLibre application.
+
+Do not refactor all old map components.
+
+Render one marker per authorized simulated unit with a valid current simulation position.
+
+Marker should convey:
+
+- unit callsign;
+- training/simulated provenance;
+- selected state;
+- current simulated position;
+- position recency;
+- optional heading.
+
+Use clear labels such as `SIM`.
+
+Never use the ordinary real-GPS live icon without a simulation indicator.
+
+Do not hide or overwrite:
+
+- canonical hydrant status;
+- incident-linked water source;
+- sector geometry;
+- tactical objects;
+- task target;
+- critical attention indicators.
+
+Keep simulation markers above background context and below critical/selection overlays.
+
+---
+
+## 18. Connect with M14.5B RTS selection
+
+M14.5B already contains:
+
+```text
+RtsMapInteraction
+ActualRecipientLayer
+box/lasso selection
+canonical recipient type + ID
+```
+
+The existing adapter deliberately accepts only authorized physical positions.
+
+For M14.5C, extend or generalize this boundary carefully to distinguish:
+
+```text
+ACTUAL position layer
+SIMULATED position layer
+```
+
+Do not silently register simulated markers as actual GPS positions.
+
+An explicit typed position-source discriminator is required.
+
+The RTS gesture logic should be reused.
+
+Do not reimplement:
+
+- box selection;
+- lasso selection;
+- point-in-polygon;
+- recipient deduplication;
+- recipient selection limits.
+
+When a training scenario is active:
+
+- simulated incident-unit markers can be selected;
+- Ctrl/Cmd selection works;
+- box/lasso works;
+- selected units appear in the existing selection toolbar;
+- selected unit IDs are genuine `incident_units.id` for the training incident;
+- task eligibility still comes from M14.5A.
+
+When no training scenario is active:
+
+- simulation layers are not registered;
+- actual-position behavior remains as before;
+- no simulated markers are shown.
+
+Do not allow a simulation overlay from one incident to appear in another incident.
+
+---
+
+## 19. Manual position controls
+
+Provide easy-to-use simulation editing controls.
+
+Suggested:
+
+```text
+Selected: GVC-1
+
+Simulated position:
+  longitude
+  latitude
+
+[SET POSITION]
+[MOVE ON MAP]
+[RESET TO START]
+```
+
+### Move on map
+
+Explicit mode:
+
+1. Select an eligible simulated unit.
+2. Click `Move on map`.
+3. Click a new location.
+4. Show the candidate position.
+5. Explicitly confirm.
+6. Execute the simulation position mutation.
+7. Update the marker.
+
+This action means:
+
+**Set the simulated observed position.**
+
+It does not mean:
+
+- issue MOVE_TO;
+- create task;
+- create route;
+- report real GPS;
+- change deployment state.
+
+Do not enable marker dragging in ordinary RTS NORMAL mode.
+
+Do not confuse simulation position editing with M14.5B target acquisition or tactical-object drawing.
+
+Provide clear mode switching and cancellation.
+
+---
+
+## 20. Optional heading and speed controls
+
+The operator may set:
+
+```text
+heading_degrees
+speed_mps
+```
+
+These values are **simulation scenario data**, not measured telemetry.
+
+For M14.5C:
+
+- heading may rotate a marker;
+- speed may be displayed;
+- setting speed alone must not cause autonomous movement;
+- do not extrapolate actual positions from speed;
+- do not fabricate future route geometry.
+
+A stationary simulated unit may have speed zero.
+
+Do not show a simulated speed as a real vehicle speed.
+
+---
+
+## 21. Simulation controls
+
+Provide:
+
+```text
+[START]
+[PAUSE]
+[RESUME]
+[RESET POSITIONS]
+[FINISH]
+```
+
+These control only the simulation lifecycle.
+
+They must not automatically modify:
+
+- real incident lifecycle;
+- incident command assignments;
+- deployed resources;
+- operational inventory;
+- canonical hydrants;
+- task assignment status.
+
+Start/Resume indicates the simulation scenario is operational for training.
+
+Pause prevents further scenario position mutations that require a running simulation, except explicit authorized setup/reset operations.
+
+Reset restores the initial simulation positions.
+
+Reset must not rewrite historical incident tasks or pretend an already issued M14.5A task was never issued.
+
+If the UI offers replay from a clean task state, it should guide creation of a fresh training incident/scenario instead of erasing immutable task history.
+
+---
+
+## 22. Simulated task interaction
+
+A primary purpose is to exercise M14.5B visually.
+
+The user should be able to:
+
+1. Select a virtual incident unit marker.
+2. Open the configurable command palette.
+3. Choose an existing Action Definition.
+4. Select a map target.
+5. Review the task.
+6. Issue the command through existing M14.5A.
+7. See its target and task status.
+
+Important:
+
+**Issuing the task must NOT move the simulated unit.**
+
+The existing M14.5A task assignment authorization and lifecycle remain authoritative.
+
+### Manual ACK limitation
+
+M14.5A execution operations are bound to real authenticated users holding appropriate roles or crew identities.
+
+M14.5C must not simulate execution by impersonating `auth.uid()`.
+
+If a training user has the required real test-account assignment, normal manual acknowledgement/execution should work through M14.5A.
+
+Otherwise:
+
+- show the task as issued;
+- do not fake ACK in the real task record;
+- optionally show a separate simulation-only note/event;
+- explain that automatic virtual response is deferred to M14.5E.
+
+Do not add a hidden “commander ACK on behalf of crew” bypass.
+
+---
+
+## 23. Training task targets and geometry
+
+Reuse M14.5A target types:
+
+```text
+NONE
+HYDRANT
+INCIDENT_MAP_OBJECT
+INCIDENT_SECTOR
+COORDINATE
+```
+
+Do not create a separate simulation-target engine.
+
+In a training incident, targets can be chosen through the current M14.5B interaction.
+
+Keep existing rules:
+
+- canonical hydrant reference;
+- valid same-incident tactical objects/sectors;
+- WGS84 coordinates;
+- point-only `MOVE_TO` and `WITHDRAW_TO`;
+- no polygon-to-centroid conversion;
+- stored historical target snapshot.
+
+For training scenarios, prefer test-specific tactical objects and free coordinates.
+
+Do not mutate real hydrant status or inspections to stage a simulation.
+
+---
+
+## 24. Position history and freshness
+
+Display the simulated position's timestamp.
+
+Suggested visual states:
+
+```text
+CURRENT SIM
+OLDER SIM
+UNKNOWN SIM
+```
+
+Do not reuse real operational `LIVE` terminology in a way that makes simulated positions appear genuinely observed.
+
+If position data is old, retain the last simulated location with its timestamp and appropriate stale indicator.
+
+Do not infer:
+
+- unit safety;
+- arrival;
+- task completion;
+- command ACK;
+
+from a position update.
+
+No automatic task transition on reaching a target coordinate in M14.5C.
+
+---
+
+## 25. Performance
+
+Initial practical scale:
+
+- 3–30 simulated incident units in ordinary scenarios;
+- up to 100 in a controlled larger scenario;
+- existing M14.5A 100-recipient task limit remains unchanged.
+
+Requirements:
+
+- one bounded position projection read for the scenario;
+- no N+1 requests per marker;
+- no MapLibre recreation on position update;
+- stable marker/source identity;
+- incremental GeoJSON source updates;
+- bounded event-history pagination;
+- avoid high-frequency DB polling;
+- no permanent timer-based simulated movement loop in C;
+- no full national inventory download;
+- no unnecessary reloading of hydrant or tactical layers.
+
+If a refresh strategy is needed, use an explicit refresh/manual fallback or existing infrastructure rather than introducing a new realtime subsystem.
+
+Realtime streaming remains a future capability.
+
+---
+
+## 26. Data integrity
+
+Define clean database constraints and indexes.
+
+Recommended relationships:
+
+```text
+SimulationScenario
+  belongs to Incident
+
+SimulationUnitPosition
+  belongs to SimulationScenario
+  references IncidentUnit
+
+SimulationEvent
+  belongs to SimulationScenario
+```
+
+Enforce cross-incident consistency server-side.
+
+A position belonging to scenario A must never reference an incident unit from incident B.
+
+Prevent more than one current position projection for the same scenario/unit pair.
+
+Preserve immutable event history.
+
+No physical deletion as a normal operation.
+
+Prevent unauthorized edits after FINISHED.
+
+For reset, restore the original configured scenario positions, not arbitrary newly generated positions.
+
+If deterministic generation is used, retain enough initial configuration to reproduce the starting state exactly.
+
+---
+
+## 27. Simulation environment safety
+
+Do not implement outbound real-world actions from the simulator.
+
+Specifically:
+
+- no emergency dispatch;
+- no CAD/112 messages;
+- no operational FCM fan-out;
+- no SMS or email alerts to real responders;
+- no real radio commands;
+- no physical drone commands;
+- no Oracle/OSRM routing calls;
+- no real resource inventory consumption;
+- no real hydrant status changes.
+
+Preserve a clear future integration boundary for M14.5D/E.
+
+Simulation features must be unavailable when the backend simulation guard is disabled.
+
+An incident's title containing “test” or “sim” is never sufficient to authorize simulation.
+
+---
+
+## 28. Scenario list and management UI
+
+Add a small simulation overview when enabled.
+
+Display:
+
+```text
+Scenario name
+Incident reference
+Scenario status
+Unit count
+Last simulation update
+Created by
+Actions
+```
+
+Actions:
+
+```text
+Open simulation
+Resume
+Reset positions
+Finish
+```
+
+Do not show unrelated incidents.
+
+Use existing organization and incident read-scope rules.
+
+Avoid adding a complicated new global administration module.
+
+Simulation management can live under the existing Incidents area.
+
+---
+
+## 29. Future Movement/Navigation adapter
+
+Design the position DTO so M14.5D can add true movement/navigation execution without rewriting M14.5C.
+
+Future interfaces should be able to distinguish:
+
+```ts
+type PositionOrigin = 'ACTUAL_GPS' | 'SIMULATED';
+```
+
+Conceptual only; do not invent a current live-GPS producer.
+
+Future movement sessions should reference:
+
+```text
+incident_task_assignment_id
+```
+
+Keep navigation state separate from task intent and position samples.
+
+Do not add routing or ETA fields to `incident_tasks`.
+
+Do not calculate distances by pretending a straight line is a road route.
+
+The future simulator will use the existing RoadProvider abstraction.
+
+Browser/Android must not contact OSRM directly.
+
+---
+
+## 30. Future Autonomous Simulator boundary
+
+M14.5E will later implement:
+
+```text
+virtual unit agent
+deterministic behavior state machine
+delayed simulated acknowledgements
+automatic movement
+route-following
+simulated position publishing
+scenario event injection
+failure scenarios
+time scaling
+```
+
+M14.5C must prepare compatible data boundaries, but **must not implement those capabilities yet**.
+
+Future autonomous behavior must not impersonate human users.
+
+Any automatic task transition in training mode will require an explicitly designed, authenticated, trusted simulation actor and server-side simulation-only enforcement.
+
+Do not create a permissive `simulate_any_task_status` RPC now.
+
+---
+
+## 31. Localization
+
+Support SI and DE.
+
+Localize:
+
+- Simulation
+- Training incident
+- Not a real incident
+- New scenario
+- Scenario template
+- Add training unit
+- Set simulated position
+- Move on map
+- Reset position
+- Start/Pause/Resume/Finish
+- Simulated position
+- Stale simulated position
+- Scenario setup error
+- Simulation disabled
+- Permission denied
+- Invalid position
+- Version conflict
+- Reset warning
+
+Never display raw SQL errors as primary user-facing messages when a localized explanation can be supplied.
+
+---
+
+## 32. User experience requirements
+
+The simulator must be usable by someone who wants to test Gasilko, not just by developers.
+
+Avoid forcing the user to:
+
+- manually write SQL INSERTs for scenario data;
+- manually enter 30 UUIDs;
+- open browser development tools;
+- fabricate auth tokens;
+- individually enter coordinates for every fixture.
+
+Prefer:
+
+```text
+Open training incident
+→ Select preset
+→ Select/create authorized training fixtures
+→ Review starting positions
+→ Start
+```
+
+The user should reach a usable test map in a small number of steps after the training environment and required authorized incident context have been configured.
+
+Use explicit empty states and guided setup when the environment lacks organizations, incident participants, units or command authority.
+
+Do not bypass business rules for convenience.
+
+---
+
+## 33. Database migrations
+
+This milestone is expected to require a **new forward-only SQL migration**.
+
+Implement only the required simulation tables, constraints, narrow RPCs and guarded authorization.
+
+Do not modify existing applied migrations.
+
+Do not rewrite M14.1–M14.5B schema.
+
+Do not change the meaning of production incident fields.
+
+Prefer simulation-specific tables rather than adding test fields throughout the core business schema.
+
+If more than one migration is genuinely necessary, keep migration ordering explicit and dependency-safe.
+
+Do not apply the migrations.
+
+Provide clear manual application instructions in the PR summary.
+
+Document that the simulation backend remains disabled until explicitly enabled in a dedicated authorized training environment.
+
+---
+
+## 34. Documentation
+
+Update:
+
+`docs/SPEC-M14-INCIDENT-OPERATIONS.md`
+
+Add M14.5C:
+
+- purpose;
+- isolation model;
+- training scenario lifecycle;
+- fixture/setup flow;
+- simulation unit position model;
+- position provenance;
+- interaction with M14.5B;
+- interaction with M14.5A;
+- authorization;
+- simulation data retention;
+- operator setup requirements;
+- manual movement;
+- reset semantics;
+- performance;
+- security;
+- future C → D → E integration.
+
+Do not remove the earlier M14 specification/history.
+
+Explicitly document:
+
+**Simulation position != actual position.**
+
+**Simulation controller != operational commander.**
+
+**Command issuance != position movement.**
+
+---
+
+## 35. Manual acceptance criteria
+
+Implement so the user can later manually verify:
+
+1. Simulation functionality is disabled by default.
+2. Backend guard rejects simulation writes when disabled.
+3. Simulation requires an explicitly configured training environment.
+4. Training scenario creation respects incident authorization.
+5. Existing live incident cannot silently become a simulation.
+6. Training incident displays an obvious persistent SIMULATION banner.
+7. Scenario preset produces reproducible starting positions.
+8. Scenario center can be selected on map.
+9. Unit fixtures use actual eligible incident-unit IDs.
+10. No fake authenticated user accounts are created.
+11. Simulated units appear as separately styled map markers.
+12. A simulation unit shows its callsign and simulated position timestamp.
+13. Simulated position is never presented as real GPS.
+14. Clicking a simulated marker selects the correct incident unit.
+15. Ctrl/Cmd multi-selection works.
+16. Box selection works with simulated position layer in training mode.
+17. Lasso selection works with simulated position layer in training mode.
+18. Box/lasso do not select sectors, hydrants or fake crew.
+19. RTS recipient eligibility remains authoritative.
+20. Existing configurable Action Definition palette works.
+21. MOVE_TO target can be chosen on map.
+22. Issuing MOVE_TO does not move the simulated marker.
+23. Manual Move on Map changes simulated position only after confirmation.
+24. Manual movement does not create a task or fake ACK.
+25. Manual movement does not change permanent inventory or incident deployment state.
+26. Position reset restores the scenario starting position.
+27. Simulation event history preserves prior position changes.
+28. Reset does not delete issued task history.
+29. Pause/resume follows the defined simulation lifecycle.
+30. Finished scenario rejects further unauthorized updates.
+31. One incident's simulation never appears in another incident.
+32. Real incident map never displays simulation markers.
+33. Unauthorized user cannot move simulated units.
+34. Lost authorization invalidates simulation write ability.
+35. Conflict handling does not silently overwrite newer positions.
+36. Exact retries do not duplicate events.
+37. Unit with no simulation position is not given a fabricated physical location.
+38. SI localization is present.
+39. DE localization is present.
+40. No tests/build/lint/typecheck/CI/deploy are executed by Codex.
+
+These are implementation acceptance targets for **manual verification by the user later**.
+
+Do not implement automated tests as part of this PR.
+
+---
+
+## 36. Strict implementation constraints
+
+Implementation only.
+
+DO NOT:
+
+- add tests;
+- run tests;
+- run build;
+- run lint;
+- run typecheck;
+- run CI;
+- run browser automation;
+- run emulator;
+- run Docker;
+- run runtime or manual smoke checks;
+- apply migrations;
+- deploy Supabase functions;
+- deploy Web;
+- deploy Android;
+- deploy or configure staging infrastructure;
+- start live simulations against production;
+- modify unrelated milestones;
+- change Android/KAPT/Gradle local settings;
+- execute performance benchmarking.
+
+Do not perform a post-implementation validation pass.
+
+Inspect the necessary source before changes, implement directly and stop after preparing the PR.
+
+Use existing dependencies.
+
+No large simulator/game/physics framework.
+
+No real-time 3D engine.
+
+No AI-agent library.
+
+No new routing library.
+
+Avoid new dependencies entirely unless absolutely necessary.
+
+Create **ONE PR ONLY**.
+
+Do not merge.
+
+Use `[skip ci]` in the implementation commit message where appropriate.
+
+---
+
+## 37. PR summary
+
+The PR must explain:
+
+1. New/changed files.
+2. Simulation backend enablement and staging isolation.
+3. Training scenario lifecycle.
+4. Scenario template/seed approach.
+5. How training fixtures integrate with existing permanent inventory and incident units.
+6. Simulation-position schema.
+7. Simulation events and reset behavior.
+8. Server-authoritative permissions and RLS.
+9. New guarded RPCs.
+10. Map rendering and SIM marker visual semantics.
+11. M14.5B selection adapter integration.
+12. Existing M14.5A task issuance reuse.
+13. Why simulation movement never changes command intent.
+14. Why automatic task ACK is not introduced.
+15. Expected manual SQL migrations and deployment prerequisites.
+16. SI/DE coverage.
+17. Performance bounds.
+18. Known limitations.
+19. What is deferred to M14.5D Movement/Navigation Execution.
+20. What is deferred to M14.5E Autonomous Simulator.
+21. Confirmation that no tests/build/lint/typecheck/CI were executed.
+22. Confirmation that no migration, Edge Function or application was deployed.
+
+**ONE PR. DO NOT MERGE. DO NOT RUN TESTS OR VALIDATION.**
+
