@@ -1,11 +1,12 @@
+import type {TrainingLabel} from '../operational/simulation';
 export const incidentStates = ['DRAFT','ACTIVE','STABILIZED','CLOSED','CANCELLED'] as const;
 export const incidentPriorities = ['LOW','NORMAL','HIGH','CRITICAL'] as const;
 export const incidentSeverities = ['UNKNOWN','MINOR','MAJOR','CRITICAL'] as const;
 export type IncidentType = {id:string;code:string;names:Record<string,string>};
 export type Organization = {id:string;name:string;can_create:boolean};
-export type InboxItem = {id:string;incident_id:string;title:string;reference_number:string;organization_id:string;version:string;expires_at?:string};
+export type InboxItem = {training?:TrainingLabel|null;id:string;incident_id:string;title:string;reference_number:string;organization_id:string;version:string;expires_at?:string};
 export type Entry = {organizations:Organization[];types:IncidentType[];invitations:InboxItem[];nominations:InboxItem[]};
-export type IncidentRow = {id:string;reference_number:string;title:string;status:string;priority:string;severity:string;created_at:string;address:string|null;lead_name:string;type:IncidentType};
+export type IncidentRow = {training?:TrainingLabel|null;id:string;reference_number:string;title:string;status:string;priority:string;severity:string;created_at:string;address:string|null;lead_name:string;type:IncidentType};
 export type Participant = {id:string;organization_id:string;name:string;status:string;agency_role:string;accepted_at:string|null;ended_at:string|null;end_reason:string|null;can_consent_release:boolean;can_release:boolean};
 export type Incident = IncidentRow & {summary:string;incident_type_id:string;latitude:number|null;longitude:number|null;timezone:string;unknown_location_reason:string|null;
  version:string;revision:string;timeline_sequence:string;lead_organization_id:string;created_organization_id:string;
@@ -18,6 +19,7 @@ export type Candidate = {id:string;name:string};
 export type Core = {title:string;summary:string;incident_type_id:string;severity:string;priority:string;latitude:string;longitude:string;address:string;unknown_location_reason:string};
 export type Receipt = {incident_id:string;operation_id:string;version:string;revision:string;timeline_sequence:string};
 export const mutationNames = {
+ create_simulation:'simulation_create_scenario',
  issue_task:'incident_issue_task',transition_task_assignment:'incident_transition_task_assignment',cancel_task:'incident_cancel_task',
  deploy_unit:'incident_deploy_unit',
  update_unit_status:'incident_update_unit_status',

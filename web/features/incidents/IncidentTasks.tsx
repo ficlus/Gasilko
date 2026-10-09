@@ -38,7 +38,7 @@ export function IncidentTasks({locale,account,org,incidentId,version,incidentRef
  const [readUnavailable,setReadUnavailable]=useState(false);
  const [checking,setChecking]=useState(false),[verifyEpoch,setVerifyEpoch]=useState(0),[actionChanged,setActionChanged]=useState(false);
  const verified=useRef(new Map<string,Recipient|null>()),verifiedEpoch=useRef(''),seenLaunch=useRef(0);
- const locked=disabled||rts.locked||rts.copEditing;
+ const locked=disabled||rts.locked||rts.copEditing||rts.externalEditing;
  const selectionKeys=chosen.map(recipientKey).sort().join('|');
  const scope={p_incident_id:incidentId,p_acting_organization_id:org};
  useEffect(()=>{alive.current=true;return()=>{alive.current=false;};},[]);

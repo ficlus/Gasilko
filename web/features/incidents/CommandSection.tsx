@@ -1,4 +1,5 @@
 'use client';
+import {SimulationBanner} from './SimulationProvider';
 import {useEffect,useRef,useState,type FormEvent,type ReactNode} from 'react';
 import {WorkspaceSlot,WorkspaceSection} from './workspace';
 import type {Locale} from '../../lib/i18n';
@@ -9,7 +10,7 @@ type Read = <T>(name:string,args:Record<string,unknown>,signal?:AbortSignal,acco
 export type CommandAction = (action:Mutation,payload:Record<string,unknown>,item?:InboxItem,description?:string)=>void;
 export function CommandRequests({locale,items,disabled,onAction}:{locale:Locale;items:CommandRequest[];disabled:boolean;onAction:CommandAction}) {
  const t=incidentText(locale);
- return <>{items.map(item=><article className="web-row" key={item.id}>
+ return <>{items.map(item=><article className="web-row" key={item.id}>{item.training&&<SimulationBanner locale={locale}/>}
   {item.title&&<strong>{item.reference_number} · {item.title}</strong>}
   <h3>{t(item.kind)} · {item.name??'—'}</h3><p>{t(item.role)} · {item.organization_name} · <span className="admin-badge">{t(item.status)}</span></p>
   {item.unit_name&&<p>{t('UNIT_LEADER')}: {item.unit_name}</p>}

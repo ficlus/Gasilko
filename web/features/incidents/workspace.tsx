@@ -4,6 +4,9 @@ import {useSearchParams} from 'next/navigation';
 import {parseEntityRef} from '../../lib/operational/entity';
 import {createPortal} from 'react-dom';
 import type {Locale} from '../../lib/i18n';
+import {SimulationProvider} from './SimulationProvider';
+import {SimulationPanel} from './SimulationPanel';
+import type {TaskRead} from '../../lib/operational/tasks';
 import {RtsProvider} from './rtsSession';
 import {RtsSelectionToolbar} from './RtsSelectionToolbar';
 import {incidentText} from '../../lib/incidents/messages';
@@ -45,7 +48,7 @@ export function IncidentWorkspace({locale,header,operations,secondary,children}:
  const [bottom,setBottom]=useState<HTMLElement|null>(null);
  const [operational,setOperational]=useState<HTMLElement|null>(null),[selectedPane,setSelectedPane]=useState<HTMLElement|null>(null);
  return <Context.Provider value={{selected,select,operational,selectedPane,bottom}}>
-  <section className="incident-workspace">{header}<RtsSelectionToolbar locale={locale}/>
+  <section className="incident-workspace">{header}<RtsSelectionToolbar locale={locale}/><SimulationPanel locale={locale}/>
    <div className="workspace-grid">
     <aside className="workspace-operational" aria-label={t('workspaceOperations')}>{operations}<div ref={setOperational}/></aside>
     <div className="workspace-map">{children}</div>
@@ -59,6 +62,6 @@ export function IncidentWorkspace({locale,header,operations,secondary,children}:
  </Context.Provider>;
 }
 
-export function IncidentLayout({operational,locked,onAccessLost,...props}:{operational:boolean;locked:boolean;onAccessLost:()=>void;locale:Locale;header:ReactNode;operations:ReactNode;secondary:ReactNode;children:ReactNode}){
- return <RtsProvider enabled={operational} locked={locked} onAccessLost={onAccessLost}>{operational?<IncidentWorkspace {...props}/>:<>{props.header}{props.operations}{props.children}{props.secondary}</>}</RtsProvider>;
+export function IncidentLayout({operational,locked,onAccessLost,simulation,...props}:{operational:boolean;locked:boolean;onAccessLost:()=>void;simulation:{account:string;org:string;incidentId:string;refresh:number;read:TaskRead;onInventoryChanged:()=>void};locale:Locale;header:ReactNode;operations:ReactNode;secondary:ReactNode;children:ReactNode}){
+ return <RtsProvider enabled={operational} locked={locked} onAccessLost={onAccessLost}><SimulationProvider {...simulation} locale={props.locale}>{operational?<IncidentWorkspace {...props}/>:<>{props.header}<SimulationPanel locale={props.locale}/>{props.operations}{props.children}{props.secondary}</>}</SimulationProvider></RtsProvider>;
 }
