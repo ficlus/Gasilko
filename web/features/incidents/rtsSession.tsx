@@ -6,7 +6,7 @@ import {recipientKey,typingTarget,type RtsMode,type RtsRecipient,type TargetPrev
 
 type PickOptions={toggle?:boolean;range?:boolean;list:string};
 type RtsController={
- enabled:boolean;locked:boolean;blocked:boolean;copEditing:boolean;setCopEditing:Dispatch<SetStateAction<boolean>>;
+ enabled:boolean;locked:boolean;blocked:boolean;externalEditing:boolean;setExternalEditing:Dispatch<SetStateAction<boolean>>;hasPositionLayers:boolean;setHasPositionLayers:Dispatch<SetStateAction<boolean>>;copEditing:boolean;setCopEditing:Dispatch<SetStateAction<boolean>>;
  mode:RtsMode;requestMode:(mode:RtsMode)=>void;cancelMode:()=>void;
  recipients:RtsRecipient[];setRecipients:Dispatch<SetStateAction<RtsRecipient[]>>;
  pick:(row:RtsRecipient,visible:readonly RtsRecipient[],options:PickOptions)=>void;
@@ -28,6 +28,7 @@ const emptyTarget:TargetPreview={target:{kind:'NONE'},geometry:null,label:''};
 /** Workspace-local presentation state. No mutation, authorization or persistent grouping. */
 export function RtsProvider({enabled,locked,onAccessLost,children}:{enabled:boolean;locked:boolean;onAccessLost:()=>void;children:ReactNode}){
  const root=useRef<HTMLDivElement>(null),latest=useRef({enabled,locked,onAccessLost});latest.current={enabled,locked,onAccessLost};
+ const [externalEditing,setExternalEditing]=useState(false),[hasPositionLayers,setHasPositionLayers]=useState(false);
  const [blocked,setBlocked]=useState(false),[copEditing,setCopEditing]=useState(false),[mode,setMode]=useState<RtsMode>('NORMAL');
  const [recipients,writeRecipients]=useState<RtsRecipient[]>([]),selectedRef=useRef<RtsRecipient[]>([]);
  const [action,setAction]=useState<ActionDefinition|null>(null),[preview,writePreview]=useState<TargetPreview>(emptyTarget);
@@ -35,14 +36,14 @@ export function RtsProvider({enabled,locked,onAccessLost,children}:{enabled:bool
  const [multiTouch,setMultiTouch]=useState(false),[merge,setMerge]=useState(false);
  const [open,setOpen]=useState(false),[launch,setLaunch]=useState(0),[intent,setIntent]=useState<TaskIntent|null>(null),[message,setMessage]=useState('');
  const anchor=useRef<{list:string;key:string}|null>(null);
- const interaction=useRef({blocked,copEditing,open,multiTouch,action});interaction.current={blocked,copEditing,open,multiTouch,action};
+ const interaction=useRef({blocked,copEditing,externalEditing,hasPositionLayers,open,multiTouch,action});interaction.current={blocked,copEditing,externalEditing,hasPositionLayers,open,multiTouch,action};
  const setRecipients=useCallback<Dispatch<SetStateAction<RtsRecipient[]>>>((input)=>{
   const previous=selectedRef.current,next=typeof input==='function'?input(previous):input;
   const unique=Array.from(new Map(next.map(r=>[recipientKey(r),r])).values());
   if(unique.length>100){setMessage('selectionLimit');return;}
   selectedRef.current=unique;writeRecipients(unique);
  },[]);
- const canInteract=()=>latest.current.enabled&&!latest.current.locked&&!interaction.current.blocked;
+ const canInteract=()=>latest.current.enabled&&!latest.current.locked&&!interaction.current.blocked&&!interaction.current.externalEditing;
  const selectMany=useCallback((rows:readonly RtsRecipient[],add:boolean)=>{
   if(!canInteract())return;
   setRecipients(previous=>add?[...previous,...rows.filter(r=>!previous.some(p=>recipientKey(p)===recipientKey(r)))]:rows.map(r=>previous.find(p=>recipientKey(p)===recipientKey(r))??r));
@@ -64,9 +65,9 @@ export function RtsProvider({enabled,locked,onAccessLost,children}:{enabled:bool
  const requestMode=useCallback((next:RtsMode)=>{
   if(next==='NORMAL'){setMode(next);return;}
   if(!canInteract())return;
-  if(interaction.current.copEditing){setMessage('drawingBusy');return;}
+  if(interaction.current.copEditing||interaction.current.externalEditing){setMessage('drawingBusy');return;}
   if(next==='CHOOSE_TARGET'&&!interaction.current.action)return;
-  setMessage(next==='SELECT_BOX'||next==='SELECT_LASSO'?'noPositions':'');setMode(next);
+  setMessage((next==='SELECT_BOX'||next==='SELECT_LASSO')&&!interaction.current.hasPositionLayers?'noPositions':'');setMode(next);
  },[]);
  const setTarget=useCallback((target:TaskTarget,geometry:Geometry|null=null,label='')=>{
   writePreview({target,geometry:geometry?structuredClone(geometry):null,label});setMode('NORMAL');setMessage('');
@@ -76,7 +77,7 @@ export function RtsProvider({enabled,locked,onAccessLost,children}:{enabled:bool
  },[]);
  const openPalette=useCallback(()=>{
   if(!canInteract())return;
-  if(interaction.current.copEditing){setMessage('drawingBusy');return;}
+  if(interaction.current.copEditing||interaction.current.externalEditing){setMessage('drawingBusy');return;}
   setMode('NORMAL');
   if(!interaction.current.open)setLaunch(v=>v+1);
   else root.current?.querySelector<HTMLElement>('[data-rts-editor]')?.focus();
@@ -85,17 +86,17 @@ export function RtsProvider({enabled,locked,onAccessLost,children}:{enabled:bool
   setBlocked(true);setRecipients([]);setAction(null);writePreview(emptyTarget);setIntent(null);setOpen(false);setMode('NORMAL');setMessage('authorityLost');
   latest.current.onAccessLost();
  },[setRecipients]);
- useEffect(()=>{if(!enabled||locked||copEditing)setMode('NORMAL');},[enabled,locked,copEditing]);
+ useEffect(()=>{if(!enabled||locked||copEditing||externalEditing)setMode('NORMAL');},[enabled,locked,copEditing,externalEditing]);
  useEffect(()=>{if(!enabled){setRecipients([]);setOpen(false);setAction(null);writePreview(emptyTarget);anchor.current=null;}},[enabled,setRecipients]);
  useEffect(()=>{if(!open)setMode('NORMAL');},[open]);
  useEffect(()=>{
   const kinds=action?.configuration.target_types.filter(k=>k!=='NONE')??[];
   setMapTargetKind((kinds.includes(preview.target.kind)?preview.target.kind:kinds.includes('COORDINATE')?'COORDINATE':kinds[0]??'NONE') as TaskTarget['kind']);
  },[action?.configuration.id]);
- const value:RtsController={enabled,locked,blocked,copEditing,setCopEditing,mode,requestMode,cancelMode,recipients,setRecipients,pick,selectMany,clear,remove,multiTouch,setMultiTouch,merge,setMerge,
+ const value:RtsController={enabled,locked,blocked,externalEditing,setExternalEditing,hasPositionLayers,setHasPositionLayers,copEditing,setCopEditing,mode,requestMode,cancelMode,recipients,setRecipients,pick,selectMany,clear,remove,multiTouch,setMultiTouch,merge,setMerge,
   action,setAction,preview,setTarget,hydrateTarget,mapTargetKind,setMapTargetKind,open,setOpen,launch,openPalette,intent,setIntent,message,setMessage,revoke};
  return <RtsContext.Provider value={value}><div ref={root} className="rts-workspace" onKeyDown={e=>{
-  if(e.defaultPrevented||typingTarget(e.target)||e.nativeEvent.isComposing||!enabled||locked||blocked||copEditing||e.target instanceof Element&&e.target.closest('dialog'))return;
+  if(e.defaultPrevented||typingTarget(e.target)||e.nativeEvent.isComposing||!enabled||locked||blocked||copEditing||externalEditing||e.target instanceof Element&&e.target.closest('dialog'))return;
   const key=e.key.toLowerCase();
   if(key==='escape'){
    if(mode!=='NORMAL'){e.preventDefault();e.stopPropagation();setMode('NORMAL');}

@@ -3,7 +3,9 @@ import {useEffect,useRef} from 'react';
 import {type Map,type GeoJSONSource} from 'maplibre-gl';
 import {useRts} from './rtsSession';
 import {useWorkspace} from './workspace';
-import {RtsMapInteraction} from './RtsMapInteraction';
+import {SimulationMapLayer,useSimulationPositionLayer} from './SimulationMapLayer';
+import {useSimulation} from './SimulationProvider';
+import {pickPositionRecipient,RtsMapInteraction} from './RtsMapInteraction';
 import {TaskIntentLayers} from './TaskIntentLayers';
 import type {TaskTarget} from '../../lib/operational/tasks';
 import {resolveTarget} from '../../lib/operational/target';
@@ -20,7 +22,8 @@ const ids=['cop-primary','cop-sectors','cop-markers','cop-zones','cop-hydrants',
 const features=(items:{id:string;geometry:Geometry;label:string;kind?:string;status?:string}[])=>({type:'FeatureCollection' as const,
  features:items.map(i=>({type:'Feature' as const,id:i.id,geometry:i.geometry,properties:{id:i.id,label:i.label,kind:i.kind??'',status:i.status??''}}))});
 export default function CopMap(props:Props){
- const rts=useRts(),workspace=useWorkspace();
+ const rts=useRts(),workspace=useWorkspace(),sim=useSimulation(),positionLayer=useSimulationPositionLayer();
+ const recipientLayers=positionLayer?[positionLayer]:[];
  const c=props.cop,primary:Position|null=c.incident.longitude!==null&&c.incident.latitude!==null?[c.incident.longitude,c.incident.latitude]:null;
  const selectedKind=c.sectors.some(s=>s.id===props.selected)?'INCIDENT_SECTOR':c.objects.some(o=>o.id===props.selected)?'INCIDENT_MAP_OBJECT':'HYDRANT';
  const selectedGeometry=resolveTarget(selectedKind==='HYDRANT'?{kind:selectedKind,entityId:props.selected}:{kind:selectedKind,entityId:props.selected,incidentId:c.incident.id},{cop:c,hydrants:props.contextHydrants});
@@ -28,6 +31,7 @@ export default function CopMap(props:Props){
   ...c.links.flatMap(l=>l.hydrant?.longitude!=null&&l.hydrant.latitude!=null?[[l.hydrant.longitude,l.hydrant.latitude] as Position]:[])];
  return <OperationalMapCanvas locale={props.locale} label={incidentText(props.locale)('copTitle')} initialPoints={points} onBounds={props.onBounds}
   onClick={(map,event)=>{
+   if(sim?.move){if(!rts?.locked&&!props.drawing)sim.pickPosition([event.lngLat.lng,event.lngLat.lat]);return;}
    if(rts?.mode==='SELECT_BOX'||rts?.mode==='SELECT_LASSO')return;
    if(rts?.mode==='CHOOSE_TARGET'){
     if(rts.locked||rts.copEditing||!rts.enabled||!rts.action)return;
@@ -51,13 +55,18 @@ export default function CopMap(props:Props){
     rts.setTarget(target,geometry,label);return;
    }
    if(props.drawing){props.onPoint([event.lngLat.lng,event.lngLat.lat]);return;}
+   if(!rts?.externalEditing&&!rts?.locked&&positionLayer){
+    const recipient=pickPositionRecipient(map,event.point,recipientLayers);
+    if(recipient){workspace?.select({kind:'INCIDENT_UNIT',id:recipient.id});
+     rts?.pick(recipient,[...positionLayer.recipients.values()],{list:'simulation:'+positionLayer.id,toggle:event.originalEvent.ctrlKey||event.originalEvent.metaKey});return;}
+   }
    const taskLayers=map.getStyle().layers.filter(l=>l.id.startsWith('rts-task-target-')).map(l=>l.id);
    const task=taskLayers.length?map.queryRenderedFeatures(event.point,{layers:taskLayers}).find(f=>f.properties?.id===rts?.intent?.id):null;
    if(task&&rts?.intent){workspace?.select({kind:'TASK',id:rts.intent.id});return;}
    const clickable=map.getStyle().layers.filter(l=>(l.id.startsWith('cop-')||l.id.startsWith('context-'))&&!l.id.startsWith('cop-draft')).map(l=>l.id);
    const id=map.queryRenderedFeatures(event.point,{layers:clickable}).find(f=>typeof f.properties?.id==='string')?.properties?.id;
    if(typeof id==='string')props.onSelect(id);
-  }}>{map=><><CopRendering map={map} props={props}/><TaskIntentLayers map={map} locale={props.locale}/><RtsMapInteraction map={map} locale={props.locale}/></>}</OperationalMapCanvas>;
+  }}>{map=><><CopRendering map={map} props={props}/><TaskIntentLayers map={map} locale={props.locale}/><SimulationMapLayer map={map} locale={props.locale}/><RtsMapInteraction map={map} locale={props.locale} layers={recipientLayers}/></>}</OperationalMapCanvas>;
 }
 function CopRendering({map,props}:{map:Map;props:Props}){
  const fitted=useRef('');

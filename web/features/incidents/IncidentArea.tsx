@@ -1,4 +1,9 @@
 'use client';
+import {SimulationSetup} from './SimulationSetup';
+import {SimulationOverview} from './SimulationOverview';
+import {SimulationBanner} from './SimulationProvider';
+import {simulationErrors,defaultSimulationSetup} from '../../lib/operational/simulation';
+import {simulationText} from '../../lib/operational/simulationMessages';
 import {IncidentTasks} from './IncidentTasks';
 import {taskErrors,taskMutations} from '../../lib/operational/tasks';
 import {IncidentLayout,WorkspaceSection} from './workspace';
@@ -7,7 +12,7 @@ import type {CrewOutcomes} from './TeamCrewTemplate';
 import {IncidentResources} from './IncidentResources';
 import {resourceErrors,resourceMutations} from '../../lib/operational/model';
 import Link from 'next/link';
-import {useRouter} from 'next/navigation';
+import {useRouter,useSearchParams} from 'next/navigation';
 import {useEffect,useRef,useState,type FormEvent} from 'react';
 import type {Locale} from '../../lib/i18n';
 import {browserClient} from '../../lib/supabase/browser';
@@ -23,10 +28,12 @@ async function rpc<T>(name:string,args:Record<string,unknown>,signal?:AbortSigna
  const result=await response.json();if(!response.ok)throw new IncidentError(result.error??'SERVER');return result.data as T;
 }
 type RequestState={action:Mutation;args:Record<string,unknown>;storageKey:string};
-type Confirmation={action:Mutation;payload:Record<string,unknown>;incident:string;version:string;org:string;description?:string};
+type Confirmation={training?:boolean;action:Mutation;payload:Record<string,unknown>;incident:string;version:string;org:string;description?:string};
 const emptyCore:Core={title:'',summary:'',incident_type_id:'',priority:'NORMAL',severity:'UNKNOWN',latitude:'',longitude:'',address:'',unknown_location_reason:''};
 export function IncidentArea({locale,account,destination,initialOrg}:{locale:Locale;account:string;destination?:string;initialOrg?:string}) {
- const t=incidentText(locale),router=useRouter();
+ const baseText=incidentText(locale),simText=simulationText(locale),t=(key:string)=>key==='create_simulation'?simText('new'):(simulationErrors as readonly string[]).includes(key)?simText(key):baseText(key),router=useRouter();
+ const requestedTraining=useSearchParams().get('training')==='1';
+ const [simulationEnvironment,setSimulationEnvironment]=useState<{enabled:boolean;can_create:boolean}|null>(null),[training,setTraining]=useState(false),[simulationSetup,setSimulationSetup]=useState(defaultSimulationSetup);
  const [entry,setEntry]=useState<Entry|null>(null),[org,setOrg]=useState(initialOrg??''),[rows,setRows]=useState<IncidentRow[]>([]);
  const [detail,setDetail]=useState<Incident|null>(null);
  const [filter,setFilter]=useState(''),[page,setPage]=useState<{created:string;id:string}|null>(null),[refresh,setRefresh]=useState(0);
@@ -45,7 +52,7 @@ export function IncidentArea({locale,account,destination,initialOrg}:{locale:Loc
  const date=(value:string|null|undefined)=>value?new Date(value).toLocaleString(locale==='de'?'de-DE':'sl-SI'): '—';
  const safeError=(e:unknown)=>{
   const code=e instanceof IncidentError?e.message:'SERVER';
-  if(([...copErrors,...resourceErrors,...taskErrors] as readonly string[]).includes(code))return code;
+  if(([...simulationErrors,...copErrors,...resourceErrors,...taskErrors] as readonly string[]).includes(code))return code;
   if(['INVALID_COMMAND_HIERARCHY','INVALID_COMMAND_ROLE','INVALID_COMMAND_CANDIDATE','TRANSFER_NOT_CURRENT','TRANSFER_EXPIRED','TRANSFER_ALREADY_PENDING','LEAD_TRANSFER_REQUIRES_CONSENT','COMMANDER_STILL_VALID','PARTICIPANT_HAS_ACTIVE_COMMAND'].includes(code))return code;
   return code==='STALE_VERSION'?'stale':code==='NOT_AUTHORIZED'?'noAccess':code==='EXPIRED'?'expired':code==='VALIDATION_FAILED'?'invalid':
    code==='OPERATION_REUSED'?'reused':['INVALID_TRANSITION','INVALID_COMMANDER','INVALID_PARTICIPANT','INCIDENT_TERMINAL','INVALID_STATE'].includes(code)?'rejected':'error';
@@ -73,6 +80,12 @@ export function IncidentArea({locale,account,destination,initialOrg}:{locale:Loc
    .then(value=>{if(!ac.signal.aborted)setCommandInbox(value);}).catch(e=>{if(!ac.signal.aborted)setError(safeError(e));});
   return()=>ac.abort();
  },[refresh,isList,account]);
+ useEffect(()=>{
+  setSimulationEnvironment(null);setTraining(false);const ac=new AbortController();
+  if(org)void rpc<{enabled:boolean;can_create:boolean}>('simulation_environment',{p_acting_organization_id:org},ac.signal,account)
+   .then(value=>{if(!ac.signal.aborted){setSimulationEnvironment(value);setTraining(value.can_create&&requestedTraining);}}).catch(()=>{if(!ac.signal.aborted)setSimulationEnvironment(null);});
+  return()=>ac.abort();
+ },[org,account,requestedTraining]);
  useEffect(()=>{setDetail(null);setConfirmation(null);setTaskFeedback({sequence:0,kind:'saved'});coreLoaded.current=false;},[org]);
  useEffect(()=>{
   if(!entry||!org)return;const ac=new AbortController();
@@ -104,7 +117,7 @@ export function IncidentArea({locale,account,destination,initialOrg}:{locale:Loc
    if(copMutations.includes(request.action))setCopFeedback(v=>({sequence:v.sequence+1,kind:'saved'}));
    if((resourceMutations as readonly string[]).includes(request.action))setResourceFeedback(v=>({sequence:v.sequence+1,kind:'saved'}));
    if(request.action==='add_crew_member'){const payload=request.args.p_payload as {user_id:string;unit_assignment_id:string};const person=payload.unit_assignment_id+':'+payload.user_id;setCrewOutcomes(v=>({...v,[person]:{state:'saved'}}));}
-   if(request.action==='create')router.push(url(receipt.incident_id,request.args.p_acting_organization_id as string));
+   if(request.action==='create'||request.action==='create_simulation')router.push(url(receipt.incident_id,request.args.p_acting_organization_id as string));
    else {setRefresh(n=>n+1);}
   } catch(e) {
    if(!alive.current)return;setError(safeError(e));
@@ -135,16 +148,23 @@ export function IncidentArea({locale,account,destination,initialOrg}:{locale:Loc
   }catch{sending.current=false;setBusy(false);setError('error');}
  }
  function ask(action:Mutation,payload:Record<string,unknown>={},item?:InboxItem,description?:string) {
-  if(loading||busy||pending)return;setReason('');setConfirmation({action,payload,incident:item?.incident_id??detail?.id??'',version:item?.version??detail?.version??'0',org:item?.organization_id??org,description});
+  if(loading||busy||pending)return;setReason('');setConfirmation({training:!!(item?.training??detail?.training),action,payload,incident:item?.incident_id??detail?.id??'',version:item?.version??detail?.version??'0',org:item?.organization_id??org,description});
  }
  function submitCore(e:FormEvent) {
   e.preventDefault();const absent=core.latitude.trim()===''&&core.longitude.trim()==='';
   if(!absent&&(core.latitude.trim()===''||core.longitude.trim()===''||!Number.isFinite(Number(core.latitude))||!Number.isFinite(Number(core.longitude)))){setError('invalid');return;}
-  void mutate(isNew?'create':'edit',{...core,latitude:absent?null:Number(core.latitude),longitude:absent?null:Number(core.longitude),address:core.address.trim()||null});
+  const payload={...core,latitude:absent?null:Number(core.latitude),longitude:absent?null:Number(core.longitude),address:core.address.trim()||null};
+  if(isNew&&training){
+   if(!simulationEnvironment?.can_create||absent){setError('invalid');return;}
+   void mutate('create_simulation',{core:payload,scenario:{...simulationSetup,longitude:Number(core.longitude),latitude:Number(core.latitude)}});
+  }else void mutate(isNew?'create':'edit',payload);
  }
  function reload(){setNotice('');setRefresh(n=>n+1);}
  const coreForm=<form onSubmit={submitCore} className="incident-form"><fieldset disabled={loading||busy||!!pending}>
   <legend>{isNew?t('new'):t('edit')}</legend>
+  {isNew&&simulationEnvironment?.can_create&&<label><input type="checkbox" checked={training} onChange={e=>setTraining(e.target.checked)}/>{simText('enable')}</label>}
+  {isNew&&training&&<SimulationSetup locale={locale} value={simulationSetup} onChange={setSimulationSetup} core={core} onCore={setCore}/>}
+
   <label>{t('name')}<input required maxLength={200} value={core.title} onChange={e=>setCore({...core,title:e.target.value})}/></label>
   <label>{t('summary')}<textarea maxLength={10000} value={core.summary} onChange={e=>setCore({...core,summary:e.target.value})}/></label>
   <label>{t('type')}<select required value={core.incident_type_id} onChange={e=>setCore({...core,incident_type_id:e.target.value})}>
@@ -160,15 +180,16 @@ export function IncidentArea({locale,account,destination,initialOrg}:{locale:Loc
  return <div className="registry incident-area">
   <div className="registry-toolbar"><label>{t('organization')}<select value={org} disabled={loading||busy||!!pending} onChange={e=>router.push(url(destination,e.target.value))}>
    <option value="">{t('select')}</option>{entry?.organizations.map(o=><option value={o.id} key={o.id}>{o.name}</option>)}</select></label>
-   <Link href={url()}>{t('list')}</Link>{entry?.organizations.find(o=>o.id===org)?.can_create&&<Link href={url('new')}>{t('new')}</Link>}
+   <Link href={url()}>{t('list')}</Link>{simulationEnvironment?.can_create&&<Link href={url('new')+'&training=1'}>{simText('new')}</Link>}{entry?.organizations.find(o=>o.id===org)?.can_create&&<Link href={url('new')}>{t('new')}</Link>}
    <button disabled={loading||busy||!!pending} onClick={reload}>{t('refresh')}</button></div>
   {error&&<p role="alert">{t(error)}</p>}{notice&&<p role="status">{t(notice)}</p>}{loading&&<p role="status">{t('loading')}</p>}
   {pending&&<section className="admin-notice"><p>{t('pending')}</p><button disabled={busy} onClick={()=>void send(pending)}>{t('retry')}</button></section>}
   {entry?.organizations.length===0&&<p>{t('noOrg')}</p>}
   {isList&&entry&&<>
+   {simulationEnvironment?.enabled&&org&&<SimulationOverview key={account+org} locale={locale} account={account} org={org} read={rpc}/>}
    {commandInbox.length>0&&<section className="admin-card"><h2>{t('commandInbox')}</h2><p>{t('commandInboxLimit')}</p><CommandRequests locale={locale} items={commandInbox} disabled={loading||busy||!!pending} onAction={ask}/></section>}
    {(entry.invitations.length>0||entry.nominations.length>0)&&<section className="admin-card"><h2>{t('inbox')}</h2><p>{t('inboxLimit')}</p>
-    {entry.nominations.map(item=><article className="web-row" key={item.id}><strong>{item.reference_number} · {item.title}</strong><p>{t('commander')} · {date(item.expires_at)}</p>
+    {entry.nominations.map(item=><article className="web-row" key={item.id}>{item.training&&<SimulationBanner locale={locale}/>}<strong>{item.reference_number} · {item.title}</strong><p>{t('commander')} · {date(item.expires_at)}</p>
      <button disabled={loading||busy||!!pending} onClick={()=>ask('consent',{consent_id:item.id},item)}>{t('consent')}</button></article>)}
     {entry.invitations.map(item=><article className="web-row" key={item.id}><strong>{item.reference_number} · {item.title}</strong>
      <p>{entry.organizations.find(o=>o.id===item.organization_id)?.name}</p><div className="actions">
@@ -176,15 +197,15 @@ export function IncidentArea({locale,account,destination,initialOrg}:{locale:Loc
       <button disabled={loading||busy||!!pending} onClick={()=>ask('decline',{participant_id:item.id},item)}>{t('decline')}</button></div></article>)}</section>}
    <label>{t('status')}<select value={filter} onChange={e=>{setFilter(e.target.value);setPage(null);}}><option value="">{t('all')}</option>{incidentStates.map(x=><option key={x} value={x}>{t(x)}</option>)}</select></label>
    {!loading&&!error&&rows.length===0&&<p>{t('empty')}</p>}
-   {rows.map(row=><article className="web-row" key={row.id}><Link href={url(row.id)}><strong>{row.reference_number} · {row.title}</strong></Link>
+   {rows.map(row=><article className="web-row" key={row.id}>{row.training&&<SimulationBanner locale={locale}/>}<Link href={url(row.id)}><strong>{row.reference_number} · {row.title}</strong></Link>
     <p><span className="admin-badge">{t(row.status)}</span> · {row.type.names[locale]??row.type.code}</p>
     <p>{t('priority')}: {t(row.priority)} · {t('severity')}: {t(row.severity)}</p><p>{row.lead_name} · {date(row.created_at)}</p>{row.address&&<p>{row.address}</p>}</article>)}
    <div className="actions">{page&&<button onClick={()=>setPage(null)}>{t('first')}</button>}{rows.length===25&&<button onClick={()=>{const last=rows[rows.length-1];setPage({created:last.created_at,id:last.id});}}>{t('more')}</button>}</div>
   </>}
   {isNew&&entry?.organizations.find(o=>o.id===org)?.can_create&&<><p>{t('draftIdentity')}</p>{coreForm}</>}
   {isNew&&entry&&!entry.organizations.find(o=>o.id===org)?.can_create&&<p>{t('noAccess')}</p>}
-  {detail&&<IncidentLayout key={`${account}/${org}/${detail.id}`} locale={locale} operational={['ACTIVE','STABILIZED'].includes(detail.status)} locked={loading||busy||!!pending||!!confirmation} onAccessLost={()=>{setDetail(null);setError('noAccess');}}
-   header={<header className="admin-card workspace-header"><p>{detail.reference_number}</p><h2>{detail.title}</h2><span className="admin-badge">{t(detail.status)}</span>
+  {detail&&<IncidentLayout key={`${account}/${org}/${detail.id}`} locale={locale} simulation={{account,org,incidentId:detail.id,refresh,read:rpc,onInventoryChanged:()=>setRefresh(v=>v+1)}} operational={['ACTIVE','STABILIZED'].includes(detail.status)} locked={loading||busy||!!pending||!!confirmation} onAccessLost={()=>{setDetail(null);setError('noAccess');}}
+   header={<header className="admin-card workspace-header">{detail.training&&<SimulationBanner locale={locale}/>}<p>{detail.reference_number}</p><h2>{detail.title}</h2><span className="admin-badge">{t(detail.status)}</span>
     <p>{t('priority')}: {t(detail.priority)} · {t('severity')}: {t(detail.severity)} · {detail.type.names[locale]??detail.type.code}</p>
     <p>{t('lead')}: {detail.lead_name}</p><p>{t('commander')}: {detail.commander?.name??t('noCommander')}</p>
     {detail.commander&&!detail.commander.valid&&['ACTIVE','STABILIZED'].includes(detail.status)&&<p role="alert">{t('invalidCommander')}</p>}
@@ -218,6 +239,7 @@ export function IncidentArea({locale,account,destination,initialOrg}:{locale:Loc
    <IncidentResources crewOutcomes={crewOutcomes} key={`${account}/${org}/${detail.id}`} locale={locale} account={account} org={org} incidentId={detail.id} refresh={refresh} feedback={resourceFeedback} disabled={loading||busy||!!pending} read={rpc} onAction={ask}/>
   </IncidentLayout>}
   {confirmation&&<ConfirmationDialog title={t(confirmation.action)} text={t('confirmation')} busy={busy||!!pending} onDismiss={()=>setConfirmation(null)}>
+   {confirmation.training&&<SimulationBanner locale={locale}/>}
    {confirmation.description&&<p className="incident-prose">{confirmation.description}</p>}
    {confirmation.action==='recover_command'&&<p role="alert">{t('recoveryWarning')}</p>}
    <form onSubmit={e=>{e.preventDefault();void mutate(confirmation.action,{...confirmation.payload,...(reason?{reason}: {})},confirmation.incident,confirmation.version,confirmation.org);}}>

@@ -54,7 +54,7 @@ export function IncidentCop({locale,account,org,incidentId,refresh,feedback,disa
  },[feedback]);
  useEffect(()=>()=>searchController.current?.abort(),[]);
  useEffect(()=>{rts?.setCopEditing(!!draft||!!drawing);return()=>rts?.setCopEditing(false);},[!!draft,!!drawing,rts?.setCopEditing]);
- const locked=disabled||loading||!!rts?.locked,actionLocked=locked||!!draft||(rts?.mode??'NORMAL')!=='NORMAL';
+ const locked=disabled||loading||!!rts?.locked||!!rts?.externalEditing,actionLocked=locked||!!draft||(rts?.mode??'NORMAL')!=='NORMAL';
  function begin(type:'sector'|'object',id?:string){
   if(!cop||locked||(rts?.mode??'NORMAL')!=='NORMAL')return;const s=cop.sectors.find(x=>x.id===id),o=cop.objects.find(x=>x.id===id);
   const value:Draft={type,id:id??crypto.randomUUID(),version:s?.version??o?.version??'0',incidentVersion:cop.incident.version,code:s?.code??'',

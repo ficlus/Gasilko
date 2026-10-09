@@ -2378,3 +2378,224 @@ This milestone is implementation-only by explicit request. No tests were
 added/modified or run; no build, lint, typecheck, CI, browser automation,
 runtime/smoke verification, migrations or deployment checks were performed.
 The assignment's manual acceptance scenarios remain unexecuted operator checks.
+
+
+## M14.5C — Incident Simulation Foundation
+
+### Purpose and strict separation
+
+M14.5C provides an explicitly enabled training data source in the existing Web
+incident workspace. **Simulation position != actual position. Simulation
+controller != operational commander. Command issuance != position movement.**
+The earlier M14.5B no-position limitation remains correct for real interventions;
+M14.5C adds a separately typed SIMULATED source only for enrolled training
+incidents. There is no actual GPS producer, navigation session or autonomous
+task-response actor in this milestone.
+
+A dedicated Supabase staging/training project with dedicated training
+organizations and accounts is the intended deployment. Production is not a
+default training database. No environment was configured or deployed by this
+implementation.
+
+### Protected enablement and operator setup
+
+Migration `20261009140000_incident_simulation_foundation.sql` is forward-only and must be
+reviewed/applied manually after preceding migrations, before deploying the Web
+changes. It installs `private.simulation_environment` with
+`enabled=false, environment_kind='DISABLED'`. No browser, organization ADMIN,
+MANAGER or application service-role table grant can enable it. A trusted
+database owner must deliberately configure the **training project**, and
+register actual authorized training operators in
+`private.simulation_operators(organization_id,user_id)`.
+
+Example for a trusted operator, to adapt and execute manually **only after
+confirming the dedicated training project and test identities**:
+
+```sql
+begin;
+insert into private.simulation_operators(organization_id,user_id)
+values ('<training-organization-uuid>'::uuid, '<training-user-uuid>'::uuid);
+update private.simulation_environment
+set environment_kind='TRAINING', enabled=true
+where singleton=true;
+commit;
+```
+
+Disabling the protected setting stops simulation writes and position/history
+reads. Scenario classification remains readable through authorized incident
+metadata so a training incident never becomes visually live when disabled.
+The Web incident list/context and consent inbox responses attach bounded
+server-authoritative training labels; classification failures fail closed.
+
+Setup through the UI:
+
+1. Sign in with a real ACTIVE training account, active exact-organization
+   membership, normal MANAGER/ADMIN creation permission and the protected
+   operator allowlist entry.
+2. Choose **New training incident**. The existing incident core form includes an
+   explicit training choice, scenario template/seed/radius and a map center
+   picker. Confirm creation. The wrapper calls the existing
+   `incident_create_draft` and enrolls the newly created incident atomically.
+3. Use normal nomination, human consent and incident activation controls.
+   No initial commander, participant or command hierarchy is fabricated.
+4. The scenario creator remains the scoped controller only while the protected
+   operator grant, current membership and the normal draft-manager or effective
+   `EDIT_SUMMARY` capability remain valid. A creator who appoints somebody else
+   must obtain a suitable real command assignment through existing procedures
+   before controlling an active incident. Simulation never grants a command role.
+5. In the simulation panel, select a bounded fixture package or already
+   authorized deployed training units, review and confirm initial positions.
+6. Start the scenario; select SIM markers/list rows, issue normal M14.5A tasks
+   and use separate explicit simulation position controls.
+
+There is deliberately **no enrollment/conversion command for existing live
+incidents**, no reverse conversion, and one stable scenario identity per
+incident. The atomic create wrapper uses a separate top-level operation receipt
+while retaining the existing incident command/audit path.
+
+### Scenario, fixture and position model
+
+`simulation_scenarios` stores immutable incident/organization/creator identity,
+title, template, seed, center, radius and versioned lifecycle state. Presets
+STRUCTURE_FIRE, WILDFIRE, TRAFFIC_ACCIDENT and SANDBOX are fixture layout choices,
+not additions to incident taxonomy or tactical Action Definitions.
+
+Placement uses an integer seed/index/template-salt generator and bounded
+spherical offsets within a 10–5000 metre configured radius. SQL produces the
+authoritative initial coordinates; the Web displays the same deterministic
+algorithm as a preview. WGS84 order is longitude, latitude, including longitude
+wrapping. Generated points are neither road-snapped nor measured GPS. Stable
+ordinal ordering and saved initial coordinates make resets reproducible.
+Existing deployment attachment is ordered by canonical UUID; generated packages
+are ordered by their stable scenario fixture ordinal.
+
+Packages of 3/5/10/30 are a convenience over the **existing** inventory UNIT
+command and incident DEPLOY command. The caller needs both their original
+permissions. The entire package is atomic: on failure no partial inventory,
+deployment or position package commits; exact receipt retries cannot duplicate
+it. Generated inventory units have a SIM-prefixed callsign, no vehicle and no
+stock. A protected fixture association prevents deployment into another
+incident or later attachment of a real vehicle. The three identities remain
+separate: permanent unit, incident deployment episode, simulation position.
+
+Existing eligible incident deployments may instead be explicitly selected in a
+bounded list. Position attachment never alters those units or their inventory.
+Training incidents reject stock allocation/consumption via the normal resource
+write path. No fake profiles, JWTs or auth.users are created. Roster management
+uses real training accounts and the existing unit/crew pane; display-only
+fictional personnel are intentionally not implemented and cannot become task
+recipients.
+
+`simulation_unit_positions` is a current projection keyed by scenario and
+incident-unit UUID, with composite FKs enforcing same incident. It stores
+SIMULATED provenance, immutable initial position/ordinal, current finite WGS84
+coordinates, heading [0,360), scenario speed [0,100] m/s, server observation time,
+actor, version and logical active flag. It never adds location fields to
+inventory, deployments, tasks or assignments. There is no invented accuracy or
+GPS trail. Removed positions remain retained, and their ordinal/initial
+coordinates are not reused; the 100-position lifetime scenario bound includes
+removed rows.
+
+### Lifecycle, mutation and retention
+
+Scenario lifecycle is DRAFT → RUNNING → PAUSED → RUNNING, with explicit FINISHED
+from any unfinished state. Starting requires an ACTIVE/STABILIZED incident.
+Provisioning/attachment are setup operations in DRAFT/PAUSED and require a live
+incident deployment context. Manual position setting is permitted in DRAFT or
+RUNNING; PAUSED permits explicit setup/removal/reset, not normal position
+movement. Reset restores the stored initial coordinates, zeros scenario
+heading/speed and leaves scenario lifecycle unchanged. FINISHED is read-only.
+
+The fixed `simulation_command` whitelist covers PROVISION, ATTACH,
+SET_POSITION, RESET_POSITION, REMOVE, START, PAUSE, RESUME, RESET and FINISH.
+Simulation positions and events are independent of task/incident history;
+resets/removal/finish do not delete tasks, acknowledge assignments, change
+deployment status or close the operational incident. Close/release/crew/task
+cleanup remains the original explicit workflow. A clean task-history replay
+requires a new training incident.
+
+`simulation_events` is append-only with scenario sequence, operation UUID,
+actor/time, typed event and bounded position/fixture payload. It retains
+before/after positions for movement/reset and is paged newest-first in groups
+of 50. Existing audit_log and durable incident operation receipts are reused;
+simulation events do not replace incident timeline, task history or audit.
+No physical deletion/truncation is available through ordinary APIs.
+
+### Authorization, concurrency and read contracts
+
+Writes authenticate the current ACTIVE actor; lock the protected enablement
+record and operator grant, exact participating organizations/profiles and then
+incident/scenario; recheck current scoped controller/command authority; enforce
+deployment identity/state, scenario version and per-position version; append
+event/audit and receipt transactionally. The existing inventory/deployment
+commands additionally enforce their own rules. Ordinary readers are never
+controllers solely because a marker is visible, or because their organization
+role is ADMIN/MANAGER.
+
+The environment/operator/fixture tables are private with application grants
+revoked. Public simulation tables have RLS-authorized reads and no authenticated
+INSERT/UPDATE/DELETE grants. Security-definer RPCs use an empty search_path and
+explicit object references. Public commands are guarded; helper execution is
+revoked except the nonsecret enablement predicate needed for RLS.
+
+Read surface: `simulation_environment`, `simulation_labels`,
+`simulation_inbox_labels`, `simulation_read`, `simulation_overview`.
+Positions are one bounded projection (100); attach candidates are bounded to
+100 authorized current incident deployments; overview is paged by 25 and event
+history by 50. No marker-by-marker reads, high-frequency polling, realtime
+subsystem or movement timer is added.
+
+Conflicting requests retain the candidate for explicit refresh/review, generate
+a new operation only on deliberate re-review and never silently overwrite a
+newer projection. Ambiguous requests retain the exact operation/arguments for
+explicit retry, in memory and optionally scoped sessionStorage. No automatic
+retry or issuance occurs. Scope change/auth loss clears visible simulation
+state and map interaction; pending requests are isolated by account/org/incident.
+
+### Map and M14.5A/B integration
+
+`SimulationMapLayer` uses the existing OperationalMapCanvas; stable GeoJSON
+source/layers update without map recreation. SIM text, dashed provenance
+banners, distinct marker styling, selection ring and position timestamp/stale
+text identify training. An older-than-five-minutes simulated sample is marked
+older, not interpreted as actual sensor health or safety. Heading/speed are
+editable scenario data; they cause no extrapolation.
+
+M14.5B's recipient-layer adapter now requires a typed ACTUAL_GPS or SIMULATED
+origin. Simulated features must additionally match the current scenario and
+incident and use the genuine incident_units UUID. Only an enabled unfinished
+scenario registers its SIM layer. Existing click/Ctrl/Cmd, box/lasso,
+point-in-polygon, deduplication, selection summary and 100-recipient limit are
+reused. Real incident maps register no simulated layer.
+
+The simulation Move on Map mode is separate from command target acquisition and
+COP editing. A click only proposes a new simulated observation and opens an
+explicit confirmation. It does not issue MOVE_TO, move a canonical hydrant,
+draw a navigation route, alter a deployment or report real telemetry. Escape
+cancels the temporary mode. Modals, position editing, COP drawing and RTS
+target/gesture tools are interlocked; no ordinary marker dragging is enabled.
+
+Tasks still use the one M14.5A draft/catalog/ParameterInputs/confirmation engine
+and authoritative recipient validation. Issuing a command does not move SIM
+markers. Manual assignment ACK/execution requires a real correctly authorized
+training account. No commander-on-behalf-of-crew bypass or automatic status
+mutation exists. Task target snapshots remain separate from simulated positions.
+
+### Delivery and future boundary
+
+SI/DE cover setup, lifecycle, position provenance, controls, errors and training
+warnings on lists/inboxes, detail/workspace, map, task confirmations and
+simulation controls. Existing dependencies only; no Android changes.
+
+M14.5D will provide Movement/Navigation Execution keyed to task-assignment IDs
+and separate from both task intent and position samples. M14.5E will design
+trusted training actors, response timing, movement and scenario injection;
+none is implemented here. No GPS producer, routing/geocoding call, ETA,
+autonomous ACK, FCM fan-out, external dispatch or simulation physics is added.
+Future notification adapters must explicitly preserve training isolation; the
+current incident command path has no operational notification fan-out.
+
+Implementation-only delivery: no tests added/modified or executed; no build,
+lint, typecheck, CI, browser automation, runtime/manual smoke checks,
+post-implementation validation pass, migrations, configuration or deployments
+were performed. The assignment's manual acceptance targets remain for the user.

@@ -7,29 +7,30 @@ import {pixelInPolygon,recipientKey,type Pixel,type RtsRecipient} from '../../li
 import {rtsText} from '../../lib/operational/rtsMessages';
 import {useRts} from './rtsSession';
 
-/**
- * Opt-in adapter for an independently authorized ACTUAL-position layer.
- * M14.4 has no such layer: callers deliberately pass none. Sector/inventory/
- * command-target features must never be registered here.
- */
-export type ActualRecipientLayer={id:string;recipients:ReadonlyMap<string,RtsRecipient>};
-const noPositionLayers:readonly ActualRecipientLayer[]=[];
-function recipientFeature(feature:MapGeoJSONFeature,layers:readonly ActualRecipientLayer[]):RtsRecipient|null{
+/** Explicit provenance; simulation adapters require the current training scope. */
+export type RecipientPositionLayer={id:string;recipients:ReadonlyMap<string,RtsRecipient>}&(
+ {origin:'ACTUAL_GPS'}|{origin:'SIMULATED';scenarioId:string;incidentId:string});
+export type ActualRecipientLayer=RecipientPositionLayer&{origin:'ACTUAL_GPS'};
+const noPositionLayers:readonly RecipientPositionLayer[]=[];
+function recipientFeature(feature:MapGeoJSONFeature,layers:readonly RecipientPositionLayer[]):RtsRecipient|null{
  if(feature.geometry.type!=='Point'||!validPosition(feature.geometry.coordinates))return null;
  const type=feature.properties?.recipient_type,id=feature.properties?.recipient_id;
  if((type!=='INCIDENT_UNIT'&&type!=='INCIDENT_CREW_MEMBER')||typeof id!=='string')return null;
- return layers.find(l=>l.id===feature.layer.id)?.recipients.get(type+':'+id)??null;
+ const layer=layers.find(l=>l.id===feature.layer.id);
+ if(!layer||feature.properties?.position_origin!==layer.origin)return null;
+ if(layer.origin==='SIMULATED'&&(feature.properties?.scenario_id!==layer.scenarioId||feature.properties?.incident_id!==layer.incidentId))return null;
+ return layer.recipients.get(type+':'+id)??null;
 }
-export function pickActualRecipient(map:Map,point:{x:number;y:number},layers:readonly ActualRecipientLayer[]):RtsRecipient|null{
+export function pickPositionRecipient(map:Map,point:{x:number;y:number},layers:readonly RecipientPositionLayer[]):RtsRecipient|null{
  const ids=layers.filter(l=>map.getLayer(l.id)).map(l=>l.id);if(!ids.length)return null;
  for(const feature of map.queryRenderedFeatures([point.x,point.y],{layers:ids})){const row=recipientFeature(feature,layers);if(row)return row;}
  return null;
 }
 type Gesture={pointer:number;points:Pixel[];origin:Pixel;handlers:{isEnabled:()=>boolean;disable:()=>unknown;enable:()=>unknown}[]};
-export function RtsMapInteraction({map,locale,layers=noPositionLayers}:{map:Map;locale:Locale;layers?:readonly ActualRecipientLayer[]}){
+export function RtsMapInteraction({map,locale,layers=noPositionLayers}:{map:Map;locale:Locale;layers?:readonly RecipientPositionLayer[]}){
  const rts=useRts(),latest=useRef({rts,layers});latest.current={rts,layers};
  const outline=useRef<SVGPathElement>(null),t=rtsText(locale);
- const mode=rts?.mode??'NORMAL',locked=!!rts?.locked||!!rts?.copEditing||!rts?.enabled;
+ const mode=rts?.mode??'NORMAL',locked=!!rts?.locked||!!rts?.copEditing||!!rts?.externalEditing||!rts?.enabled;
  useEffect(()=>{
   const canvas=map.getCanvas();
   const previousCursor=canvas.style.cursor,previousTouchAction=canvas.style.touchAction;

@@ -230,3 +230,25 @@ button:disabled { opacity: .6; cursor: wait; }
  .rts-recipient-list{max-height:19rem}
  .rts-map-mode{max-height:40%;font-size:.8rem}
 }
+
+/* Training provenance is text + border pattern, never only a marker color. */
+.simulation-banner{border:2px dashed #74510b;background:#fff3ce;color:#4e3600;padding:.65rem .8rem;margin:.5rem 0;overflow-wrap:anywhere}
+.simulation-scope>.simulation-banner{position:sticky;top:0;z-index:4}
+.simulation-map-banner{position:absolute;left:.5rem;right:3.5rem;bottom:2.2rem;pointer-events:none;z-index:3;font-size:.75rem}
+.simulation-map-banner .simulation-banner{padding:.35rem;margin:0}
+.simulation-scope:has(.simulation-map-banner) .rts-intent-legend{bottom:5.5rem}
+.simulation-unit{display:block;width:100%;text-align:start;margin:.4rem 0;border-inline-start:4px dashed #74510b}
+.simulation-unit span,.simulation-unit small{display:block}
+.simulation-unit[aria-pressed=true]{outline:3px solid #075f93}
+.simulation-setup{min-width:0}
+.simulation-setup .web-map{height:18rem;min-height:12rem}
+.simulation-scope fieldset{min-width:0}
+.simulation-scope label{display:block;margin-block:.5rem}
+.simulation-scope label:has(input[type=checkbox]){display:flex;align-items:center;gap:.5rem}
+.simulation-scope input[type=checkbox]{width:auto}
+.simulation-scope button{min-height:44px;white-space:normal}
+.simulation-scope .actions{display:flex;flex-wrap:wrap;gap:.4rem}
+.simulation-dialog{max-width:min(40rem,calc(100vw - 2rem));max-height:85dvh;overflow:auto}
+.simulation-event{white-space:pre-wrap;overflow-wrap:anywhere;max-height:20rem;overflow:auto}
+@media(max-width:48rem){.simulation-map-banner{font-size:.68rem}.simulation-dialog{padding:.75rem}.simulation-scope fieldset{padding:.5rem}}
+@media(prefers-reduced-motion:reduce){.simulation-scope *{scroll-behavior:auto}}
