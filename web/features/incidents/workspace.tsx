@@ -1,5 +1,7 @@
 'use client';
-import {createContext,useContext,useState,type ReactNode} from 'react';
+import {createContext,useContext,useState,useEffect,type ReactNode} from 'react';
+import {useSearchParams} from 'next/navigation';
+import {parseEntityRef} from '../../lib/operational/entity';
 import {createPortal} from 'react-dom';
 import type {Locale} from '../../lib/i18n';
 import {incidentText} from '../../lib/incidents/messages';
@@ -23,7 +25,21 @@ export function WorkspaceSection({title,children,open=false}:{title:string;child
  return <details className="workspace-section" open={open||undefined}><summary>{title}</summary>{children}</details>;
 }
 export function IncidentWorkspace({locale,header,operations,secondary,children}:{locale:Locale;header:ReactNode;operations:ReactNode;secondary:ReactNode;children:ReactNode}){
- const t=incidentText(locale),[selected,select]=useState<SelectedEntity|null>(null);
+ const query=useSearchParams();
+ const t=incidentText(locale),[selected,setSelected]=useState<SelectedEntity|null>(null);
+ function fromUrl(){
+  const url=new URL(window.location.href),incidentId=url.pathname.split('/').at(-1);
+  const ref=parseEntityRef(url.searchParams.get('selected'),{incidentId,organizationId:url.searchParams.get('org')??undefined});
+  const kind=ref?.type==='INCIDENT_MAP_OBJECT'?'MAP_OBJECT':ref?.type;
+  setSelected(current=>ref&&kind&&['INCIDENT_SECTOR','MAP_OBJECT','HYDRANT','INCIDENT_UNIT','ALLOCATION'].includes(kind)?{kind:kind as SelectedEntity['kind'],id:ref.id}:!url.searchParams.has('selected')&&current?.id==='primary'?current:null);
+ }
+ useEffect(()=>{fromUrl();window.addEventListener('popstate',fromUrl);return()=>window.removeEventListener('popstate',fromUrl);},[query.get('selected'),query.get('org')]);
+ function select(entity:SelectedEntity|null){
+  setSelected(entity);const url=new URL(window.location.href);
+  if(entity&&entity.id!=='primary')url.searchParams.set('selected',(entity.kind==='MAP_OBJECT'?'INCIDENT_MAP_OBJECT':entity.kind)+':'+entity.id);
+  else url.searchParams.delete('selected');
+  window.history.replaceState(window.history.state,'',url);
+ }
  const [bottom,setBottom]=useState<HTMLElement|null>(null);
  const [operational,setOperational]=useState<HTMLElement|null>(null),[selectedPane,setSelectedPane]=useState<HTMLElement|null>(null);
  return <Context.Provider value={{selected,select,operational,selectedPane,bottom}}>

@@ -1,6 +1,7 @@
 'use client';
-import {useEffect} from 'react';
+import {useEffect,useRef} from 'react';
 import {type Map,type GeoJSONSource} from 'maplibre-gl';
+import {resolveTarget} from '../../lib/operational/target';
 import type {Locale} from '../../lib/i18n';
 import {incidentText} from '../../lib/incidents/messages';
 import {geometryPositions,type Cop,type Geometry,type Position} from '../../lib/incidents/cop';
@@ -15,7 +16,9 @@ const features=(items:{id:string;geometry:Geometry;label:string;kind?:string;sta
  features:items.map(i=>({type:'Feature' as const,id:i.id,geometry:i.geometry,properties:{id:i.id,label:i.label,kind:i.kind??'',status:i.status??''}}))});
 export default function CopMap(props:Props){
  const c=props.cop,primary:Position|null=c.incident.longitude!==null&&c.incident.latitude!==null?[c.incident.longitude,c.incident.latitude]:null;
- const points=primary?[primary]:[...c.sectors.flatMap(s=>s.geometry?geometryPositions(s.geometry):[]),...c.objects.flatMap(o=>geometryPositions(o.geometry)),
+ const selectedKind=c.sectors.some(s=>s.id===props.selected)?'INCIDENT_SECTOR':c.objects.some(o=>o.id===props.selected)?'INCIDENT_MAP_OBJECT':'HYDRANT';
+ const selectedGeometry=resolveTarget(selectedKind==='HYDRANT'?{kind:selectedKind,entityId:props.selected}:{kind:selectedKind,entityId:props.selected,incidentId:c.incident.id},{cop:c,hydrants:props.contextHydrants});
+ const points=selectedGeometry?geometryPositions(selectedGeometry):primary?[primary]:[...c.sectors.flatMap(s=>s.geometry?geometryPositions(s.geometry):[]),...c.objects.flatMap(o=>geometryPositions(o.geometry)),
   ...c.links.flatMap(l=>l.hydrant?.longitude!=null&&l.hydrant.latitude!=null?[[l.hydrant.longitude,l.hydrant.latitude] as Position]:[])];
  return <OperationalMapCanvas locale={props.locale} label={incidentText(props.locale)('copTitle')} initialPoints={points} onBounds={props.onBounds}
   onClick={(map,event)=>{
@@ -26,6 +29,17 @@ export default function CopMap(props:Props){
   }}>{map=><CopRendering map={map} props={props}/>}</OperationalMapCanvas>;
 }
 function CopRendering({map,props}:{map:Map;props:Props}){
+ const fitted=useRef('');
+ useEffect(()=>{
+  if(!props.selected){fitted.current='';return;}if(fitted.current===props.selected)return;
+  const c=props.cop;
+  const kind=c.sectors.some(s=>s.id===props.selected)?'INCIDENT_SECTOR':c.objects.some(o=>o.id===props.selected)?'INCIDENT_MAP_OBJECT':'HYDRANT';
+  const g=resolveTarget(kind==='HYDRANT'?{kind,entityId:props.selected}:{kind,entityId:props.selected,incidentId:c.incident.id},{cop:c,hydrants:props.contextHydrants});
+  if(!g)return;const points=geometryPositions(g);if(!points.length)return;
+  const xs=points.map(p=>p[0]),ys=points.map(p=>p[1]);
+  map.fitBounds([[Math.min(...xs),Math.min(...ys)],[Math.max(...xs),Math.max(...ys)]],{padding:60,maxZoom:16});
+  fitted.current=props.selected;
+ },[map,props.selected,props.cop,props.contextHydrants]);
  useEffect(()=>{
   const m=map;
    for(const id of ids)m.addSource(id,{type:'geojson',data:features([])});

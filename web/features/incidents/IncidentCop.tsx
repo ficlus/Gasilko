@@ -6,6 +6,8 @@ import {incidentText} from '../../lib/incidents/messages';
 import {mapKinds,type Cop,type CopFeedback,type Geometry,type Position,type MapKind} from '../../lib/incidents/cop';
 import type {CommandAction} from './CommandSection';
 import type {CopLayers} from './CopMap';
+import {isUuid} from '../../lib/operational/entity';
+import type {ContextHydrant} from '../../lib/hydrants/viewport';
 import {useWorkspace,WorkspaceSlot,WorkspaceSection,ContextActions} from './workspace';
 import {HydrantDetailsAction} from './HydrantDetailsAction';
 import {useHydrantContext} from './useHydrantContext';
@@ -94,12 +96,26 @@ export function IncidentCop({locale,account,org,incidentId,refresh,feedback,disa
  function link(hydrantId=candidate,linkPurpose=purpose){
   if(!cop||!hydrantId)return;const id=linkId||crypto.randomUUID();setLinkId(id);
   onAction('hydrant_link',{id,hydrant_id:hydrantId,purpose:linkPurpose},{id,incident_id:incidentId,organization_id:org,version:cop.incident.version,title:'',reference_number:''},
-   (candidates.find(c=>c.id===hydrantId)?.code??context.rows.find(c=>c.id===hydrantId)?.code??t('copPendingCode'))+' · '+t(linkPurpose));
+   (candidates.find(c=>c.id===hydrantId)?.code??context.rows.find(c=>c.id===hydrantId)?.code??(targetHydrant?.id===hydrantId?targetHydrant.code:null)??t('copPendingCode'))+' · '+t(linkPurpose));
  }
- const selection=cop?.sectors.find(s=>s.id===selected)??cop?.objects.find(o=>o.id===selected)??cop?.links.find(l=>l.id===selected||l.hydrant?.id===selected);
- const backgroundHydrant=context.rows.find(h=>h.id===selected);
- const linked=cop?.links.find(l=>l.hydrant?.id===selected);
- const shownHydrant=backgroundHydrant??linked?.hydrant;
+ const kind=workspace?.selected?.kind;
+ const selection=(!workspace||kind==='INCIDENT_SECTOR'?cop?.sectors.find(s=>s.id===selected):undefined)
+  ??(!workspace||kind==='MAP_OBJECT'?cop?.objects.find(o=>o.id===selected):undefined)
+  ??(!workspace||kind==='HYDRANT'?cop?.links.find(l=>l.id===selected||l.hydrant?.id===selected):undefined);
+ const backgroundHydrant=(!workspace||kind==='HYDRANT')?context.rows.find(h=>h.id===selected):undefined;
+ const [targetHydrant,setTargetHydrant]=useState<(Omit<ContextHydrant,'latitude'|'longitude'>&{latitude:number|null;longitude:number|null})|null>(null);
+ useEffect(()=>{
+  setTargetHydrant(null);if(!cop||!workspace||workspace.selected?.kind!=='HYDRANT'||!isUuid(selected))return;
+  const ac=new AbortController();
+  void fetch('/api/hydrant-context',{method:'POST',headers:{'Content-Type':'application/json','X-Gasilko-Account':account},body:JSON.stringify({id:selected}),signal:ac.signal,cache:'no-store'})
+   .then(async r=>{if(!r.ok)throw Error();return r.json();}).then(r=>{if(!ac.signal.aborted)setTargetHydrant(r.hydrant??null);})
+   .catch(()=>{if(!ac.signal.aborted)setTargetHydrant(null);});
+  return()=>ac.abort();
+ },[account,org,incidentId,selected,workspace?.selected?.kind,!!cop,refresh,epoch]);
+ const resolvedHydrant=kind==='HYDRANT'&&targetHydrant?.id===selected?targetHydrant:null;
+ const mapHydrants=resolvedHydrant&&resolvedHydrant.longitude!==null&&resolvedHydrant.latitude!==null&&!context.rows.some(h=>h.id===resolvedHydrant.id)?[...context.rows,{...resolvedHydrant,latitude:resolvedHydrant.latitude,longitude:resolvedHydrant.longitude}]:context.rows;
+ const linked=(!workspace||kind==='HYDRANT')?cop?.links.find(l=>l.hydrant?.id===selected):undefined;
+ const shownHydrant=backgroundHydrant??linked?.hydrant??resolvedHydrant;
  return <section className="admin-card cop-surface"><h2>{t('copTitle')}</h2><p>{t('copAuthority')}</p>
   <button disabled={locked} onClick={()=>setEpoch(n=>n+1)}>{t('refresh')}</button>
   {loading&&<p role="status">{t('loading')}</p>}{error&&<p role="alert">{t(error)}</p>}
@@ -109,7 +125,7 @@ export function IncidentCop({locale,account,org,incidentId,refresh,feedback,disa
    <label><input type="checkbox" checked={background} onChange={e=>setBackground(e.target.checked)}/>{t('workspaceHydrants')}</label>
    <p className="workspace-map-legend">{t('workspaceMarkerLegend')}</p>
    {context.loading&&<p role="status">{t('loading')}</p>}{context.error&&<p role="alert">{t('workspaceHydrantError')}</p>}{context.more&&<p role="status">{t('workspaceHydrantLimit')}</p>}
-   <CopMap selected={selected} contextHydrants={context.rows} onBounds={setBounds} locale={locale} cop={cop} layers={layers} drawing={locked?null:drawing} draft={draft?.geometry??null} vertices={vertices} onPoint={point} onSelect={setSelected}/>
+   <CopMap selected={selection||shownHydrant||selected==='primary'?selected:''} contextHydrants={mapHydrants} onBounds={setBounds} locale={locale} cop={cop} layers={layers} drawing={locked?null:drawing} draft={draft?.geometry??null} vertices={vertices} onPoint={point} onSelect={setSelected}/>
    {selected==='primary'&&<p>{t('copLocation')}: {cop.incident.latitude}, {cop.incident.longitude}</p>}
    <WorkspaceSlot name="selectedPane">
    {selected==='primary'&&<p>{t('copLocation')}: {cop.incident.latitude}, {cop.incident.longitude}</p>}

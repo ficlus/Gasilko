@@ -1,4 +1,8 @@
 'use client';
+import {integrationText} from '../../lib/operational/integrationMessages';
+import {isUuid} from '../../lib/operational/entity';
+import {initialFilters,rpc,type Detail as HydrantData} from '../../lib/hydrants/admin';
+import type {Bounds} from '../map/HydrantMap';
 import dynamic from 'next/dynamic';
 import {useEffect,useMemo,useRef,useState} from 'react';
 import type {CSSProperties} from 'react';
@@ -21,11 +25,31 @@ export function PlanDetail({root,id,locale,scope,onBack}:{root:string;id:string;
  const [preview,setPreview]=useState<Record<string,string|null>|null>(null),[previewBusy,setPreviewBusy]=useState(false),[confirmActivation,setConfirmActivation]=useState(false);
  const [moving,setMoving]=useState<Item|null>(null),[destination,setDestination]=useState(''),[reason,setReason]=useState('');
  const [inspectionItem,setInspectionItem]=useState<string|null>(null);
+ const x=integrationText(locale);
+ const [bounds,setBounds]=useState<Bounds|null>(null),[background,setBackground]=useState<Row[]>([]),[backgroundMore,setBackgroundMore]=useState(false);
+ const [addition,setAddition]=useState<Row|null>(null);
+ const requested=useRef<string|null>(null);
+ useEffect(()=>{
+  if(!data)return;const value=new URL(window.location.href).searchParams.get('addHydrant');
+  if(!isUuid(value)||requested.current===value)return;
+  if(!data.writable||data.limited||!['DRAFT','PLANNED'].includes(data.plan.status))return;
+  let live=true;
+  void rpc<HydrantData>('web_hydrant_detail',{root,hydrant:value}).then(d=>{
+   if(live&&d.hydrant.organization_id===data.plan.organization_id){requested.current=value;setAddition(d.hydrant);}
+  }).catch(()=>{if(live)setError(x('error'));});return()=>{live=false;};
+ },[data?.plan.id,root,revision]);
+ useEffect(()=>{
+  setBackground([]);setBackgroundMore(false);if(!data||!bounds||edit)return;
+  let live=true;const timer=setTimeout(()=>{
+   void rpc<{rows:Row[];more:boolean}>('web_hydrants',{root,filters:{...initialFilters,organization:data.plan.organization_id},bounds,sort_by:'code'})
+    .then(r=>{if(live){setBackground(r.rows);setBackgroundMore(r.more);}}).catch(()=>{if(live){setBackground([]);setError(x('error'));}});
+  },300);return()=>{live=false;clearTimeout(timer);};
+ },[root,data?.plan.organization_id,bounds,edit,revision]);
  const transferPanel=useRef<HTMLElement>(null);
  useEffect(()=>{if(moving)transferPanel.current?.scrollIntoView({block:'center',behavior:'smooth'});},[moving?.id]);
  const reload=()=>setRevision(v=>v+1),mutation=usePlanningMutation(locale,()=>{setMoving(null);setPreview(null);setConfirmActivation(false);reload();});
  const paused=useRef(false);paused.current=edit||mutation.locked||!!moving||!!preview||previewBusy||confirmActivation;
- useEffect(()=>{let live=true;void planningRpc<Detail>('web_plan_detail',{root,plan:id,history_page:historyPage}).then(d=>{if(live&&!paused.current){setData(d);setSelected(s=>s?d.items.find(i=>i.hydrant_id===s.id)?.hydrant??null:null);setError('');}}).catch(e=>{if(live){if(e instanceof PlanningError&&['FORBIDDEN','EXPIRED'].includes(e.message)){setData(null);setSelected(null);setHydrant(null);setMoving(null);setPreview(null);setConfirmActivation(false);setEdit(false);}setError(planningError(locale,e));}});return()=>{live=false;};},[root,id,revision,historyPage,locale]);
+ useEffect(()=>{let live=true;void planningRpc<Detail>('web_plan_detail',{root,plan:id,history_page:historyPage}).then(d=>{if(live&&!paused.current){setData(d);setSelected(s=>s?d.items.find(i=>i.hydrant_id===s.id)?.hydrant??null:null);setError('');}}).catch(e=>{if(live){if(e instanceof PlanningError&&['FORBIDDEN','EXPIRED'].includes(e.message)){setData(null);setSelected(null);setHydrant(null);setMoving(null);setPreview(null);setConfirmActivation(false);setEdit(false);setAddition(null);setBackground([]);}setError(planningError(locale,e));}});return()=>{live=false;};},[root,id,revision,historyPage,locale]);
  useEffect(()=>{const c=browserClient();if(!c)return;let debounce:ReturnType<typeof setTimeout>;
  const changed=()=>{clearTimeout(debounce);debounce=setTimeout(()=>{if(!paused.current)reload();},500);};
  const channel=c.channel('web-plan:'+id).on('postgres_changes',{event:'*',schema:'public',table:'inspection_plans',filter:'id=eq.'+id},changed);
@@ -41,7 +65,7 @@ export function PlanDetail({root,id,locale,scope,onBack}:{root:string;id:string;
  const p=data.plan,writable=data.writable&&scope.organizations.some(o=>o.id===p.organization_id&&o.writable),planning=['DRAFT','PLANNED'].includes(p.status),operational=p.status==='ACTIVE',unfinished=planning||operational;
  if(!scope.organizations.some(o=>o.id===p.organization_id))return <p role="alert">{t.hForbidden}</p>;
  const disabled=mutation.locked||previewBusy||!writable,teamName=(id:string|null)=>data.teams.find(t=>t.id===id)?.name??t.pUnassigned;
- if(edit&&writable)return <PlanEditor root={root} locale={locale} scope={scope} initial={data} onBack={()=>{setEdit(false);reload();}} onSaved={()=>{setEdit(false);reload();}}/>;
+ if(edit&&writable&&!data.limited&&planning)return <PlanEditor root={root} locale={locale} scope={scope} initial={data} initialAddition={addition??undefined} onBack={()=>{setEdit(false);setAddition(null);reload();}} onSaved={()=>{setEdit(false);setAddition(null);reload();}}/>;
  if(hydrant)return <HydrantDetail key={hydrant} root={root} id={hydrant} locale={locale} scope={scope} onBack={()=>{setHydrant(null);reload();}} onChanged={reload}/>;
  const inspected=data.items.find(i=>i.id===inspectionItem);
  if(inspected?.inspection){const inspection=inspected.inspection;return <section className="admin-card"><button onClick={()=>setInspectionItem(null)}>{t.pBack}</button><h2>{inspected.hydrant.code??t.hMissing} · {modeLabel(t,inspection.mode)}</h2><p>{p.organization_name} · {p.name}</p><p>{resultLabel(t,inspection.result)} · {new Date(inspection.completed_at).toLocaleString(locale)}</p><p>{inspection.notes}</p><p>{t.wPressure}: {inspection.pressure_bar??t.hMissing} · {t.wFlow}: {inspection.flow_l_min??t.hMissing}</p><PhotoGallery locale={locale} org={p.organization_id} hydrant={inspected.hydrant_id} inspection={inspection.id} refresh={revision}/></section>;}
@@ -77,7 +101,10 @@ export function PlanDetail({root,id,locale,scope,onBack}:{root:string;id:string;
  {!items.length&&!data.limited&&<small>{t.hNoMatches}</small>}</article>;})}</div>
  <div className="web-form-grid"><label>{t.adminTeams}<select value={team} onChange={e=>{setTeam(e.target.value);setStopPage(0);setSelected(null);}}><option value="">{t.hAll}</option>{data.teams.map(team=><option key={team.id} value={team.id}>{team.name}</option>)}</select></label></div>
  <div className="web-legend">{data.teams.map(team=><label key={team.id}><span style={{backgroundColor:colors[team.id]}}/>{team.name}</label>)}</div><p>{t.pMapLegend}</p>
- <Map locale={locale} rows={displayed.map(i=>i.hydrant)} selected={selected} onSelect={setSelected} onOpen={h=>setHydrant(h.id)} plan={overlay} point={p.start_latitude!==null&&p.start_longitude!==null?[p.start_longitude,p.start_latitude]:null}/>
+ <p>{x('background')}</p>{backgroundMore&&<p>{x('more')}</p>}
+ <Map locale={locale} rows={[...background.filter(h=>!data.items.some(i=>i.hydrant_id===h.id)),...displayed.map(i=>i.hydrant)]} selected={selected} onSelect={setSelected} onBounds={setBounds} onOpen={h=>setHydrant(h.id)} plan={overlay} point={p.start_latitude!==null&&p.start_longitude!==null?[p.start_longitude,p.start_latitude]:null}/>
+ {selected&&writable&&planning&&!data.limited&&!data.items.some(i=>i.hydrant_id===selected.id)&&selected.organization_id===p.organization_id&&<button disabled={disabled||!!preview||!!moving||confirmActivation} onClick={()=>{setAddition(selected);setEdit(true);}}>{x('addHere')}</button>}
+ {addition&&!edit&&<aside className="admin-notice"><p>{addition.code??t.hMissing} · {x('preview')}</p>{data.items.some(i=>i.hydrant_id===addition.id)?<p>{x('existing')}</p>:writable&&planning&&!data.limited&&<button disabled={disabled||!!preview||!!moving||confirmActivation} onClick={()=>setEdit(true)}>{x('addHere')}</button>}</aside>}
  <section className="admin-card"><h2>{t.pStops}</h2>{displayed.some(i=>i.route_order===null)&&<p>{t.pFallbackOrder}</p>}
  {displayed.slice(stopPage*50,(stopPage+1)*50).map(i=><article className={'plan-stop '+(i.inspection_id?'completed':i.skipped_at?'skipped':'')} key={i.id} style={{borderInlineStartColor:colors[i.team_id??'']??'#68767e'}}>
  <button onClick={()=>setSelected(i.hydrant)}><strong>{i.route_order!==null?`${i.route_order}. `:''}{i.hydrant.code??i.hydrant_id.slice(0,8)}</strong> · {teamName(i.team_id)}</button>
