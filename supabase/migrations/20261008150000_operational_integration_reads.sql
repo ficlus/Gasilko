@@ -25,10 +25,19 @@ begin
  select i.id,i.title name,i.reference_number,i.status,i.updated_at,acting.organization_id,
  (select l.purpose from public.incident_hydrant_links l where l.incident_id=i.id and l.hydrant_id=p_hydrant and l.active limit 1) purpose
  from public.incidents i
- cross join lateral (select m.organization_id from public.user_organizations m
- where m.user_id=auth.uid() and private.incident_acting_member(m.organization_id)
- and (not p_candidates or private.has_incident_capability(i.id,m.organization_id,'MANAGE_COP'))
- order by m.organization_id limit 1) acting
+cross join lateral (
+ select m.organization_id
+ from public.user_organizations m
+ where m.user_id=auth.uid()
+ and private.incident_acting_member(m.organization_id)
+ and public.incident_context(i.id,m.organization_id) is not null
+ and (
+   not p_candidates
+   or private.has_incident_capability(i.id,m.organization_id,'MANAGE_COP')
+ )
+ order by m.organization_id
+ limit 1
+) acting
  where private.can_read_incident(i.id) and i.status in ('ACTIVE','STABILIZED')
  and (p_candidates or exists(select 1 from public.incident_hydrant_links l where l.incident_id=i.id and l.hydrant_id=p_hydrant and l.active))
  order by i.updated_at desc,i.id limit 26) q;
