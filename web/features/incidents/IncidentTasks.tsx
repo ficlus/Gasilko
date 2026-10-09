@@ -174,7 +174,7 @@ export function IncidentTasks({locale,account,org,incidentId,version,operational
      <ParameterInputs locale={locale} definitions={cfg.parameter_definitions} value={parameters} onChange={setParameters}/>
      {Object.keys(parameters).filter(code=>!cfg.parameter_definitions.some(p=>p.code===code)).map(code=><p role="alert" key={code}>
       {t('INVALID_ACTION_PARAMETERS')} {code}: {String(parameters[code])} <button type="button" onClick={()=>{const next={...parameters};delete next[code];setParameters(next);}}>{t('remove')}</button>
-     </p>)
+     </p>)}
      <label>{t('priority')}<select value={priority} onChange={e=>setPriority(e.target.value)}>{incidentPriorities.map(p=><option key={p} value={p}>{t(p)}</option>)}</select></label>
      <label>{t('title')}<input maxLength={200} value={title} onChange={e=>setTitle(e.target.value)}/></label>
      <label>{t('notes')}<textarea maxLength={4000} value={notes} onChange={e=>setNotes(e.target.value)}/></label>
