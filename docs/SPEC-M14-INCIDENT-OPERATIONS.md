@@ -293,8 +293,8 @@ recovery policy requires a separately approved later contract, not a hidden bypa
 Role capabilities:
 
 - IC: incident-wide operational command, lifecycle, participants, roles and handover.
-- Deputy: edit summary, invite agencies; later issue tasks/manage COP under IC.
-  Cannot transfer command or close an incident by implication.
+- Deputy: existing edit-summary/invitation capabilities remain unchanged. M14.5A
+  adds no blanket task authority. Cannot transfer command or close by implication.
 - Agency commander: own agency's deployed resources and scoped tasking. Cannot
   command another agency merely because both participate.
 - Sector commander: only expressly delegated sector/resources/tasks. Sector
@@ -404,8 +404,11 @@ organization scope and the existing role helpers instead.
 | `incident_crew_members` M14.4 | incident_id, unit_assignment_id, user_id FK profile, membership_org_id, crew_role LEADER/DRIVER/RESPONDER/SPECIALIST, joined_at,left_at,status ACTIVE/LEFT, added_by; active exact org membership checked at commit | UNIQUE(incident_id,user_id) active; (unit_assignment_id,status); UNIT_LEADER authority is a separate explicit role assignment; member histories long-lived |
 | `operational_resources` M14.4 | organization_id, name, resource_type_code, unit_of_measure_code, total_quantity numeric≥0, active; one row denotes a countable stock or individually identified item (quantity1), not a person | (org,active,type); exact-org inventory write; no fleet/warehouse ERP |
 | `incident_resource_allocations` M14.4 | incident_id, resource_id, participant_id, quantity>0, optional unit_assignment_id, status RESERVED/DEPLOYED/RETURNED/CONSUMED/CANCELLED, allocated_by/at, ended_at | (incident_id,status),(resource_id,status); lock stock row and sum live allocations ≤available; owner unchanged; long-lived |
-| `incident_tasks` M14.5 | incident_id, issuer_assignment_id, assignee_user_id OR unit_assignment_id (exactly one), task_type_code, title≤200,instructions≤8000,priority,status,sector_id?,target_map_object_id OR target_hydrant_id OR target_unit_assignment_id OR target_latitude+longitude (exactly one target), issued_at,acknowledged_at,started_at,completed_at,outcome?,blocked_reason?,updated_by | (incident_id,status),(unit_assignment_id,status),(assignee_user_id,status); all target FKs scoped/authorized; no client DML; task version and history long-lived |
-| `incident_task_dependencies` M14.5 | PK(task_id,depends_on_task_id), incident_id, created_by/at, active; both same incident, no self/cycle; deactivate instead of delete | Reverse(depends_on_task_id,active); task issuer authority; DAG checked under incident lock; retain history |
+| `operational_action_definitions` M14.5A | SYSTEM or exact-org stable code; current immutable version; future availability | Bounded catalogue RPC; exact-org administration; no direct DML |
+| `operational_action_definition_versions` M14.5A | Immutable labels, native behavior, recipient/target classes and declarative parameters | Tasks retain the exact historical version |
+| `incident_tasks` M14.5A | incident_id, exact action version, issued_by/org, priority, title≤200,notes≤4000, canonical target + historical geometry/label, parameters≤8KiB, OPEN/CLOSED/CANCELLED + outcome, version,changed_revision | Incident/status/time page; no direct DML; immutable intent |
+| `incident_task_assignments` M14.5A | One explicit unit OR crew-member episode per recipient; independent status, actor/time/reasons, version,changed_revision | Same-incident composite FKs, unique task/recipient; no physical deletes; terminal immutable |
+| `incident_task_dependencies` FUTURE (not M14.5A) | PK(task_id,depends_on_task_id), incident_id, created_by/at, active; both same incident, no self/cycle; deactivate instead of delete | Reverse(depends_on_task_id,active); task issuer authority; DAG checked under incident lock; retain history |
 | `incident_mobilizations` M14.6 | incident_id, recipient_org_id, requested_by, priority, reason, status REQUESTED/ACCEPTED/DECLINED/CANCELLED/FULFILLED, requested_at,responded_by/at, response_reason | (recipient_org_id,status,requested_at); current-org managers see minimal request even before joining; acceptance creates participation through same contract; long-lived |
 | `incident_turnout_responses` M14.6 | mobilization_id, incident_id, user_id OR unit_id exactly one, status AVAILABLE/UNAVAILABLE/EN_ROUTE/ARRIVED/RELEASED, response_at, departure_at,arrival_at,release_at; optional ETA is declared, not invented routing time | Unique(mobilization,target) via partial user/unit indexes; (incident_id,status); own response or authorized unit leader, long-lived |
 | `incident_messages` M14.7 | incident_id, sender_user_id/acting_org_id, audience INCIDENT/ORGANIZATION/UNIT, audience_org_id OR unit_assignment_id matching audience, body≤4000, sent_at, supersedes_id?; append-only corrections | (incident_id,sent_at,id), audience lookup; recipient SELECT RLS, no broadcast of private text to timeline; operational communication, not social chat |
@@ -448,37 +451,37 @@ steps as unknown, not invented timestamps. Per-person turnout does not change an
 entire unit's state automatically. Crew membership dates remain independent of
 vehicle availability and permanent org membership.
 
-Task is an instruction with one explicit assignee, target and issuer assignment.
-An order is the issue/transition command, not a second task database. Supported
-initial type contracts include RECON, WATER_SUPPLY, RESCUE, SUPPRESSION, SECURE_AREA,
-STAGING and OTHER; labels are configurable and do not confer authority. A target
-must be a same-incident map object/unit, an authorized existing hydrant, or a
-validated coordinate. Free text cannot replace target validation.
+M14.5A implements one immutable task intent with one or more recipient assignment
+episodes; it supersedes the original single-assignee task proposal. An order is a
+server-authoritative issue/transition/cancel command, not a second task database.
+Tactical doctrine lives in versioned configuration, not task-type engine enums.
 
-| Task transition | Required actor / data |
+| Assignment transition | Actor / data |
 | --- | --- |
-| DRAFT→ISSUED | Authorized issuer; current assignee, target and dependencies valid |
-| DRAFT→CANCELLED | Issuer, reason |
-| ISSUED→ACKNOWLEDGED | Assigned person or current assigned unit leader; explicit acknowledgement |
-| ACKNOWLEDGED→IN_PROGRESS | Same executor; dependencies completed or authorized explicit dependency override event |
-| ISSUED/ACKNOWLEDGED/IN_PROGRESS→BLOCKED | Executor, nonempty reason; previous status retained in event |
-| BLOCKED→ACKNOWLEDGED or IN_PROGRESS | Executor, resolution note; cannot bypass missing acknowledgement |
-| IN_PROGRESS→COMPLETED or FAILED | Executor, outcome; failed requires reason; immutable final result |
-| ISSUED/ACKNOWLEDGED/IN_PROGRESS/BLOCKED→CANCELLED | Authorized issuing command scope; reason; recipient informed |
+| ISSUED → ACKNOWLEDGED → IN_PROGRESS → COMPLETED | Effective leader of the recipient unit, or matching eligible crew member |
+| ISSUED → IN_PROGRESS | Same executor, only if that immutable action version does not require acknowledgement |
+| ISSUED / ACKNOWLEDGED → UNABLE | Same executor, nonempty reason |
+| IN_PROGRESS → BLOCKED | Same executor, nonempty reason |
+| BLOCKED → IN_PROGRESS / UNABLE | Same executor; UNABLE needs a reason |
+| Any nonterminal → CANCELLED | Current issuer authority for that recipient |
 
-Terminal tasks cannot be reset. Follow-up work is a new linked task. Assignment
-change is an explicit online command that increments version, preserves previous
-recipient/history, and resets any recipient acknowledgement to ISSUED. It cannot
-rewrite a completed outcome. Dependency cycles are rejected. Cross-agency tasking
-requires IC/deputy authority; agency commanders manage their own resources;
-sector commanders only resources explicitly delegated to their sector. No user
-may grant themselves additional command capability through a task.
+COMPLETED, UNABLE and CANCELLED are terminal and cannot reopen. Each assignment
+progresses independently. The parent stays OPEN until all assignments are
+terminal, then CLOSED/SUCCESS (all completed), CLOSED/PARTIAL (some completed),
+or CLOSED/FAILED (none completed). Explicit whole-task cancellation yields
+CANCELLED, cancels only nonterminal children and retains terminal siblings.
+No reassignment, dependencies or draft persistence are implemented in M14.5A.
 
-RTS-style UX is selection of authorized unit(s), target and action followed by a
-normal confirmed command. Dragging a marker or clicking a map is not a command
-until submitted. Multi-unit tasking creates one task per assignee in a bounded
-atomic command with distinct stable task UUIDs. UI gestures are not persisted,
-and a visual arrow is not evidence of server acceptance.
+Authority follows current explicit command relationships: IC across the incident;
+agency commander within own participating organization; sector commander only
+units explicitly assigned to that sector and their crew; unit leader only active
+crew in their own unit. Deputy gets no new blanket authority. Recipient execution
+is separate: commanders cannot impersonate an executor. Descriptive crew LEADER
+does not substitute for an effective UNIT_LEADER assignment.
+
+RTS selection/targeting is deferred to M14.5B. The current form can issue one task
+with up to 100 independently identified child assignments; selection alone never
+issues a command. COMMAND INTENT != EXECUTION PLAN != TELEMETRY.
 
 Mobilization (M14.6): IC/deputy requests an organization or already available unit;
 receiving org accepts/declines; acceptance establishes participation through the
@@ -595,9 +598,10 @@ operations must not destroy earlier retry receipts.
 | `incident_put_map_object` PLANNED_M14_3 | Envelope + object UUID,kind,label,geometry,sector? → object DTO | IC/deputy or scoped commander/operator capability; expected version; MAP_OBJECT_CREATED/UPDATED + audit. |
 | `incident_assign_unit` PLANNED_M14_4 | Envelope + assignment UUID,participation,unit,sector?,accepted availability/version → unit deployment DTO | IC with owning agency consent, or own agency commander; sector commander only delegates already offered units in own scope; lock unit/incident; UNIT_ASSIGNED + audit. |
 | `incident_transition_unit` PLANNED_M14_4 | Envelope + unit assignment/version,next_status,reason/observed_at → unit DTO | Unit leader own unit for movement/status, command authority for task allocation/release; §6; UNIT_STATUS_CHANGED + audit. |
-| `incident_create_task` PLANNED_M14_5 | Envelope + task UUID,type,assignee,target,priority,instructions,dependencies → task DTO | Scoped issuer, current target/assignee visibility, no cycles; version0; TASK_CREATED then TASK_ISSUED if explicitly requested, audit. |
-| `incident_transition_task` PLANNED_M14_5 | Envelope + task/version,next_status,reason,outcome,occurred_at → task DTO | §6 actor/state rules, live assignee at commit; stale offline result preserved for attention; TASK_* + audit. |
-| `incident_reassign_task` PLANNED_M14_5 | Envelope + task/version,new assignee,reason → task DTO | Issuer command scope; unfinished only, online; retain previous assignee/result evidence; TASK_REASSIGNED + audit. |
+| `incident_issue_task` IMPLEMENTED_M14_5A | Envelope + stable task/action-version/assignment UUIDs, target, typed parameters → receipt | Current explicit authority and eligibility for every recipient, current action version, expected incident core version; TASK_ISSUED + audit. |
+| `incident_transition_task_assignment` IMPLEMENTED_M14_5A | Envelope + assignment UUID, expected assignment version, next state/reason → receipt | Recipient execution or issuer cancellation scope; aggregate recomputed atomically; TASK_ASSIGNMENT_* / TASK_CLOSED + audit. |
+| `incident_cancel_task` IMPLEMENTED_M14_5A | Envelope + task UUID, expected task version → receipt | Current issuer scope over all nonterminal recipients; terminal evidence preserved; TASK_CANCELLED + audit. |
+| `incident_reassign_task` FUTURE (not M14.5A) | Envelope + task/version,new assignee,reason → task DTO | Issuer command scope; unfinished only, online; retain previous assignee/result evidence; TASK_REASSIGNED + audit. |
 | `incident_request_mobilization` PLANNED_M14_6 | Envelope + request UUID,target org/unit,priority,reason → request DTO | IC/deputy/current scoped agency commander, exact target checks; MOBILIZATION_REQUESTED + audit and M10 hint. |
 | `incident_respond_turnout` PLANNED_M14_6 | Envelope + request/version,person=self OR led unit,state,observed_at → response DTO | Own current membership or unit leader; receipt; TURNOUT_RESPONDED/UNIT_STATUS_CHANGED + audit. |
 | `incident_operational_snapshot` PLANNED_M14_7 | incident,acting org,page token? → core,participants,command,units/tasks/map authorized DTO pages + pinned revision R and sequence S | Current incident and audience gates; consistent snapshot manifest with expiring token; no dozens of independent unordered UI queries; read-only. |
@@ -652,7 +656,7 @@ details, raw external payloads and routine precise GPS fixes are excluded.
 | SECTOR_CREATED, SECTOR_UPDATED, SECTOR_DEACTIVATED | future sector FK, version, changed fields; M14.3 |
 | MAP_OBJECT_CREATED, MAP_OBJECT_UPDATED, MAP_OBJECT_DEACTIVATED, HYDRANT_LINKED | future typed subject FK, version and minimal kind/label; M14.3 |
 | UNIT_ASSIGNED, UNIT_STATUS_CHANGED, UNIT_RELEASED, CREW_JOINED, CREW_LEFT, RESOURCE_ALLOCATED, RESOURCE_RETURNED | future unit/crew/resource FK, from/to status or quantity, observed/server time; M14.4 |
-| TASK_CREATED, TASK_ISSUED, TASK_ACKNOWLEDGED, TASK_STARTED, TASK_BLOCKED, TASK_RESUMED, TASK_COMPLETED, TASK_FAILED, TASK_CANCELLED, TASK_REASSIGNED | future task FK, old/new state, assignee IDs, outcome/reason; M14.5 |
+| TASK_ISSUED, TASK_CANCELLED, TASK_CLOSED; TASK_ASSIGNMENT_ACKNOWLEDGED/STARTED/BLOCKED/COMPLETED/UNABLE/CANCELLED | Typed task or assignment FK, old/new state, actor/time, reason and aggregate outcome; implemented M14.5A |
 | MOBILIZATION_REQUESTED, MOBILIZATION_ACCEPTED, MOBILIZATION_DECLINED, TURNOUT_RESPONDED | future mobilization/response FK, org/unit/person, response code; M14.6 |
 | OPERATIONAL_NOTE_ADDED, ATTACHMENT_REGISTERED | authorized text or attachment FK; no public URL; M14.7 |
 | EXTERNAL_EVENT_LINKED | internal incident and provider code, no raw payload; M14.9 |
@@ -2158,3 +2162,123 @@ applied, deployment, Android build or Oracle changes.
 ## Need Professional Help in Developing Your Architecture?
 
 Please contact me at [sammuti.com](https://sammuti.com) :)
+
+## M14.5A — Tasks + configurable action / command engine (implemented)
+
+The native kernel is exactly NONE, MOVE_TO, HOLD_POSITION, WITHDRAW_TO and
+REQUEST_STATUS. ACK/CANCEL/COMPLETE are lifecycle transitions. Sector assignment,
+unit leadership, crew membership and resource allocation retain their existing
+owning APIs. No tactical action code is dispatched in SQL or TypeScript.
+
+### Catalog and parameter contract
+
+SYSTEM definitions have no owner organization and are read-only through app
+administration. Custom definitions belong to one exact organization and are
+managed only by its active MANAGER/ADMIN. Inventory administration does not
+grant incident command authority. Catalog issuance reads expose SYSTEM plus the
+selected acting organization's active definitions only.
+
+A stable safe code identifies a definition. Every save creates an immutable
+version and moves the current pointer; active/future-issuance flags do not
+reinterpret existing tasks. History reads include the exact referenced version
+even when the current catalog is inactive. The system seeds MOVE_TO,
+HOLD_POSITION, WITHDRAW_TO (CRITICAL), REQUEST_STATUS and generic NONE templates:
+RECON, FIRE_SUPPRESSION, SEARCH, RESCUE, ESTABLISH_WATER_SUPPLY, SECURE_AREA,
+LOGISTICS. These templates are data, not executable doctrine.
+
+Versions declare recipient classes INCIDENT_UNIT / INCIDENT_CREW_MEMBER and
+target kinds NONE / HYDRANT / INCIDENT_MAP_OBJECT / INCIDENT_SECTOR / COORDINATE.
+Up to 10 parameters use TEXT, INTEGER, DECIMAL, BOOLEAN or CHOICE. Codes and
+SI/DE labels are bounded, numeric bounds and integer values checked, TEXT limited
+to 2000 characters and each CHOICE to 20 labeled options. Metadata is limited to
+24 KiB; submitted values to 8 KiB. The server rejects unknown keys, missing
+required values and malformed/out-of-range values. No executable rules exist.
+
+### Target and movement intent
+
+The task target reuses OperationalTarget and adds explicit NONE. The server
+re-resolves identity under locks: authorized active canonical hydrant UUID;
+active same-incident map object/sector; or finite WGS84 [longitude, latitude].
+It records immutable geometry and label snapshots at issuance, plus canonical
+UUID/incident identity. Later source edits never rewrite task intent. Source
+geometry is never used to infer authority.
+
+MOVE_TO and WITHDRAW_TO require an explicit point-resolvable COORDINATE,
+HYDRANT or point INCIDENT_MAP_OBJECT. Missing coordinates, line/polygon targets
+and sector centroids are not movement destinations. HOLD_POSITION invents no
+coordinate and may use NONE. REQUEST_STATUS needs no location or polling.
+
+MOVE_TO is intent only: no marker movement, deployment-status change, road
+routing, GPS, ETA or navigation progress. A future NavigationSession can
+reference incident_task_assignment_id; no route fields or placeholder
+NavigationSession are introduced.
+
+### Integrity, concurrency, history and safety
+
+All new public tables have RLS and no client DML/table grants. Narrow authenticated
+RPCs use auth.uid(), empty search_path and fully qualified domain objects.
+Incident task mutations reuse private.incident_operation_receipts and operation
+lock namespace 141. Catalog writes reuse the existing immutable administration
+audit receipts and namespace 842. Exact replay returns the saved result after
+current read authorization is rechecked; a changed request rejects. Task,
+operation and assignment UUIDs are prepared once and retained for uncertain
+response retry. No browser-only deduplication authority is assumed.
+
+Commands acquire sorted organization security locks (including a hydrant target's
+owner), sorted profile locks, the incident row and sorted recipient/assignment
+rows; they recheck live roles, memberships, participants, recipients, action
+version and target. The expected version is the incident core version on issue,
+task version on whole cancellation, and assignment version on execution changes.
+Entity versions are not incident revisions. A transaction increments the incident
+aggregate revision once, and every changed task/assignment records that revision.
+Every lifecycle transition and per-recipient cancellation uses the existing
+timeline/audit, with typed task/assignment foreign keys. Historical intent and
+terminal assignments cannot be modified or deleted.
+
+Stale UI requests retain intent and refresh the bounded authoritative reads;
+explicit re-edit/reconfirmation is required. Transport uncertainty retains the
+exact pending request. There is no one-active-task-per-unit restriction.
+
+Existing incident close, participant release, unit RELEASED/UNAVAILABLE and crew
+leave operations now reject unresolved recipient assignments. Unit/participant
+checks include both unit and person recipients. Explicit resolution/cancellation
+is required; no cleanup silently discards commands. CLOSED/CANCELLED incidents
+allow historical reads only. Existing resource/command guards also remain active.
+
+### Web integration and limits
+
+The existing organization operational inventory administration surface has a
+separate action-catalog section: SYSTEM read-only labels, custom versioned editor,
+future availability, SI/DE metadata and generic parameter editor. The incident
+workspace retains its central map. Open/history task pages live in the
+operational panel; selected task detail or creation form lives in the selected
+panel. Priority uses text plus emphasis, with semantic localized lifecycle labels.
+
+The creation form chooses action, multiple recipients, target and metadata-driven
+parameters, then displays a full explicit confirmation using the existing
+incident command pipeline. Selected hydrant/sector/map object context actions
+prefill targets; selected unit preselects the recipient. Neither performs a
+mutation. TASK identity links reuse SelectedEntity/EntityRef and timeline links.
+
+Limits: 500 open tasks per incident; 50 task/history rows per page; 50 recipient
+candidates per page; 100 action definitions per page; 100 assignments per task.
+Reads stay separate from incident_context. Catalog and candidate search is
+bounded. Task detail includes at most 100 assignments. No per-marker task query, worker or realtime subscription; selected task detail
+uses one bounded on-demand read.
+
+### Explicitly deferred
+
+M14.5B: Ctrl/Shift multi-select, lasso/box selection, selection groups, map command
+palette/radial/context menus, target cursor, click-map target acquisition, command
+arrows/lines, bulk RTS map issuing, keyboard shortcuts, overlays and dragging.
+
+Movement: GPS/position telemetry/history, NavigationSession, RoadProvider /
+OSRM / GraphHopper task routing, ETA/distance, rerouting, route sharing, driver
+guidance, progress/arrival, constraints/road closures, water shuttle and convoys.
+No Oracle/NAV3 work.
+
+M14.6+: dispatch/turnout/mobilization, REQUESTED/DISPATCHED/EN_ROUTE production,
+realtime/chat/attachments, Android Incident Field Mode, Firebase delivery,
+CAD/112, reports/drone control, global search/dashboard/navigation regrouping,
+Exchange/Inspections redesign. Task dependencies and reassignment remain future
+work, not hidden behavior in this command engine.
