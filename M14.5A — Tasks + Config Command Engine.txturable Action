@@ -1,0 +1,1605 @@
+Implement one PR:
+
+M14.5A — Tasks + Configurable Action / Command Engine
+
+Base this work on current main after merged M14.4.2 / PR #59.
+
+This milestone builds the authoritative task/command model that the later
+M14.5B RTS Map Interaction milestone will use.
+
+This is primarily a DOMAIN / COMMAND-ENGINE milestone with a practical,
+form-based Web UI.
+
+DO NOT implement lasso, box selection, map multi-select, drag-to-command,
+live GPS, navigation sessions or realtime yet.
+
+==================================================
+CORE PRODUCT MODEL
+==================================================
+
+Gasilko must support an RTS-like operational interaction model in the future:
+
+SELECT RECIPIENT(S)
+    ->
+CHOOSE ACTION
+    ->
+CHOOSE TARGET
+    ->
+CONFIRM INTENT
+    ->
+SERVER-AUTHORITATIVE COMMAND
+    ->
+ACKNOWLEDGEMENT / EXECUTION / RESULT
+
+However:
+
+THE MAP IS NOT THE AUTHORITY.
+
+Client selection does not grant permission.
+
+COMMAND INTENT
+!=
+EXECUTION PLAN
+!=
+TELEMETRY
+
+Example:
+
+COMMAND INTENT:
+"Unit A: go to Point X"
+
+FUTURE NAVIGATION EXECUTION:
+"current route, remaining distance, ETA"
+
+FUTURE TELEMETRY:
+"actual GPS position"
+
+Never conflate these concepts.
+
+==================================================
+1. DO NOT HARDCODE FIRE SERVICE TACTICS
+==================================================
+
+Do NOT build the command engine around a fixed enum like:
+
+EXTINGUISH
+DEFEND
+SEARCH
+RESCUE
+VENTILATE
+WATER_SUPPLY
+RECON
+
+These are operational/tactical meanings that may differ by:
+
+- organization,
+- country,
+- doctrine,
+- incident type,
+- language,
+- future integrations.
+
+Instead create versioned CONFIGURABLE ACTION DEFINITIONS.
+
+The command engine understands only a very small set of native execution
+behaviors.
+
+Everything else is configuration.
+
+==================================================
+2. NATIVE BEHAVIOR KERNEL
+==================================================
+
+Implement only these native behaviors:
+
+NONE
+
+MOVE_TO
+
+HOLD_POSITION
+
+WITHDRAW_TO
+
+REQUEST_STATUS
+
+These are SYSTEM SEMANTICS, not organization-defined tactical doctrine.
+
+Do not add more native behaviors without a concrete engine-level reason.
+
+Specifically:
+
+ACKNOWLEDGE is NOT an Action Definition.
+It is command-assignment lifecycle.
+
+CANCEL is NOT an Action Definition.
+It is command/task lifecycle.
+
+COMPLETE is NOT an Action Definition.
+It is execution lifecycle.
+
+ASSIGN_SECTOR is NOT an Action Definition.
+It remains the existing authoritative M14.4 structural operation.
+
+UNIT_LEADER assignment is NOT an Action Definition.
+
+Crew membership is NOT an Action Definition.
+
+Resource allocation is NOT an Action Definition.
+
+RTS UX may expose those structural operations contextually later,
+but they must continue using their owning authoritative APIs.
+
+==================================================
+3. NATIVE BEHAVIOR SEMANTICS
+==================================================
+
+NONE
+
+No engine-specific execution behavior.
+The Action Definition describes allowed recipients/targets/parameters.
+Human lifecycle updates remain authoritative.
+
+MOVE_TO
+
+Represents movement INTENT only.
+
+It does NOT:
+
+- modify unit position,
+- calculate a route,
+- start navigation,
+- create ETA,
+- infer arrival,
+- move a marker,
+- write GPS data.
+
+A MOVE_TO Action Definition must use a point-resolvable target.
+
+Allowed target classes for native MOVE_TO should be conservative:
+
+- COORDINATE
+- HYDRANT
+- point INCIDENT_MAP_OBJECT
+
+Do NOT automatically use a polygon centroid.
+
+Do NOT automatically use a sector centroid.
+
+If the future UI wants "move into Sector A", it must ultimately provide an
+explicit movement destination or another future execution rule.
+
+HOLD_POSITION
+
+Represents an instruction to remain/operate at the current declared context.
+
+No fake coordinate is created.
+
+Target may be NONE or a valid explicitly selected operational target as
+per the Action Definition.
+
+WITHDRAW_TO
+
+Represents explicit withdrawal / retreat intent.
+
+This is semantically different from ordinary MOVE_TO because later safety
+UX/notification behavior may treat it differently.
+
+Default priority should be CRITICAL or equivalent highest operational
+priority.
+
+It still does NOT move a marker or calculate a route.
+
+REQUEST_STATUS
+
+Requests an operational response/status.
+
+No spatial target required.
+
+Do not invent polling/realtime behavior yet.
+
+==================================================
+4. VERSIONED ACTION DEFINITION CATALOG
+==================================================
+
+Create an authoritative, versioned Action Definition model.
+
+Suggested structure:
+
+operational_action_definitions
+--------------------------------
+id uuid
+owner_organization_id uuid nullable
+code text
+active boolean
+current_version_id uuid
+created_at
+created_by
+updated_at
+updated_by
+version
+
+owner_organization_id NULL means SYSTEM definition.
+
+System definitions are read-only through normal application administration.
+
+Organization-owned definitions are managed only by exact-org authorized
+MANAGER/ADMIN.
+
+Inventory administration authority does NOT grant incident command authority.
+
+Action code should be stable and language-neutral.
+
+Use a bounded safe format such as:
+
+[A-Z][A-Z0-9_-]{0,63}
+
+Do not use localized text as identity.
+
+==================================================
+5. IMMUTABLE ACTION DEFINITION VERSIONS
+==================================================
+
+Create immutable versions, conceptually:
+
+operational_action_definition_versions
+--------------------------------------
+id uuid
+definition_id uuid
+version_number integer
+native_behavior text
+label_sl text
+label_de text
+description_sl text nullable
+description_de text nullable
+default_priority text
+requires_acknowledgement boolean
+active_for_new_commands boolean
+created_at
+created_by
+
+A version that has been used by an incident task must never be edited
+in place.
+
+Changing an Action Definition creates a NEW immutable version and moves
+current_version_id.
+
+Historical incident tasks continue referencing the exact original version.
+
+Never reinterpret an old command using today's configuration.
+
+==================================================
+6. DEFAULT SYSTEM ACTION CATALOG
+==================================================
+
+Seed a small logical default catalog.
+
+Native-system actions:
+
+MOVE_TO
+- native_behavior = MOVE_TO
+- SI: Premakni se na
+- DE: Bewege dich zu
+- acknowledgement required
+
+HOLD_POSITION
+- native_behavior = HOLD_POSITION
+- SI: Zadrži položaj
+- DE: Position halten
+
+WITHDRAW_TO
+- native_behavior = WITHDRAW_TO
+- SI: Umakni se na
+- DE: Rückzug zu
+- highest default priority
+- acknowledgement required
+
+REQUEST_STATUS
+- native_behavior = REQUEST_STATUS
+- SI: Sporoči stanje
+- DE: Status melden
+- no target required
+
+Also seed a SMALL set of logical firefighter-oriented DEFAULT TEMPLATES with:
+
+native_behavior = NONE
+
+Examples:
+
+RECON
+SI: Izvidovanje
+DE: Erkundung
+
+FIRE_SUPPRESSION
+SI: Gašenje
+DE: Brandbekämpfung
+
+SEARCH
+SI: Preiskovanje
+DE: Suche
+
+RESCUE
+SI: Reševanje
+DE: Rettung
+
+ESTABLISH_WATER_SUPPLY
+SI: Vzpostavi vodno oskrbo
+DE: Wasserversorgung herstellen
+
+SECURE_AREA
+SI: Zavaruj območje
+DE: Bereich sichern
+
+LOGISTICS
+SI: Logistična naloga
+DE: Logistikauftrag
+
+These are DEFAULT CONFIGURATION.
+
+They MUST NOT become SQL/TypeScript tactical special cases.
+
+No code such as:
+
+if action = 'FIRE_SUPPRESSION' then ...
+
+Their behavior is driven only by their declarative Action Definition.
+
+Organizations may create their own actions.
+
+Do not attempt to encode complete Slovenian/German firefighting doctrine.
+
+==================================================
+7. ACTION RECIPIENT CONTRACT
+==================================================
+
+Action Definition versions declare allowed recipient classes.
+
+For M14.5A support:
+
+INCIDENT_UNIT
+
+INCIDENT_CREW_MEMBER
+
+Do NOT make permanent OPERATIONAL_VEHICLE a command recipient.
+
+A vehicle is inventory / physical equipment.
+
+The incident unit is the operational command recipient.
+
+Do NOT make hydrants, map objects or sectors command recipients.
+
+They are possible TARGETS.
+
+Do not add autonomous drones/robots yet.
+
+==================================================
+8. TARGET CONTRACT
+==================================================
+
+Reuse M14.4.2 OperationalTarget concepts.
+
+Task/command target kinds for this milestone:
+
+NONE
+
+HYDRANT
+
+INCIDENT_MAP_OBJECT
+
+INCIDENT_SECTOR
+
+COORDINATE
+
+Do not create a second unrelated target abstraction.
+
+Target data must store:
+
+- target kind,
+- canonical entity id where applicable,
+- incident relationship where required,
+- immutable geometry snapshot at issuance where appropriate,
+- optional bounded display-label snapshot.
+
+The canonical entity remains authoritative for identity.
+
+The snapshot is historical evidence of what the commander targeted at
+issuance time.
+
+A later entity edit must not rewrite historical task intent.
+
+Do NOT use target geometry to infer command authority.
+
+GEOMETRY DOES NOT GRANT AUTHORITY.
+
+==================================================
+9. TARGET VALIDATION
+==================================================
+
+At command creation the server must re-resolve and validate the target.
+
+Examples:
+
+HYDRANT
+- must be authorized according to the relevant existing read/integration
+  rules;
+- preserve canonical hydrant UUID.
+
+INCIDENT_MAP_OBJECT
+- must belong to the same incident;
+- caller must have incident access;
+- inactive/invalid target rules must be explicit.
+
+INCIDENT_SECTOR
+- same incident;
+- valid sector state.
+
+COORDINATE
+- finite WGS84 longitude/latitude;
+- preserve [longitude, latitude].
+
+For native MOVE_TO / WITHDRAW_TO:
+
+target must resolve to an explicit point.
+
+Do not use polygon/line centroid automatically.
+
+==================================================
+10. DECLARATIVE ACTION PARAMETERS
+==================================================
+
+Allow custom Action Definitions to declare bounded typed parameters.
+
+Do NOT allow scripts, expressions, SQL, JavaScript or executable rules.
+
+Use a simple declarative model.
+
+Supported parameter types:
+
+TEXT
+
+INTEGER
+
+DECIMAL
+
+BOOLEAN
+
+CHOICE
+
+Conceptually parameter definitions contain:
+
+code
+label_sl
+label_de
+type
+required
+min/max where meaningful
+max_length
+choice options where meaningful
+sort_order
+
+Limits:
+
+- maximum 10 parameters per Action Definition version;
+- parameter code stable / bounded;
+- choice list bounded, e.g. max 20;
+- text bounded;
+- complete submitted parameter payload bounded, e.g. <= 8 KiB.
+
+Server validates submitted parameter values against the exact Action
+Definition version.
+
+Unknown keys reject.
+
+Missing required values reject.
+
+Wrong types reject.
+
+No browser-only validation authority.
+
+==================================================
+11. INCIDENT TASK / COMMAND MODEL
+==================================================
+
+Create an authoritative incident task/directive model.
+
+Use names consistent with existing SPEC/repository naming.
+
+Conceptually:
+
+incident_tasks
+--------------
+id uuid
+incident_id uuid
+action_definition_version_id uuid
+issuing_organization_id uuid
+issued_by uuid
+
+priority
+title/summary optional bounded
+notes optional bounded
+
+target_type
+target_entity_id nullable
+target_geometry_snapshot jsonb nullable
+target_label_snapshot nullable
+
+parameters jsonb
+
+status
+outcome nullable
+
+issued_at
+closed_at nullable
+cancelled_at nullable
+
+version
+changed_revision
+
+Tasks preserve the exact Action Definition version used when issued.
+
+==================================================
+12. ONE TASK MAY HAVE MULTIPLE RECIPIENTS
+==================================================
+
+Do NOT store recipient UUID arrays in incident_tasks.
+
+Create child assignment episodes.
+
+Conceptually:
+
+incident_task_assignments
+-------------------------
+id uuid
+task_id uuid
+
+recipient_type
+incident_unit_id nullable
+incident_crew_member_id nullable
+
+status
+
+acknowledged_at/by nullable
+started_at/by nullable
+blocked_at/by nullable
+blocked_reason nullable
+completed_at/by nullable
+unable_at/by nullable
+unable_reason nullable
+cancelled_at/by nullable
+
+version
+changed_revision
+
+Exactly one recipient identity is valid according to recipient_type.
+
+A single issued command may therefore target:
+
+GVC-1
+GVC-2
+Crew member Janez
+
+while each gets an independent execution lifecycle.
+
+This is required for future RTS multi-select.
+
+==================================================
+13. ASSIGNMENT LIFECYCLE
+==================================================
+
+Use an explicit lifecycle.
+
+Suggested:
+
+ISSUED
+
+ACKNOWLEDGED
+
+IN_PROGRESS
+
+BLOCKED
+
+COMPLETED
+
+UNABLE
+
+CANCELLED
+
+Rules:
+
+ISSUED
+-> ACKNOWLEDGED
+-> IN_PROGRESS
+-> COMPLETED
+
+Where requires_acknowledgement = false:
+
+ISSUED
+-> IN_PROGRESS
+
+Valid failure/exception paths:
+
+ISSUED -> UNABLE
+ACKNOWLEDGED -> UNABLE
+IN_PROGRESS -> BLOCKED
+BLOCKED -> IN_PROGRESS
+BLOCKED -> UNABLE
+
+Issuer-authorized cancellation:
+
+nonterminal -> CANCELLED
+
+Terminal:
+
+COMPLETED
+UNABLE
+CANCELLED
+
+No transition out of terminal state.
+
+Require bounded reason for BLOCKED / UNABLE where applicable.
+
+Do not delete assignment history.
+
+==================================================
+14. TASK AGGREGATE STATUS
+==================================================
+
+Parent task lifecycle must reflect child assignments without destroying
+per-recipient evidence.
+
+Recommended parent statuses:
+
+OPEN
+
+CLOSED
+
+CANCELLED
+
+Recommended final outcome for CLOSED:
+
+SUCCESS
+
+PARTIAL
+
+FAILED
+
+Server updates/recomputes aggregate state atomically when an assignment
+enters a terminal state.
+
+Suggested semantics:
+
+all assignments COMPLETED
+-> CLOSED / SUCCESS
+
+some COMPLETED and some UNABLE/CANCELLED
+-> CLOSED / PARTIAL
+
+all terminal and none COMPLETED
+-> CLOSED / FAILED
+
+Explicit whole-task cancellation:
+-> CANCELLED
+
+Do not mark a command successful merely because one of several recipients
+completed it.
+
+==================================================
+15. TASK CANCELLATION
+==================================================
+
+Issuer-authorized users may cancel:
+
+- an individual nonterminal assignment, where scope permits;
+- or the whole task.
+
+Whole-task cancellation atomically:
+
+- marks every remaining nonterminal assignment CANCELLED;
+- preserves already terminal assignments;
+- records actor/time;
+- writes timeline/audit evidence;
+- updates aggregate task state.
+
+Cancellation is NOT deletion.
+
+==================================================
+16. ACKNOWLEDGEMENT AUTHORITY
+==================================================
+
+Acknowledgement represents the recipient side.
+
+For INCIDENT_UNIT recipient:
+
+The effective UNIT_LEADER may:
+
+- acknowledge,
+- start,
+- block,
+- complete,
+- mark unable
+
+for that unit assignment.
+
+Do not treat descriptive crew role LEADER as UNIT_LEADER authority.
+
+If a unit has no effective UNIT_LEADER, its command may remain ISSUED.
+
+Do not silently let any crew member impersonate the unit leader.
+
+For INCIDENT_CREW_MEMBER recipient:
+
+the matching authenticated user may update their own assignment execution
+state while they remain an eligible active incident crew member.
+
+Server must recheck identity and eligibility.
+
+Commanders may CANCEL within their command scope.
+
+Do not let commanders fake recipient acknowledgement.
+
+If an exceptional commander-side administrative status correction is ever
+needed, that should be a separate explicitly audited future operation.
+
+==================================================
+17. ISSUANCE AUTHORITY
+==================================================
+
+Implement explicit server-side task issuance scope.
+
+IC:
+- may issue to eligible recipients across the incident.
+
+Agency Commander:
+- may issue to eligible recipients belonging to their own participating
+  organization.
+
+Sector Commander:
+- may issue to incident units / crew currently explicitly assigned to their
+  sector scope.
+
+Do NOT infer sector authority from geometry containment.
+
+Unit Leader:
+- may issue subordinate tasks only to active crew members of their own
+  incident unit.
+
+Do NOT automatically give Unit Leader authority over other units.
+
+Deputy Commander:
+
+Do NOT invent new blanket task/resource authority merely because the role
+exists.
+
+Preserve current command semantics unless an existing explicit capability
+already grants the relevant authority.
+
+If necessary, add a narrow server capability for task issuance with the
+above explicit role scopes.
+
+Do not use organization hierarchy as incident command authority.
+
+==================================================
+18. ACTION DEFINITION VISIBILITY
+==================================================
+
+For issuance, allow:
+
+- active SYSTEM Action Definitions;
+- active Action Definitions owned by the caller's selected acting
+  organization.
+
+Do not automatically expose every participating organization's private custom
+catalogue to every other organization.
+
+IC acting under the lead organization may use system + lead-org definitions.
+
+Agency Commander uses system + own-org definitions.
+
+Unit/sector scopes still apply independently.
+
+Action catalogue visibility does not grant issuance authority.
+
+==================================================
+19. ACTION DEFINITION ADMINISTRATION
+==================================================
+
+Add organization administration UI for custom Action Definitions.
+
+Use an appropriate existing operational administration area.
+
+Exact-org MANAGER/ADMIN only.
+
+Features:
+
+- list definitions;
+- create;
+- create a new version/edit current configuration;
+- activate/deactivate for future issuance;
+- labels SI/DE;
+- native behavior selection;
+- allowed recipients;
+- allowed target kinds;
+- priority;
+- acknowledgement requirement;
+- declarative parameters.
+
+System definitions:
+
+- visible,
+- read-only,
+- clearly marked as system defaults.
+
+Do not allow organization admins to mutate the global system definition rows.
+
+Do not imply that action catalogue administration grants incident command
+authority.
+
+==================================================
+20. INCIDENT TASK UI — FORM BASED FOR M14.5A
+==================================================
+
+Integrate Tasks / Commands into the M14.4.1 operational workspace.
+
+SI concept:
+Naloge in ukazi
+
+DE equivalent required.
+
+Provide:
+
+- current/open tasks;
+- task detail;
+- recipient statuses;
+- priority;
+- target summary;
+- action label;
+- issuer/time;
+- blocked/unable reasons;
+- completed/history view;
+- filters as appropriate but bounded.
+
+Do not make the incident page a long vertical form again.
+
+Use existing workspace panels.
+
+==================================================
+21. BASIC COMMAND CREATION UI
+==================================================
+
+M14.5A may use a conventional form/dialog.
+
+Do NOT implement RTS lasso/targeting yet.
+
+Creation flow:
+
+1. choose Action Definition;
+2. choose one or more eligible recipients;
+3. choose/confirm target if required/allowed;
+4. fill declarative parameters;
+5. optional notes;
+6. show complete confirmation summary;
+7. issue through authoritative server command.
+
+Recipient candidate reads must be bounded.
+
+The data model/UI MUST support multiple recipients already.
+
+This prepares M14.5B.
+
+==================================================
+22. CREATE TASK FROM CURRENTLY SELECTED ENTITY
+==================================================
+
+Reuse M14.4.1 SelectedEntity / ContextAction infrastructure.
+
+Where semantically valid, expose:
+
+Create task here
+
+This pre-fills the OperationalTarget from the selected:
+
+- hydrant,
+- sector,
+- tactical/map object.
+
+Do NOT automatically issue anything.
+
+The user still chooses:
+
+- Action Definition,
+- recipients,
+- parameters,
+- confirmation.
+
+If the chosen Action Definition does not allow that target type,
+show a clear reason or require a valid target.
+
+==================================================
+23. CREATE TASK FOR SELECTED UNIT VIA UI
+==================================================
+
+From the existing unit Selected Entity pane, allow:
+
+Issue task
+
+This preselects that incident unit as recipient.
+
+Do not move it.
+
+Do not create a map marker.
+
+Do not create a fake route.
+
+Do not modify its incident deployment status merely because it received a
+task.
+
+==================================================
+24. NATIVE MOVE_TO UI IN M14.5A
+==================================================
+
+MOVE_TO can be created through the normal command form.
+
+Its target may be selected from existing supported point targets or explicit
+coordinates.
+
+After issuance display:
+
+MOVE_TO
+Target: ...
+Status: ISSUED / ACKNOWLEDGED / ...
+
+Do NOT display:
+
+ETA
+route
+distance
+navigation progress
+
+because no NavigationSession exists yet.
+
+A future movement/navigation milestone will attach execution to the assignment.
+
+==================================================
+25. FUTURE NAVIGATION HOOK
+==================================================
+
+Design the schema so a future navigation execution can safely reference:
+
+incident_task_assignment_id
+
+Example future relationship:
+
+Task Assignment
+MOVE_TO -> Unit A -> Point X
+        |
+        + future NavigationSession
+
+Do NOT create NavigationSession now.
+
+Do NOT add placeholder route fields to incident_tasks.
+
+Route and ETA do not belong in the task table.
+
+==================================================
+26. TIMELINE / AUDIT
+==================================================
+
+Operationally meaningful events should be recorded using existing incident
+timeline/audit patterns.
+
+Examples:
+
+TASK_ISSUED
+
+TASK_ASSIGNMENT_ACKNOWLEDGED
+
+TASK_ASSIGNMENT_STARTED
+
+TASK_ASSIGNMENT_BLOCKED
+
+TASK_ASSIGNMENT_COMPLETED
+
+TASK_ASSIGNMENT_UNABLE
+
+TASK_CANCELLED
+
+Avoid creating a second audit system.
+
+Use existing incident_operation_receipts for durable idempotency.
+
+Do not write every UI read/selection to timeline.
+
+==================================================
+27. IDEMPOTENCY
+==================================================
+
+Every mutation must use durable DB-side idempotency.
+
+Task creation:
+
+- stable operation UUID;
+- stable task UUID;
+- stable child assignment UUIDs;
+- canonical payload.
+
+Exact replay:
+-> same acknowledged result
+
+Same operation UUID with changed payload:
+-> reject
+
+Lost response:
+-> replay without duplicating task or assignments
+
+Assignment lifecycle changes:
+-> same receipt discipline.
+
+Do not rely on browser-only deduplication.
+
+==================================================
+28. OPTIMISTIC CONCURRENCY
+==================================================
+
+Use positive entity versions.
+
+Task edits/cancellation require expected task version where applicable.
+
+Assignment transitions require expected assignment version.
+
+Stale mutation:
+
+- return safe domain error/current version/read DTO;
+- UI retains intent;
+- refreshes authoritative state;
+- requires explicit re-edit/reconfirmation where behavior changes.
+
+Never silently resubmit a changed command.
+
+==================================================
+29. INCIDENT REVISION
+==================================================
+
+Task/assignment mutations should participate in existing incident aggregate
+revision semantics where appropriate.
+
+changed_revision should represent the revision committed by that mutation.
+
+Do not overload entity version and incident revision as the same thing.
+
+==================================================
+30. READ MODELS / BOUNDS
+==================================================
+
+Do not create one huge incident_context payload.
+
+Provide bounded reads such as:
+
+open tasks:
+bounded current set
+
+task detail:
+one task + bounded assignments
+
+history:
+paged
+
+action definitions:
+bounded active catalogue
+
+recipient candidates:
+bounded and filtered
+
+suggested starting limits:
+
+- open tasks <= 500 per incident;
+- task page/history 50;
+- recipient candidates 50;
+- action definitions 100;
+- assignments/task <= 100.
+
+If reasonable limits differ due to existing conventions, document them.
+
+No per-map-marker task queries.
+
+==================================================
+31. CLOSURE / RELEASE GUARDS
+==================================================
+
+Do not silently destroy open command history.
+
+Incident closure should reject unresolved nonterminal tasks/assignments unless
+the existing closure operation explicitly performs a deliberate, evidenced
+cleanup policy.
+
+Prefer explicit resolution/cancellation before close.
+
+Unit RELEASE / UNAVAILABLE must not silently orphan nonterminal tasks assigned
+to that unit.
+
+Define an explicit guard.
+
+Participant release must not silently orphan tasks for its units/crew.
+
+Crew leave must reject or explicitly require resolution of an active
+person-targeted assignment.
+
+No silent operational command disappearance.
+
+==================================================
+32. CLOSED / CANCELLED INCIDENTS
+==================================================
+
+Historical read only.
+
+No new tasks.
+
+No task lifecycle mutations.
+
+Task/action version snapshots remain readable for history.
+
+==================================================
+33. SECURITY
+==================================================
+
+New public tables must have RLS.
+
+No browser direct privileged DML.
+
+Use narrow RPC/server command boundaries.
+
+Security-definer functions:
+
+- empty search_path;
+- qualified objects;
+- auth.uid() actor;
+- no client-selected actor;
+- no service-role browser key.
+
+Lock/recheck:
+
+- incident lifecycle;
+- participant state;
+- caller profile/membership;
+- role effectiveness;
+- target recipient eligibility;
+- target validity;
+- Action Definition version validity.
+
+Return only whitelisted safe domain errors.
+
+Do not expose raw SQL/provider errors to Web.
+
+==================================================
+34. DATABASE LOCKING
+==================================================
+
+Use deterministic lock ordering.
+
+Commands involving multiple recipients must avoid recipient-order-dependent
+deadlocks.
+
+Sort recipient IDs before locking.
+
+Recheck command authority and recipient eligibility under locks.
+
+Concurrent commands may both exist if semantically valid.
+
+Do not invent a "one active task per unit" restriction.
+
+A unit can legitimately have multiple tasks.
+
+==================================================
+35. NO GEOMETRY AUTHORITY
+==================================================
+
+Critical rule:
+
+A person/unit being visually inside a sector polygon does NOT grant Sector
+Commander authority.
+
+A target point being inside a sector does NOT itself grant authority.
+
+Command scope is derived from explicit incident relationships:
+
+- role assignment,
+- unit sector assignment,
+- organization ownership,
+- crew relationship.
+
+Geometry is operational context only.
+
+==================================================
+36. UI PRIORITY / ACCESSIBILITY
+==================================================
+
+Priority should use both text and visual treatment.
+
+Suggested stable priorities:
+
+LOW
+NORMAL
+HIGH
+CRITICAL
+
+Do not rely on color alone.
+
+CRITICAL does not bypass authorization.
+
+Keyboard-accessible forms.
+
+Semantic status labels.
+
+SI/DE localization.
+
+No hidden command meaning encoded only by icon.
+
+==================================================
+37. ACTION PARAMETER UI
+==================================================
+
+Render declarative Action Definition parameters from their versioned metadata.
+
+Do not hardcode UI fields by tactical action code.
+
+For example do NOT write:
+
+if action.code === 'FIRE_SUPPRESSION':
+  render HoseCount
+
+Instead render parameter definitions generically.
+
+Native behavior-specific UI may enforce native engine requirements such as
+MOVE_TO requiring a point-resolvable target.
+
+==================================================
+38. SYSTEM DEFAULTS ARE CONFIGURATION, NOT ENGINE LOGIC
+==================================================
+
+Very important.
+
+It is acceptable to seed:
+
+FIRE_SUPPRESSION
+
+but the engine must treat it exactly like an organization-defined
+native_behavior = NONE action.
+
+Deleting/deactivating it for future availability must not require TypeScript/
+SQL tactical code changes.
+
+Historical tasks continue to work because they reference the immutable version.
+
+==================================================
+39. DO NOT IMPLEMENT M14.5B
+==================================================
+
+Explicitly deferred to M14.5B:
+
+- Ctrl/Shift map multi-select;
+- lasso selection;
+- box selection;
+- selection groups;
+- map command palette;
+- RTS radial/context menu;
+- target cursor mode;
+- click-map target acquisition;
+- command arrows/lines;
+- bulk RTS issue from map;
+- keyboard RTS shortcuts;
+- visual command overlays;
+- drag-based interaction.
+
+M14.5A provides the authoritative backend/model they will use.
+
+==================================================
+40. DO NOT IMPLEMENT MOVEMENT EXECUTION
+==================================================
+
+Explicitly deferred:
+
+- GPS;
+- position telemetry;
+- location history;
+- NavigationSession;
+- RoadProvider route generation for commands;
+- OSRM/GraphHopper calls for task execution;
+- ETA;
+- remaining distance;
+- rerouting;
+- route sharing;
+- driver guidance;
+- route progress;
+- arrival detection;
+- route constraints;
+- road closures affecting routing;
+- water shuttle routing;
+- convoys.
+
+Do NOT touch Oracle or NAV3.
+
+==================================================
+41. DO NOT IMPLEMENT M14.6+
+==================================================
+
+Also deferred:
+
+- dispatch;
+- turnout;
+- mobilization;
+- REQUESTED/DISPATCHED/EN_ROUTE production;
+- realtime subscriptions;
+- operational chat;
+- attachments;
+- Android Incident Field Mode;
+- Firebase notification delivery;
+- CAD/112;
+- incident reports;
+- drone control;
+- global search;
+- dashboard redesign;
+- navigation regrouping;
+- Exchange/Inspections redesign.
+
+==================================================
+42. MIGRATIONS
+==================================================
+
+Forward migrations only.
+
+Do NOT edit already-applied historical migrations.
+
+Likely separate migrations by concern, for example:
+
+- action definition schema/catalog;
+- task schema;
+- task command API;
+- task reads/admin APIs.
+
+Exact filenames/timestamps should follow repository convention.
+
+No dependency upgrades unless absolutely unavoidable.
+
+Prefer zero new dependencies.
+
+==================================================
+43. WEB ADMIN
+==================================================
+
+Add Action Definition management into an existing sensible organization
+administration / operational administration surface.
+
+Do not create another disconnected product shell.
+
+Keep inventory and action catalogue semantically separate even if presented
+under the same operational administration area.
+
+Show system/default vs organization-owned clearly.
+
+==================================================
+44. WEB INCIDENT UX
+==================================================
+
+M14.4.1 workspace remains map-first.
+
+Add task/command UI without turning IncidentArea back into a giant page.
+
+Suggested composition:
+
+LEFT / OPERATIONAL
+- command
+- sectors
+- units
+- tasks
+
+CENTER
+- current map
+
+RIGHT
+- selected entity / selected task
+
+BOTTOM / SECONDARY
+- command requests
+- timeline/history
+
+Exact layout may follow current #58 architecture.
+
+==================================================
+45. SPEC
+==================================================
+
+Update:
+
+docs/SPEC-M14-INCIDENT-OPERATIONS.md
+
+Document explicitly:
+
+- configurable Action Definitions;
+- immutable Action Definition versions;
+- system defaults vs organization definitions;
+- native behavior kernel;
+- why tactical doctrine is not hard-coded;
+- task/assignment model;
+- multi-recipient commands;
+- assignment lifecycle;
+- authority scopes;
+- target model;
+- target geometry snapshot;
+- command intent != execution plan != telemetry;
+- MOVE_TO without route/GPS;
+- future NavigationSession reference point;
+- future M14.5B multi-select/lasso targeting;
+- closure/release guards;
+- idempotency/concurrency.
+
+==================================================
+46. MANUAL ACCEPTANCE CHECKLIST
+==================================================
+
+Include at minimum:
+
+A. System Action Definitions are visible and read-only in org admin.
+
+B. Exact-org MANAGER/ADMIN can create a custom Action Definition.
+
+C. Editing a used Action Definition creates a new immutable version.
+
+D. Historical task keeps its old Action Definition version.
+
+E. Custom native_behavior=NONE action works without source-code tactical
+special casing.
+
+F. MOVE_TO requires a point-resolvable target.
+
+G. MOVE_TO does not create route/ETA/GPS data.
+
+H. Sector polygon is not silently converted to centroid for MOVE_TO.
+
+I. One task can be issued to multiple units/people.
+
+J. Each recipient has an independent lifecycle.
+
+K. Unit Leader can acknowledge/manage its own unit assignment.
+
+L. Ordinary crew member cannot impersonate Unit Leader for unit command.
+
+M. Person-targeted assignment can be acknowledged by the matching active user.
+
+N. IC can issue across the incident.
+
+O. Agency Commander cannot task another organization's unit.
+
+P. Sector Commander cannot task units outside explicit sector assignment.
+
+Q. Geometry containment does not grant Sector Commander authority.
+
+R. Unit Leader cannot task another unit.
+
+S. Unauthorized client manipulation is rejected server-side.
+
+T. Requires-acknowledgement action follows ISSUED -> ACKNOWLEDGED.
+
+U. Non-ack-required action may enter IN_PROGRESS legally.
+
+V. BLOCKED requires reason and may resume.
+
+W. UNABLE preserves history.
+
+X. Completed assignment cannot reopen.
+
+Y. Whole-task cancellation preserves already terminal assignments.
+
+Z. Aggregate SUCCESS/PARTIAL/FAILED behavior is correct.
+
+AA. Lost task-create response replays without duplicate task/assignments.
+
+AB. Same operation UUID with changed payload rejects.
+
+AC. Concurrent recipient ordering does not create obvious lock-order races.
+
+AD. Stale task/assignment versions require explicit refresh/re-edit.
+
+AE. Hydrant target preserves canonical UUID.
+
+AF. Target snapshot remains historical after source entity changes.
+
+AG. Existing M14.4.2 deep links/context actions remain functional.
+
+AH. "Create task here" only prefills and never auto-issues.
+
+AI. Unit "Issue task" does not alter deployment status or invent position.
+
+AJ. Custom declarative parameters render and validate generically.
+
+AK. Unknown/malformed parameter payload rejects server-side.
+
+AL. Task close/release guards prevent orphaned operational commands.
+
+AM. CLOSED/CANCELLED incident is historical/read-only.
+
+AN. SI labels.
+
+AO. DE labels.
+
+AP. Existing COP, units, crews, resources and hydrant integrations remain
+unchanged.
+
+==================================================
+47. VALIDATION / DELIVERY BOUNDARY
+==================================================
+
+One PR only.
+
+Do NOT merge.
+
+Do NOT deploy.
+
+Do NOT apply migrations.
+
+Do NOT run:
+
+- tests;
+- build;
+- lint;
+- typecheck;
+- CI;
+- browser automation;
+- Supabase migration application;
+- Edge Function deployment;
+- Android build;
+- Oracle/OSRM changes.
+
+Do not add tests.
+
+Use [skip ci] if that remains repository convention.
+
+At completion:
+
+1. Create PR.
+2. Give detailed source-level summary.
+3. List every changed file.
+4. List every new migration in application order.
+5. Explain:
+   - Action Definition model;
+   - native behavior kernel;
+   - default catalog;
+   - task/assignment lifecycle;
+   - authority model;
+   - target model;
+   - parameter validation;
+   - idempotency/concurrency;
+   - release/closure guards;
+   - Web administration;
+   - Incident workspace integration.
+6. Explicitly confirm no tactical action has hard-coded engine semantics except
+   the native behavior kernel.
+7. List all deferred M14.5B and movement/navigation features.
+8. Include manual verification checklist.
+9. State clearly:
+   - no tests run;
+   - no build;
+   - no lint;
+   - no typecheck;
+   - no CI;
+   - no browser automation;
+   - no migrations applied;
+   - no deployment.
+10. Stop after PR creation.
+
+==================================================
+SUCCESS CRITERIA
+==================================================
+
+M14.5A succeeds if:
+
+- Gasilko has an authoritative command/task engine;
+- one command may address multiple real incident recipients;
+- recipient execution states are independently tracked;
+- command authority follows explicit incident relationships;
+- tactical doctrine is configurable rather than hard-coded;
+- historical commands retain exact Action Definition versions;
+- MOVE_TO expresses movement intent without pretending to know route or GPS;
+- no unit marker is moved by command issuance;
+- custom actions require no tactical TypeScript/SQL branching;
+- M14.5B can add lasso/multi-select/targeting directly on top of this model;
+- a later navigation milestone can attach NavigationSession to a task
+  assignment without redesigning task history;
+- COMMAND INTENT remains strictly separate from EXECUTION PLAN and TELEMETRY.
