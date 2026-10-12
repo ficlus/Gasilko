@@ -1,0 +1,1689 @@
+# GASILKO — M14.5D MOVEMENT & NAVIGATION EXECUTION
+
+Implement **M14.5D — Incident Movement & Navigation Execution** in the existing Gasilko monorepo.
+
+Repository: `ficlus/Gasilko`
+
+Base on current `main` AFTER merged:
+
+- PR #57 — M14.4 Units / Vehicles / Crews / Resources
+- PR #58 — M14.4.1 Operational Workspace
+- PR #59 — M14.4.2 Cross-Module Integration
+- PR #60 — M14.5A Tasks + Configurable Action / Command Engine
+- PR #61 — M14.5B RTS Map Interaction
+- PR #62 — M14.5C Incident Simulation Foundation
+
+**PR #62 is confirmed merged by the user.**
+
+If required M14.5C functionality is missing from the checked-out branch, STOP and report instead of recreating it.
+
+This is an **implementation-only** milestone.
+
+The user manually reviews and merges PRs, applies SQL migrations and deploys functions/applications.
+
+Do not execute tests, build, lint, typecheck, CI, browser automation, runtime verification, migrations or deployment.
+
+Create ONE PR ONLY. Do not merge.
+
+---
+
+## 1. Main objective
+
+Implement a proper **incident navigation execution layer** that connects issued M14.5A task assignments to navigable road routes.
+
+Main operator workflow:
+
+1. Commander selects an incident unit.
+2. Commander issues an existing configured action whose native behavior is `MOVE_TO` or `WITHDRAW_TO`.
+3. M14.5A creates the authoritative task and recipient assignment.
+4. An authorized operator selects the assignment and chooses **Prepare navigation**.
+5. The system resolves the issued immutable target snapshot.
+6. The operator chooses an authorized route origin.
+7. Backend routing calculates a route using the existing RoadProvider.
+8. A versioned NavigationSession stores the route.
+9. The route, distance and planned estimated duration appear in the incident workspace and map.
+10. The session can be explicitly started, paused, resumed, stopped, cancelled or recalculated when authorized.
+
+Navigation must be useful immediately in M14.5C training scenarios while remaining compatible with future real GPS observations and Android incident navigation.
+
+**Do not implement automatic vehicle movement in M14.5D.**
+
+---
+
+## 2. Non-negotiable domain separation
+
+The governing principle is:
+
+**COMMAND INTENT != EXECUTION PLAN != TELEMETRY**
+
+### Command intent
+
+Example:
+
+`GVC-1 → MOVE_TO → Hydrant H-000123`
+
+This represents an issued instruction.
+
+It does NOT imply:
+
+- the recipient acknowledged it;
+- the recipient started moving;
+- a route exists;
+- navigation was activated;
+- the unit reached the destination;
+- the task was completed.
+
+### Execution plan
+
+A NavigationSession represents one possible route/execution plan for a specific task assignment.
+
+It may contain:
+
+- authorized route origin;
+- immutable command destination;
+- RoadProvider geometry;
+- planned road distance;
+- planned duration;
+- provider attribution;
+- route revisions;
+- navigation state.
+
+A navigation plan is not a position observation.
+
+### Telemetry
+
+Physical position comes from a separate source:
+
+- actual authenticated GPS observations, when implemented;
+- explicitly simulated M14.5C positions in training incidents.
+
+Never update a unit's observed position because:
+
+- a task was issued;
+- a route was calculated;
+- navigation was started;
+- time passed;
+- an ETA elapsed.
+
+Never infer unit safety, arrival, ACK or task completion from route geometry.
+
+---
+
+## 3. Inspect only relevant source
+
+Before implementation, inspect the actual current repository contracts.
+
+Relevant components:
+
+- M14.1 incident lifecycle.
+- M14.2 incident command authority.
+- M14.3 COP, sectors and tactical objects.
+- M14.4 incident units, deployments and resources.
+- M14.4.1 OperationalMapCanvas.
+- M14.4.2 OperationalTarget and canonical entity references.
+- M14.5A Action Definitions, immutable versions, task assignments, target snapshots, RPC authorization, receipts and audit.
+- M14.5B RTS selection, task intent layers and existing task UI.
+- M14.5C simulation scenarios, position projections and protected training environment.
+- Existing routing provider implementation.
+- Existing Web API and Supabase Edge Function patterns.
+- SI/DE localization.
+- M14 SPEC.
+
+Likely paths, to verify against actual source:
+
+```text
+supabase/functions/plan-routes/provider.ts
+supabase/functions/plan-routes/osrm.ts
+supabase/functions/plan-routes/navigation.ts
+supabase/functions/plan-routes/index.ts
+
+web/lib/operational/tasks.ts
+web/lib/operational/target.ts
+web/lib/operational/simulation.ts
+
+web/features/incidents/IncidentTasks.tsx
+web/features/incidents/TaskIntentLayers.tsx
+web/features/incidents/SimulationProvider.tsx
+web/features/incidents/SimulationMapLayer.tsx
+web/features/incidents/CopMap.tsx
+web/features/incidents/IncidentArea.tsx
+web/features/incidents/workspace.tsx
+
+web/app/api/incidents/route.ts
+
+supabase/migrations/
+docs/SPEC-M14-INCIDENT-OPERATIONS.md
+```
+
+Do not assume every suggested path or API already exists.
+
+Reuse the actual current models and naming conventions.
+
+Do not re-audit unrelated Android, M8/M9, notifications, Oracle, NAV3 or administrative modules.
+
+---
+
+## 4. Integration policy
+
+Prior implementations are authoritative for their own business semantics.
+
+Preserve:
+
+- organization-scoped security roles;
+- incident command roles;
+- incident lifecycle;
+- resource and deployment identity;
+- Action Definition versioning;
+- task assignment lifecycle;
+- task target snapshots;
+- RTS selection;
+- simulation isolation;
+- receipts and idempotency;
+- optimistic concurrency;
+- audit and historical records;
+- canonical hydrant data and authorization.
+
+**Integration-safe changes to previous modules ARE ALLOWED AND EXPECTED.**
+
+You may:
+
+- extract a shared routing provider module;
+- introduce an incident routing Edge Function;
+- add focused SQL schema and RPCs;
+- extend existing incident task details;
+- add shared map navigation layers;
+- expose contextual navigation actions;
+- add bounded authorized reads;
+- extend the simulation map integration;
+- add navigation-related SI/DE messages;
+- update the M14 SPEC.
+
+Do not create a second task engine or another RoadProvider implementation.
+
+Do not make a large unrelated refactor.
+
+---
+
+## 5. NavigationSession identity
+
+A NavigationSession belongs to a **specific task assignment**, not merely to the parent task.
+
+Relationship:
+
+```text
+Incident
+  └── IncidentTask
+        └── IncidentTaskAssignment
+              └── NavigationSession
+                    ├── RouteRevision 1
+                    ├── RouteRevision 2
+                    └── NavigationEvents
+```
+
+Example:
+
+```text
+One MOVE_TO task
+Target: Hydrant H-000123
+
+GVC-1 → assignment A → navigation session A
+GVC-2 → assignment B → navigation session B
+GVC-3 → assignment C → navigation session C
+```
+
+Each unit can have a different origin and therefore a different route and ETA.
+
+Do not generate one shared route for all recipients.
+
+Use the actual M14.5A assignment UUID as the canonical association.
+
+For this MVP, road navigation supports:
+
+`INCIDENT_UNIT`
+
+Do not automatically create vehicle-navigation sessions for:
+
+`INCIDENT_CREW_MEMBER`
+
+Crew-member walking navigation is deferred unless the existing provider/domain can support it without new assumptions.
+
+Permanent vehicle inventory records are not navigation recipients by themselves.
+
+---
+
+## 6. Action eligibility
+
+Only task assignments whose issued immutable Action Definition version has native behavior:
+
+- `MOVE_TO`
+- `WITHDRAW_TO`
+
+are eligible for movement navigation.
+
+Do not decide based on:
+
+- localized action name;
+- action code;
+- tactical label;
+- manually entered text.
+
+Examples of configurable actions must remain configuration:
+
+- reconnaissance;
+- rescue;
+- fire suppression;
+- water supply;
+- search;
+- logistics.
+
+A custom organization action backed by `MOVE_TO` should work without changing navigation code.
+
+Never rewrite an issued task's Action Definition version.
+
+Navigation must reference the version/snapshot that was authoritative when the command was issued.
+
+---
+
+## 7. Immutable navigation destination
+
+Resolve navigation destination from the **issued task target snapshot**.
+
+Supported point-capable target kinds:
+
+- `COORDINATE`
+- `HYDRANT`
+- `INCIDENT_MAP_OBJECT` with Point geometry
+
+Use M14.5A authoritative target snapshot semantics.
+
+Do not silently resolve current mutable hydrant coordinates if the issued target snapshot differs.
+
+Do not convert:
+
+- sector polygon to centroid;
+- hazard polygon to center;
+- LineString midpoint to point;
+- current object geometry to historical target.
+
+For `MOVE_TO` and `WITHDRAW_TO`, only a valid Point destination may produce a road-navigation route.
+
+Preserve:
+
+```text
+target_type
+target_entity_id
+target_geometry_snapshot
+target_label_snapshot
+```
+
+Use actual existing field names.
+
+Store the resolved destination explicitly in the navigation record/revision, but do not modify the original task target.
+
+If destination resolution fails, return a specific localized error.
+
+---
+
+## 8. Navigation origin types
+
+Implement explicit provenance.
+
+Conceptually:
+
+```ts
+type NavigationOrigin =
+  | {
+      source: "SIMULATED_POSITION";
+      scenarioId: string;
+      incidentUnitId: string;
+      positionVersion: number;
+      observedAt: string;
+      coordinate: [number, number];
+    }
+  | {
+      source: "ACTUAL_POSITION";
+      incidentUnitId: string;
+      observationId: string;
+      observedAt: string;
+      coordinate: [number, number];
+    }
+  | {
+      source: "MANUAL_PLANNING_POINT";
+      coordinate: [number, number];
+      selectedBy: string;
+    };
+```
+
+These are conceptual types. Adapt to actual source.
+
+### SIMULATED_POSITION
+
+Reuse M14.5C's simulation position model.
+
+Requirements:
+
+- training scenario is authorized;
+- protected simulation guard is enabled;
+- caller is authorized in that training scenario;
+- position belongs to the exact incident-unit deployment;
+- scenario belongs to the same incident;
+- original position version/timestamp is retained;
+- origin is labeled SIMULATED.
+
+The browser must not supply a fake SIM position as authoritative.
+
+The server resolves the current simulation projection.
+
+### ACTUAL_POSITION
+
+This origin type is reserved for a genuine authorized incident-location source.
+
+Do not create a fake GPS producer.
+
+If no actual authoritative incident-unit positions exist, return a clear unsupported/unavailable result.
+
+Do not treat permanent vehicle coordinates or station coordinates as current GPS.
+
+### MANUAL_PLANNING_POINT
+
+Allow an authorized operator to choose an origin point on the map.
+
+This must be clearly labeled as a **manual route planning origin**.
+
+It is not a GPS observation.
+
+It must not create or move a unit marker.
+
+It must not prove arrival, movement or execution.
+
+A manual-origin route may be prepared and viewed even when no real/simulated unit position is available.
+
+Do not silently fall back to a station, sector center or task target.
+
+---
+
+## 9. Position freshness and provenance
+
+Every position-derived route origin must preserve:
+
+- source;
+- source entity;
+- observed timestamp;
+- relevant source version;
+- coordinates.
+
+Display distinguishable states:
+
+```text
+SIM POSITION
+SIM POSITION — STALE
+ACTUAL POSITION
+ACTUAL POSITION — STALE
+MANUAL PLANNING ORIGIN
+POSITION UNAVAILABLE
+```
+
+Actual GPS location must never be represented by a SIM marker.
+
+SIM position must never be labeled actual live GPS.
+
+Manual planning origin must not appear as a unit's current position.
+
+Do not extrapolate current position from speed/heading without an actual new observation.
+
+Route revisions retain the origin snapshot used at calculation time.
+
+---
+
+## 10. Database design
+
+Create a focused forward-only SQL migration.
+
+Inspect actual schema before selecting precise foreign keys, column names and enum conventions.
+
+Suggested conceptual tables follow.
+
+### incident_navigation_sessions
+
+```text
+id UUID PRIMARY KEY
+incident_id UUID NOT NULL
+task_id UUID NOT NULL
+task_assignment_id UUID NOT NULL
+incident_unit_id UUID NOT NULL
+
+acting_organization_id UUID
+created_by UUID NOT NULL
+
+status TEXT NOT NULL
+version BIGINT NOT NULL
+
+origin_source TEXT NOT NULL
+origin_snapshot JSONB NOT NULL
+target_snapshot JSONB NOT NULL
+
+current_route_id UUID NULL
+
+created_at TIMESTAMPTZ NOT NULL
+updated_at TIMESTAMPTZ NOT NULL
+finished_at TIMESTAMPTZ NULL
+```
+
+### incident_navigation_routes
+
+```text
+id UUID PRIMARY KEY
+session_id UUID NOT NULL
+revision INTEGER NOT NULL
+
+origin_snapshot JSONB NOT NULL
+destination_snapshot JSONB NOT NULL
+
+provider TEXT NOT NULL
+profile TEXT
+distance_m DOUBLE PRECISION NOT NULL
+duration_s DOUBLE PRECISION NOT NULL
+
+route_geometry JSONB NOT NULL
+navigation_steps JSONB NULL
+snapped_origin JSONB NULL
+snapped_destination JSONB NULL
+
+calculated_at TIMESTAMPTZ NOT NULL
+operation_id UUID NOT NULL
+```
+
+### incident_navigation_events
+
+```text
+id UUID PRIMARY KEY
+session_id UUID NOT NULL
+event_sequence BIGINT NOT NULL
+event_type TEXT NOT NULL
+
+actor_user_id UUID NULL
+operation_id UUID NOT NULL
+
+previous_state TEXT NULL
+new_state TEXT NULL
+route_revision INTEGER NULL
+
+payload JSONB
+created_at TIMESTAMPTZ NOT NULL
+```
+
+Exact physical design may differ if the repository has a more suitable established pattern.
+
+Requirements:
+
+- preserve incident/task/assignment/unit consistency;
+- immutable stored route revisions;
+- append-only navigation event history;
+- session optimistic concurrency;
+- durable idempotency;
+- no destructive updates to historical routes;
+- no direct browser writes;
+- bounded read projections;
+- indexes for incident, assignment, active unit session and history;
+- no PostGIS dependency;
+- no physical deletion through normal API;
+- private sensitive location access;
+- SQL/trigger guards against cross-incident relationships.
+
+The database must not accept arbitrary client-supplied geometry and treat it as a provider-calculated route.
+
+---
+
+## 11. Navigation state machine
+
+Use:
+
+```text
+PLANNED
+ACTIVE
+PAUSED
+ARRIVED_REPORTED
+STOPPED
+CANCELLED
+SUPERSEDED
+```
+
+### PLANNED
+
+The route has been prepared and committed.
+
+No indication that the unit moved or acknowledged the task.
+
+### ACTIVE
+
+An authorized executing actor explicitly started navigation.
+
+The existence of ACTIVE navigation does not prove physical movement.
+
+### PAUSED
+
+Navigation guidance has been paused.
+
+It does not prove the vehicle physically stopped.
+
+### ARRIVED_REPORTED
+
+An authorized actor explicitly reported arrival at the destination.
+
+It does not complete the task automatically.
+
+### STOPPED
+
+Navigation guidance was explicitly stopped.
+
+### CANCELLED
+
+The navigation session was cancelled.
+
+### SUPERSEDED
+
+The navigation session was replaced by another valid navigation plan.
+
+Preserve valid transition rules server-side.
+
+Do not invent new M14.5A assignment statuses.
+
+Do not couple navigation transitions to deployment lifecycle.
+
+---
+
+## 12. Navigation session operations
+
+Implement narrowly scoped authoritative commands.
+
+Conceptual operations:
+
+```text
+prepare_navigation
+commit_navigation_route
+start_navigation
+pause_navigation
+resume_navigation
+report_arrival
+stop_navigation
+cancel_navigation
+recalculate_navigation
+supersede_navigation
+```
+
+Use actual repository naming patterns.
+
+Do not blindly create one RPC per conceptual operation if the existing architecture uses a single versioned command dispatcher.
+
+Each operation must:
+
+- authenticate;
+- validate current account;
+- validate current incident;
+- validate incident command/execution authority;
+- validate assignment/recipient;
+- validate lifecycle;
+- validate expected version;
+- use row locks where needed;
+- use durable operation ID;
+- append correct events/audit;
+- return safe bounded DTOs.
+
+Mutation routes must not grant permissions through UI flags alone.
+
+---
+
+## 13. Task ACK and execution authorization
+
+M14.5A task assignment lifecycle remains authoritative:
+
+```text
+ISSUED
+ACKNOWLEDGED
+IN_PROGRESS
+BLOCKED
+COMPLETED
+UNABLE
+CANCELLED
+```
+
+A commander may be authorized to issue a task without being authorized to acknowledge it.
+
+Do not allow commander impersonation.
+
+### Planning
+
+An authorized commander may prepare a road route for units inside the command scope.
+
+Route planning does not ACK the assignment.
+
+### Starting real navigation
+
+Starting navigation requires a valid, explicit executing authority.
+
+Respect the existing assignment lifecycle and acknowledgement requirements.
+
+Do not let an org ADMIN/MANAGER become navigation executor merely because they administer the organization.
+
+If the current system lacks a secure way to represent a legitimate unit executor, fail closed and document the limitation.
+
+### Training navigation
+
+An authorized M14.5C simulation controller may prepare routes for scenario units.
+
+This remains simulation-control authority, not task ACK authority.
+
+Training controllers must not impersonate crew members or issue false ACKs.
+
+Automatic simulated execution is deferred to M14.5E.
+
+---
+
+## 14. RoadProvider reuse — mandatory
+
+The existing routing infrastructure already provides a RoadProvider abstraction.
+
+Relevant source:
+
+```text
+supabase/functions/plan-routes/provider.ts
+supabase/functions/plan-routes/osrm.ts
+supabase/functions/plan-routes/navigation.ts
+```
+
+The provider can return:
+
+- road geometry;
+- distance;
+- duration;
+- snapped coordinates;
+- navigation legs and steps when supported.
+
+**Reuse it.**
+
+Do not implement another OSRM/GraphHopper client.
+
+Do not add a routing SDK.
+
+Do not call OSRM directly from Web or Android.
+
+Do not expose:
+
+```text
+OSRM_BASE_URL
+OSRM_USERNAME
+OSRM_PASSWORD
+GRAPHHOPPER_API_KEY
+```
+
+to browser or public DTOs.
+
+### Existing inspection plan routing boundary
+
+The current `plan-routes` Edge Function is bound to inspection plans, plan versions and team assignments.
+
+Incident navigation is a separate domain.
+
+Do not use fabricated inspection plan IDs to call it.
+
+Implement a dedicated authenticated incident-navigation routing endpoint, reusing the same provider layer.
+
+If necessary, extract the provider implementation into a shared Supabase Functions module.
+
+Preserve the existing `plan-routes` behavior and its imports.
+
+Do not change inspection plan route optimization or capacity.
+
+---
+
+## 15. Provider configuration and fallback
+
+Preserve the current provider policy.
+
+OSRM is primary when required configuration is complete.
+
+GraphHopper remains the existing fallback/development provider.
+
+Do not silently fall back when:
+
+- OSRM configuration is partially present;
+- provider credentials are rejected;
+- coordinates are invalid;
+- route is genuinely unreachable;
+- routing limit is exceeded;
+- caller lacks authorization;
+- task/session version has changed.
+
+Preserve existing typed routing errors, including:
+
+```text
+ROUTE_LIMIT
+ROUTE_UNREACHABLE
+ROUTE_CONFIGURATION
+ROUTE_PROVIDER
+ROUTE_COORDINATES
+```
+
+Reuse existing error adapters where possible.
+
+Do not return raw provider bodies, internal URLs or secrets.
+
+Do not change NAV3's existing 100-point capacity setting.
+
+Do not modify Oracle, Caddy or deployed routing infrastructure.
+
+---
+
+## 16. Incident routing backend architecture
+
+Use the existing authenticated Supabase Edge Function pattern.
+
+Suggested flow:
+
+```text
+Authenticated Web client
+        |
+        v
+Incident navigation Edge Function
+        |
+        v
+JWT verification
+        |
+        v
+Authoritative prepare RPC
+        |
+        v
+Resolve assignment + target + origin
+        |
+        v
+Shared RoadProvider
+        |
+        v
+Validate normalized result
+        |
+        v
+Authoritative commit RPC
+        |
+        v
+Versioned route + NavigationSession
+        |
+        v
+Sanitized response to Web
+```
+
+Important:
+
+- The target must come from the issued task snapshot.
+- The simulation origin must come from the actual protected simulation-position projection.
+- The manual planning origin must be explicitly submitted and authorized.
+- The provider result must be validated server-side.
+- Only trusted backend code may submit provider geometry for commitment.
+- No service-role credential may be exposed to Web.
+- The database must still verify the requesting principal's authorization at prepare and commit.
+- Do not rely on an unrestricted public SECURITY DEFINER commit RPC.
+
+For trusted Edge Function operations, use the repository's existing secure principal-binding conventions.
+
+A raw client-provided `actor_user_id` is never sufficient authority.
+
+---
+
+## 17. Prepare / provider / commit consistency
+
+Routing calls can be slow.
+
+Do not hold database locks while waiting for OSRM or GraphHopper.
+
+Use a prepare/provider/commit workflow.
+
+### Prepare
+
+Resolve an authoritative snapshot:
+
+```text
+incident
+task
+assignment
+recipient
+action version/native behavior
+issued target snapshot
+origin source/version
+navigation session version
+actor scope
+operation UUID
+```
+
+### Provider
+
+Call the shared RoadProvider outside the database transaction.
+
+### Commit
+
+Recheck the current authoritative state.
+
+The following may have changed:
+
+- task cancelled;
+- assignment completed;
+- incident closed;
+- incident command authority transferred;
+- unit released;
+- scenario paused/finished;
+- simulation position changed;
+- navigation session superseded;
+- another route revision committed.
+
+Reject stale route results safely.
+
+Do not persist geometry calculated from stale assumptions as the new current route.
+
+Preserve the last successful route when a new calculation fails.
+
+---
+
+## 18. Durable idempotency
+
+Reuse existing operation-receipt conventions.
+
+Each navigation mutation must have a stable operation UUID.
+
+For an exact retry:
+
+- return the previous committed result where appropriate;
+- do not create duplicate sessions;
+- do not increment route revision twice;
+- do not duplicate navigation events.
+
+For the same operation UUID with different payload:
+
+```text
+OPERATION_REUSED
+```
+
+or the repository's existing equivalent error.
+
+Preserve the original operation ID and payload when retrying an ambiguous network failure.
+
+Do not create new UUIDs merely because the HTTP response was lost.
+
+Do not rely solely on disabled buttons or browser state.
+
+---
+
+## 19. Session and route concurrency
+
+An incident unit may have multiple legitimate task assignments.
+
+Do not limit the unit to one task globally.
+
+However, it must not have two conflicting ACTIVE navigation guidance sessions.
+
+Enforce:
+
+**At most one ACTIVE navigation session per deployed incident unit.**
+
+Use a server-side lock/constraint strategy, not UI-only logic.
+
+Allow historical sessions.
+
+Bound the number of PLANNED sessions if necessary.
+
+Replacing a navigation session must be explicit.
+
+Preserve event history.
+
+Do not silently supersede an ACTIVE route simply because someone calculated another candidate route.
+
+---
+
+## 20. Navigation invalidation
+
+Navigation must not remain deceptively active after loss of underlying validity.
+
+Handle:
+
+- assignment CANCELLED;
+- assignment COMPLETED;
+- assignment UNABLE;
+- incident terminal state;
+- incident-unit release;
+- revoked relevant execution authority;
+- changed/invalid training environment.
+
+Use narrow server-side integration guards where appropriate.
+
+When an assignment becomes terminal, an ACTIVE navigation session must cease to be executable.
+
+Do not delete its route history.
+
+Do not rely solely on Web polling for lifecycle integrity.
+
+Avoid changing the meaning of M14.5A task transitions.
+
+If a task mutation needs a small server-side navigation invalidation hook, implement it without rewriting the task engine.
+
+---
+
+## 21. Road snapping
+
+Distinguish:
+
+```text
+Original unit-origin position
+Snapped origin on road
+Original issued target
+Snapped destination on road
+```
+
+Routing may use snapped coordinates.
+
+Never move canonical objects merely because road snapping occurred.
+
+Do not change:
+
+- hydrant coordinates;
+- task target geometry;
+- simulated position;
+- actual GPS position.
+
+Store snapped access points where useful, but preserve originals.
+
+Reject or clearly mark unreachable routes.
+
+Do not silently snap to a distant unrelated road.
+
+---
+
+## 22. Planned ETA and remaining distance
+
+For every successful route revision, persist:
+
+```text
+distance_m
+duration_s
+calculated_at
+provider
+```
+
+Show human-friendly values.
+
+Example:
+
+```text
+GVC-1 → H-000123
+
+Road distance: 4.8 km
+Planned driving time: 7 min
+Provider: OSRM
+Calculated: 14:42
+Origin: SIMULATED
+```
+
+Distinguish:
+
+**PLANNED TRAVEL TIME**
+
+from future:
+
+**LIVE REMAINING ETA**
+
+In M14.5D, the baseline is planned duration from the route's stored origin.
+
+Do not pretend that the ETA is continuously updated from real-world traffic or GPS when no fresh observation exists.
+
+Do not create a countdown that implies actual movement.
+
+If an authorized observed position later changes, the operator may explicitly recalculate navigation.
+
+Do not invent straight-line ETA as a substitute for road routing.
+
+---
+
+## 23. Navigation progress
+
+Prepare the architecture for position-driven route progress.
+
+M14.5C already supports explicit manual SIM position updates.
+
+When a SIM position changes:
+
+- the SIM marker updates through the existing simulation projection;
+- the command remains unchanged;
+- the stored road route remains unchanged;
+- a previously planned route may become stale;
+- the UI may offer Recalculate.
+
+Do not use elapsed time alone to infer physical progress.
+
+Do not automatically move the marker along the route.
+
+Do not automatically set:
+
+```text
+ACKNOWLEDGED
+IN_PROGRESS
+COMPLETED
+ARRIVED_REPORTED
+```
+
+from map proximity.
+
+A future real GPS source and M14.5E autonomous simulator will supply observed positions through their own explicit producers.
+
+Do not create a fake actual-GPS publisher in this milestone.
+
+---
+
+## 24. Rerouting
+
+Support explicit **Recalculate route**.
+
+Use the newest authorized origin when recalculation is requested.
+
+Destination remains the immutable task target.
+
+Workflow:
+
+1. Validate actor/assignment/session.
+2. Resolve new origin.
+3. Reuse RoadProvider.
+4. Validate returned geometry.
+5. Create next immutable route revision.
+6. Atomically update the session's current route reference.
+7. Append event/audit.
+8. Refresh the map.
+
+Failure:
+
+- do not delete the old route;
+- do not change task status;
+- do not move the unit;
+- do not pretend recalculation succeeded;
+- show localized retry/error state.
+
+No background continuous reroute loop.
+
+No reroute that silently issues a new command.
+
+---
+
+## 25. Arrival reporting
+
+Support a conservative explicit arrival-report action.
+
+`ARRIVED_REPORTED` means that an authorized executing actor reported arriving at the planned navigation destination.
+
+It does NOT mean:
+
+- incident resource is safe;
+- task COMPLETED;
+- incident objective achieved;
+- GPS confirmed arrival.
+
+No automatic geofence arrival detection in M14.5D.
+
+For a real unit, only a legitimate authorized execution identity may report arrival.
+
+Do not allow a commander to impersonate the actual recipient.
+
+Training controllers may manipulate SIM positions but may not forge real task ACKs.
+
+If the current domain cannot safely represent an authorized arrival reporter, restrict the feature and report that limitation rather than weakening security.
+
+---
+
+## 26. Navigation map layer
+
+Integrate into the existing OperationalMapCanvas.
+
+Add a focused business layer, conceptually:
+
+`IncidentNavigationLayer`
+
+Do not create a new MapLibre application.
+
+Show:
+
+- current selected navigation route;
+- start marker;
+- destination marker;
+- road geometry;
+- provider attribution;
+- route freshness/status;
+- selected session highlight.
+
+Preserve separate visual meanings:
+
+```text
+Task intent          dashed / command indicator
+Navigation road path solid line
+Actual GPS           actual-position marker
+SIM position         clearly labeled SIM marker
+Manual origin        planning-only marker
+```
+
+Never use a route line as proof that the unit traveled there.
+
+Do not display all historical routes simultaneously.
+
+Default:
+
+- show selected unit/assignment route;
+- optionally show a small number of active routes when the appropriate layer is enabled;
+- hide superseded/historical routes unless explicitly selected.
+
+Keep hydrants, sectors, tactical objects, RTS selection and simulation layers functioning.
+
+Do not rebuild MapLibre on every route/session state update.
+
+---
+
+## 27. Navigation panel and operator UX
+
+Integrate navigation into the existing incident workspace.
+
+Do not add another top-level app.
+
+Entry points:
+
+- selected task assignment;
+- selected eligible incident unit;
+- existing ContextActions.
+
+Suggested navigation panel:
+
+```text
+NAVIGATION — GVC-1
+
+Task: MOVE_TO
+Target: Hydrant H-000123
+Task status: ACKNOWLEDGED
+
+Origin:
+SIM position — 14:32
+
+[PREPARE ROAD ROUTE]
+
+After successful route calculation:
+
+Route: 4.8 km
+Planned travel: 7 min
+Provider: OSRM
+
+[SHOW ON MAP]
+[RECALCULATE]
+[START NAVIGATION]  // only if authorized
+[CANCEL ROUTE]
+```
+
+When no unit position exists:
+
+```text
+Current unit position unavailable.
+
+[SELECT MANUAL PLANNING ORIGIN]
+```
+
+When manual origin is used:
+
+```text
+PLANNING ONLY
+
+This point is not a GPS observation.
+```
+
+Provide meaningful loading, error, stale/conflict, disabled and empty states.
+
+Preserve current map camera and RTS selection where practical.
+
+---
+
+## 28. Origin selection on map
+
+Add a focused mode:
+
+`SELECT_NAVIGATION_ORIGIN`
+
+Behavior:
+
+1. Operator opens navigation preparation.
+2. Chooses manual planning origin.
+3. Clicks a point on the map.
+4. Sees a preview marker.
+5. Confirms origin.
+6. Backend validates and prepares the route.
+
+This is separate from:
+
+- RTS task target mode;
+- COP tactical-object drawing;
+- M14.5C manual SIM position editing.
+
+Never interpret a manual origin click as:
+
+- MOVE_TO issuance;
+- simulation position change;
+- GPS observation;
+- tactical object creation.
+
+Cancel or Escape must clean up handlers and temporary geometry.
+
+Map pan/zoom should remain practical.
+
+---
+
+## 29. Multi-recipient task integration
+
+M14.5A supports up to 100 recipients in one task.
+
+Navigation remains per assignment.
+
+Example:
+
+```text
+Task T
+  ├── Assignment GVC-1 → Route A
+  ├── Assignment GVC-2 → Route B
+  └── Assignment GVC-3 → Route C
+```
+
+M14.5D MVP must support preparing individual assignment routes.
+
+Optionally allow a bounded UI workflow to prepare several routes, but only if the backend preserves:
+
+- individual authorization;
+- unique origin snapshot;
+- individual result;
+- individual error;
+- individual idempotency;
+- provider rate and workload bounds.
+
+Do not create one shared route for all recipients.
+
+Do not launch 100 uncontrolled provider calls from the browser.
+
+If bounded multi-route orchestration would be too intrusive, defer it explicitly; individual route preparation must work.
+
+---
+
+## 30. Simulation compatibility
+
+Reuse M14.5C's:
+
+- protected training environment;
+- enrolled simulation operators;
+- simulation scenarios;
+- simulation unit positions;
+- simulation provenance;
+- scenario lifecycle;
+- training banners.
+
+For a training incident:
+
+1. Select SIM GVC-1.
+2. Issue MOVE_TO.
+3. Prepare navigation from its current SIM position.
+4. Show the actual road route.
+5. Display planned distance and ETA.
+6. Leave the unit marker stationary.
+7. Optionally change the SIM position manually through the existing control.
+8. Recalculate the route from the new SIM position.
+
+Do not create another simulation position table.
+
+Do not let a training navigation session send real dispatch notifications or commands to external emergency systems.
+
+If the scenario is paused/finished or backend simulation is disabled, enforce the documented server-side restrictions.
+
+Training position provenance must survive navigation session creation, serialization and map rendering.
+
+---
+
+## 31. Performance and bounds
+
+Target realistic command workloads.
+
+Requirements:
+
+- bounded navigation session reads;
+- route-history pagination;
+- one session/route fetch rather than N requests per marker;
+- bounded provider request duration;
+- bounded route vertices and JSON sizes;
+- validate finite coordinates/distances/durations;
+- protect provider from excessive requests;
+- no unbounded parallel route calculations;
+- no busy polling;
+- no per-frame database writes;
+- no route calculation during ordinary map pan/zoom;
+- no recreation of MapLibre during status changes;
+- no downloading unrelated incident or national resource datasets.
+
+Reuse existing provider timeouts and request validation.
+
+For provider geometry, enforce reasonable safety limits while preserving normal realistic routes.
+
+A route is not an incident tactical geometry and does not require PostGIS in this milestone.
+
+---
+
+## 32. Security
+
+All navigation mutations must be server-authoritative.
+
+Authorization must distinguish:
+
+- command authority;
+- task execution authority;
+- route-planning permission;
+- protected simulation-controller permission.
+
+Organization ADMIN/MANAGER does not imply incident command authority.
+
+Sector geometry does not grant command scope.
+
+A user who can read a hydrant is not automatically authorized to command a unit to it.
+
+A unit's precise position must not be exposed solely because the user can read its permanent inventory record.
+
+RLS and RPC checks must preserve incident/agency/sector scope.
+
+Use current server-side account checks and revoke-sensitive authorization on every mutation.
+
+Do not introduce browser-accessible privileged geometry commit operations.
+
+Do not expose service-role keys, routing credentials or private simulation configuration.
+
+Follow existing SECURITY DEFINER patterns, explicit qualification and safe search paths.
+
+---
+
+## 33. Audit and history
+
+Navigation history is distinct from:
+
+- incident task history;
+- incident timeline;
+- incident audit;
+- simulation events;
+- future GPS observations.
+
+Record meaningful navigation mutations with:
+
+- actor;
+- timestamp;
+- incident;
+- task assignment;
+- navigation session;
+- operation UUID;
+- old/new state;
+- route revision where relevant.
+
+Do not store high-frequency telemetry in audit.
+
+Do not rewrite the existing task timeline to pretend route planning is task execution.
+
+A navigation event may reference an existing task assignment but must not alter its immutable command intent.
+
+---
+
+## 34. Localization
+
+Support Slovenian and German.
+
+Translate all new labels, including:
+
+- Navigation
+- Prepare road route
+- Select origin
+- Manual planning origin
+- Simulated position
+- Actual position
+- Position unavailable
+- Show route on map
+- Planned distance
+- Planned travel time
+- Provider
+- Route calculated
+- Route stale
+- Recalculate
+- Start navigation
+- Pause
+- Resume
+- Stop
+- Cancel
+- Arrival reported
+- Superseded
+- Permission denied
+- Routing unavailable
+- Unreachable
+- Invalid target
+- Stale task/assignment
+- Version conflict
+- Retry previous operation
+
+Do not show raw SQL errors or provider internals as the primary user-facing message.
+
+Use accessible buttons and keyboard controls.
+
+No essential action may be hover-only.
+
+---
+
+## 35. Database and Edge Function deliverables
+
+Expected:
+
+- New forward-only Supabase SQL migration(s).
+- Dedicated incident navigation Edge Function or equivalent secure backend routing adapter.
+- Shared existing RoadProvider implementation.
+- Focused authorized navigation RPCs.
+- Navigation session/route/event read models.
+- Web incident API integration.
+- Navigation panel.
+- Navigation route map layer.
+- SI/DE messages.
+- M14 SPEC update.
+
+No Android changes.
+
+Do not modify previously applied migration files.
+
+Do not apply SQL.
+
+Do not deploy Edge Functions.
+
+Do not deploy Web.
+
+In the PR summary, explicitly document the required deployment order:
+
+1. Confirm all prerequisite M14 migrations are present in the target database.
+2. Manually apply the new M14.5D migration(s).
+3. Configure required existing routing secrets.
+4. Manually deploy the incident navigation Edge Function.
+5. Manually deploy compatible Web code.
+6. Perform user-controlled manual verification afterward.
+
+Do not perform these steps yourself.
+
+---
+
+## 36. Out of scope
+
+Do NOT implement:
+
+- automatic simulated driving;
+- virtual autonomous unit agents;
+- automatic ACK;
+- automatic task completion;
+- time-scaled simulation;
+- simulation failure injection;
+- live GPS ingestion;
+- Android incident navigation;
+- Android Room/outbox changes;
+- Android background tracking;
+- Web-to-OSRM direct calls;
+- continuous automatic rerouting;
+- automatic geofence arrival;
+- route-constrained vehicle animation;
+- routing restrictions/road closure editor;
+- convoy management;
+- fleet tracking platform;
+- multi-modal pedestrian/drone routing;
+- traffic prediction;
+- tactical route optimization for 100 units;
+- new Action Definition types;
+- new task statuses;
+- mobilization/dispatch;
+- operational chat;
+- notification/FCM changes;
+- CAD/112;
+- Oracle/Caddy updates;
+- NAV3 capacity changes;
+- PostGIS deployment;
+- broad Admin redesign;
+- new large dependencies.
+
+M14.5E will add autonomous simulated execution using the navigation model created here.
+
+---
+
+## 37. Manual acceptance criteria — implementation targets only
+
+Implement the code so the user can later manually verify:
+
+1. Existing M14.5A task creation still works.
+2. Existing M14.5B RTS selection still works.
+3. Existing M14.5C SIM markers remain visible.
+4. MOVE_TO assignment offers navigation preparation.
+5. WITHDRAW_TO assignment offers navigation preparation.
+6. Non-navigation native behaviors do not offer road execution.
+7. Navigation is attached to the correct assignment UUID.
+8. Each recipient has an independent route.
+9. Only eligible incident-unit recipients support road navigation.
+10. Route target is derived from the issued immutable target snapshot.
+11. Hydrant target does not modify the canonical hydrant.
+12. Point tactical object is supported.
+13. Line/polygon target is not silently converted to a point.
+14. SIM position can be selected as origin in an authorized training incident.
+15. SIM provenance remains visible.
+16. Manual planning origin works without GPS.
+17. Manual origin does not create a unit-position marker.
+18. No actual GPS position is fabricated.
+19. RoadProvider computes a road route.
+20. Web does not call OSRM directly.
+21. Existing provider configuration/fallback semantics remain unchanged.
+22. No fabricated inspection-plan ID is used for incident routing.
+23. Distance and planned duration are displayed.
+24. Route line renders on the incident map.
+25. Task intent and navigation route use different styling.
+26. Route calculation never moves the unit marker.
+27. Route calculation never ACKs or completes a task.
+28. Route preparation does not automatically activate navigation.
+29. Only properly authorized execution actors can start navigation.
+30. At most one ACTIVE navigation session exists for a unit.
+31. Explicit reroute creates a new immutable route revision.
+32. Previous route history remains accessible.
+33. Failed reroute preserves the previous route.
+34. Stale task/session changes reject route commit.
+35. Reusing operation UUID with different payload is rejected.
+36. Exact retries do not duplicate sessions or routes.
+37. Incident closure prevents further navigation writes.
+38. Released unit cannot continue active navigation.
+39. Terminal task assignment cannot keep valid active navigation guidance.
+40. Simulation pause/finish and guard restrictions are respected.
+41. Existing real incident never exposes SIM positions as actual telemetry.
+42. Arrival reporting never automatically completes the task.
+43. Map pan/zoom and RTS selection remain functional.
+44. SI labels are present.
+45. DE labels are present.
+46. No migration or function is deployed by Codex.
+47. No tests/build/lint/typecheck/CI/runtime verification are executed by Codex.
+
+These are **manual acceptance targets**, not instructions to execute tests.
+
+---
+
+## 38. Strict Codex execution rules
+
+**IMPLEMENTATION ONLY.**
+
+Do not add tests.
+
+Do not run:
+
+- tests;
+- build;
+- lint;
+- typecheck;
+- CI;
+- browser automation;
+- emulator;
+- Docker;
+- runtime smoke verification;
+- manual verification;
+- migration application;
+- Edge Function deployment;
+- Web deployment;
+- Android deployment;
+- infrastructure checks;
+- performance benchmarks;
+- post-implementation validation.
+
+Do not inspect the completed implementation for validation beyond what is necessary to author the changes.
+
+Do not modify unrelated corporate-local Android/Gradle/KAPT/KSP settings.
+
+Do not use `git reset --hard`.
+
+Do not rewrite already-applied SQL migrations.
+
+Do not change unrelated completed milestones.
+
+Use existing dependencies.
+
+Prefer no new dependencies.
+
+Create **ONE PR ONLY**.
+
+Do not merge the PR.
+
+Use `[skip ci]` in the implementation commit where appropriate.
+
+Stop after PR creation.
+
+---
+
+## 39. PR summary requirements
+
+Provide a concise but technically complete PR description with:
+
+1. Changed/new files.
+2. NavigationSession schema and relationships.
+3. Assignment UUID linkage.
+4. State machine and transition permissions.
+5. Route revision/history model.
+6. Navigation-origin provenance.
+7. Immutable task-target resolution.
+8. Existing RoadProvider reuse.
+9. Incident-specific routing Edge Function design.
+10. Existing OSRM/GraphHopper fallback preservation.
+11. Prepare/provider/commit consistency.
+12. Durable idempotency and optimistic concurrency.
+13. Session ACTIVE uniqueness.
+14. Assignment/incident/unit invalidation behavior.
+15. Road snapping and original coordinates.
+16. Planned ETA versus actual position distinction.
+17. Explicit rerouting behavior.
+18. M14.5C SIM integration.
+19. Web navigation panel and map layers.
+20. SI/DE coverage.
+21. New migration filenames and manual application order.
+22. Edge Function name and manual deployment requirements.
+23. Known limitations.
+24. Deferred M14.5E autonomous movement.
+25. Explicit confirmation that no tests/build/lint/typecheck/CI were executed.
+26. Explicit confirmation that no SQL/function/Web/Android deployment was performed.
+
+**ONE PR. DO NOT MERGE. DO NOT TEST. DO NOT DEPLOY.**
+
