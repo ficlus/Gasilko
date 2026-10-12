@@ -252,3 +252,14 @@ button:disabled { opacity: .6; cursor: wait; }
 .simulation-event{white-space:pre-wrap;overflow-wrap:anywhere;max-height:20rem;overflow:auto}
 @media(max-width:48rem){.simulation-map-banner{font-size:.68rem}.simulation-dialog{padding:.75rem}.simulation-scope fieldset{padding:.5rem}}
 @media(prefers-reduced-motion:reduce){.simulation-scope *{scroll-behavior:auto}}
+
+/* Navigation is an execution plan, visually separate from dashed command intent. */
+.incident-navigation-panel {border-inline-start:4px solid #085b9b;min-width:0;}
+.incident-navigation-panel button,.navigation-origin-actions {margin-block:.3rem;}
+.navigation-origin-actions {display:flex;flex-wrap:wrap;gap:.5rem;}
+.incident-navigation-panel dl {display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:.4rem;}
+.incident-navigation-panel dd {margin:0;overflow-wrap:anywhere;}
+.incident-navigation-panel select {max-width:100%;}
+.navigation-assignment-list {max-height:30rem;overflow:auto;}
+.navigation-map-note {position:absolute;bottom:2.5rem;left:.5rem;max-width:min(24rem,70%);padding:.45rem .7rem;background:#fff;color:#123f62;border:1px solid #085b9b;border-radius:.35rem;pointer-events:none;font-size:.85rem;}
+@media(max-width:600px){.incident-navigation-panel dl{grid-template-columns:1fr;}.incident-navigation-panel button{min-height:44px;white-space:normal;}}

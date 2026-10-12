@@ -4,6 +4,8 @@ import {useSearchParams} from 'next/navigation';
 import {parseEntityRef} from '../../lib/operational/entity';
 import {createPortal} from 'react-dom';
 import type {Locale} from '../../lib/i18n';
+import {IncidentNavigationProvider} from './IncidentNavigationProvider';
+import {IncidentNavigationPanel} from './IncidentNavigationPanel';
 import {SimulationProvider} from './SimulationProvider';
 import {SimulationPanel} from './SimulationPanel';
 import type {TaskRead} from '../../lib/operational/tasks';
@@ -48,7 +50,7 @@ export function IncidentWorkspace({locale,header,operations,secondary,children}:
  const [bottom,setBottom]=useState<HTMLElement|null>(null);
  const [operational,setOperational]=useState<HTMLElement|null>(null),[selectedPane,setSelectedPane]=useState<HTMLElement|null>(null);
  return <Context.Provider value={{selected,select,operational,selectedPane,bottom}}>
-  <section className="incident-workspace">{header}<RtsSelectionToolbar locale={locale}/><SimulationPanel locale={locale}/>
+  <section className="incident-workspace">{header}<RtsSelectionToolbar locale={locale}/><SimulationPanel locale={locale}/><IncidentNavigationPanel locale={locale}/>
    <div className="workspace-grid">
     <aside className="workspace-operational" aria-label={t('workspaceOperations')}>{operations}<div ref={setOperational}/></aside>
     <div className="workspace-map">{children}</div>
@@ -63,5 +65,5 @@ export function IncidentWorkspace({locale,header,operations,secondary,children}:
 }
 
 export function IncidentLayout({operational,locked,onAccessLost,simulation,...props}:{operational:boolean;locked:boolean;onAccessLost:()=>void;simulation:{account:string;org:string;incidentId:string;refresh:number;read:TaskRead;onInventoryChanged:()=>void};locale:Locale;header:ReactNode;operations:ReactNode;secondary:ReactNode;children:ReactNode}){
- return <RtsProvider enabled={operational} locked={locked} onAccessLost={onAccessLost}><SimulationProvider {...simulation} locale={props.locale}>{operational?<IncidentWorkspace {...props}/>:<>{props.header}<SimulationPanel locale={props.locale}/>{props.operations}{props.children}{props.secondary}</>}</SimulationProvider></RtsProvider>;
+ return <RtsProvider enabled={operational} locked={locked} onAccessLost={onAccessLost}><SimulationProvider key={simulation.account+':'+simulation.org+':'+simulation.incidentId} {...simulation} locale={props.locale}><IncidentNavigationProvider {...simulation} locale={props.locale}>{operational?<IncidentWorkspace {...props}/>:<>{props.header}<SimulationPanel locale={props.locale}/><IncidentNavigationPanel locale={props.locale}/>{props.operations}{props.children}{props.secondary}</>}</IncidentNavigationProvider></SimulationProvider></RtsProvider>;
 }

@@ -2599,3 +2599,165 @@ Implementation-only delivery: no tests added/modified or executed; no build,
 lint, typecheck, CI, browser automation, runtime/manual smoke checks,
 post-implementation validation pass, migrations, configuration or deployments
 were performed. The assignment's manual acceptance targets remain for the user.
+
+
+## M14.5D — Incident Movement & Navigation Execution
+
+### Separation and identity
+
+**Command intent != execution plan != telemetry.** Navigation references the
+actual M14.5A task-assignment UUID and its deployed INCIDENT_UNIT. Crew walking
+navigation is deferred. Only issued immutable Action Definition versions with
+native MOVE_TO/WITHDRAW_TO behavior qualify, including custom organization
+actions. Names/codes do not determine eligibility.
+
+The issued target geometry/label/entity snapshot is the destination. Only
+COORDINATE, HYDRANT or Point INCIDENT_MAP_OBJECT targets qualify. No mutable
+hydrant/object lookup, centroid conversion, new target engine or change to
+canonical coordinates is performed.
+
+### Origin provenance and simulation
+
+SIMULATED_POSITION is resolved by the database from the exact M14.5C scenario
+and deployment projection, preserving version, observation time and original
+coordinates. It requires the protected environment and current controller
+authorization. DRAFT/RUNNING scenarios allow preparation; PAUSED/FINISHED and
+disabled environments block new preparation/execution and invalidate guidance.
+
+MANUAL_PLANNING_POINT is explicitly chosen on the existing map and confirmed.
+It is labelled planning-only, never displayed as a unit GPS observation.
+ACTUAL_POSITION is reserved and returns POSITION_UNAVAILABLE until a genuine
+authorized incident position source exists. No GPS source, station fallback or
+position extrapolation is introduced.
+
+Command issuance, route calculation, navigation start and elapsed time never
+move a SIM marker, ACK a task or report arrival. M14.5C manual changes remain the
+only new-position producer. A changed SIM version makes the stored route stale;
+recalculation remains explicit.
+
+### Persistence and security
+
+Forward-only migration:
+`20261012100000_incident_navigation_execution.sql`.
+
+- incident_navigation_sessions: incident/task/assignment/deployment identity,
+  acting organization, creator, executor identity, status/version, current route.
+- incident_navigation_routes: immutable numbered revisions with original
+  origin/target snapshots, provider/profile, road geometry, distance, planned
+  duration, optional provider steps, snapped access points and calculation time.
+- incident_navigation_events: append-only independent navigation history.
+- private.incident_navigation_preparations: durable authenticated request/input
+  snapshots and a short provider lease.
+
+Composite foreign keys and identity triggers enforce assignment/task/unit
+consistency. Current route references belong to the same session. RLS is enabled
+with no direct application table grants; scoped SECURITY DEFINER projections are
+the read boundary. Geometry is not exposed to an inventory-only reader.
+Readers need current incident/acting-organization access and the unit's owning
+organization, command scope or the protected scenario-controller relationship.
+
+Planning uses existing command authority, legitimate task execution authority,
+or protected scenario control. Organization ADMIN/MANAGER does not itself grant
+command or execution. Starting/resuming/reporting arrival requires the existing
+can_execute_task unit-leader authority and the issued action's ACK requirement.
+A simulation controller does not impersonate a crew member.
+
+### Lifecycle, consistency and invalidation
+
+States: PLANNED, ACTIVE, PAUSED, ARRIVED_REPORTED, STOPPED, CANCELLED, SUPERSEDED.
+Start moves PLANNED to ACTIVE; pause/resume toggles ACTIVE/PAUSED; stop/explicit
+arrival terminate active/paused guidance. Planning-authorized actors may cancel
+an open plan or explicitly supersede it with another PLANNED session for the
+same unit. Supersession does not start the replacement.
+
+A partial unique index permits at most one ACTIVE session per deployment, and
+one open session per assignment. Multiple task assignments remain valid.
+Time-expired executor authority is projected immediately as STOPPED, and its
+guidance slot is reclaimed under lock when another session explicitly starts.
+No scheduler is introduced for time-only expiry.
+
+Narrow triggers on task assignment, incident, unit, participation, command role,
+account, organization/membership and simulation configuration changes stop
+invalid open guidance while retaining all route/event history. Task lifecycle
+semantics remain unchanged. Every command rechecks current authority and state.
+
+### Routing adapter and exact retries
+
+The authenticated incident-navigation Edge Function verifies the bearer token
+with Auth, calls incident_navigation_prepare, obtains a short provider lease,
+routes outside the database transaction and commits via a service-only RPC.
+The actor passed to that RPC comes exclusively from the verified Auth result.
+Trusted commitment binds auth.uid()-based domain helpers to that principal
+transaction-locally and rechecks the prepared input before accepting geometry.
+Browser API allowlists never expose commit or lease RPCs.
+
+Preparation captures assignment/task/unit/incident/scenario/session versions,
+immutable destination and authoritative origin. Commit rejects intervening
+changes, including position updates and revoked authority. A failed recalculation
+leaves the last successful route intact.
+
+Existing incident receipts provide exact operation UUID/payload idempotency;
+different payload reuse is rejected. Pending Web requests retain original IDs
+and arguments for explicit retry in memory and account/org/incident-scoped
+sessionStorage. No automatic retry/issuance occurs. Provider leases expire after
+110 seconds so an interrupted worker cannot permanently block retry.
+
+The shared provider-selection module delegates to the existing RoadProvider,
+OSRM and GraphHopper implementations. Inspection plan optimization, 100-point
+capacity and provider behavior remain unchanged. OSRM is primary with complete
+configuration; only the existing ROUTE_PROVIDER availability failure permits
+configured GraphHopper fallback. Partial configuration, authorization,
+unreachable/invalid routes and capacity failures do not cause silent fallback.
+
+Only two route points are requested. Original coordinates are retained beside
+provider-snapped road access points. UI displays both access distances and a
+warning for a separation over 100 m; this threshold is a disclosure, not a
+routing rejection or invented straight-line driving fallback.
+
+### Workspace, rendering and bounds
+
+Navigation is available from eligible task-assignment details and from the
+selected unit's bounded assignment list, within the current incident workspace.
+The manual-origin mode has a candidate marker, confirmation and Escape/cancel;
+it is mutually exclusive with RTS/COP/SIM editing. Separate interaction-lock
+ownership prevents one mode from unlocking another.
+
+A stable map source renders the selected road route as a solid blue line,
+separate from dashed task intent and SIM position markers. Original start and
+target points, provenance, provider and planned duration remain visible.
+Show route fits geometry plus original endpoints without ordinary refresh
+forcing the camera. History geometry loads only on explicit selection.
+
+The panel shows road distance, **planned travel time**, origin timestamp/stale
+state, session status, lifecycle actions, route revisions and recent events.
+No live remaining-ETA countdown, proximity arrival or automatic reroute exists.
+Default SI and DE text covers new flows, controls and safe domain errors.
+
+Reads: assignments 25/page, route revisions 20/page, session history most recent
+25 and navigation events most recent 50. Individual historical routes are fetched
+on demand. Preparation permits 10 new operations/account/minute; a lease limits
+concurrent exact provider retries. Routes are bounded to 50,000 vertices and
+3 MB normalized Edge payload; provider timeouts remain 45 seconds per attempt
+within a 100-second operation. No new dependencies, busy polling, map
+recreation, per-frame writes or N+1 marker requests.
+
+### Manual delivery and deferred work
+
+Deployment order for the user:
+1. Confirm prerequisite M14 migrations, including M14.5A/B/C, in the target DB.
+2. Manually apply the new M14.5D migration.
+3. Configure the existing routing secrets in Supabase's server secret store.
+4. Manually deploy the incident-navigation Edge Function (and plan-routes if
+   deploying the shared provider-selection extraction together).
+5. Manually deploy compatible Web code.
+6. Perform the assignment's manual acceptance checks afterward.
+
+No SQL, function, Web, Android or infrastructure deployment was performed.
+No tests were added/modified; no tests/build/lint/typecheck/CI, runtime/manual
+verification or post-implementation validation was executed.
+
+Limitations: no actual GPS producer, no Android incident navigation, no batch
+multi-recipient route orchestration, recent-session/event history is bounded,
+and no timer-driven persisted expiry sweep. GraphHopper may provide geometry
+without maneuver steps. M14.5E trusted autonomous actors, automatic ACK,
+route-following movement, time scaling and event injection remain deferred.

@@ -40,7 +40,7 @@ export function SimulationProvider({account,org,incidentId,refresh:externalRefre
  useEffect(()=>{if(proposal){dialog.current?.showModal();}return()=>dialog.current?.close();},[!!proposal]);
  useEffect(()=>{if(rts.locked)setMove(null);},[rts.locked]);
  function propose(action:SimulationAction,payload:Record<string,unknown>,summary:string){
-  if(!data?.scenario||!data.can_control||!data.enabled||pending||busy||rts.locked)return;
+  if(!data?.scenario||!data.can_control||!data.enabled||pending||busy||rts.locked||rts.navigationEditing)return;
   rts.cancelMode();setMove(null);setError('');setRejected(false);
   setProposal({action,summary,args:{p_operation:crypto.randomUUID(),p_acting_organization_id:org,p_incident_id:incidentId,p_expected_version:data.scenario.version,p_action:action,p_payload:structuredClone(payload)}});
  }
@@ -61,7 +61,7 @@ export function SimulationProvider({account,org,incidentId,refresh:externalRefre
   }finally{sending.current=false;if(alive.current)setBusy(false);}
  }
  const controller:Controller={data,error,busy,pending:!!pending,proposal,move,before,refresh:()=>{setError('');setEpoch(v=>v+1);},older:setBefore,propose,
-  startMove:value=>{if(!data?.can_control||!data.enabled||pending||proposal||rts.locked||rts.copEditing||rts.mode!=='NORMAL'){setError('modeBusy');return;}rts.cancelMode();setMove(value);},
+  startMove:value=>{if(!data?.can_control||!data.enabled||pending||proposal||rts.locked||rts.externalEditing||rts.copEditing||rts.mode!=='NORMAL'){setError('modeBusy');return;}rts.cancelMode();setMove(value);},
   cancelMove:()=>setMove(null),pickPosition:p=>{if(!move||rts.locked)return;propose('SET_POSITION',{unit_id:move.unitId,position_version:move.positionVersion,longitude:p[0],latitude:p[1],heading_degrees:Number(move.heading),speed_mps:Number(move.speed)},t('SET_POSITION')+'\n'+p.join(', '));}};
  return <Context.Provider value={controller}><div className="simulation-scope" onKeyDownCapture={e=>{
   if(e.key==='Escape'&&move&&!typingTarget(e.target)&&!e.nativeEvent.isComposing){e.preventDefault();e.stopPropagation();setMove(null);}

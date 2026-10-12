@@ -1,5 +1,7 @@
 'use client';
 import {useEffect,useRef,useState,type FormEvent} from 'react';
+import {useIncidentNavigation} from './IncidentNavigationProvider';
+import {navigationText} from '../../lib/operational/navigationMessages';
 import {useSearchParams} from 'next/navigation';
 import type {Locale} from '../../lib/i18n';
 import {incidentPriorities,type InboxItem,type Mutation} from '../../lib/incidents/model';
@@ -19,6 +21,7 @@ type Props={locale:Locale;account:string;org:string;incidentId:string;version:st
 type HydrantOption={id:string;code:string|null;address:string|null};
 type Chosen=RtsRecipient;
 export function IncidentTasks({locale,account,org,incidentId,version,incidentReference,organizationName,operational,refresh,feedback,disabled,read,onAction}:Props){
+ const navigation=useIncidentNavigation(),nt=navigationText(locale);
  const urlQuery=useSearchParams();
  const rts=useRtsSession(),rt=rtsText(locale);
  const t=taskText(locale),workspace=useWorkspace(),alive=useRef(true),blocked=useRef(false);
@@ -284,7 +287,7 @@ export function IncidentTasks({locale,account,org,incidentId,version,incidentRef
     {detail.target_geometry_snapshot&&<details><summary>{t('target')}</summary><pre style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere'}}>{JSON.stringify(detail.target_geometry_snapshot)}</pre></details>}
     <dl>{detail.configuration.parameter_definitions.map(p=><div key={p.code}><dt>{parameterLabel(p,locale)}</dt><dd>{parameterValueLabel(p,detail.parameters[p.code],locale)}</dd></div>)}</dl>
     {stale&&<><p role="alert">{t('stale')}</p><button disabled={disabled} onClick={()=>{setStale(false);setError('');}}>{t('reedit')}</button></>}
-    {detail.assignments.map(a=><article key={a.id} className="web-row"><strong>{a.recipient_name}</strong><p>{t(a.recipient_type)} · {t(a.status)}</p>
+    {detail.assignments.map(a=><article key={a.id} className="web-row"><strong>{a.recipient_name}</strong>{a.recipient_type==='INCIDENT_UNIT'&&['MOVE_TO','WITHDRAW_TO'].includes(detail.configuration.native_behavior)&&<button disabled={locked} onClick={()=>navigation?.select(a.id)}>{nt('open')}</button>}<p>{t(a.recipient_type)} · {t(a.status)}</p>
      {a.blocked_reason&&<p>{t('BLOCKED')}: {a.blocked_reason}</p>}{a.unable_reason&&<p>{t('UNABLE')}: {a.unable_reason}</p>}
      <small>{[a.acknowledged_at,a.started_at,a.blocked_at,a.completed_at,a.unable_at,a.cancelled_at].filter(Boolean).map(v=>new Date(v!).toLocaleString(locale)).join(' · ')}</small>
      {executionStates(a).some(s=>s==='BLOCKED'||s==='UNABLE')&&<label>{t('reason')}<textarea disabled={disabled||stale} maxLength={2000} value={reasons[a.id]??''} onChange={e=>setReasons({...reasons,[a.id]:e.target.value})}/></label>}
