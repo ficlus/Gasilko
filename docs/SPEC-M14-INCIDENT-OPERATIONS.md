@@ -2761,3 +2761,206 @@ multi-recipient route orchestration, recent-session/event history is bounded,
 and no timer-driven persisted expiry sweep. GraphHopper may provide geometry
 without maneuver steps. M14.5E trusted autonomous actors, automatic ACK,
 route-following movement, time scaling and event injection remain deferred.
+
+
+## M14.5E — Autonomous Incident Simulator
+
+### Trusted virtual execution, not human execution
+
+Command intent, navigation plan and telemetry remain separate. An explicitly
+started simulation_agent_runs record links one enrolled scenario, deployed
+incident_unit, existing issued task_assignment and (for MOVE_TO/WITHDRAW_TO)
+one immutable M14.5D navigation session/route revision. Other configured native
+behaviors receive a generic delayed simulation response. No label-based tactical
+logic, fire physics, stock consumption, actual GPS, dispatch or notification
+effects are introduced.
+
+The protected M14.5C TRAINING environment and operator enrollment remain the
+only enablement mechanism. No configuration is enabled by this migration.
+A run's creator is the scenario controller. Every tick rechecks that creator's
+current active profile, membership, organization, enrolled operator relationship
+and effective incident commander/deputy role, plus live incident, deployment and
+assignment eligibility. No auth.uid manipulation, fake profiles, user JWTs or
+Unit Leader assignments are used.
+
+Virtual acknowledgement and completion live only in simulation_agent_events and
+the run projection. They never update M14.5A assignment status, acknowledged_by
+or M14.5D executor/status. A PLANNED navigation route can be a simulator's movement
+plan while its real navigation session remains PLANNED. The UI shows operational
+task status, navigation status and SIM execution separately. Arrival means the
+road-access endpoint, not arrival at an off-road target or proof of safety.
+
+### Persistence and state machine
+
+Forward-only migration: **20261012130000_autonomous_incident_simulator.sql**.
+
+- simulation_scenario_clock: elapsed simulated seconds, scale, authoritative
+  tick sequence, independent controller version, anchors and runner freshness.
+- simulation_agent_runs: immutable identity/configuration, response profile,
+  due times, monotonic road progress, current state and position/version linkage.
+- simulation_agent_events: append-only, paginated event history with simulated
+  and recorded time, operation UUID, SIMULATION_ENGINE or HUMAN_CONTROLLER origin.
+- simulation_event_injections: immutable allowlisted definitions with fire-once
+  bookkeeping; no arbitrary scripts.
+- private.simulation_paths: cumulative road geometry lengths computed once.
+- private.simulation_tick_receipts: durable exact tick outcomes.
+- private.simulation_engine_writes: transaction-local publication capability.
+
+Normal flow: WAITING_TO_ACK → SIM_ACKNOWLEDGED → SIM_IN_PROGRESS →
+SIM_ARRIVED → SIM_COMPLETED. SIM_BLOCKED, SIM_PAUSED and SIM_SIGNAL_LOST
+represent explicit faults/holds. SIM_CANCELLED preserves invalidated/stopped
+history; SIM_UNABLE is reserved as a terminal state. A no-response profile
+blocks before virtual ACK. Only one nonterminal movement run may own a deployed
+unit, and only one nonterminal run may own an assignment. New commands never
+automatically supersede a movement run: stop it, select/prepare another route
+and explicitly start another run.
+
+All new public tables have RLS with direct application grants revoked.
+Controller/read RPCs enforce scenario scope; service RPCs require service_role.
+Foreign keys and identity triggers pin scenario/incident/unit/assignment/route.
+History cannot be physically deleted through application APIs.
+
+The existing simulation_unit_positions projection remains the only current SIM
+location store. Human observations retain updated_by and HUMAN_MANUAL.
+Engine observations have a null human actor, SIMULATION_ENGINE and an exact
+engine_run_id. A private transaction capability and composite foreign key
+protect publication; ordinary callers cannot claim engine provenance.
+
+### Clock, movement and deterministic failures
+
+The clock defaults to 1× and supports 5×/10×. A worker invocation consumes at
+most five elapsed real seconds and fifty simulated seconds. Large outages
+discard excess wall-time debt and show a behind warning; they never replay an
+unbounded teleport. Manual step advances one scaled second through the same
+database engine. Time-scale changes and scenario pause/resume reset the
+wall-time anchor. Scenario pause freezes ACK/fault timers and movement.
+Finish stops remaining runs. No task or route history is reset.
+
+One-second simulated substeps give deterministic event boundaries independently
+of browser frame rate. Seed + run UUID + profile select persisted defaults;
+operator overrides are bounded and frozen. Profiles: NORMAL, SLOW_RESPONSE,
+NO_RESPONSE, BREAKDOWN, COMMUNICATION_LOSS and ROUTE_BLOCKED. Template-specific
+UI timing defaults supplement M14.5C fixture counts/availability. No dynamic
+fire, casualty or vehicle-physics model exists.
+
+Movement reuses stored road LineString geometry and planned duration. Haversine
+segment lengths, cumulative lookup and spherical interpolation handle repeated
+points, tiny segments and longitude wrapping. Degenerate/nonfinite/antipodal
+routes fail closed. Speed uses length / planned duration with bounded multiplier
+and 100 m/s ceiling. Geometry is never recalculated during ticks. Heading and
+speed are simulated, never measured. Most position publication occurs at the
+final substep, with immediate transition samples where needed.
+
+Start requires the exact current SIM position/version used in the route origin.
+The original origin, provider-snapped origin and first road geometry point must
+agree within the disclosed 5 m starting tolerance (original snapshot within
+0.1 m). Larger access gaps block simulated movement, not road routing itself.
+The panel can show the existing route/access point and propose an explicitly
+confirmed M14.5C SET_POSITION. Then the operator explicitly recalculates the
+route through M14.5D. There is no off-road driving fallback or automatic snapping.
+
+Allowlisted injections: SIM_BREAKDOWN, SIM_ROAD_BLOCKED, SIM_SIGNAL_LOSS,
+SIM_NO_RESPONSE, SIM_HOLD, SIM_RESUME. Triggers: scenario TIME,
+AFTER_ACK, PROGRESS fraction, EXECUTION_START. Progress events clamp advance at
+their threshold; the event is processed at the next discrete boundary before
+further movement. Each definition fires once. Full replay uses a fresh scenario.
+
+Communication loss advances internal simulated progress while withholding
+externally visible observations. UI keeps the last published position and its
+real observation time, marked SIM SIGNAL LOST. Restoration publishes a new
+engine sample without rewriting older timestamps. HOLD_POSITION affects only
+simulator movement, and REQUEST_STATUS emits a clearly simulated report.
+Other actions have no invented tactical effects.
+
+### Controls, lifecycle and concurrency
+
+Controls include start, pause/resume/stop unit, clear fault, stop all, injection,
+time-scale and manual step. Explicit confirmation freezes UUID and payload.
+Ambiguous replies retain the exact request in memory and optional account/org/
+incident-scoped sessionStorage for explicit retry. Definitive stale responses
+require closing/reviewing against current state; no automatic overwrite/retry.
+
+Incident/scenario row locks, existing organization/profile lock conventions,
+partial unique indexes and tick receipts serialize worker/manual execution.
+A duplicate scheduler tick returns the committed outcome. A crash rolls back
+the complete transaction; there is no persistent in-progress lease to strand.
+No provider call occurs while holding these locks. Engine provenance capability
+rows are inserted and removed in the same publication transaction.
+
+Cancelled/terminal assignments, invalid routes, released units and lost
+authority stop advancement. Route replacement never swaps a running snapshot.
+M14.5D's system STOPPED session caused specifically by scenario pause remains
+usable by the independent SIM run after scenario resume; no actual navigation
+status is changed or restarted. Other STOPPED/superseded sessions invalidate it.
+
+Manual movement/reset is rejected while a nonterminal movement agent owns the
+unit. Stop the agent first, then use the existing confirmed position command.
+Reset preserves all task, route and simulation history. There is no silent
+resume from a newly edited position.
+
+### Web and workload bounds
+
+AutonomousSimulationProvider/Panel integrate with the existing workspace,
+selected deployed unit, navigation panel and shared modal interaction locks.
+The panel exposes runner heartbeat/error, simulated clock, response configuration,
+progress, explicit events and paged history. It does not claim background work
+when no successful runner heartbeat exists. SI and DE cover simulator labels,
+errors and controls. Operational/navigation labels reuse their existing resources.
+
+A visible-workspace five-second refresh reads bounded scenario state and refreshes
+the existing batch SIM projection. Hidden tabs, unmount and scope changes abort
+reads and stop timers. No browser authoritative tick loop or per-marker fetch
+exists. The existing MapLibre source receives bounded 800 ms presentation-only
+interpolation between committed positions, honors reduced motion, never
+extrapolates, and displays SIM CURRENT/STALE/SIGNAL LOST/UNKNOWN. Other map layers,
+selection and task/nav overlays remain in the same map.
+
+Bounds: 100 concurrent runs, 1,000 lifetime runs/scenario, 1,000 event definitions,
+50,000 append-only agent events (normal advancement stops at 49,000 to reserve
+control history), 100,000 ticks and one year of simulated seconds. Samples are
+recorded every 60 simulated seconds rather than every frame. Runs/assignments
+are paged by 25; events by 50; recent injection list by 50. Route geometry retains
+M14.5D's 50,000-point limit. Controls are limited to one new request per 500 ms
+per scenario; exact retries remain idempotent. Runner batches contain at most
+five scenarios and have a 25-second Edge deadline. History is retained rather
+than silently pruned; begin a new scenario when exercise limits are reached.
+These are implementation bounds, not measured performance claims.
+
+### Manual deployment and operation — user only
+
+1. Verify all prerequisites through M14.5D in the dedicated TRAINING/staging
+   Supabase project. Confirm its identity independently of browser configuration.
+2. Manually apply 20261012130000_autonomous_incident_simulator.sql.
+3. Existing navigation/provider functions remain unchanged. Deploy compatible
+   updates only if not already present.
+4. Set a newly generated, independent SIMULATION_RUNNER_SECRET (at least 32
+   random characters) in the Edge secret store. SUPABASE_URL and
+   SUPABASE_SERVICE_ROLE_KEY remain server-only.
+5. Deploy incident-simulation-runner with gateway JWT verification disabled
+   **for this function only**, because its own independently authenticated
+   scheduler bearer secret is required. Do not disable the function's internal
+   authentication, expose the secret to Web, or use an ordinary user JWT.
+6. Configure a trusted external HTTPS scheduler to POST an empty body to
+   <training-project>/functions/v1/incident-simulation-runner every five seconds,
+   with Authorization: Bearer <scheduler-secret>. Keep the secret in the
+   scheduler's protected secret store; avoid request/header logs. Do not assume
+   pg_cron or another scheduler is already installed. Permit only one scheduled
+   job; duplicate invocations are harmless but waste work. Rotate the shared
+   secret on both sides together.
+7. Deploy compatible Web code. No Android deployment is required.
+8. Reuse protected M14.5C operator enrollment, then enable only the verified
+   TRAINING environment. Ordinary organization managers cannot enable it.
+9. Create/provision a training scenario, start it, issue a real training command,
+   prepare its road route, reconcile access point if required, and explicitly
+   start the virtual run. Observe a successful runner heartbeat before relying
+   on background execution; otherwise use the separately labelled manual step.
+10. Perform the assignment's manual acceptance scenarios: time scaling,
+    pause/resume, duplicate requests, failures/restoration, revocation, route
+    supersession, manual editing interlock, tab closure, scope switching and SI/DE.
+
+The scheduler is intentionally NOT configured by this PR. No SQL/function/app
+was deployed, no simulator tick was executed, and no tests/build/lint/typecheck/
+CI/runtime/manual verification or post-implementation validation was performed.
+No tests or dependencies were added. Human ACK/execution, real GPS, physical
+vehicle control, notifications, full scripting and tactical physics remain
+outside this milestone.

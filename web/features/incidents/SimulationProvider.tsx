@@ -40,7 +40,7 @@ export function SimulationProvider({account,org,incidentId,refresh:externalRefre
  useEffect(()=>{if(proposal){dialog.current?.showModal();}return()=>dialog.current?.close();},[!!proposal]);
  useEffect(()=>{if(rts.locked)setMove(null);},[rts.locked]);
  function propose(action:SimulationAction,payload:Record<string,unknown>,summary:string){
-  if(!data?.scenario||!data.can_control||!data.enabled||pending||busy||rts.locked||rts.navigationEditing)return;
+  if(!data?.scenario||!data.can_control||!data.enabled||pending||busy||rts.locked||rts.navigationEditing||rts.agentEditing)return;
   rts.cancelMode();setMove(null);setError('');setRejected(false);
   setProposal({action,summary,args:{p_operation:crypto.randomUUID(),p_acting_organization_id:org,p_incident_id:incidentId,p_expected_version:data.scenario.version,p_action:action,p_payload:structuredClone(payload)}});
  }
