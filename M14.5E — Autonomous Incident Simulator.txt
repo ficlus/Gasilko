@@ -1,0 +1,2272 @@
+# GASILKO — M14.5E AUTONOMOUS INCIDENT SIMULATOR
+
+Implement **M14.5E — Autonomous Incident Simulator** in the existing Gasilko monorepo.
+
+Repository: `ficlus/Gasilko`
+
+Base on current `main` AFTER merged:
+
+- PR #57 — M14.4 Units / Vehicles / Crews / Resources
+- PR #58 — M14.4.1 Operational Workspace Foundation
+- PR #59 — M14.4.2 Cross-Module Integration
+- PR #60 — M14.5A Tasks + Configurable Action / Command Engine
+- PR #61 — M14.5B RTS Map Interaction
+- PR #62 — M14.5C Incident Simulation Foundation
+- PR #63 — M14.5D Incident Movement & Navigation Execution
+
+**The user confirms PR #63 is merged.**
+
+If required M14.5D functionality is absent from the checked-out branch, STOP and report. Do not recreate earlier milestones.
+
+This is an **implementation-only milestone**.
+
+The user manually reviews PRs, applies migrations, deploys Edge Functions and merges.
+
+Do not execute tests, build, lint, typecheck, CI, browser automation, runtime verification, migrations or deployment.
+
+Create ONE PR ONLY. Do not merge.
+
+---
+
+## 1. Primary objective
+
+Turn the existing M14.5C training environment and M14.5D road-navigation system into a practical **autonomous, deterministic incident simulator**.
+
+An authorized training operator should be able to:
+
+1. Open a training incident.
+2. Create/select simulated incident units.
+3. Issue existing configured commands through M14.5A/M14.5B.
+4. Prepare an actual road route through M14.5D.
+5. Enable autonomous execution for a simulated unit.
+6. Watch the virtual unit react to the command.
+7. Observe the unit moving along the calculated road geometry.
+8. See simulated acknowledgement and execution progress.
+9. Accelerate or pause the scenario clock.
+10. Inject delays, breakdowns, road-access problems and communication loss.
+11. Stop, resume or override individual simulated units.
+12. Inspect detailed simulation event history.
+13. Run reproducible training exercises.
+
+The simulation should work without Android devices, physical vehicles, real GPS or actual field responders.
+
+**The simulation must remain completely separate from real operational execution.**
+
+---
+
+## 2. Mandatory architectural invariants
+
+Preserve the governing principle:
+
+**COMMAND INTENT != EXECUTION PLAN != TELEMETRY**
+
+### Command intent
+
+An M14.5A task says what must be done.
+
+Example:
+
+```text
+Task:
+  MOVE_TO
+  Recipient: GVC-1
+  Target: Hydrant H-000123
+```
+
+The task alone never moves the unit.
+
+### Execution plan
+
+An M14.5D NavigationSession contains the planned road route, distance, travel duration and routing provider.
+
+Example:
+
+```text
+NavigationSession:
+  assignment_id
+  current_route_id
+  route geometry
+  estimated travel duration
+```
+
+The navigation session alone never moves the unit.
+
+### Simulated execution
+
+M14.5E introduces a separate simulation agent that can follow an already prepared route.
+
+Example:
+
+```text
+SimulationAgentRun:
+  incident_unit_id
+  task_assignment_id
+  navigation_session_id
+  route_revision_id
+  simulated_progress
+  simulated_execution_state
+```
+
+### Simulated telemetry
+
+The agent publishes explicit SIMULATED position observations into the existing M14.5C simulation position projection through an authorized backend-only pathway.
+
+Never create ACTUAL_GPS observations.
+
+Never infer that a real firefighter acknowledged a command merely because a virtual agent responded.
+
+Never treat a simulated arrival as proof of operational arrival or safety.
+
+---
+
+## 3. Essential implementation boundary
+
+M14.5E must make the simulator autonomous **without bypassing M14.5A or M14.5D human authorization**.
+
+Existing M14.5A task transitions are bound to authenticated real users and contain actor references.
+
+Existing M14.5D navigation execution also requires legitimate execution authority.
+
+A virtual unit does not have a real authenticated human identity.
+
+Therefore:
+
+**Do not impersonate `auth.uid()`.**
+
+Do not create fake users, fake JWTs, fake profiles or invented Unit Leader memberships.
+
+Introduce an explicit trusted **SIMULATION_ENGINE** execution identity, used only for simulator-owned state and clearly classified simulation events.
+
+For M14.5E MVP, distinguish:
+
+```text
+REAL TASK:
+ISSUED
+
+SIMULATED RESPONSE:
+SIM_ACKNOWLEDGED
+SIM_IN_PROGRESS
+SIM_ARRIVED
+```
+
+The original assignment remains governed by M14.5A.
+
+In the UI, display both concepts separately.
+
+Example:
+
+```text
+GVC-1
+
+Command:
+MOVE_TO H-000123
+
+Operational task status:
+ISSUED
+
+Simulation execution:
+SIM_IN_PROGRESS
+
+SIM location:
+2.4 km along planned route
+```
+
+This is correct and intentional.
+
+The simulator may exercise the command and visualization pipeline without forging human execution history.
+
+If, after inspecting the complete existing task/audit model, a safe narrowly authorized first-class system-executor extension can be introduced without changing real-user semantics, it may be documented as a future extension.
+
+**Do not make that extension a dependency for autonomous movement in this milestone.**
+
+The primary implementation must remain functional using separate simulation execution state.
+
+---
+
+## 4. Inspect relevant existing code only
+
+Inspect:
+
+- M14.1 incident lifecycle and participation.
+- M14.2 command roles.
+- M14.4 deployed incident units.
+- M14.5A task assignments, action versions and native behaviors.
+- M14.5B RTS command interaction.
+- M14.5C simulation scenarios, protected environment, positions, fixtures and events.
+- M14.5D navigation sessions, route revisions, road geometry and status.
+- Existing MapLibre OperationalMapCanvas.
+- Existing Supabase Edge Function patterns.
+- Existing SI/DE localization and API routing.
+- Existing M14 SPEC.
+
+Important actual database contracts to inspect:
+
+```text
+private.simulation_environment
+private.simulation_operators
+private.simulation_controller
+
+public.simulation_scenarios
+public.simulation_unit_positions
+public.simulation_events
+
+public.incident_tasks
+public.incident_task_assignments
+
+public.incident_navigation_sessions
+public.incident_navigation_routes
+public.incident_navigation_events
+```
+
+Important migration files:
+
+```text
+supabase/migrations/20261009101000_incident_tasks.sql
+supabase/migrations/20261009102000_incident_task_commands.sql
+supabase/migrations/20261009140000_incident_simulation_foundation.sql
+supabase/migrations/20261012100000_incident_navigation_execution.sql
+```
+
+Likely Web entry points:
+
+```text
+web/features/incidents/SimulationProvider.tsx
+web/features/incidents/SimulationPanel.tsx
+web/features/incidents/SimulationMapLayer.tsx
+web/features/incidents/IncidentNavigationProvider.tsx
+web/features/incidents/IncidentNavigationPanel.tsx
+web/features/incidents/IncidentNavigationLayer.tsx
+web/features/incidents/IncidentTasks.tsx
+web/features/incidents/IncidentArea.tsx
+web/features/incidents/workspace.tsx
+web/lib/operational/simulation.ts
+web/lib/operational/navigation.ts
+web/app/api/incidents/route.ts
+```
+
+Verify actual paths.
+
+Inspect the implementation before deciding how to extend it.
+
+Do not re-audit or modify unrelated Android, Oracle, M8/M9, inventory administration, QR or notification infrastructure.
+
+---
+
+## 5. Simulation environment isolation
+
+Reuse the protected M14.5C enablement mechanism.
+
+The simulator must run only if:
+
+```text
+private.simulation_environment.enabled = true
+
+AND
+
+private.simulation_environment.environment_kind = TRAINING
+```
+
+Also require:
+
+- an explicitly enrolled training scenario;
+- a valid scenario/incident relationship;
+- scenario status RUNNING;
+- current incident operational eligibility;
+- an eligible incident-unit deployment;
+- an appropriately authorized training operator who enabled the run;
+- current protected operator enrollment and authority where required.
+
+A normal production incident must never be eligible.
+
+An ordinary organization ADMIN/MANAGER must not be able to activate the global simulator.
+
+Do not rely on a client-supplied boolean such as:
+
+```text
+simulation=true
+```
+
+for security.
+
+Simulation must remain disabled by default.
+
+The preferred environment is a dedicated Supabase staging/training project.
+
+No external dispatch, emergency messages, real radio commands, FCM fan-out or production equipment commands are permitted.
+
+---
+
+## 6. Simulation agent identity
+
+A simulation agent is a **virtual execution actor attached to a deployed training incident unit**.
+
+It is not:
+
+- a new `auth.users` account;
+- a Gasilko organization member;
+- a real incident crew member;
+- an Incident Commander;
+- a Unit Leader role assignment;
+- a real GPS device;
+- a permanent operational vehicle.
+
+Canonical identity:
+
+```text
+scenario_id
+incident_unit_id
+```
+
+For a specific simulated command execution, also reference:
+
+```text
+task_assignment_id
+navigation_session_id
+route_id
+```
+
+Use existing UUIDs.
+
+Do not identify agents by callsign or display label.
+
+Preserve the difference between permanent operational inventory and its incident deployment episode.
+
+---
+
+## 7. Simulation agent lifecycle
+
+Implement an independent, finite, deterministic state machine.
+
+Suggested lifecycle:
+
+```text
+IDLE
+  ↓
+COMMAND_DETECTED
+  ↓
+WAITING_TO_ACK
+  ↓
+SIM_ACKNOWLEDGED
+  ↓
+PREPARING_EXECUTION
+  ↓
+SIM_IN_PROGRESS
+  ↓
+SIM_ARRIVED
+  ↓
+SIM_COMPLETED
+```
+
+Additional states:
+
+```text
+SIM_BLOCKED
+SIM_UNABLE
+SIM_PAUSED
+SIM_SIGNAL_LOST
+SIM_CANCELLED
+```
+
+These are **simulation execution states**, not new values for M14.5A task assignments.
+
+Do not modify the existing M14.5A task-status enum.
+
+Transitions must have explicit rules.
+
+For example:
+
+```text
+WAITING_TO_ACK -> SIM_ACKNOWLEDGED
+SIM_ACKNOWLEDGED -> SIM_IN_PROGRESS
+SIM_IN_PROGRESS -> SIM_ARRIVED
+SIM_ARRIVED -> SIM_COMPLETED
+```
+
+The agent must not progress when:
+
+- scenario is PAUSED or FINISHED;
+- simulation guard is disabled;
+- relevant assignment is cancelled/terminal;
+- incident becomes terminal;
+- unit is released/unavailable;
+- route becomes invalid;
+- another conflicting agent run owns the unit.
+
+An interrupted run may enter SIM_PAUSED or SIM_BLOCKED with an explicit reason.
+
+---
+
+## 8. Simulation-agent persistence
+
+Introduce a small, forward-only schema.
+
+Suggested conceptual table:
+
+```text
+simulation_agent_runs
+
+id UUID PRIMARY KEY
+
+scenario_id UUID NOT NULL
+incident_id UUID NOT NULL
+incident_unit_id UUID NOT NULL
+
+task_assignment_id UUID NOT NULL
+navigation_session_id UUID NOT NULL
+route_id UUID NOT NULL
+
+status TEXT NOT NULL
+
+speed_factor DOUBLE PRECISION
+route_progress_m DOUBLE PRECISION
+route_progress_fraction DOUBLE PRECISION
+
+simulated_started_at TIMESTAMPTZ
+simulated_updated_at TIMESTAMPTZ
+
+ack_due_sim_time TIMESTAMPTZ
+completion_due_sim_time TIMESTAMPTZ
+
+version BIGINT
+last_tick_sequence BIGINT
+
+failure_mode TEXT
+failure_state JSONB
+
+created_by UUID
+created_at TIMESTAMPTZ
+updated_at TIMESTAMPTZ
+finished_at TIMESTAMPTZ
+```
+
+Adapt names and timestamp representation to actual conventions.
+
+Requirements:
+
+- same-scenario/same-incident foreign-key consistency;
+- correct incident-unit recipient;
+- correct issued task assignment;
+- correct associated M14.5D route revision;
+- immutable assigned target/route identity during an execution run;
+- no normal physical deletes;
+- optimistic concurrency;
+- appropriate indexes;
+- no direct browser INSERT/UPDATE/DELETE grants.
+
+Enforce at most one nonterminal autonomous movement run per incident-unit deployment.
+
+Do not create one agent per virtual crew member.
+
+---
+
+## 9. Immutable route execution
+
+Every autonomous movement run must use one explicit **existing M14.5D route revision**.
+
+The route is calculated by the existing RoadProvider before the autonomous run begins.
+
+The simulator must not create its own OSRM implementation.
+
+Do not call OSRM or GraphHopper directly from the simulation browser.
+
+Do not pass fabricated inspection-plan IDs to `plan-routes`.
+
+Use:
+
+```text
+incident_navigation_routes.route_geometry
+incident_navigation_routes.distance_m
+incident_navigation_routes.duration_s
+```
+
+and the corresponding authoritative session/assignment identity.
+
+The route snapshot selected for the run remains immutable.
+
+If a new route revision is prepared:
+
+- do not silently replace the active agent's route;
+- require explicit resumption/reselection or a documented simulation-only reroute operation;
+- preserve previous run history;
+- never rewrite past movement observations.
+
+---
+
+## 10. Starting an autonomous run
+
+The operator workflow should be:
+
+```text
+Open training incident
+       ↓
+Select SIM unit
+       ↓
+Issue MOVE_TO or WITHDRAW_TO
+       ↓
+Prepare road route through M14.5D
+       ↓
+Open simulation execution panel
+       ↓
+Choose response profile
+       ↓
+[START AUTONOMOUS SIMULATION]
+```
+
+Before starting, show:
+
+```text
+Unit: GVC-1
+
+Task: MOVE_TO
+Target: Hydrant H-000123
+
+Route: 4.8 km
+Planned duration: 7 min
+
+Simulation speed: 5×
+
+Response delay: 3 simulated seconds
+
+[START SIMULATION]
+```
+
+The final button must create a simulation-agent run, not change the real task assignment status.
+
+No simulated agent may start from a route belonging to a different assignment or unit.
+
+Do not automatically launch execution merely because an actual task was issued.
+
+The operator must explicitly enable autonomous training execution.
+
+---
+
+## 11. Route origin and snapping
+
+M14.5D preserves original coordinates and snapped road-access coordinates.
+
+A simulator must not silently teleport a unit onto the road.
+
+Before autonomous movement:
+
+- compare current SIM position to the stored route origin;
+- verify the simulation position version;
+- inspect snapped-origin access distance;
+- confirm the route was generated from the appropriate position.
+
+For a small road-access gap, show it clearly.
+
+If the virtual unit is materially separated from the drivable road:
+
+```text
+Cannot start road-following simulation.
+
+Simulated unit is not at the planned road-access point.
+
+[SHOW ACCESS POINT]
+[SET SIM POSITION TO ACCESS POINT]
+[RECALCULATE ROUTE]
+```
+
+Setting a SIM position to the access point must be an explicit authorized training action with a preview and confirmation.
+
+It must not rewrite the issued task target or canonical data.
+
+Do not create a straight-line movement segment through buildings, rivers or inaccessible terrain and label it as road navigation.
+
+Do not silently ignore substantial start-point separation.
+
+Keep the existing M14.5D snapping disclosure unchanged for ordinary navigation.
+
+---
+
+## 12. Road-following movement algorithm
+
+Implement a deterministic route-progress algorithm.
+
+The agent must move **along the actual stored road geometry**, not in a straight line from origin to destination.
+
+For a route LineString:
+
+```text
+P0, P1, P2, ..., Pn
+```
+
+Precompute cumulative geographic segment lengths:
+
+```text
+L0 = 0
+
+Li = Li-1 + distance(Pi-1, Pi)
+```
+
+Let:
+
+```text
+route_length = Ln
+progress = traveled distance along route
+```
+
+Find segment i such that:
+
+```text
+Li-1 <= progress <= Li
+```
+
+Interpolate the position within that segment.
+
+Use a robust WGS84-appropriate segment-distance calculation and safe interpolation.
+
+Handle:
+
+- zero-length segments;
+- repeated coordinates;
+- short segments;
+- dateline/longitude wrapping;
+- invalid or nonfinite values;
+- endpoints;
+- large provider geometries.
+
+Do not treat geographic longitude/latitude as ordinary planar meters.
+
+Do not add a full physics engine.
+
+### Planned travel speed
+
+Use the route's existing planned duration as the baseline.
+
+Conceptually:
+
+```text
+baseline_speed_mps =
+  route_length_m / planned_duration_s
+```
+
+Then apply the selected bounded simulation behavior profile.
+
+Do not use the route geometry to infer an actual vehicle's speed.
+
+The model is for deterministic testing, not physical vehicle dynamics.
+
+### Per-tick progress
+
+Conceptually:
+
+```text
+simulated_delta_seconds =
+  elapsed_real_seconds * time_scale
+
+distance_advance =
+  simulated_speed_mps * simulated_delta_seconds
+
+new_progress =
+  min(route_length, previous_progress + distance_advance)
+```
+
+Adjust for failure modes, pauses and lifecycle.
+
+All progress must be monotonic during normal movement.
+
+No movement when simulation time is paused.
+
+Never move backward merely because of a retry or delayed worker response.
+
+---
+
+## 13. Heading and simulated speed
+
+For each position update, derive:
+
+- longitude;
+- latitude;
+- simulated heading;
+- simulated speed;
+- observation timestamp;
+- position version.
+
+Heading should follow the movement direction of the current route segment.
+
+For stationary/paused vehicles:
+
+```text
+speed_mps = 0
+```
+
+Preserve the last known heading where appropriate.
+
+Do not label these values as measured GPS speed or compass heading.
+
+They are explicitly generated simulation properties.
+
+Do not modify original route points or snapped endpoints.
+
+---
+
+## 14. Simulated position publishing
+
+Reuse:
+
+```text
+simulation_unit_positions
+```
+
+Do not create a second current-position table.
+
+M14.5C already has:
+
+```text
+scenario_id
+incident_unit_id
+longitude
+latitude
+heading_degrees
+speed_mps
+observed_at
+version
+source = SIMULATED
+```
+
+However, the existing `updated_by` column references a real profile and is non-null.
+
+A simulation worker is **not** a human profile.
+
+Introduce a forward-only, narrowly scoped way to distinguish:
+
+```text
+HUMAN_MANUAL
+SIMULATION_ENGINE
+```
+
+For automated observations, store explicit engine provenance without inventing a profile UUID.
+
+If adapting the existing position schema:
+
+- preserve all historical human-created rows;
+- preserve valid manual editing;
+- allow nullable human actor only for strongly validated simulator-engine updates;
+- require explicit engine provenance;
+- keep source fixed to SIMULATED;
+- enforce the cross-scenario/incident/unit checks;
+- prevent ordinary authenticated callers from claiming engine provenance.
+
+An automated position mutation must be performed through a service-only, strongly guarded database operation.
+
+Do not weaken ordinary `simulation_command` authorization to achieve this.
+
+---
+
+## 15. Server-authoritative autonomous runner
+
+**Do not run the authoritative simulator loop inside the browser.**
+
+The simulator must continue operating when the operator closes the tab, assuming the training environment's scheduler is running.
+
+Implement a bounded server-side worker using the existing Supabase Edge Function/backend conventions.
+
+Suggested component:
+
+```text
+supabase/functions/incident-simulation-runner/
+```
+
+Responsibilities:
+
+1. Authenticate the trusted scheduler invocation.
+2. Check protected TRAINING enablement.
+3. Acquire a bounded batch of eligible scenarios/runs.
+4. Advance the authoritative simulation clock.
+5. Apply due simulated task responses.
+6. Advance positions along stored routes.
+7. Process injected simulation failures.
+8. Append structured simulation-agent events.
+9. Commit position projections and run versions.
+10. Return compact execution metrics.
+
+Do not implement an infinite serverless loop.
+
+Do not keep an Edge Function alive for the duration of a multi-hour exercise.
+
+Use short bounded worker invocations.
+
+---
+
+## 16. Scheduler architecture
+
+The runner needs an external scheduler.
+
+Use an existing supported Supabase scheduling approach where practical, such as an explicitly configured scheduled invocation.
+
+Do not assume a cron scheduler is already installed.
+
+Do not automatically create production schedules.
+
+The PR must include operator documentation for manually configuring the scheduler **only in an authorized training environment**.
+
+Recommended architecture:
+
+```text
+Trusted scheduler
+       ↓
+Authenticated runner Edge Function
+       ↓
+Protected simulation dispatcher
+       ↓
+Scenario clock / due agent runs
+       ↓
+Atomic position + run-state updates
+       ↓
+Simulation map/read projections
+```
+
+The scheduler invocation must be independently authenticated.
+
+A browser user JWT must not authorize unrestricted scheduler ticks.
+
+Do not allow a public request containing only `scenario_id` to tick arbitrary scenarios.
+
+For development and initial operator testing, provide a secure **Advance one simulation step** action that invokes the same server-side engine through a properly authorized scenario-controller path.
+
+Manual stepping must not be a separate simulation algorithm.
+
+The UI must clearly distinguish:
+
+```text
+AUTOMATIC RUNNER ACTIVE
+```
+
+from:
+
+```text
+MANUAL STEP MODE — no background scheduling configured
+```
+
+Never claim that a simulation is progressing in the background if no scheduler is configured.
+
+---
+
+## 17. Simulation clock
+
+Add a persisted scenario clock model.
+
+Conceptually:
+
+```text
+simulation_clock
+
+scenario_id
+simulated_time
+time_scale
+last_advanced_at
+tick_sequence
+status
+version
+```
+
+Default:
+
+```text
+time_scale = 1
+```
+
+Supported initial speeds:
+
+```text
+1×
+5×
+10×
+```
+
+The clock must be authoritative on the server.
+
+The browser may display the simulated time but must not own it.
+
+### Pause
+
+When scenario is PAUSED:
+
+- simulation time stops;
+- autonomous movement stops;
+- simulated ACK timers stop;
+- failure timers stop;
+- no catch-up movement accumulates.
+
+### Resume
+
+Resume from the persisted simulated time.
+
+Reset the real-time advancement anchor.
+
+Do not apply the entire paused wall-clock duration as movement time.
+
+### Time scale change
+
+Allow the authorized operator to change speed.
+
+Take effect at a defined clock boundary.
+
+Record an event.
+
+Do not retroactively rescale historical movement events.
+
+### Recovery after downtime
+
+If the scheduler was unavailable for a significant period:
+
+- do not teleport units over the entire elapsed wall time;
+- apply a conservative maximum simulated-time increment per tick;
+- mark the runner behind/stale if necessary;
+- resume in bounded steps;
+- display an operator-visible warning.
+
+---
+
+## 18. Deterministic execution
+
+Reproducibility is important.
+
+Use existing M14.5C scenario seed.
+
+Derive a deterministic per-agent/per-event random source from:
+
+```text
+scenario seed
+agent/run identity
+event sequence
+```
+
+Do not use uncontrolled `Math.random()` for authoritative simulation decisions.
+
+Persist any randomly selected decision before using it.
+
+Examples:
+
+```text
+ACK delay = 4 seconds
+
+Breakdown triggered at 67% route progress
+
+Signal loss begins at simulated time X
+```
+
+The same scenario configuration and seed should produce the same decisions under equivalent command inputs and tick progression.
+
+Do not rely on a particular browser frame rate.
+
+A repeated worker request must never decide a different failure outcome.
+
+---
+
+## 19. Response profiles
+
+Create configurable simulation-only behavior profiles.
+
+Initial profiles:
+
+### NORMAL
+
+- normal ACK delay;
+- normal travel speed;
+- successful arrival;
+- optional completion delay.
+
+### SLOW_RESPONSE
+
+- longer ACK delay;
+- delayed start;
+- ordinary movement after response.
+
+### NO_RESPONSE
+
+- no simulated ACK;
+- no automatic movement start;
+- operator sees a clear attention state.
+
+### BREAKDOWN
+
+- movement begins;
+- a deterministic fault occurs at a configured progress point;
+- unit stops;
+- simulation status becomes SIM_BLOCKED.
+
+### COMMUNICATION_LOSS
+
+- simulate communication/telemetry freshness failure;
+- distinguish missing reported updates from actual virtual movement;
+- do not claim a fresh observed position after contact is lost.
+
+### ROUTE_BLOCKED
+
+- simulated road execution stops at a configured route progress point;
+- display route obstruction;
+- wait for explicit operator intervention or permitted route replacement.
+
+These are examples of data-driven simulation profiles, not new M14.5A Action Definitions.
+
+Avoid hardcoded tactical command labels.
+
+Keep profile parameters bounded.
+
+---
+
+## 20. Configurable behavior parameters
+
+A training operator should be able to configure:
+
+```text
+ack_delay_seconds
+start_delay_seconds
+travel_speed_multiplier
+completion_delay_seconds
+
+fault_mode
+fault_trigger_progress
+
+signal_loss_duration_seconds
+```
+
+Validate reasonable minimums/maximums.
+
+Do not permit:
+
+- negative time;
+- NaN/Infinity;
+- unlimited speed multiplier;
+- arbitrarily huge timestamps;
+- unbounded JSON payloads.
+
+Default to predictable NORMAL behavior.
+
+Show chosen configuration before starting a run.
+
+Persist the selected behavior snapshot on the agent run.
+
+Later changes to a behavior preset must not rewrite an active run's past decisions.
+
+---
+
+## 21. Simulated acknowledgement
+
+The simulator should automatically produce a **SIM_ACK** event when its configured response delay expires.
+
+Important:
+
+This is not a genuine M14.5A human acknowledgement.
+
+Do not write a fake `acknowledged_by` human identity.
+
+Do not call the ordinary authenticated task-transition RPC using service-role impersonation.
+
+Do not manipulate Supabase Auth JWT claims to pretend to be a unit leader.
+
+Store the simulated acknowledgement in the new simulation-agent execution history and current simulation response projection.
+
+The existing task remains authoritative for actual task state.
+
+UI example:
+
+```text
+TASK STATUS
+ISSUED
+
+SIMULATION STATUS
+Acknowledged by virtual unit
+4 s simulated response delay
+```
+
+A simulated acknowledgement must never appear indistinguishable from a real responder ACK.
+
+---
+
+## 22. Simulated task execution
+
+After simulated ACK:
+
+1. Agent enters a simulated execution state.
+2. Agent checks that a valid route revision is attached.
+3. Agent waits for configured start delay.
+4. Agent begins advancing along the road geometry.
+5. Agent publishes simulated positions.
+6. Agent reacts to pauses/failures.
+7. Agent reaches the route endpoint.
+8. Agent records SIM_ARRIVED.
+9. Agent may record SIM_COMPLETED after configured simulated delay.
+
+Do not automatically update canonical M14.5A assignment status to COMPLETED.
+
+Do not automatically call real M14.5D ARRIVE.
+
+The training UI must show both:
+
+- authoritative operational status;
+- virtual simulation execution status.
+
+A training operator can still use a real training account with legitimate execution authority to exercise the ordinary M14.5A lifecycle separately.
+
+---
+
+## 23. Simulated navigation execution versus real navigation execution
+
+M14.5D currently requires a legitimate human executor to transition a NavigationSession to ACTIVE.
+
+Do not weaken that rule.
+
+The autonomous simulator may use a **PLANNED** route revision as a validated simulation movement plan.
+
+Its own state should say:
+
+```text
+SIM_FOLLOWING_ROUTE
+```
+
+This does not change the M14.5D navigation session to ACTIVE.
+
+UI example:
+
+```text
+NavigationSession:
+PLANNED
+
+Simulator:
+SIM_FOLLOWING_ROUTE
+
+Position source:
+SIMULATED
+```
+
+Do not visually imply a real user started navigation.
+
+Do not fake `executor_id` or `executor_organization_id`.
+
+If a real training user subsequently starts navigation through the proper authority, the regular M14.5D lifecycle remains available and independent.
+
+---
+
+## 24. Conflicting commands
+
+A unit may receive multiple M14.5A tasks.
+
+Do not assume every new task supersedes the previous one.
+
+For one simulated unit:
+
+- at most one active autonomous movement run;
+- multiple pending task assignments may exist;
+- a new task is not automatically executed if it conflicts with the current run;
+- the operator must have a clear way to choose or queue the next run.
+
+Suggested MVP:
+
+```text
+Current simulated movement:
+MOVE_TO Hydrant A
+
+New task:
+WITHDRAW_TO Point B
+
+[STOP CURRENT RUN]
+[PREPARE / SELECT NEW ROUTE]
+[START NEW RUN]
+```
+
+Do not automatically override current execution based only on task priority.
+
+A later configurable interruption policy may be added separately.
+
+Preserve every command and route history.
+
+---
+
+## 25. HOLD_POSITION and REQUEST_STATUS
+
+Use existing configured native behaviors.
+
+### HOLD_POSITION
+
+The simulator may support a simulation-only hold response:
+
+- simulated ACK;
+- current agent movement stops;
+- last SIM position remains;
+- simulated speed becomes zero;
+- current movement run enters an appropriate paused/held state.
+
+Do not physically stop any real vehicle.
+
+Do not infer that a real responder followed the command.
+
+### REQUEST_STATUS
+
+The simulator may generate a deterministic simulated status response.
+
+Example:
+
+```text
+SIM STATUS REPORT
+
+Unit: GVC-1
+Movement: 72% along route
+Simulated speed: 31 km/h
+Signal: available
+Faults: none
+```
+
+Store this as a simulation event.
+
+Do not create an actual responder-authored task acknowledgement or message.
+
+### Other configured actions
+
+For actions without a movement-native behavior:
+
+- permit a generic simulation-only delayed response;
+- do not invent hardcoded rescue/fire-suppression physics;
+- do not create tactical effects that the existing domain does not represent.
+
+---
+
+## 26. Failure injection
+
+Allow an authorized training operator to inject controlled failures.
+
+Initial supported events:
+
+```text
+SIM_BREAKDOWN
+SIM_ROUTE_BLOCKED
+SIM_SIGNAL_LOSS
+SIM_NO_RESPONSE
+SIM_HOLD
+SIM_RESUME
+```
+
+Every injection must be:
+
+- explicitly selected;
+- validated;
+- authorized;
+- recorded;
+- idempotent;
+- scenario-scoped.
+
+No arbitrary JavaScript or SQL execution from scenario inputs.
+
+No arbitrary script upload or eval.
+
+### Vehicle breakdown
+
+Stop simulated route progress.
+
+Set simulated speed to zero.
+
+Display a simulated failure event.
+
+Do not mark the permanent vehicle inventory as broken.
+
+### Road blocked
+
+Stop movement at the current progress point.
+
+Do not alter actual OSRM road graph.
+
+Do not modify road closure data in production.
+
+Do not automatically reroute unless an authorized operator prepares/selects a suitable route through existing navigation functionality.
+
+### Signal loss
+
+Retain the last published SIM position with stale/lost-signal indication.
+
+Distinguish:
+
+- internal simulated movement state;
+- last externally visible simulated observation.
+
+Never publish fresh fake observations while displaying the data as unavailable.
+
+### No response
+
+Do not generate SIM_ACK.
+
+Keep the unit's movement stopped until the configured behavior changes or the operator intervenes.
+
+---
+
+## 27. Stop, resume and manual override
+
+Provide individual agent controls:
+
+```text
+[PAUSE AGENT]
+[RESUME AGENT]
+[STOP AGENT]
+[INJECT FAILURE]
+[CLEAR FAILURE]
+[SHOW ROUTE]
+```
+
+Manual position editing from M14.5C must not fight with autonomous movement.
+
+If the operator chooses **Move SIM on Map** while a unit is auto-moving:
+
+- pause/stop the autonomous agent first;
+- clearly explain why;
+- require explicit confirmation;
+- apply the manual position through the existing authorized training path;
+- mark the old autonomous route/run stale or interrupted;
+- do not silently resume from an inconsistent position.
+
+Use server-side locking, not only UI disabled controls.
+
+---
+
+## 28. Scenario pause, reset and finish
+
+Integrate with existing M14.5C scenario lifecycle.
+
+### Pause
+
+Stops simulated clock progression.
+
+Agent runs remain persisted.
+
+SIM positions remain at their last authoritative observations.
+
+### Resume
+
+Continues eligible paused agent runs from their saved progress.
+
+No catch-up teleport.
+
+### Reset positions
+
+Preserve M14.5C semantics.
+
+Reset must not erase historical tasks, routes or simulation events.
+
+Active autonomous runs must be stopped or superseded before resetting positions.
+
+Do not silently resume the old route after reset.
+
+### Finish
+
+Stop all autonomous execution.
+
+No further ticks should mutate scenario positions.
+
+Navigation and task history remain intact.
+
+Do not close the incident automatically.
+
+For a completely fresh exercise, guide the operator to create a new training incident/scenario rather than deleting immutable history.
+
+---
+
+## 29. Concurrency and tick idempotency
+
+A scheduled worker may be invoked twice.
+
+An earlier invocation may overlap a later one.
+
+The operator may also manually advance the scenario.
+
+Protect against:
+
+- duplicate ticks;
+- duplicated ACK;
+- duplicated arrival;
+- double movement;
+- replay after FINISHED;
+- stale position overwrites;
+- two workers advancing the same agent simultaneously.
+
+Use:
+
+- row/advisory locks following repository conventions;
+- a monotonic scenario tick sequence;
+- agent run version;
+- expected position version;
+- unique event identity;
+- durable tick/operation receipt;
+- atomic transaction per bounded unit of work.
+
+If two workers race, only one should commit advancement for the same scenario tick.
+
+A repeated identical tick must not advance the unit again.
+
+Do not hold a database transaction across an external routing request.
+
+There should be no routing request during an ordinary simulation tick.
+
+---
+
+## 30. Simulation events and audit
+
+Add a separate append-only simulation-agent event history.
+
+Do not force non-human events into M14.5C `simulation_events.actor_user_id`, which currently requires a real profile.
+
+Suggested event representation:
+
+```text
+simulation_agent_events
+
+id
+scenario_id
+agent_run_id
+incident_unit_id
+
+event_sequence
+event_type
+
+origin = SIMULATION_ENGINE | HUMAN_CONTROLLER
+initiated_by_user_id NULLABLE
+
+simulated_at
+recorded_at
+
+operation_id
+payload
+```
+
+Important:
+
+- engine events are explicitly attributed to SIMULATION_ENGINE;
+- human controller commands retain real authenticated actor identity;
+- no fake UUIDs or profiles;
+- no ordinary authenticated event writes;
+- events are immutable;
+- event reads are bounded;
+- payload sizes are limited;
+- no secrets;
+- no high-frequency event audit for every render frame.
+
+Events should cover:
+
+```text
+AGENT_RUN_STARTED
+SIM_ACK_SCHEDULED
+SIM_ACKNOWLEDGED
+SIM_EXECUTION_STARTED
+SIM_POSITION_ADVANCED
+SIM_HOLD
+SIM_BREAKDOWN
+SIM_SIGNAL_LOST
+SIM_SIGNAL_RESTORED
+SIM_ROUTE_BLOCKED
+SIM_ARRIVED
+SIM_COMPLETED
+AGENT_RUN_STOPPED
+AGENT_RUN_FAILED
+```
+
+For high-frequency movement, prefer bounded/sampled position-history storage instead of inserting a heavyweight domain audit event for every tiny interpolation step.
+
+Preserve useful history without unbounded database growth.
+
+---
+
+## 31. Protected server execution
+
+Introduce a trusted simulation-worker execution path.
+
+Requirements:
+
+- non-public scheduler authorization;
+- no service-role key in browser;
+- no client-supplied actor UUID treated as authority;
+- server-side protected environment check;
+- exact scenario and unit relationship validation;
+- current incident lifecycle validation;
+- authorized controller enrollment at run creation;
+- current policy checks at tick time;
+- no arbitrary route ID/geometry injection;
+- no arbitrary task status updates;
+- no arbitrary position writes outside training scenarios.
+
+The worker may use an internal privileged database operation only if tightly constrained to simulation-owned data.
+
+Prefer one narrowly designed service-only advancement procedure to multiple broad public mutation endpoints.
+
+All relevant SECURITY DEFINER functions must use safe explicit search paths.
+
+Never grant the ordinary authenticated role a generic `advance_any_simulation` capability.
+
+---
+
+## 32. Automatic runner and operator controls
+
+Add a compact **Simulation Control Center** within the existing incident workspace.
+
+Example:
+
+```text
+SIMULATION CONTROL
+
+Scenario:
+Structure fire
+
+Status:
+RUNNING
+
+Time:
+00:08:32
+
+Speed:
+[1×] [5×] [10×]
+
+Runner:
+ACTIVE / MANUAL STEP / UNAVAILABLE
+
+Units:
+10 total
+5 moving
+2 waiting for ACK
+1 blocked
+2 idle
+
+[PAUSE SCENARIO]
+[ADVANCE ONE STEP]
+[STOP ALL AGENTS]
+```
+
+Provide explicit status if the scheduler has not run recently.
+
+Do not rely on the existence of an Edge Function as proof that scheduling is active.
+
+The operator should see:
+
+- latest successful tick time;
+- simulated clock time;
+- last runner error category, if any;
+- active agent count;
+- blocked agent count;
+- stale position count.
+
+No raw service secrets or internal stack traces in this UI.
+
+---
+
+## 33. Individual unit simulation panel
+
+When selecting a simulated unit on the map:
+
+```text
+GVC-1  [SIM]
+
+Scenario: Structure fire
+Simulation execution: MOVING
+
+Current command:
+MOVE_TO Hydrant H-000123
+
+Road route:
+4.8 km
+
+Progress:
+2.1 / 4.8 km
+
+Simulated speed:
+34 km/h
+
+Simulated remaining travel:
+4 min
+
+SIM ACK:
+Received after 3 s
+
+[PAUSE UNIT]
+[STOP]
+[INJECT FAILURE]
+[SHOW ROUTE]
+```
+
+Values must come from persisted simulation state or explicit simulated calculations.
+
+Do not confuse simulated remaining time with real-world ETA.
+
+Always show a persistent SIM label.
+
+Use the existing M14.5B selected-entity and M14.5D navigation panel infrastructure.
+
+Do not add a second map application.
+
+---
+
+## 34. Map animation
+
+Use the existing `OperationalMapCanvas` and M14.5C SimulationMapLayer.
+
+The backend is authoritative for committed SIM observations.
+
+The frontend may animate smoothly between successive committed SIM positions.
+
+Important:
+
+- visual animation is presentation only;
+- it must not create authoritative position observations;
+- it must not update task status;
+- it must not call the routing provider;
+- it must not extrapolate indefinitely after the last observation;
+- it must stop or show stale state when updates are missing.
+
+Preserve:
+
+- hydrant layer;
+- linked water sources;
+- sectors;
+- tactical objects;
+- RTS selection;
+- task-intent overlays;
+- navigation routes;
+- actual versus SIM provenance.
+
+When an agent moves, only its simulation position layer should update.
+
+Avoid recreating the MapLibre instance.
+
+---
+
+## 35. Realtime and refresh strategy
+
+M14.5C does not currently require a realtime subsystem.
+
+For M14.5E provide a bounded refresh strategy appropriate to current architecture.
+
+Prefer reuse of existing authorized Realtime infrastructure if compatible and safe.
+
+Otherwise use a bounded, visible-workspace position refresh interval.
+
+Requirements:
+
+- no unbounded national subscriptions;
+- no one-request-per-marker N+1 pattern;
+- refresh only authorized scenario data;
+- ignore stale async responses;
+- stop subscriptions/timers when leaving the scenario;
+- no high-frequency task/catalog refetch;
+- normal manual refresh fallback;
+- no browser-owned authoritative simulation tick.
+
+Background simulation must continue based on the server runner, not on a browser setInterval.
+
+---
+
+## 36. Simulated telemetry freshness
+
+Preserve a meaningful difference between:
+
+```text
+SIM CURRENT
+SIM STALE
+SIM SIGNAL LOST
+SIM UNKNOWN
+```
+
+Show the last observed simulated position and time.
+
+Do not turn a stale SIM position into LIVE actual GPS.
+
+A simulation clock tick does not necessarily mean a new externally visible location observation exists.
+
+For communication-loss scenarios, stop updating the externally visible position projection while the internal agent run may maintain a separate simulated state.
+
+When communication is restored:
+
+- publish a new properly attributed simulated observation;
+- record restoration;
+- do not claim the previous stale positions were fresh at the time.
+
+---
+
+## 37. Movement completion
+
+At the end of the stored route:
+
+- clamp route progress to final distance;
+- set simulated speed to zero;
+- publish a final SIM position at the valid road route endpoint;
+- record SIM_ARRIVED;
+- optionally wait configured completion delay;
+- record SIM_COMPLETED.
+
+Do not silently shift the final SIM position from the snapped road endpoint onto an off-road hydrant coordinate.
+
+Preserve original task target and snapped destination separately.
+
+If endpoint access distance is significant, display the distinction.
+
+A virtual vehicle reaching a road access point does not mean the firefighter physically reached a hydrant, entered a building or completed a rescue.
+
+No real task COMPLETED transition is made.
+
+---
+
+## 38. Scenario-specific training behavior
+
+Support existing templates:
+
+- STRUCTURE_FIRE
+- WILDFIRE
+- TRAFFIC_ACCIDENT
+- SANDBOX
+
+For this milestone, templates influence:
+
+- initial simulation behavior presets;
+- response timing;
+- unit counts/availability;
+- optional seeded failure probabilities.
+
+Do not simulate:
+
+- wildfire spread;
+- structural collapse;
+- actual water pressure/flow;
+- fire suppression outcomes;
+- casualties;
+- medical treatment;
+- real hazardous-material physics.
+
+Those require separate authoritative models.
+
+The simulator is initially about **command flow, movement, acknowledgement visualization, map operation and resilience**.
+
+---
+
+## 39. Deterministic training event injection
+
+Provide a small built-in training-event editor.
+
+Suggested workflow:
+
+```text
+Add event
+
+Type:
+Vehicle breakdown
+
+Target:
+GVC-2
+
+Trigger:
+After 60% of route
+
+[ADD EVENT]
+```
+
+Other supported triggers:
+
+```text
+At simulated time
+After ACK delay
+At route progress percentage
+On agent execution start
+```
+
+Event definitions are declarative and allowlisted.
+
+Do not permit arbitrary JavaScript scripts.
+
+Do not build a general scripting runtime.
+
+Persist:
+
+```text
+event type
+target unit/run
+trigger type
+trigger value
+configuration
+seed / deterministic choice
+enabled
+fired_at
+```
+
+A scheduled event may fire only once per intended run.
+
+Replay from a completely clean incident requires a fresh scenario.
+
+---
+
+## 40. Performance requirements
+
+Target an MVP workload of:
+
+- 3–30 simulated units in ordinary training;
+- up to 100 units in a controlled stress scenario;
+- multiple concurrent navigation sessions;
+- repeated movement ticks;
+- one or more independent ongoing tasks per unit.
+
+Requirements:
+
+- bounded worker batch size;
+- bounded work time per Edge invocation;
+- no N+1 database query per marker when avoidable;
+- no per-frame database writes;
+- no per-tick OSRM requests;
+- no MapLibre recreation;
+- bounded events/position-history retention;
+- paginated agent-event reads;
+- batch scenario-position fetches;
+- sensible update interval;
+- rate-limited scenario controls;
+- no unbounded task polling;
+- no unbounded worker retries.
+
+The simulator should prioritize consistent authoritative state over a high animation frame rate.
+
+Client-side interpolation may provide smooth appearance.
+
+Document workload caps and configuration.
+
+---
+
+## 41. Security and privacy
+
+All training movement must stay scoped to an explicitly authorized simulation scenario.
+
+No action may:
+
+- mutate actual GPS tables;
+- alter real hydrant status;
+- consume inventory stock;
+- release a real unit;
+- change actual task assignment status without valid domain authority;
+- impersonate a responder;
+- send CAD/112 requests;
+- trigger operational notifications to real personnel;
+- issue drone commands;
+- change permanent vehicle location;
+- change organization security roles;
+- bypass incident command hierarchy.
+
+Command authority remains M14.5A.
+
+Simulation-control authority remains M14.5C.
+
+Route-planning authority remains M14.5D.
+
+Engine execution authority must be narrow, protected and training-specific.
+
+No fake accounts, JWTs or role assignments.
+
+---
+
+## 42. Failure recovery
+
+Explicitly handle:
+
+### Worker crash
+
+Previously committed progress remains valid.
+
+Retry advances from persisted state.
+
+No duplicate ACK/events.
+
+### Duplicate scheduler invocation
+
+One advancement per scenario tick.
+
+### Lost network response
+
+Durable operation result and persisted state remain authoritative.
+
+### Simulation disabled
+
+Stop future agent advancement immediately.
+
+Do not remove training classification.
+
+### Scenario paused
+
+Freeze simulation clock and positions.
+
+### Scenario finished
+
+Reject future advancement.
+
+### Unit released
+
+Stop autonomous movement and preserve history.
+
+### Assignment cancelled
+
+Stop dependent simulated run.
+
+### Route superseded
+
+Do not continue silently along an invalid route.
+
+### Missing route geometry
+
+Enter SIM_BLOCKED/SIM_UNABLE as appropriate.
+
+Do not approximate a straight-line route.
+
+### Position manually changed
+
+Stop or pause the active autonomous run and require explicit reconciliation.
+
+### Scheduler unavailable
+
+Display runner status as unavailable.
+
+Do not pretend background movement continues.
+
+---
+
+## 43. Localization
+
+Support Slovenian and German.
+
+Translate:
+
+- Autonomous simulation
+- Simulation runner
+- Training mode
+- Simulation clock
+- Time scale
+- Start autonomous execution
+- Pause unit
+- Resume unit
+- Stop unit
+- Virtual acknowledgement
+- Awaiting simulated acknowledgement
+- Following road route
+- Simulated arrival
+- Simulated completion
+- Position stale
+- Signal lost
+- Vehicle breakdown
+- Road blocked
+- Inject event
+- Clear failure
+- Advance one step
+- Runner unavailable
+- Manual step mode
+- Route required
+- Simulation disabled
+- Invalid simulation state
+- Conflict
+- Retry
+- Recalculate route
+- Training-only
+- Not a real incident
+
+Use readable labels and accessible controls.
+
+Do not rely only on color to distinguish SIM state.
+
+---
+
+## 44. Database deliverables
+
+This milestone is expected to require one or more new **forward-only migrations**.
+
+Potential deliverables:
+
+```text
+simulation_agent_runs
+simulation_agent_events
+simulation_scenario_clock
+simulation_event_injections
+simulation worker receipts/leases
+```
+
+Names are conceptual.
+
+Adapt to repository conventions.
+
+Also extend the existing M14.5C simulated-position projection safely to allow server-engine provenance.
+
+Do not alter historical migrations.
+
+Do not introduce direct application-table WRITE grants.
+
+Use narrow authorized controller commands and service-only simulation tick functions.
+
+Create suitable unique indexes, version checks, immutable-history guards and RLS/read projections.
+
+Preserve existing scenario and incident consistency.
+
+---
+
+## 45. Edge Function deliverables
+
+Add the bounded autonomous simulator worker.
+
+Suggested:
+
+```text
+supabase/functions/incident-simulation-runner/index.ts
+```
+
+Required characteristics:
+
+- authenticated trusted scheduler calls;
+- bounded processing;
+- guarded environment;
+- secure server/database integration;
+- no public arbitrary tick endpoint;
+- no infinite long-running loops;
+- no direct OSRM calls during ticks;
+- no secrets in browser;
+- concise sanitized error responses;
+- explicit handling of duplicate invocations.
+
+Add an operator-authorized manual stepping pathway that uses the same core engine.
+
+If existing Edge patterns are better suited, adapt accordingly.
+
+Do not create multiple independent simulation engines.
+
+---
+
+## 46. Web deliverables
+
+Integrate into existing IncidentWorkspace.
+
+Expected UI features:
+
+1. Autonomous simulation controls.
+2. Scenario time scale.
+3. Background runner status.
+4. Unit autonomous execution controls.
+5. Action/assignment to simulation-run linkage.
+6. Simulated ACK and progress display.
+7. Existing road-route reuse.
+8. Unit route-progress indicator.
+9. Failure injection controls.
+10. Simulation event history.
+11. Smooth SIM marker updates.
+12. Persistent SIM labeling.
+13. Clear operational status versus simulated status.
+14. SI/DE localization.
+
+Reuse existing components where possible.
+
+Do not introduce a new Web application or separate MapLibre map.
+
+Do not broadly redesign unrelated Admin, Hydrants, Plans or Exchange modules.
+
+---
+
+## 47. Documentation
+
+Update:
+
+`docs/SPEC-M14-INCIDENT-OPERATIONS.md`
+
+Add M14.5E architecture:
+
+- trusted simulation engine;
+- agent lifecycle;
+- simulated execution states;
+- distinction from M14.5A task states;
+- separation from M14.5D navigation status;
+- simulation clock;
+- deterministic route following;
+- position provenance;
+- scheduler;
+- event injection;
+- worker idempotency;
+- training isolation;
+- manual scenario configuration;
+- performance bounds;
+- operator/deployment requirements;
+- known limitations.
+
+Explicitly document why virtual acknowledgements do not impersonate actual human acknowledgements.
+
+Do not remove earlier M14 history.
+
+---
+
+## 48. Manual deployment order
+
+Codex must NOT deploy anything.
+
+Document this sequence for the user:
+
+1. Verify all required M14 migrations through M14.5D are applied in the intended training database.
+2. Confirm that the target Supabase project is the dedicated training/staging environment.
+3. Manually apply the new M14.5E forward-only SQL migration(s).
+4. Manually deploy any required compatible Edge Function updates.
+5. Manually deploy `incident-simulation-runner`.
+6. Manually configure the protected scheduler invocation in the training environment.
+7. Manually deploy compatible Web code.
+8. Use existing protected simulation operator enrollment.
+9. Enable the simulation backend only after verifying the correct environment.
+10. Run user-controlled manual acceptance scenarios.
+
+Do not enable a simulation runner on a production project by default.
+
+Provide operator guidance without embedding real secrets.
+
+---
+
+## 49. Manual acceptance criteria
+
+Implement so the user can later manually verify:
+
+1. PR #63 functionality remains present.
+2. Simulation remains disabled by default.
+3. Production incidents cannot be attached to autonomous runs.
+4. Protected TRAINING configuration is required.
+5. Only authorized operators can configure autonomous runs.
+6. Background runner cannot be called as an unrestricted public API.
+7. No fake Auth users/JWTs/profiles are created.
+8. A SIM unit can receive an ordinary M14.5A MOVE_TO task.
+9. Existing M14.5D route can be selected for that assignment.
+10. Route is not recalculated unnecessarily at every tick.
+11. Autonomous run starts only after explicit authorized action.
+12. Virtual ACK is generated after configured simulated delay.
+13. Virtual ACK does not populate a fake real-user acknowledgement.
+14. Command task and simulator execution statuses are clearly separate.
+15. Virtual unit follows the road route rather than a straight line.
+16. Marker position stays SIMULATED.
+17. No ACTUAL_GPS position is fabricated.
+18. Original road snapping and task target remain unchanged.
+19. Simulation supports 1× time.
+20. Simulation supports 5× time.
+21. Simulation supports 10× time.
+22. Pause freezes simulated time and movement.
+23. Resume does not create a catch-up teleport.
+24. Speed and heading are simulation-specific.
+25. Worker can continue when browser is closed if scheduler is configured.
+26. Manual step uses the same simulation engine.
+27. Duplicate ticks do not move units twice.
+28. Repeated ACK ticks do not create duplicate events.
+29. Worker crash does not erase committed progress.
+30. Scenario finish prevents further autonomous movement.
+31. Released units stop moving.
+32. Cancelled tasks stop their simulation runs.
+33. Old route revisions remain immutable.
+34. Route supersession does not silently change an active run.
+35. Vehicle breakdown stops simulated movement.
+36. Road blockage stops simulated movement.
+37. Signal loss shows stale position, not false fresh observations.
+38. No-response profile prevents virtual ACK.
+39. Hold command can stop simulated movement.
+40. REQUEST_STATUS generates clearly simulated status data.
+41. Simulated arrival does not automatically complete a real task.
+42. Simulated arrival does not claim unit safety.
+43. Manual position editing cannot race with autonomous movement.
+44. Reset preserves historic tasks and route revisions.
+45. Scenario events are deterministic from seed/configuration.
+46. MapLibre remains stable across position updates.
+47. Existing RTS click/box/lasso selection still works.
+48. Existing M14.5C manual SIM controls remain available.
+49. Existing Hydrants/COP/Navigation map layers remain intact.
+50. SI localization is complete.
+51. DE localization is complete.
+52. No tests are run by Codex.
+53. No build/lint/typecheck/CI is run by Codex.
+54. No SQL migration or Edge Function is deployed by Codex.
+55. PR is created but not merged.
+
+These are **manual acceptance targets for the user**, not instructions to run tests or create automated test files.
+
+---
+
+## 50. Strict implementation rules
+
+**IMPLEMENTATION ONLY.**
+
+Do not add or modify tests.
+
+Do not run:
+
+- tests;
+- build;
+- lint;
+- typecheck;
+- CI;
+- browser automation;
+- emulator;
+- Docker;
+- runtime smoke checks;
+- manual testing;
+- performance benchmarks;
+- post-implementation validation;
+- migrations;
+- Supabase deployments;
+- Web deployments;
+- Android deployments;
+- staging infrastructure configuration;
+- scheduler configuration in a live environment.
+
+Do not execute simulator ticks against any real database.
+
+Do not modify unrelated Android/KAPT/KSP/Gradle local settings.
+
+Do not change NAV3 capacity.
+
+Do not alter OSRM/Oracle/Caddy infrastructure.
+
+Do not modify previously applied migrations.
+
+Do not use `git reset --hard`.
+
+Reuse existing dependencies.
+
+Prefer zero new dependencies.
+
+Do not add a game engine, AI-agent framework or physics engine.
+
+Do not replace existing routing logic.
+
+Do not introduce unrelated tactical business rules.
+
+Do not implement autonomous actions outside explicitly authorized training scenarios.
+
+One implementation branch.
+
+**ONE PR ONLY.**
+
+Do not merge.
+
+Use `[skip ci]` in the implementation commit message where appropriate.
+
+Stop after creating the PR.
+
+---
+
+## 51. PR summary requirements
+
+Provide:
+
+1. Changed files.
+2. New SQL migration filenames.
+3. Simulation agent identity and state machine.
+4. Scenario clock and time scaling.
+5. Server-side scheduler/worker architecture.
+6. Trusted runner authentication and authorization.
+7. Agent execution schema.
+8. Existing M14.5A task-assignment linkage.
+9. Existing M14.5D route-revision linkage.
+10. Deterministic road-following algorithm.
+11. Original versus snapped position handling.
+12. SIM position provenance.
+13. Why simulated ACK is not real ACK.
+14. Why navigation PLANNED is not silently changed to ACTIVE.
+15. Failure-injection behavior.
+16. Pause/resume/reset semantics.
+17. Concurrency, leases and exact retries.
+18. Scenario event history and attribution.
+19. UI/map integration.
+20. SI/DE coverage.
+21. Performance and retention bounds.
+22. Manual SQL application order.
+23. Manual Edge Function deployment.
+24. Manual scheduler setup.
+25. Manual Web deployment requirements.
+26. Known limitations and deferred features.
+27. Explicit statement that tests/build/lint/typecheck/CI were not run.
+28. Explicit statement that no SQL/function/app was deployed.
+29. Explicit statement that no simulator was executed.
+30. Confirmation that ONE PR was created and not merged.
+
+**CREATE ONE PR. DO NOT MERGE. DO NOT TEST. DO NOT DEPLOY.**
+
