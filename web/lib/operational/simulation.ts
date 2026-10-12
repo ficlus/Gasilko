@@ -9,7 +9,7 @@ export type SimulationEvent={id:string;sequence:string;event_type:string;inciden
 export type SimulationView={enabled:boolean;scenario:Scenario|null;positions:SimulationPosition[];candidates:{id:string;name:string}[];events:SimulationEvent[];can_control:boolean;can_provision?:boolean;next_ordinal?:number;capacity_remaining?:number};
 export type SimulationAction='PROVISION'|'ATTACH'|'SET_POSITION'|'RESET_POSITION'|'REMOVE'|'START'|'PAUSE'|'RESUME'|'RESET'|'FINISH';
 export const simulationReads=['simulation_environment','simulation_labels','simulation_read','simulation_overview'];
-export const simulationErrors=['SIMULATION_DISABLED','INVALID_SIMULATION_STATE','INVALID_SIMULATION_UNIT','INVALID_SIMULATION_POSITION','SIMULATION_LIMIT','SIMULATION_RESOURCE_DISABLED'];
+export const simulationErrors=['SIM_STOP_BEFORE_EDIT','SIMULATION_DISABLED','INVALID_SIMULATION_STATE','INVALID_SIMULATION_UNIT','INVALID_SIMULATION_POSITION','SIMULATION_LIMIT','SIMULATION_RESOURCE_DISABLED'];
 export type SimulationSetup={id:string;template:SimulationTemplate;seed:number;radius_m:number};
 export const defaultSimulationSetup=():SimulationSetup=>({id:crypto.randomUUID(),template:'STRUCTURE_FIRE',seed:1,radius_m:500});
 /** Same bounded spherical placement as the SQL fixture generator. Never a road/GPS model. */

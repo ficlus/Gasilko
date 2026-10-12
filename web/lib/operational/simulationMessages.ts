@@ -1,5 +1,6 @@
 import type {Locale} from '../i18n';
 const messages:Record<string,readonly [string,string]>={
+ 'SIM_STOP_BEFORE_EDIT':['Pred urejanjem položaja ali ponastavitvijo ustavi avtonomno izvajanje.','Vor Positionsänderung oder Zurücksetzen autonome Ausführung stoppen.'],
  "banner": [
   "SIMULACIJA — NI RESNIČNA INTERVENCIJA",
   "SIMULATION — KEIN REALER EINSATZ"

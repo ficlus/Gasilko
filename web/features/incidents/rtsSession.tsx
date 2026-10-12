@@ -6,7 +6,7 @@ import {recipientKey,typingTarget,type RtsMode,type RtsRecipient,type TargetPrev
 
 type PickOptions={toggle?:boolean;range?:boolean;list:string};
 type RtsController={
- enabled:boolean;locked:boolean;blocked:boolean;navigationEditing:boolean;setNavigationEditing:Dispatch<SetStateAction<boolean>>;externalEditing:boolean;setExternalEditing:Dispatch<SetStateAction<boolean>>;hasPositionLayers:boolean;setHasPositionLayers:Dispatch<SetStateAction<boolean>>;copEditing:boolean;setCopEditing:Dispatch<SetStateAction<boolean>>;
+ enabled:boolean;locked:boolean;blocked:boolean;agentEditing:boolean;setAgentEditing:Dispatch<SetStateAction<boolean>>;navigationEditing:boolean;setNavigationEditing:Dispatch<SetStateAction<boolean>>;externalEditing:boolean;setExternalEditing:Dispatch<SetStateAction<boolean>>;hasPositionLayers:boolean;setHasPositionLayers:Dispatch<SetStateAction<boolean>>;copEditing:boolean;setCopEditing:Dispatch<SetStateAction<boolean>>;
  mode:RtsMode;requestMode:(mode:RtsMode)=>void;cancelMode:()=>void;
  recipients:RtsRecipient[];setRecipients:Dispatch<SetStateAction<RtsRecipient[]>>;
  pick:(row:RtsRecipient,visible:readonly RtsRecipient[],options:PickOptions)=>void;
@@ -29,7 +29,8 @@ const emptyTarget:TargetPreview={target:{kind:'NONE'},geometry:null,label:''};
 export function RtsProvider({enabled,locked,onAccessLost,children}:{enabled:boolean;locked:boolean;onAccessLost:()=>void;children:ReactNode}){
  const root=useRef<HTMLDivElement>(null),latest=useRef({enabled,locked,onAccessLost});latest.current={enabled,locked,onAccessLost};
  const [simulationEditing,setExternalEditing]=useState(false),[navigationEditing,setNavigationEditing]=useState(false);
- const externalEditing=simulationEditing||navigationEditing;
+ const [agentEditing,setAgentEditing]=useState(false);
+ const externalEditing=simulationEditing||navigationEditing||agentEditing;
  const [hasPositionLayers,setHasPositionLayers]=useState(false);
  const [blocked,setBlocked]=useState(false),[copEditing,setCopEditing]=useState(false),[mode,setMode]=useState<RtsMode>('NORMAL');
  const [recipients,writeRecipients]=useState<RtsRecipient[]>([]),selectedRef=useRef<RtsRecipient[]>([]);
@@ -95,7 +96,7 @@ export function RtsProvider({enabled,locked,onAccessLost,children}:{enabled:bool
   const kinds=action?.configuration.target_types.filter(k=>k!=='NONE')??[];
   setMapTargetKind((kinds.includes(preview.target.kind)?preview.target.kind:kinds.includes('COORDINATE')?'COORDINATE':kinds[0]??'NONE') as TaskTarget['kind']);
  },[action?.configuration.id]);
- const value:RtsController={enabled,locked,blocked,navigationEditing,setNavigationEditing,externalEditing,setExternalEditing,hasPositionLayers,setHasPositionLayers,copEditing,setCopEditing,mode,requestMode,cancelMode,recipients,setRecipients,pick,selectMany,clear,remove,multiTouch,setMultiTouch,merge,setMerge,
+ const value:RtsController={enabled,locked,blocked,agentEditing,setAgentEditing,navigationEditing,setNavigationEditing,externalEditing,setExternalEditing,hasPositionLayers,setHasPositionLayers,copEditing,setCopEditing,mode,requestMode,cancelMode,recipients,setRecipients,pick,selectMany,clear,remove,multiTouch,setMultiTouch,merge,setMerge,
   action,setAction,preview,setTarget,hydrateTarget,mapTargetKind,setMapTargetKind,open,setOpen,launch,openPalette,intent,setIntent,message,setMessage,revoke};
  return <RtsContext.Provider value={value}><div ref={root} className="rts-workspace" onKeyDown={e=>{
   if(e.defaultPrevented||typingTarget(e.target)||e.nativeEvent.isComposing||!enabled||locked||blocked||copEditing||externalEditing||e.target instanceof Element&&e.target.closest('dialog'))return;

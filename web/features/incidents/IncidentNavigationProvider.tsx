@@ -47,7 +47,7 @@ export function IncidentNavigationProvider({account,org,incidentId,refresh:exter
  useEffect(()=>{if(blocked){setPicking(false);setCandidate(null);setHistoric(null);setData(null);}},[blocked]);
  useEffect(()=>{if(proposal)dialog.current?.showModal();return()=>dialog.current?.close();},[!!proposal]);
  function select(id:string|null){if(pending||busy||proposal)return;setAssignment(id);setPage(0);setSessionId(null);setHistoric(null);setBefore(null);setError('');setPicking(false);setCandidate(null);}
- function review(request:Request){if(blocked||busy||pending||rts.copEditing||sim?.move||sim?.proposal||rts.open)return;setError('');setPicking(false);rts.cancelMode();setProposal(request);}
+ function review(request:Request){if(blocked||busy||pending||rts.copEditing||sim?.move||sim?.proposal||rts.open||rts.agentEditing)return;setError('');setPicking(false);rts.cancelMode();setProposal(request);}
  const row=data?.rows.find(a=>a.id===assignment);
  function prepare(source:'SIMULATED_POSITION'|'MANUAL_PLANNING_POINT'){
   if(!row?.can_plan||(source==='MANUAL_PLANNING_POINT'&&!candidate))return;

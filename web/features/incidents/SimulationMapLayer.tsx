@@ -1,11 +1,13 @@
 'use client';
-import {useEffect,useMemo} from 'react';
+import {useEffect,useMemo,useRef} from 'react';
 import type {Map,GeoJSONSource} from 'maplibre-gl';
 import type {Locale} from '../../lib/i18n';
 import {validPosition} from '../../lib/operational/target';
 import {recipientKey,type RtsRecipient} from '../../lib/operational/rts';
 import {simulationText} from '../../lib/operational/simulationMessages';
 import {useSimulation,SimulationBanner} from './SimulationProvider';
+import {useAutonomousSimulation} from './AutonomousSimulationProvider';
+import {agentText} from '../../lib/operational/agentMessages';
 import {useRtsSession} from './rtsSession';
 import type {RecipientPositionLayer} from './RtsMapInteraction';
 const empty={type:'FeatureCollection' as const,features:[]};
@@ -24,7 +26,8 @@ export function useSimulationPositionLayer():RecipientPositionLayer|null{
  },[sim?.data]);
 }
 export function SimulationMapLayer({map,locale}:{map:Map;locale:Locale}){
- const sim=useSimulation(),rts=useRtsSession(),t=simulationText(locale),s=sim?.data?.scenario;
+ const sim=useSimulation(),agents=useAutonomousSimulation(),rts=useRtsSession(),t=simulationText(locale),at=agentText(locale),s=sim?.data?.scenario;
+ const previous=useRef<globalThis.Map<string,{coordinate:number[];version:string}>>(new globalThis.Map());
  const visible=!!sim?.data?.enabled&&!!s&&s.status!=='FINISHED';
  useEffect(()=>{
   if(!visible)return;
@@ -43,10 +46,28 @@ export function SimulationMapLayer({map,locale}:{map:Map;locale:Locale}){
   const features=(sim?.data?.positions??[]).filter(p=>p.scenario_id===s.id&&p.incident_id===s.incident_id&&validPosition([p.longitude,p.latitude])).map(p=>({
    type:'Feature' as const,id:p.incident_unit_id,geometry:{type:'Point' as const,coordinates:[p.longitude,p.latitude]},
    properties:{id:p.incident_unit_id,recipient_id:p.incident_unit_id,recipient_type:'INCIDENT_UNIT',position_origin:'SIMULATED',scenario_id:s.id,incident_id:s.incident_id,
-    selected:rts.recipients.some(r=>r.type==='INCIDENT_UNIT'&&r.id===p.incident_unit_id),label:'SIM · '+p.callsign+' · '+t(Date.now()-Date.parse(p.observed_at)>300000?'older':'current')}
+    selected:rts.recipients.some(r=>r.type==='INCIDENT_UNIT'&&r.id===p.incident_unit_id),label:'SIM · '+p.callsign+' · '+at(agents?.data?.signals[p.incident_unit_id]??(!Number.isFinite(Date.parse(p.observed_at))?'unknown':Date.now()-Date.parse(p.observed_at)>30000?'stalePosition':'current'))}
   }));
-  (map.getSource('simulation-units') as GeoJSONSource|undefined)?.setData({type:'FeatureCollection',features});
- },[map,visible,s,sim?.data?.positions,rts.recipients,locale]);
+  const source=map.getSource('simulation-units') as GeoJSONSource|undefined;
+  const old=previous.current,next=new globalThis.Map<string,{coordinate:number[];version:string}>();
+  for(const p of sim?.data?.positions??[])next.set(p.incident_unit_id,{coordinate:[p.longitude,p.latitude],version:p.version});
+  previous.current=next;
+  let frame=0;const start=performance.now();
+  const reduced=window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const animate=(now:number)=>{
+   const fraction=Math.min(1,(now-start)/800);
+   source?.setData({type:'FeatureCollection',features:features.map(f=>{
+    const prior=old.get(f.id),current=next.get(f.id);
+    if(!prior||!current||prior.version===current.version||reduced||agents?.data?.signals[f.id]||document.visibilityState!=='visible')return f;
+    const delta=((current.coordinate[0]-prior.coordinate[0]+540)%360)-180;
+    const longitude=prior.coordinate[0]+delta*fraction;
+    return {...f,geometry:{...f.geometry,coordinates:[longitude-360*Math.floor((longitude+180)/360),prior.coordinate[1]+(current.coordinate[1]-prior.coordinate[1])*fraction]}};
+   })});
+   if(fraction<1&&document.visibilityState==='visible')frame=requestAnimationFrame(animate);
+  };
+  frame=requestAnimationFrame(animate);
+  return()=>cancelAnimationFrame(frame);
+ },[map,visible,s,sim?.data?.positions,rts.recipients,locale,agents?.data?.signals]);
  useEffect(()=>{
   if(!sim?.move)return;const canvas=map.getCanvas(),previous=canvas.style.cursor;canvas.style.cursor='crosshair';
   return()=>{canvas.style.cursor=previous;};
