@@ -1,6 +1,8 @@
 'use client';
 import {useEffect,useRef} from 'react';
 import {type Map,type GeoJSONSource} from 'maplibre-gl';
+import {IncidentNavigationLayer} from './IncidentNavigationLayer';
+import {useIncidentNavigation} from './IncidentNavigationProvider';
 import {useRts} from './rtsSession';
 import {useWorkspace} from './workspace';
 import {SimulationMapLayer,useSimulationPositionLayer} from './SimulationMapLayer';
@@ -22,6 +24,7 @@ const ids=['cop-primary','cop-sectors','cop-markers','cop-zones','cop-hydrants',
 const features=(items:{id:string;geometry:Geometry;label:string;kind?:string;status?:string}[])=>({type:'FeatureCollection' as const,
  features:items.map(i=>({type:'Feature' as const,id:i.id,geometry:i.geometry,properties:{id:i.id,label:i.label,kind:i.kind??'',status:i.status??''}}))});
 export default function CopMap(props:Props){
+ const navigation=useIncidentNavigation();
  const rts=useRts(),workspace=useWorkspace(),sim=useSimulation(),positionLayer=useSimulationPositionLayer();
  const recipientLayers=positionLayer?[positionLayer]:[];
  const c=props.cop,primary:Position|null=c.incident.longitude!==null&&c.incident.latitude!==null?[c.incident.longitude,c.incident.latitude]:null;
@@ -31,6 +34,7 @@ export default function CopMap(props:Props){
   ...c.links.flatMap(l=>l.hydrant?.longitude!=null&&l.hydrant.latitude!=null?[[l.hydrant.longitude,l.hydrant.latitude] as Position]:[])];
  return <OperationalMapCanvas locale={props.locale} label={incidentText(props.locale)('copTitle')} initialPoints={points} onBounds={props.onBounds}
   onClick={(map,event)=>{
+   if(navigation?.picking){if(!rts?.locked&&!props.drawing)navigation.point([event.lngLat.lng,event.lngLat.lat]);return;}
    if(sim?.move){if(!rts?.locked&&!props.drawing)sim.pickPosition([event.lngLat.lng,event.lngLat.lat]);return;}
    if(rts?.mode==='SELECT_BOX'||rts?.mode==='SELECT_LASSO')return;
    if(rts?.mode==='CHOOSE_TARGET'){
@@ -66,7 +70,7 @@ export default function CopMap(props:Props){
    const clickable=map.getStyle().layers.filter(l=>(l.id.startsWith('cop-')||l.id.startsWith('context-'))&&!l.id.startsWith('cop-draft')).map(l=>l.id);
    const id=map.queryRenderedFeatures(event.point,{layers:clickable}).find(f=>typeof f.properties?.id==='string')?.properties?.id;
    if(typeof id==='string')props.onSelect(id);
-  }}>{map=><><CopRendering map={map} props={props}/><TaskIntentLayers map={map} locale={props.locale}/><SimulationMapLayer map={map} locale={props.locale}/><RtsMapInteraction map={map} locale={props.locale} layers={recipientLayers}/></>}</OperationalMapCanvas>;
+  }}>{map=><><CopRendering map={map} props={props}/><TaskIntentLayers map={map} locale={props.locale}/><SimulationMapLayer map={map} locale={props.locale}/><IncidentNavigationLayer map={map} locale={props.locale}/><RtsMapInteraction map={map} locale={props.locale} layers={recipientLayers}/></>}</OperationalMapCanvas>;
 }
 function CopRendering({map,props}:{map:Map;props:Props}){
  const fitted=useRef('');

@@ -1,3 +1,4 @@
+import {navigationErrors,navigationReads} from '../../../lib/operational/navigation';
 import {simulationErrors,simulationReads} from '../../../lib/operational/simulation';
 import {taskErrors,taskReads} from '../../../lib/operational/tasks';
 import {resourceErrors} from '../../../lib/operational/model';
@@ -7,8 +8,8 @@ import {loadAccount} from '../../../lib/auth/load';
 import {mutationNames} from '../../../lib/incidents/model';
 import {copErrors} from '../../../lib/incidents/cop';
 
-const reads = [...simulationReads,'simulation_command',...taskReads,'incident_resource_selection_page','incident_team_template','incident_entry','incident_list','incident_context','incident_timeline_page','incident_candidates','incident_command_candidates','incident_command_view','incident_command_inbox','incident_cop','incident_cop_hydrants','incident_resources','incident_unit_candidates','incident_resource_candidates','incident_crew_candidates','incident_crew_history','incident_unit_leader_candidates'];
-const safeErrors = new Set([...simulationErrors,'NOT_AUTHORIZED','STALE_VERSION','INVALID_TRANSITION','INVALID_COMMANDER','INVALID_PARTICIPANT','INCIDENT_TERMINAL','OPERATION_REUSED','VALIDATION_FAILED','INVALID_STATE',
+const reads = [...navigationReads,...simulationReads,'simulation_command',...taskReads,'incident_resource_selection_page','incident_team_template','incident_entry','incident_list','incident_context','incident_timeline_page','incident_candidates','incident_command_candidates','incident_command_view','incident_command_inbox','incident_cop','incident_cop_hydrants','incident_resources','incident_unit_candidates','incident_resource_candidates','incident_crew_candidates','incident_crew_history','incident_unit_leader_candidates'];
+const safeErrors = new Set([...navigationErrors,...simulationErrors,'NOT_AUTHORIZED','STALE_VERSION','INVALID_TRANSITION','INVALID_COMMANDER','INVALID_PARTICIPANT','INCIDENT_TERMINAL','OPERATION_REUSED','VALIDATION_FAILED','INVALID_STATE',
  'INVALID_COMMAND_HIERARCHY','INVALID_COMMAND_ROLE','INVALID_COMMAND_CANDIDATE','TRANSFER_NOT_CURRENT','TRANSFER_EXPIRED','TRANSFER_ALREADY_PENDING','LEAD_TRANSFER_REQUIRES_CONSENT','COMMANDER_STILL_VALID','PARTICIPANT_HAS_ACTIVE_COMMAND',...copErrors,...resourceErrors,...taskErrors]);
 export async function POST(request:Request) {
  const headers={'Cache-Control':'no-store'};
@@ -22,6 +23,15 @@ export async function POST(request:Request) {
   const input=JSON.parse(text) as {name?:unknown;args?:unknown};
   if(typeof input.name!=='string'||![...reads,...Object.values(mutationNames)].includes(input.name)||!input.args||typeof input.args!=='object'||Array.isArray(input.args))
    return NextResponse.json({error:'VALIDATION_FAILED'},{status:400,headers});
+  if(input.name==='incident_navigation_calculate'){
+   const result=await client.functions.invoke('incident-navigation',{body:input.args});
+   if(result.error){
+    let code='SERVER';
+    try{if(result.error.context instanceof Response){const body=await result.error.context.json();if(safeErrors.has(body.error))code=body.error;}}catch{}
+    return NextResponse.json({error:code},{status:code==='NOT_AUTHORIZED'?403:code==='STALE_VERSION'?409:422,headers});
+   }
+   return NextResponse.json({data:result.data},{headers});
+  }
   const {data,error}=await client.rpc(input.name,input.args);
   if(error) return NextResponse.json({error:safeErrors.has(error.message)?error.message:error.code==='42501'?'NOT_AUTHORIZED':/^22|^23/.test(error.code??'')?'VALIDATION_FAILED':'SERVER'}, {status:400,headers});
   if(input.name==='incident_entry'||input.name==='incident_command_inbox'){
