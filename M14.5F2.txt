@@ -1,0 +1,571 @@
+# CODEX IMPLEMENTATION PROMPT — M14.5F2
+## RTS Context Commands & Direct Map Interaction
+
+You are implementing **M14.5F2 — RTS Context Commands & Direct Map Interaction** in the existing Gasilko monorepo.
+
+**Prerequisite:** M14.5F1, including the Classic / Command Map switch and responsive Command Map workspace, must be merged into the working branch before implementation.
+
+Create **one focused pull request targeting `main`**. Do not merge it.
+
+## 1. Product goal
+
+Make the **Poveljniška karta** operate like an RTS command interface, adapted to real fire-service command operations.
+
+The primary interaction is:
+
+**Select units → right-click a target on the map → choose an available action → review → confirm.**
+
+The user must also be able to start from the destination:
+
+**Right-click an empty map location → choose Move To → select recipient units → review → confirm.**
+
+Context menus must also work on existing units, hydrants, and already-supported COP objects.
+
+Do not implement unit drag-and-drop.
+
+The existing **Klasični pogled** and all advanced forms/dropdowns must remain available and unchanged in behavior.
+
+## 2. Inspect existing architecture before editing
+
+Inspect the actual branch, including:
+
+- `web/features/incidents/workspace.tsx`
+- `web/features/incidents/IncidentViewSwitch.tsx`
+- `web/features/incidents/IncidentCop.tsx`
+- `web/features/incidents/IncidentTasks.tsx`
+- `web/features/incidents/RtsSelectionToolbar.tsx`
+- `web/features/incidents/rtsSession.tsx`
+- `web/features/map/OperationalMapCanvas.tsx`
+- COP layer/feature registration and hit-testing
+- hydrant context layer and hydrant identifiers
+- the existing M14.5A action catalog and task API
+- existing task target types, validation, recipients and command permission checks
+- current MapLibre click, box/lasso, editing, navigation, and SIM interactions
+- responsive Command Map panel behavior introduced in F1
+- incident role/authorization handling
+- Slovenian/German localization
+
+Do not invent component names, backend methods, database fields, or unsupported commands.
+
+**Reuse the current RTS session and existing task/action engine.**
+
+## 3. Strict scope
+
+### Implement
+
+- Context menu on empty map positions.
+- Context menu on actual visible unit markers.
+- Context menu on hydrant markers.
+- Context menu on already-supported COP objects/sectors.
+- A compact contextual action palette.
+- Move To flow for preselected units.
+- Move To flow where recipient units are selected after choosing the destination.
+- Lightweight action/recipient/target preview.
+- Integration with the existing task confirmation and mutation path.
+- Accessible keyboard and touch alternatives.
+- Correct behavior across wide, narrow, and expanded map layouts.
+- Proper disabled/unauthorized/invalid action states.
+- Clear feedback about command creation, rejection and pending acknowledgment.
+
+### Do NOT implement
+
+- New tactical object persistence.
+- New command post, assembly point, triage point or temporary water source database entities.
+- New SQL migrations.
+- New Edge Functions.
+- New autonomous SIM logic.
+- New routing provider.
+- A parallel command engine.
+- New permission model.
+- Fake GPS locations.
+- Drag-and-drop unit movement.
+- Minimap.
+- Unit control-group hotkeys.
+- Global realtime notification system; that belongs to F4.
+
+**Tactical incident object creation is M14.5F3.**
+
+Do not show apparently working creation actions that cannot actually persist the requested object.
+
+## 4. Map interaction contract
+
+Implement the following behavior in **Command Map View only**.
+
+| User action | Behavior |
+|---|---|
+| Left-click a unit | Reuse existing selection behavior |
+| Ctrl/Shift + left-click | Reuse existing multiselection behavior |
+| Existing box/lasso tools | Preserve existing selection behavior |
+| Right-click empty map | Open coordinate-based context menu |
+| Right-click unit | Open menu for that specific unit |
+| Right-click hydrant | Open hydrant context menu |
+| Right-click COP object/sector | Open existing-object context menu |
+| Long-press on touch device | Open equivalent context menu |
+| Escape / outside click | Close the context menu without mutation |
+
+Opening a menu must never itself create a task or update data.
+
+Keep native context menus available outside the actual map interaction surface.
+
+Prevent conflicts with browser/map interactions only where necessary.
+
+### Hit-testing rules
+
+Use MapLibre feature hit-testing against existing registered and interactive map layers.
+
+Identify object types using trustworthy feature metadata and established source/layer contracts, not icon color, label text, arbitrary nearest coordinates, or guessed IDs.
+
+Priority when features overlap:
+
+1. Explicitly clicked selectable unit marker.
+2. Explicitly clicked hydrant or existing tactical/COP object.
+3. Empty map coordinates.
+
+If multiple overlapping objects are genuinely ambiguous, provide a small object chooser rather than silently choosing the wrong target.
+
+Respect feature visibility, layer permissions, and incident scope.
+
+Do not treat a route line, polygon fill, or background label as an actual unit.
+
+Do not lose the precise captured geographic coordinates when the menu opens, the map moves, or the layout changes.
+
+## 5. Empty map context menu
+
+On a right-click at geographic coordinates, display a compact menu anchored near the click.
+
+Primary action:
+
+**Premakni enote sem** — only when an existing configured Move To action supports a coordinate target and the current user has the required command permissions.
+
+Other relevant options may be included only if backed by existing functionality.
+
+Examples:
+
+- View/copy coordinates.
+- Existing supported COP editing or marking operations, if already implemented and authorized.
+- Other actions from the configured action catalog that accept the clicked target type.
+
+The user ultimately wants these additional commands:
+
+- Ustvari poveljniško mesto
+- Ustvari zbirno mesto
+- Ustvari triažno točko
+- Označi začasni vodni vir
+
+**Do not implement those four commands in F2.**
+
+These require incident-scoped persistent tactical objects and server-side command-role authorization, which belong to **F3**.
+
+Keep the menu architecture extensible through typed menu/action descriptors so F3 can register those actions later without rewriting the context-menu system.
+
+Do not create fake markers or session-only objects to simulate F3 functionality.
+
+## 6. Move To — existing selection
+
+Required flow:
+
+1. User selects one or more authorized units.
+2. User right-clicks an empty map position or supported destination object.
+3. Menu offers **Premakni enote sem**.
+4. User selects the action.
+5. Show a compact preview:
+   - requested action label
+   - selected eligible recipients
+   - excluded/ineligible recipients and reasons
+   - destination coordinates or object
+   - current action parameters that require user input
+6. User confirms.
+7. Call the existing authorized task creation path.
+8. Display the real server result.
+
+Do not require the user to manually reopen the existing dropdown merely to choose the same destination again.
+
+Preserve the destination from the original map click.
+
+### Important
+
+A command is not an acknowledgment, a planned route, or actual vehicle movement.
+
+Use distinct states:
+
+- Draft/preview
+- Sending
+- Accepted by server
+- Rejected by server
+- Awaiting unit acknowledgment, where applicable
+
+Do not immediately display a real unit as moving or arriving.
+
+SIM units may subsequently move only through the existing simulation execution system.
+
+## 7. Move To — no units selected
+
+This is an important usability requirement.
+
+When the user right-clicks an empty position without a current unit selection:
+
+1. Show **Premakni enote sem** if the action is available.
+2. Selecting it opens a compact recipient picker within the Command Map UI.
+3. List only actual authorized/selectable incident recipients.
+4. Allow selecting one or several recipients.
+5. Preserve the captured target position while selecting recipients.
+6. Continue into the same action preview/confirmation flow.
+
+Do not force users to close the target menu, search for a unit, and repeat the entire target selection.
+
+Reuse the existing recipient eligibility model and selection limits, including the existing 100-recipient cap where applicable.
+
+Do not synthesize coordinates for units without known authorized positions.
+
+A unit may appear in a non-spatial recipient picker if the existing action model permits addressing that unit without positioning it on the map.
+
+## 8. Unit context menu
+
+When right-clicking an actual unit, show context-appropriate options.
+
+Examples, only where the existing domain supports them:
+
+- Select unit.
+- Add/remove unit from current selection.
+- View details.
+- View assigned tasks.
+- View current navigation.
+- Issue an available action.
+- Show current status.
+
+If issuing an action requires a target location, enter target-picking mode or open the existing compatible action flow.
+
+Do not fabricate a dedicated backend action called HOLD, STATUS, RETURN, etc., unless it already exists in the catalog.
+
+The clicked unit and the previously selected group must be handled predictably.
+
+For example, when multiple units are already selected, a right-click on one selected unit must not silently discard the group.
+
+If an action applies to a single unit rather than the selected group, label that scope explicitly.
+
+## 9. Hydrant context menu
+
+Right-clicking a real hydrant should show available actions such as:
+
+- **Podatki o hidrantu**.
+- **Premakni enote sem**, if the configured Move To action supports this destination.
+- Existing relevant navigation or task options where supported.
+
+Do not modify the permanent hydrant registry from incident command context unless the existing application explicitly permits the operation.
+
+Keep permanent hydrants separate from future incident-scoped temporary water sources.
+
+Do not store a hydrant as a free coordinate target if an appropriate supported entity target is required by the action schema.
+
+Conversely, do not invent a new hydrant target type if the current action schema only supports coordinates. Adapt through the existing resolver where semantically valid.
+
+The source object identity, coordinates, and destination preview must remain consistent.
+
+## 10. Existing COP objects and sectors
+
+For existing supported COP entities:
+
+- Allow opening authorized details.
+- Offer configured compatible actions.
+- Reuse existing selection/navigation flows.
+- Do not invent unsupported sector assignment, command post management, or infrastructure modification operations.
+
+Be careful with map geometries.
+
+A polygon/sector is not automatically equivalent to a safe vehicle destination.
+
+Require an explicit suitable point target or a supported existing destination representation.
+
+## 11. Action catalog integration
+
+The context menu must not hardcode domain commands as if every organization and incident had the same action definitions.
+
+Build a small adapter over the existing configured action catalog.
+
+For each candidate action, evaluate:
+
+- Action availability/enabled state.
+- Recipient types supported by its configuration.
+- Target kind supported by its configuration.
+- Current incident state.
+- Current user command authorization.
+- Existing recipient eligibility.
+- Required parameters.
+- Target validity.
+- Any existing RTS/COP/navigation/SIM editing lock.
+
+Show only relevant actions or explicitly disabled actions with useful explanations.
+
+**The backend remains authoritative.**
+
+The context-menu adapter is for UX; it must not replace server-side validation.
+
+### Configurable parameters
+
+For actions with required parameters:
+
+- Render the existing typed parameter controls inside a compact preview/drawer.
+- Preserve existing validation rules.
+- Avoid duplicating schema interpretation or task creation code.
+- If the existing task form is essential for a complex configuration, open it prefilled with the selected recipients, action and target.
+- Never silently omit required inputs.
+
+The goal is fewer steps, not bypassed validation.
+
+## 12. Reuse existing RTS session
+
+Where possible, integrate with the existing:
+
+- `useRts()`
+- selected recipients
+- `recipientKey(...)`
+- selected action
+- action palette
+- target preview
+- map target kind
+- RTS locking/editing states
+- current task confirmation flow
+
+Inspect the actual exported controller API before making changes.
+
+Avoid introducing a second independent recipient selection store or a second task mutation path.
+
+Context-menu presentation state may be local to the Command Map, but operational selection and command draft state should reuse the established source of truth.
+
+A menu or preview must not accidentally remain associated with the previous incident when the user navigates to another incident, account or organization.
+
+## 13. Coexistence with map tools
+
+Carefully coordinate the new context menu with:
+
+- existing MapLibre click handling
+- normal map pan and zoom
+- box and lasso selection
+- COP editing/drawing
+- navigation target picking
+- RTS target-picking mode
+- SIM navigation
+- layer visibility
+- expanded map-focus mode
+
+When another tool is actively editing geometry or choosing a target, context commands must not silently hijack that operation.
+
+Make the behavior deterministic and understandable.
+
+One pointer gesture must not issue two actions.
+
+Escape handling must respect current modal/target-picking priority and avoid inadvertently canceling unrelated editing work.
+
+## 14. Responsive and accessible menus
+
+### Desktop
+
+- Open next to the context-click position.
+- Reposition to remain within the actual visible map container.
+- Do not clip menus at screen edges.
+- Support keyboard navigation and focus management.
+- Close with Escape, outside click or a deliberate menu choice.
+
+### Touch
+
+- Provide long-press behavior on the map with a reasonable touch threshold.
+- Do not open the menu during ordinary pan, pinch-zoom or scrolling.
+- Make controls touch-friendly.
+- If necessary, use a compact bottom sheet rather than a tiny cursor-anchored popup.
+- Ensure accessible alternatives exist for users unable to long-press.
+
+### Keyboard
+
+Provide a visible, focusable **Dejanja** entry point for the current selection.
+
+Essential command workflows must not depend exclusively on a mouse right-click or long-press.
+
+Support correct ARIA semantics, focus return and Escape behavior.
+
+Use existing Slovenian and German localization infrastructure.
+
+## 15. Command preview and feedback
+
+Introduce a compact preview in the Command Map UI without creating a new execution engine.
+
+Suggested content:
+
+- Action name
+- Selected recipients and count
+- Target name/coordinates
+- Required parameters
+- Eligibility/permission warnings
+- Cancel and Confirm controls
+
+Show actual server submission status.
+
+Prevent accidental duplicate submissions while a request is pending.
+
+Preserve existing idempotency mechanisms and conflict/version guards.
+
+When server validation rejects the action, present the real reason without claiming that the task was created.
+
+### Route preview
+
+If an existing valid navigation route is already available, it can be displayed as supplementary information.
+
+Do not require a new OSRM route merely to open a context menu.
+
+Do not claim an ETA is available when there is no valid route.
+
+Do not create a new navigation session implicitly unless the existing action workflow already does that through the authorized backend.
+
+## 16. Authorization and SIM safety
+
+Preserve these invariants:
+
+**COMMAND INTENT ≠ EXECUTION PLAN ≠ OBSERVED TELEMETRY.**
+
+- Organization admins are not automatically incident commanders.
+- Command operations require the existing incident-specific permissions.
+- Viewing a map object does not grant permission to modify it.
+- Read-only users may see permitted details but cannot issue commands.
+- RLS and backend/RPC checks remain authoritative.
+- SIM units are clearly labeled simulated.
+- SIM actions never impersonate actual human acknowledgment.
+- Real vehicle positions never move merely because a Move To task was created.
+- A new command does not directly mutate simulation marker coordinates.
+- Future F3 object creation will need separate command-role write authorization.
+- No historical task/command record may be silently rewritten.
+
+The fact that training and ordinary incidents may share a Supabase project makes scope isolation especially important.
+
+## 17. Performance
+
+The interaction must feel immediate:
+
+- Show menu without waiting for a network request when existing catalog/state is already loaded.
+- Preserve current visible map and selection while the menu opens.
+- Avoid rerendering every hydrant/unit on menu open.
+- Do not remount MapLibre.
+- Do not create duplicate event listeners or subscriptions.
+- Clean up MapLibre interaction handlers and timers correctly.
+- Do not repeatedly fetch identical action definitions solely because the menu opened.
+- Keep the interaction lightweight on mobile devices.
+
+Aim for immediate local UI feedback, but do not claim measured performance without actual measurements.
+
+## 18. Suggested component boundaries
+
+Adapt these suggestions to the repository's actual architecture:
+
+```text
+Command Map (from F1)
+├── Existing MapLibre/COP canvas
+│   ├── Existing unit selection
+│   └── Context-trigger integration
+├── RtsContextMenu
+│   ├── Empty location actions
+│   ├── Unit actions
+│   ├── Hydrant actions
+│   └── Existing COP object actions
+├── RtsRecipientPicker
+├── RtsCommandPreview
+└── Existing IncidentTasks / RTS session / task mutation
+```
+
+Prefer a typed context descriptor such as:
+
+```ts
+type MapContext =
+  | { kind: 'COORDINATE'; lng: number; lat: number }
+  | { kind: 'UNIT'; id: string }
+  | { kind: 'HYDRANT'; id: string }
+  | { kind: 'COP_OBJECT'; id: string }
+  | { kind: 'COP_SECTOR'; id: string };
+```
+
+This is a design suggestion, not a demand to replace existing domain entity types.
+
+Use established identifiers and resolvers, with the necessary incident/account/organization scope.
+
+Menu items should have typed action descriptors and consistent eligibility behavior. This architecture must be extensible for M14.5F3 tactical objects.
+
+## 19. Acceptance criteria
+
+- [ ] In Command Map, right-clicking empty space opens a context menu at the clicked location.
+- [ ] An existing unit selection can receive a supported Move To command through the menu.
+- [ ] With no selection, the user can choose Move To, pick recipients and preserve the original target.
+- [ ] Right-click on an actual unit opens relevant unit actions.
+- [ ] Right-click on an actual hydrant opens relevant hydrant actions.
+- [ ] Supported COP objects receive context-specific actions.
+- [ ] Unsupported actions are not falsely shown as functional.
+- [ ] Existing action definitions, recipient restrictions and parameter requirements are enforced.
+- [ ] Commands use the existing authorized task creation path.
+- [ ] Creating a task does not fabricate acknowledgment, route execution or movement.
+- [ ] Real and SIM unit behavior remains correctly separated.
+- [ ] Read-only users cannot issue commands.
+- [ ] Multiple selected units remain selected when appropriate.
+- [ ] Context menus do not conflict with box/lasso, COP editing or target picking.
+- [ ] Mobile and keyboard users can access equivalent controls.
+- [ ] Menu positioning works near viewport edges and inside expanded map mode.
+- [ ] Classic View remains unchanged.
+- [ ] MapLibre is not remounted when opening a context menu.
+- [ ] No tactical object persistence is introduced.
+- [ ] No SQL migration, new Edge Function or new external dependency is introduced.
+
+## 20. Development restrictions
+
+Do NOT run:
+
+- tests
+- builds
+- lint
+- typecheck
+- CI
+- browser/runtime checks
+- Android/Gradle tasks
+- database migrations
+- Supabase deployments
+
+Do not modify production infrastructure.
+
+Do not merge the PR.
+
+Do not use destructive Git commands or discard uncommitted work.
+
+Preserve the user's local customizations:
+
+- `android/app/build.gradle.kts`
+- `android/build.gradle.kts`
+- `android/gradle.properties`
+- `android/app/schemas/`
+- `pnpm-lock.yaml`
+- `web/next-env.d.ts`
+
+Avoid lockfile or dependency modifications.
+
+Do not add a large prompt `.txt` file to the repository root. Deliver the requested source implementation in a focused branch and PR.
+
+## 21. Deliverables
+
+1. Complete M14.5F2 frontend code in one focused PR.
+2. Reuse of existing M14.5A action/catalog/task infrastructure.
+3. Compact right-click context menu and command preview.
+4. Recipient-first and target-first command workflows.
+5. SI/DE localization.
+6. Accessible desktop, touch and keyboard behavior.
+7. PR summary listing changed files and architectural decisions.
+8. Manual verification checklist covering:
+   - right-click empty map with and without selected units
+   - right-click single unit and multiselection
+   - right-click hydrant
+   - overlapping map features
+   - existing COP objects/sectors
+   - invalid or disabled actions
+   - action parameters
+   - command permissions
+   - normal vs SIM incidents
+   - responsive/expanded mode
+   - box/lasso and COP editing conflicts
+   - failure and duplicate-submit behavior
+9. Clearly disclose all checks that were not executed.
+
+**Goal:** Make the existing Gasilko Command Map genuinely RTS-like, with direct, safe, contextual map commands and no parallel backend architecture.
+
+**Next milestone, NOT part of this PR:** M14.5F3 — persistent incident tactical objects (command post, assembly point, triage point, temporary water source), complete with migrations, role-based mutations, history and map integration.
