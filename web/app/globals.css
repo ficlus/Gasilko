@@ -358,3 +358,17 @@ button:disabled { opacity: .6; cursor: wait; }
 .cop-surface .cop-map-controls>summary{display:none}
 .command-workspace .cop-surface .cop-map-controls{display:block}
 .command-workspace .cop-surface .cop-map-controls>summary{display:list-item}
+
+/* Command-map context surface: no map instance, domain store or native annotation. */
+.rts-context-entry{position:absolute;left:.5rem;top:.5rem;z-index:4;min-height:44px;background:#fff;color:#20252a;max-width:calc(100% - 4rem)}
+.rts-context-menu{position:absolute;z-index:5;box-sizing:border-box;width:min(22rem,calc(100% - 16px));overflow:auto;overscroll-behavior:contain;background:#fff;color:#20252a;border:2px solid #075f93;border-radius:.6rem;padding:.6rem;box-shadow:0 4px 20px #0004;overflow-wrap:anywhere}
+.rts-context-menu button{min-height:44px;width:100%;text-align:start;white-space:normal;margin:.2rem 0}
+.rts-context-menu small{display:block;margin:.2rem 0 .5rem}
+.rts-context-heading{display:flex;align-items:center;gap:.5rem}
+.rts-context-heading strong{flex:1;min-width:0}
+.rts-context-heading button{width:auto;flex-shrink:0}
+.rts-context-target{font-variant-numeric:tabular-nums;font-size:.85rem}
+.rts-command-preview{border-inline-start:4px solid #075f93;background:#f0f6fa;padding:.6rem}
+.rts-context-recipients{border-block:1px solid #bac7ce;margin-block:.7rem;padding-block:.5rem}
+.rts-context-recipients .rts-recipient-list{max-height:14rem;overflow:auto}
+@media(max-width:40rem){.rts-context-menu{width:calc(100% - 16px)}}

@@ -25,7 +25,7 @@ export function ContextActions({actions}:{actions:ContextAction[]}){
  return <div className="actions">{actions.map(a=><div key={a.id}><button type="button" disabled={!a.enabled} title={!a.enabled?a.disabledReason:undefined}
   onClick={a.execute}>{a.label}</button>{!a.enabled&&a.disabledReason&&<small>{a.disabledReason}</small>}</div>)}</div>;
 }
-type Workspace={view:IncidentView;selected:SelectedEntity|null;select:(entity:SelectedEntity|null)=>void;operational:HTMLElement|null;selectedPane:HTMLElement|null;bottom:HTMLElement|null};
+type Workspace={view:IncidentView;selected:SelectedEntity|null;showDetails:()=>void;select:(entity:SelectedEntity|null)=>void;operational:HTMLElement|null;selectedPane:HTMLElement|null;bottom:HTMLElement|null};
 const Context=createContext<Workspace|null>(null);
 export const useWorkspace=()=>useContext(Context);
 export function WorkspaceSlot({name,children}:{name:'operational'|'selectedPane'|'bottom';children:ReactNode}){
@@ -110,7 +110,10 @@ export function IncidentWorkspace({locale,header,operations,secondary,children,v
  useEffect(()=>{if(command&&rts?.open){setExpanded(false);setRight(true);setTools(false);if(!wide){setLeft(false);setHistory(false);}}},[command,rts?.open,wide]);
  const [bottom,setBottom]=useState<HTMLElement|null>(null);
  const [operational,setOperational]=useState<HTMLElement|null>(null),[selectedPane,setSelectedPane]=useState<HTMLElement|null>(null);
- const context=useMemo(()=>({view,selected,select,operational,selectedPane,bottom}),[view,selected,select,operational,selectedPane,bottom]);
+ const showDetails=useCallback(()=>{setExpanded(false);setRight(true);setTools(false);if(!wide){setLeft(false);setHistory(false);}
+  requestAnimationFrame(()=>document.getElementById(ids+'-right')?.querySelector<HTMLButtonElement>('.command-panel-close')?.focus());
+ },[wide,ids]);
+ const context=useMemo(()=>({view,selected,select,showDetails,operational,selectedPane,bottom}),[view,selected,select,showDetails,operational,selectedPane,bottom]);
  return <Context.Provider value={context}>
   <section ref={root} className={'incident-workspace'+(command?' command-workspace':'')+(expanded?' command-expanded':'')}
    data-wide={wide} data-left={leftOpen} data-right={rightOpen||toolsOpen}
