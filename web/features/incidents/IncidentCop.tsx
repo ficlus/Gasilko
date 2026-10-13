@@ -2,6 +2,7 @@
 import dynamic from 'next/dynamic';
 import {useEffect,useRef,useState,type FormEvent} from 'react';
 import type {Locale} from '../../lib/i18n';
+import {workspaceText} from '../../lib/incidents/workspaceMessages';
 import {incidentText} from '../../lib/incidents/messages';
 import {mapKinds,type Cop,type CopFeedback,type Geometry,type Position,type MapKind} from '../../lib/incidents/cop';
 import type {CommandAction} from './CommandSection';
@@ -118,15 +119,20 @@ export function IncidentCop({locale,account,org,incidentId,refresh,feedback,disa
  const mapHydrants=resolvedHydrant&&resolvedHydrant.longitude!==null&&resolvedHydrant.latitude!==null&&!context.rows.some(h=>h.id===resolvedHydrant.id)?[...context.rows,{...resolvedHydrant,latitude:resolvedHydrant.latitude,longitude:resolvedHydrant.longitude}]:context.rows;
  const linked=(!workspace||kind==='HYDRANT')?cop?.links.find(l=>l.hydrant?.id===selected):undefined;
  const shownHydrant=backgroundHydrant??linked?.hydrant??resolvedHydrant;
- return <section className="admin-card cop-surface"><h2>{t('copTitle')}</h2><p>{t('copAuthority')}</p>
-  <button disabled={locked} onClick={()=>setEpoch(n=>n+1)}>{t('refresh')}</button>
+ return <section className="admin-card cop-surface">
+  <details className="cop-map-controls" open={workspace?.view!=='command'}><summary>{workspaceText(locale)('controls')}</summary>
+   <h2>{t('copTitle')}</h2><p>{t('copAuthority')}</p>
+   <button disabled={locked} onClick={()=>setEpoch(n=>n+1)}>{t('refresh')}</button>
+   {cop&&<>
+    <p>{t('status')}: {t(cop.incident.status)} · {t('copRevision')}: {cop.incident.revision}</p>
+    <div className="actions">{(Object.keys(layers) as (keyof CopLayers)[]).map(k=><label key={k}><input type="checkbox" checked={layers[k]} onChange={e=>setLayers(v=>({...v,[k]:e.target.checked}))}/>{t('copLayer_'+k)}</label>)}</div>
+    <label><input type="checkbox" checked={background} onChange={e=>setBackground(e.target.checked)}/>{t('workspaceHydrants')}</label>
+    <p className="workspace-map-legend">{t('workspaceMarkerLegend')}</p>
+   </>}
+  </details>
   {loading&&<p role="status">{t('loading')}</p>}{error&&<p role="alert">{t(error)}</p>}
+  {context.loading&&<p role="status">{t('loading')}</p>}{context.error&&<p role="alert">{t('workspaceHydrantError')}</p>}{context.more&&<p role="status">{t('workspaceHydrantLimit')}</p>}
   {cop&&<>
-   <p>{t('status')}: {t(cop.incident.status)} · {t('copRevision')}: {cop.incident.revision}</p>
-   <div className="actions">{(Object.keys(layers) as (keyof CopLayers)[]).map(k=><label key={k}><input type="checkbox" checked={layers[k]} onChange={e=>setLayers(v=>({...v,[k]:e.target.checked}))}/>{t('copLayer_'+k)}</label>)}</div>
-   <label><input type="checkbox" checked={background} onChange={e=>setBackground(e.target.checked)}/>{t('workspaceHydrants')}</label>
-   <p className="workspace-map-legend">{t('workspaceMarkerLegend')}</p>
-   {context.loading&&<p role="status">{t('loading')}</p>}{context.error&&<p role="alert">{t('workspaceHydrantError')}</p>}{context.more&&<p role="status">{t('workspaceHydrantLimit')}</p>}
    <CopMap selected={selection||shownHydrant||selected==='primary'?selected:''} contextHydrants={mapHydrants} onBounds={setBounds} locale={locale} cop={cop} layers={layers} drawing={locked?null:drawing} draft={draft?.geometry??null} vertices={vertices} onPoint={point} onSelect={setSelected}/>
    {selected==='primary'&&<p>{t('copLocation')}: {cop.incident.latitude}, {cop.incident.longitude}</p>}
    <WorkspaceSlot name="selectedPane">
@@ -152,6 +158,7 @@ export function IncidentCop({locale,account,org,incidentId,refresh,feedback,disa
     ]}/>
    </section>}
    </WorkspaceSlot>
+   <div className="cop-edit-surface">
    {stale&&<section className="admin-notice" role="alert"><h3>{t('copStale')}</h3><p>{t('copStaleHelp')}</p>
     {draft&&<><h4>{t('copLocal')}</h4><pre style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere',maxHeight:220,overflow:'auto'}}>{coordinateText||'—'}</pre>
      <h4>{t('copServer')}</h4><pre style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere',maxHeight:220,overflow:'auto'}}>{current?JSON.stringify(current,null,2):t('copMissing')}</pre>
@@ -181,6 +188,7 @@ export function IncidentCop({locale,account,org,incidentId,refresh,feedback,disa
     <div className="actions"><button type="submit" disabled={stale||!!drawing||!canSave}>{t('save')}</button>
      <button type="button" onClick={()=>{setDraft(null);setDrawing(null);setVertices([]);setStale(false);}}>{t('dismiss')}</button></div>
    </fieldset></form>}
+   </div>
    <WorkspaceSlot name="operational"><WorkspaceSection title={t('copSectors')} open>
    <h3>{t('copSectors')}</h3>{cop.can_manage&&<button disabled={actionLocked} onClick={()=>begin('sector')}>{t('sector_create')}</button>}
    {cop.sectors.length===0&&<p>{t('copEmpty')}</p>}{cop.sectors.map(s=><article className="web-row" key={s.id}><strong>{s.code} · {s.name}</strong>
