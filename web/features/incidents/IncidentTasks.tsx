@@ -252,7 +252,7 @@ export function IncidentTasks({submission='idle',locale,account,org,incidentId,v
    {error&&<p role="alert">{t(error)}</p>}
    {readUnavailable&&<p role="alert">{rt('readUnavailable')}</p>}
    {actionChanged&&<p role="alert">{rt('actionChanged')}</p>}
-   {contextForm&&<section className="rts-context-recipients"><h4>{ct('recipients')}</h4><p>{ct('pickerHelp')}</p>{recipientPicker}</section>}
+   {contextForm&&commandView&&<section className="rts-context-recipients"><h4>{ct('recipients')}</h4><p>{ct('pickerHelp')}</p>{recipientPicker}</section>}
    <form className="task-editor" onSubmit={review}><fieldset disabled={locked||stale}><legend>{t('action')}</legend>
     <label>{t('search')}<input maxLength={100} value={catalogQuery} onChange={e=>{setCatalogQuery(e.target.value);setCatalogPage(0);}}/></label>
     <label>{t('action')}<select required value={actionChanged?'':action?.id??''} onChange={e=>chooseAction(e.target.value)}><option value="">{t('select')}</option>
