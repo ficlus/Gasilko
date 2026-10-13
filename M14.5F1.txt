@@ -1,0 +1,490 @@
+# CODEX IMPLEMENTATION PROMPT — M14.5F1
+## Responsive Command Map & Incident View Switch
+
+You are working in the existing **Gasilko** monorepo.
+
+Implement **M14.5F1 — Responsive Command Map & Incident View Switch** as a focused, production-quality frontend milestone.
+
+**Important:** This milestone establishes the responsive, map-first incident workspace. Direct RTS context commands, tactical object creation, and live command notifications belong to later milestones and must NOT be implemented here.
+
+Create one focused PR. Do not merge it.
+
+---
+
+## 1. Product goal
+
+The existing incident workspace is functional but too form-heavy and does not use available screen space effectively.
+
+Introduce two explicitly selectable workspace modes:
+
+1. **Klasični pogled** — the existing incident workspace with all current capabilities.
+2. **Poveljniška karta** — a new, responsive, map-dominant workspace for operational command.
+
+The user switches between modes using a clearly visible segmented control in the incident header.
+
+The new mode must feel like the foundation of an RTS command interface: the map is the main working surface, while supplementary information is available through collapsible panels.
+
+However, no existing authorization, incident, command, navigation, or simulation semantics may change.
+
+## 2. Repository inspection — mandatory before implementation
+
+Inspect the actual current code on the working branch and trace the incident workspace composition, including relevant equivalents of:
+
+- `IncidentWorkspace`
+- `IncidentArea`
+- `CopMap`
+- `RtsSelectionToolbar`
+- `IncidentTasks`
+- `CommandSection`
+- existing incident navigation and resource components
+- incident header / workspace navigation
+- organization administration route and layout
+- `web/app/[locale]/admin/org/[organizationId]/[[...section]]/page.tsx`
+- incident-specific and global styles, including `web/app/globals.css`
+- MapLibre map implementation and its resize behavior
+
+Inspect how the workspace receives incident state, task state, selected units, map data, callbacks, access permissions, and SIM controls.
+
+Identify the current layout constraints, including any:
+
+- fixed maximum content widths
+- hardcoded map heights
+- three-column CSS layouts
+- excessive vertical stacking above the map
+- nested scroll containers
+- sticky headers and global administration navigation
+
+Use the actual architecture found in the repository.
+
+Do not fabricate components or APIs based on this prompt.
+
+## 3. Strict scope
+
+### Must implement
+
+- View switch in the incident header.
+- Browser-local mode persistence.
+- Existing Classic View preserved.
+- New responsive Command Map View.
+- Wide-screen map expansion.
+- Collapsible supporting panels.
+- Tablet/mobile adaptations.
+- Optional expanded map-focus mode.
+- Stable MapLibre rendering and resize behavior.
+- Preservation of existing incident and RTS selection state across mode changes where feasible.
+- Accessibility and proper loading/error/empty states.
+
+### Must not implement
+
+- New SQL schema or migrations.
+- New Edge Functions.
+- New command execution APIs.
+- New task/authorization models.
+- RTS right-click context menus.
+- Tactical object creation.
+- Drag-and-drop unit movement.
+- Minimap.
+- Keyboard control groups.
+- Fake telemetry or synthesized unit positions.
+- New simulation logic.
+- New external component libraries unless absolutely unavoidable.
+
+Preserve the existing M14.2–M14.5E behavior.
+
+---
+
+## 4. Header view switch
+
+Provide a clearly visible control in the header of an opened incident:
+
+**Klasični pogled | Poveljniška karta**
+
+Requirements:
+
+- First visit defaults to **Klasični pogled**.
+- Selection persists in `localStorage`.
+- Use a stable, namespaced preference key, such as `gasilko.incident.workspace.view.v1`.
+- The preference is browser-local, not an incident database field.
+- Handle malformed or unavailable browser storage gracefully.
+- Avoid SSR/hydration mismatches in Next.js.
+- Keep the control accessible using mouse, keyboard, and touch.
+- Keep the selected state obvious.
+- The control must remain easy to access even when the incident workspace is scrolled.
+- It must not be hidden inside an unrelated administrative dropdown.
+- Mode switching must not trigger mutations or reload the entire browser page.
+- Switching must not create/cancel tasks or restart/pause simulations.
+- Switching back to Classic View must restore the normal existing layout.
+
+Use the existing i18n/localization mechanism. Provide appropriate Slovenian and other already-supported locale translations.
+
+Do not introduce hardcoded Slovenian strings into otherwise localized components.
+
+## 5. Classic View — preserve existing functionality
+
+Do not redesign Classic View in this PR.
+
+The existing view must continue to support:
+
+- incident details
+- operational picture
+- resource/unit panels
+- task/action forms and dropdowns
+- navigation
+- command structure
+- COP map
+- RTS selection, if currently available
+- SIM panels and manual controls, where applicable
+- existing permissions and read-only states
+
+The Classic View should remain visually and functionally as close as possible to its existing behavior.
+
+Avoid moving business logic into mode-specific duplicated components.
+
+Both views must use the same source of truth for incident data.
+
+---
+
+## 6. New Command Map View
+
+Create a dedicated, responsive map-first layout using existing incident/map components.
+
+### Desktop layout
+
+The map must dominate available screen space.
+
+Recommended structure:
+
+```text
+┌─────────────────────────────────────────────────────────────────────┐
+│ INCIDENT HEADER    Klasični pogled | Poveljniška karta             │
+├──────────────┬───────────────────────────────────────┬──────────────┤
+│              │                                       │              │
+│ UNIT /       │                                       │ CONTEXT /    │
+│ RESOURCE     │                                       │ DETAILS      │
+│ ROSTER       │             LARGE MAP                 │              │
+│              │                                       │ Tasks        │
+│ Collapsible  │                                       │ Navigation   │
+│              │                                       │ Selection    │
+│              │                                       │              │
+├──────────────┴───────────────────────────────────────┴──────────────┤
+│ COMPACT MAP CONTROLS / STATUS — existing capabilities only         │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+This is conceptual; adapt it to the existing components and styling.
+
+Implementation requirements:
+
+- Use a responsive CSS grid or equivalent layout.
+- Main map column must use `minmax(0, 1fr)` or equivalent.
+- Avoid horizontal overflow.
+- Avoid unnecessary global maximum widths for Command Map View.
+- Support large 1440p and 4K displays.
+- Map should fill the available viewport height below persistent site/incident headers, without covering them.
+- Use viewport-aware sizing and safe fallbacks.
+- Do not impose one fixed `58dvh` map height across all screen sizes.
+- Panels should have sensible minimum and maximum widths.
+- Panel content must scroll independently when needed.
+- Map must remain usable with either or both panels collapsed.
+- Provide explicit, accessible panel open/close controls.
+- Do not force large administrative forms into the always-visible map area.
+- Provide access to existing functions through panel sections or links to Classic View.
+
+### Panel defaults
+
+Suggested behavior:
+
+- Left roster: open on sufficiently wide displays.
+- Right context panel: open when there is sufficient space and meaningful content.
+- On narrower displays, panels should start collapsed.
+- Prefer adapting to the actual available workspace width, not merely the physical device width.
+
+The user must always be able to regain access to collapsed panels.
+
+### Header and vertical space
+
+Review the entire administration shell, not only the map component.
+
+Do not leave the Command Map artificially constrained by an ancestor `max-width` or padding designed for forms.
+
+Any wider layout styling should be scoped to the incident Command Map so unrelated administrative pages retain their existing appearance.
+
+---
+
+## 7. Tablet and mobile behavior
+
+The Command Map must remain functional at narrow widths.
+
+### Tablet
+
+- Map remains the primary region.
+- Supporting panels become collapsible overlays/drawers where appropriate.
+- Only one obstructive panel should be open at a time on narrow layouts.
+- Panels must be dismissible.
+- Prevent overlay controls from trapping or blocking map access unintentionally.
+
+### Mobile
+
+- Map uses the full available content width.
+- Appropriate viewport height: not a tiny map surrounded by stacked forms.
+- Roster, context details, and supplementary controls open as compact drawers or sheets.
+- Touch targets should be comfortable and accessible.
+- Do not depend on hover.
+- Do not depend on keyboard modifier keys for essential functionality.
+- Respect device safe-area insets.
+- Handle mobile browser dynamic viewport behavior.
+- Avoid scroll trapping and accidental horizontal page scrolling.
+
+Reuse existing design-system primitives if appropriate. Do not add an unnecessary drawer library.
+
+---
+
+## 8. Expanded map-focus mode
+
+Provide a button such as:
+
+**Razširi karto**
+
+And a clear exit:
+
+**Zapri razširjeni pogled**
+
+Requirements:
+
+- Enlarge the map to occupy as much of the available application viewport as reasonably possible.
+- Hide or collapse nonessential side panels.
+- Preserve access to the incident identity, view switch, exit control, and essential safety/status indications.
+- Support `Esc` to exit.
+- Return to the previous panel arrangement when leaving expanded mode.
+- Avoid triggering the browser Fullscreen API unless it is already a supported pattern in this application.
+- Avoid breaking page navigation, browser history, or accessibility.
+- Map must resize correctly upon entry and exit.
+
+The view switch in the incident header must remain accessible in expanded mode.
+
+---
+
+## 9. Reuse existing MapLibre/COP functionality
+
+Reuse the current `CopMap` implementation and its existing overlays.
+
+Preserve:
+
+- real units with authorized available coordinates
+- SIM markers with unmistakable SIM identification
+- hydrants
+- existing COP geometries/layers
+- sectors or other operational layers already supported
+- navigation overlays
+- current map selection capabilities
+- existing map click/selection interactions
+- current permissions and visibility rules
+
+Do not build a second independent map implementation with divergent state and layers.
+
+### Critical lifecycle requirements
+
+Investigate the current `ResizeObserver`, map initialization, cleanup, and map container sizing.
+
+Ensure the map behaves correctly when:
+
+- opening Command Map View
+- switching back to Classic View
+- collapsing the left panel
+- collapsing the right panel
+- resizing the browser
+- rotating a tablet/phone
+- opening and closing a mobile drawer
+- entering and exiting expanded mode
+- navigating between incidents
+
+Avoid duplicate MapLibre instances that both subscribe to the same expensive data streams.
+
+If mode switching necessarily remounts the map, ensure proper cleanup and avoid repeated subscriptions, memory leaks, and unnecessary refetches.
+
+Preserve the map center/zoom and the selected operational entities across view changes where practical.
+
+Do not incorrectly preserve the old incident's selection or view state when switching to a different incident.
+
+---
+
+## 10. Selection and supplementary panels
+
+Reuse the current M14.5B RTS selection state and existing selection controls.
+
+In Command Map View:
+
+- Selected units must stay visibly selected.
+- Show a compact selection summary.
+- Keep existing click and multi-selection support.
+- Expose access to current unit/task/navigation details without leaving the Command Map.
+- Do not require full-size task forms to remain permanently visible.
+- Avoid accidentally clearing selection when opening/closing supporting panels.
+- Keep empty selections visually clear and unobtrusive.
+
+This milestone does not need to create the new direct command menu. That is F2.
+
+If an advanced action currently requires the existing form, provide a straightforward way to reach that workflow without duplicating command logic.
+
+---
+
+## 11. Security and operational invariants
+
+Preserve all existing role checks and RLS-backed server authorization.
+
+In particular:
+
+- Organization administration roles are not interchangeable with incident command roles.
+- Switching workspace modes never grants extra capabilities.
+- Unauthorized users must not gain command controls through the new layout.
+- Data visible in the new mode must be limited to what the existing application authorizes.
+- Read-only incident participants must remain read-only.
+- SIM data must remain clearly distinct from real incident telemetry.
+- Never display planned routes as actual vehicle movement.
+- Never simulate or invent live GPS data.
+- Never bypass the existing task/command creation workflow.
+
+Remember the established distinction:
+
+**Command intent ≠ execution plan ≠ observed telemetry.**
+
+This is a presentation milestone, not a change to the operational truth model.
+
+---
+
+## 12. Performance and responsiveness
+
+Optimize for a responsive, RTS-like feel without rewriting the application.
+
+Requirements:
+
+- Unit selection and panel toggles should respond immediately on the client.
+- Avoid unnecessary whole-workspace rerenders for simple presentation-state changes.
+- Do not repeatedly reload incident data when merely toggling a panel.
+- Avoid duplicate polling and duplicate subscriptions in the two views.
+- Reuse existing data hooks/state where possible.
+- Avoid layout thrashing on map resize.
+- Do not create expensive event listeners without proper cleanup.
+- Keep MapLibre controls and overlays usable at all viewport sizes.
+
+Do not introduce a new global state management library for this milestone.
+
+---
+
+## 13. Suggested implementation strategy
+
+Adapt the existing codebase rather than following this structure blindly.
+
+Suggested architecture:
+
+```text
+IncidentWorkspace
+├── IncidentHeader
+│   └── IncidentViewModeSwitch
+└── SharedIncidentState
+    ├── ClassicIncidentView
+    │   └── Existing workspace composition
+    └── CommandMapView
+        ├── UnitRosterPanel
+        ├── DominantCopMap
+        ├── ContextDetailsPanel
+        ├── ExistingRtsSelectionControls
+        └── ExpandedMapMode
+```
+
+Prefer shared hooks and presentation props instead of duplicating incident state or mutation logic.
+
+Keep mode-specific CSS carefully scoped to avoid affecting unrelated pages.
+
+If existing component composition makes a different structure safer, use it and explain the choice in the PR summary.
+
+---
+
+## 14. Acceptance criteria
+
+The PR is acceptable only if the implementation meets these conditions:
+
+- [ ] Incident header contains `Klasični pogled / Poveljniška karta`.
+- [ ] Classic View is the initial default.
+- [ ] View choice persists across page reloads.
+- [ ] No SSR/localStorage hydration mismatch introduced.
+- [ ] Classic View retains existing features.
+- [ ] Command Map uses available wide-screen space.
+- [ ] Map height is no longer constrained to a small fraction of the viewport in Command Map View.
+- [ ] Left/right supporting panels can be collapsed.
+- [ ] Collapsing panels causes the map to use the freed space.
+- [ ] Mobile/tablet layouts avoid horizontal overflow.
+- [ ] Map remains usable when narrow-screen panels are open or closed.
+- [ ] Expanded mode works and can be exited with `Esc`.
+- [ ] MapLibre resizes after layout changes.
+- [ ] No fake unit positions or fake command statuses introduced.
+- [ ] Existing incident permissions remain effective.
+- [ ] No new backend or SQL changes.
+- [ ] No new right-click command logic (reserved for F2).
+- [ ] No drag-and-drop movement.
+- [ ] No minimap.
+
+Do not claim an item is verified unless you actually inspected enough code to support that claim.
+
+---
+
+## 15. Development restrictions
+
+**Do not run:**
+
+- tests
+- builds
+- lint
+- typechecks
+- CI workflows
+- Android/Gradle tasks
+- application runtime checks
+- database migrations
+- Supabase deploys
+
+Do not merge the PR.
+
+Do not modify unrelated Android files or local development environment settings.
+
+In particular, preserve local user-specific changes involving:
+
+- `android/app/build.gradle.kts`
+- `android/build.gradle.kts`
+- `android/gradle.properties`
+- `android/app/schemas/`
+- `pnpm-lock.yaml`
+- `web/next-env.d.ts`
+
+Avoid modifying dependency lockfiles unless absolutely necessary. Prefer no dependency changes.
+
+Do not use `git reset --hard`, destructive cleanup, or commands that discard uncommitted user changes.
+
+Follow repository conventions and keep the implementation focused.
+
+---
+
+## 16. Deliverables
+
+Produce:
+
+1. The M14.5F1 frontend implementation.
+2. Scoped responsive styles.
+3. Appropriate localization strings.
+4. A concise PR description explaining changed behavior.
+5. A list of all modified files and why they changed.
+6. A manual browser verification checklist covering:
+   - 1920×1080 desktop
+   - 2560×1440 / wider desktop
+   - tablet
+   - mobile
+   - classic/command mode switching
+   - panel collapsing
+   - expanded map mode
+   - incident navigation
+   - normal incident vs SIM incident
+   - read-only user vs authorized commander
+7. Explicit mention of anything that was not verified, including the fact that automated checks were not run.
+
+Do not execute the manual verification yourself under the current restrictions.
+
+**Final goal:** Deliver a solid responsive, map-first incident workspace that provides the UI foundation for **M14.5F2 — RTS Context Commands**, without changing or destabilizing existing Gasilko operational behavior.
