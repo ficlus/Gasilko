@@ -1,0 +1,711 @@
+# CODEX IMPLEMENTATION PROMPT — M14.5F3
+## Tactical Incident Objects & RTS Map-First Creation
+
+You are implementing **M14.5F3 — Tactical Incident Objects & RTS Map-First Creation** in the existing Gasilko monorepo.
+
+**Prerequisite:** PR #66 (M14.5F2 — RTS Context Commands) has been merged into `main`.
+
+Create one focused implementation branch and pull request targeting the latest `main`. Do not merge it.
+
+## 1. Objective
+
+Allow authorized incident commanders to create, inspect, edit, and deactivate tactical incident objects **directly from the Poveljniška karta**, using the existing right-click / long-press interaction.
+
+Required user workflow:
+
+1. Right-click an empty map location.
+2. Choose a tactical object type.
+3. Enter a short name and optional description.
+4. Preview its exact geographic position.
+5. Confirm using the existing COP command workflow.
+6. The server persists the object.
+7. The confirmed object appears on the map with a recognizable icon.
+8. Right-click the existing object to view, edit, or deactivate it.
+
+Keep the existing **Klasični pogled** fully operational.
+
+Do not implement drag-and-drop unit movement or a separate map application.
+
+## 2. Critical discovery: reuse existing COP objects
+
+The repository already has a tactical map-object model.
+
+Current frontend definitions include:
+
+`web/lib/incidents/cop.ts`
+
+```typescript
+export const mapKinds = [
+  'COMMAND_POST',
+  'STAGING',
+  'HAZARD',
+  'WATER_SOURCE',
+  'ACCESS_POINT',
+  'PERIMETER',
+  'NOTE',
+] as const;
+```
+
+Existing semantics:
+
+- `COMMAND_POST` = Poveljniško mesto
+- `STAGING` = Zbirno mesto
+- `WATER_SOURCE` = Vodni vir
+- `HAZARD` = Nevarnost
+- `ACCESS_POINT` = Dostopna točka
+- `PERIMETER` = Obod / zapora
+- `NOTE` = Opomba
+
+The current COP supports:
+
+- incident-scoped objects;
+- persistent point/line/polygon geometry;
+- object identifiers and versions;
+- incident and sector scope;
+- object create/update through `object_put`;
+- object deactivation through `object_deactivate`;
+- established confirmation, conflict, audit, and authorization flows.
+
+**Do not introduce a duplicate `tactical_objects` table or parallel object API.**
+
+Extend the current COP infrastructure instead.
+
+### Missing object type
+
+Introduce:
+
+`TRIAGE_POINT` = Triažna točka
+
+Only add database changes necessary to make that new type valid in the existing backend.
+
+Do not invent a new `ASSEMBLY_POINT` type because the current `STAGING` type already represents the existing Slovenian "Zbirno mesto".
+
+Do not duplicate `WATER_SOURCE` as `TEMPORARY_WATER_SOURCE`. In this feature, the existing incident COP water-source object represents a temporary incident annotation; permanent hydrants continue to live in their separate register.
+
+## 3. Mandatory code and database inspection
+
+Before editing, inspect the actual latest `main`, including:
+
+- `web/lib/incidents/cop.ts`
+- `web/lib/incidents/messages.ts`
+- `web/features/incidents/IncidentCop.tsx`
+- `web/features/incidents/CopMap.tsx`
+- `web/features/incidents/RtsContextMenu.tsx`
+- `web/lib/operational/contextCommands.ts`
+- `web/lib/operational/contextMessages.ts`
+- `web/features/incidents/rtsSession.tsx`
+- `web/features/incidents/workspace.tsx`
+- `web/features/incidents/IncidentArea.tsx`
+- existing incident command confirmation handling
+- existing COP backend commands, read RPCs, schemas, constraints, history and permissions
+- all relevant forward migrations under `supabase/migrations/`
+
+Determine exactly how `object_put` and `object_deactivate` work, where the allowed kinds are checked, and how COP revisions and audit history are maintained.
+
+Do not assume the allowed object kinds exist in only one validation location.
+
+Inspect current server-side incident command-role authorization and sector-scoped edit permissions.
+
+Reuse existing mechanisms.
+
+## 4. Functional requirements
+
+### MUST
+
+- Create `COMMAND_POST` from a map coordinate.
+- Create `STAGING` from a map coordinate.
+- Create `WATER_SOURCE` from a map coordinate.
+- Create `TRIAGE_POINT` from a map coordinate.
+- View details by right-clicking the persisted object.
+- Edit authorized existing objects.
+- Deactivate authorized existing objects.
+- Preserve the existing COP data model and mutation workflow.
+- Enforce incident-command authorization on the server.
+- Preserve versioning, history, scope, and confirmation.
+- Show objects in both Classic View and Command Map.
+- Keep SIM and real incidents separated by incident identity.
+- Preserve current F1 responsiveness and F2 contextual command behavior.
+
+### SHOULD
+
+- Use recognizable icons and accessible labels.
+- Show compact success/error feedback.
+- Retain the selected object after a successful creation.
+- Support keyboard/touch alternatives.
+- Support existing incident sector assignment where authorized.
+
+### OUT OF SCOPE
+
+- Persistent relationships between tactical objects.
+- Automatic command hierarchy restructuring.
+- Assigning firefighters or patients to triage points as a new workflow.
+- Patient medical records or triage classifications.
+- Automatic resource allocation.
+- New hydrant-register entries.
+- Automatic road route creation.
+- New SIM movement logic.
+- Realtime notifications/F4.
+- Minimap.
+- Unit drag-and-drop.
+
+## 5. Right-click on empty map
+
+Extend the existing F2 context menu.
+
+Required entries, localized in SI and DE:
+
+```text
+Ustvari taktični objekt
+    ├── Poveljniško mesto
+    ├── Zbirno mesto
+    ├── Triažna točka
+    ├── Začasni vodni vir
+    └── Druga taktična oznaka
+```
+
+"Druga taktična oznaka" may expose already supported COP point kinds such as `ACCESS_POINT` and `NOTE`.
+
+Existing `MOVE_TO` and other F2 actions must remain available.
+
+Do not add a second context-menu implementation.
+
+The menu should remain responsive to:
+
+- right-click on desktop;
+- long press on touch;
+- existing keyboard-accessible "Dejanja" entry point;
+- expanded Command Map layout;
+- overlapping feature selection.
+
+### Authorization
+
+A read-only participant may view permitted existing objects but must not see an enabled create command.
+
+The UI must derive eligibility from the actual server-backed COP capabilities.
+
+A visible action is not proof of write authorization; the server validates again on submission.
+
+Do not silently use organization-admin authority as incident-command authority.
+
+## 6. Capture exact clicked position
+
+Use the original geographic coordinate captured by F2.
+
+Coordinate contract:
+
+```typescript
+type Position = [longitude: number, latitude: number];
+
+type PointGeometry = {
+  type: 'Point';
+  coordinates: Position;
+};
+```
+
+Requirements:
+
+- WGS84 coordinate.
+- Correct longitude/latitude order.
+- Finite numeric values.
+- Valid global coordinate bounds.
+- Keep the original coordinate immutable while editing the object name or sector.
+- Panning/zooming after opening the editor must not change the target location.
+- No invented GPS positions.
+- No automatic snapping to hydrants or roads.
+- Do not create the object until the user explicitly confirms.
+
+Use the established COP geometry validation rather than a weaker frontend-only approximation.
+
+## 7. Compact creation editor
+
+When the user chooses a type, open a compact form/drawer within the Command Map layout.
+
+Example:
+
+```text
+Novo poveljniško mesto
+
+Ime:
+[Poveljniško mesto A]
+
+Opis:
+[                         ]
+
+Lokacija:
+46.320584, 15.878671
+[Prikaži na karti]
+
+Sektor:
+[Intervencija / dovoljeni sektor]
+
+[Prekliči]    [Preglej in shrani]
+```
+
+Requirements:
+
+- Type is preselected from the context action.
+- The coordinate is already filled in.
+- Name is required.
+- Description is optional.
+- Name/description lengths follow existing COP limits.
+- Sector is optional only where existing command permissions permit incident-wide creation.
+- For sector-limited commanders, constrain choices to authorized sectors.
+- No raw GeoJSON text editing required for this quick-create flow.
+- Preserve advanced geometry editing in Classic View.
+- Keyboard accessible.
+- Touch friendly.
+- Map remains visible and stable.
+- Dismiss/Cancel does not persist anything.
+
+### Default object names
+
+Provide sensible localized suggestions, such as:
+
+- Poveljniško mesto
+- Zbirno mesto
+- Triažna točka
+- Začasni vodni vir
+
+Allow editing before confirmation.
+
+Do not automatically assign globally unique names if the backend has no such rule.
+
+## 8. Reuse the existing COP mutation command
+
+The existing frontend already constructs object payloads equivalent to:
+
+```typescript
+{
+  id: objectId,
+  version: '0',
+  kind: 'COMMAND_POST',
+  label: 'Poveljniško mesto A',
+  description: '',
+  geometry: {
+    type: 'Point',
+    coordinates: [15.878671, 46.320584],
+  },
+  sector_id: null,
+}
+```
+
+For a new object:
+
+- Generate the client UUID once for the logical request.
+- Use the existing `object_put` command.
+- Use the currently authoritative incident version.
+- Use the established acting organization and incident context.
+- Route the command through the same confirmation and mutation handling already used in `IncidentCop`.
+- Reuse expected-version checks, retry behavior and conflict handling.
+- Avoid generating a new UUID or changed payload during retry of an ambiguous response.
+- Never bypass the existing incident command APIs with direct browser table writes.
+
+The example above is illustrative; inspect the exact existing command payload contract and match it.
+
+**Do not duplicate the server-side authorization or command engine in the new UI.**
+
+## 9. Backend support for TRIAGE_POINT
+
+First inspect the exact existing schema.
+
+Identify all places where allowed COP object kinds are defined or validated:
+
+- database CHECK constraints or enum types;
+- PL/pgSQL validation branches;
+- COP command handlers;
+- server-side JSON validation;
+- frontend kind unions;
+- localized labels;
+- map styling;
+- historical/audit serialization.
+
+Add `TRIAGE_POINT` only where needed.
+
+### Migration strategy
+
+If the current database rejects the new kind, add **one forward-only SQL migration** with the next available timestamp.
+
+Do not edit historical migrations.
+
+Do not drop/recreate incident object tables.
+
+Do not change the structure of unrelated COP commands.
+
+If a constraint must be replaced:
+
+1. Preserve all currently allowed kinds.
+2. Add `TRIAGE_POINT`.
+3. Preserve existing constraints on geometry and lifecycle state.
+4. Ensure existing rows and historical records remain valid.
+
+If the type is a PostgreSQL enum, use an appropriate additive enum migration rather than inventing a replacement type.
+
+If validation occurs inside a PL/pgSQL function, preserve the full function contract, authorization and all existing branches while extending the allowed kind.
+
+Do not change the accepted geometry rules of `HAZARD`, `PERIMETER` or other kinds.
+
+For `TRIAGE_POINT`, allow an appropriate point geometry consistent with other operational point objects.
+
+### Important
+
+The existing COP already represents three of the requested object types.
+
+Do **not** create new SQL tables for those three types.
+
+Create a new table only if repository inspection proves that an essential requirement cannot be safely represented by existing COP infrastructure, and explicitly explain that finding before making such a change.
+
+## 10. Server-side permissions
+
+Only authorized incident-command roles may create or modify tactical objects.
+
+Follow the actual existing command model.
+
+Required policy:
+
+- Incident commander: authorized within actual current command scope.
+- Delegated/sector commander: authorized only within their granted operational scope.
+- Ordinary participant: read access only where permitted.
+- Organization administrator without incident command authority: no automatic tactical write access.
+- Revoked/expired command role: no new mutations.
+- Closed/cancelled incident: respect existing mutation restrictions.
+
+Do not weaken the current authorization model.
+
+If `cop.can_manage` or sector `can_edit` is already authoritative and sufficient, reuse it.
+
+If any current path allows unauthorized organizational administrators to create tactical objects independently of incident command authority, fix that server-side permission path narrowly without changing unrelated administrative behavior.
+
+Do not trust `can_manage` flags sent by the browser.
+
+The server must resolve acting identity, organization, incident and current command scope itself.
+
+Preserve RLS and existing RPC security posture.
+
+## 11. Editing existing tactical objects
+
+Extend the F2 right-click object menu with appropriate entries:
+
+```text
+Poveljniško mesto A
+    ├── Podrobnosti
+    ├── Uredi
+    ├── Deaktiviraj
+    └── Dovoljena dejanja iz kataloga
+```
+
+Rules:
+
+- Display only operations actually authorized.
+- Reuse `object_put` for edits.
+- Preserve the same object UUID.
+- Preserve the existing immutable kind-on-update rule, if enforced by the backend.
+- Use the latest known object version.
+- Prevent stale overwrites.
+- Show a clear conflict UI when another commander changed the object.
+- Never silently overwrite the other person's modification.
+- Do not allow an edit to accidentally move the object when the user changes only the label.
+
+### Deactivation
+
+Use the existing `object_deactivate` command.
+
+- Require explicit confirmation.
+- Do not hard-delete a persisted object.
+- Preserve its audit trail.
+- Do not remove an existing object merely by deleting a React marker.
+- Reflect server-confirmed deactivation in the map and object list.
+
+If a user wants the object again, create a new object or follow an existing authorized restoration workflow; do not quietly resurrect archived entities.
+
+## 12. Display and symbols
+
+Use the existing MapLibre/COP sources and layers.
+
+Do not add a second MapLibre instance.
+
+Do not render persisted tactical objects as separate unsynchronized DOM markers.
+
+Use a clear, consistent symbol mapping:
+
+| COP kind | Slovenian label | Suggested icon |
+|---|---|---|
+| `COMMAND_POST` | Poveljniško mesto | Command / flag |
+| `STAGING` | Zbirno mesto | Group / assembly |
+| `TRIAGE_POINT` | Triažna točka | Medical cross |
+| `WATER_SOURCE` | Začasni vodni vir | Water / droplet |
+| `ACCESS_POINT` | Dostopna točka | Access |
+| `NOTE` | Opomba | Note |
+
+The icon design must remain usable at multiple zoom levels.
+
+Requirements:
+
+- Different types distinguishable by shape/icon, not solely color.
+- Accessible text labels.
+- Use existing MapLibre source/layer lifecycle.
+- Existing labels and points must not disappear on every zoom.
+- Selected object receives a visible highlight.
+- Context menu hit testing recognizes each new type through its existing COP UUID and source provenance.
+- Do not interfere with unit marker priority or hydrant selection.
+- Avoid unnecessary GeoJSON `setData()` calls when only a menu or drawer changes.
+- Preserve map camera and existing F1 stable-height fixes.
+- Do not hide operational incident safety warnings.
+
+### Important separation
+
+`WATER_SOURCE` is an incident COP object.
+
+An official hydrant is a permanent registry entity.
+
+Do not modify or duplicate hydrant registry rows to create a temporary water source.
+
+## 13. History and audit
+
+Inspect the existing COP command history and audit implementation.
+
+Creation, editing and deactivation must retain:
+
+- actor identity;
+- acting organization;
+- incident identity;
+- affected object UUID;
+- action type;
+- timestamp;
+- version/revision;
+- sufficient before/after information to understand the change.
+
+Use the established immutable history/audit facilities.
+
+Do not build a duplicate frontend-only event history.
+
+If the existing COP history does not expose enough information, extend it through the established backend pattern rather than introducing a separate history table by default.
+
+Closed incidents must retain these objects in their historical record.
+
+Do not export SIM annotations into operational incidents.
+
+## 14. Refresh and server-authoritative state
+
+After a successful create/edit/deactivate:
+
+1. Receive the authoritative server result.
+2. Trigger the existing COP refresh or command feedback mechanism.
+3. Replace the displayed object with server-confirmed data.
+4. Keep map camera and unaffected selection stable.
+5. Show concise success feedback.
+
+Before the server confirms creation, a temporary preview marker may be displayed, but it must be visually identified as an **unconfirmed draft**.
+
+Do not display a draft as a persisted object.
+
+If the server rejects the mutation, retain the draft and explain the reason.
+
+If the response is ambiguous, use the existing retry/idempotency mechanism rather than issuing a new logical command.
+
+Handle version conflicts explicitly.
+
+Handle access loss by clearing privileged drafts and inaccessible data according to the existing account/incident security lifecycle.
+
+No page reload should be needed merely to see a newly created object.
+
+## 15. Interaction conflicts
+
+Creation must coexist with all existing F2 functionality:
+
+- right-click unit;
+- right-click hydrant;
+- right-click COP entity;
+- right-click empty map;
+- Move To;
+- existing RTS recipient selection;
+- box selection;
+- lasso selection;
+- COP drawing and editing;
+- navigation target picking;
+- SIM movement;
+- modal confirmations.
+
+Do not open a tactical creation menu while another higher-priority tool owns the pointer.
+
+Do not let a double-click or synthetic touch click create duplicate objects.
+
+Capture one coordinate per creation flow.
+
+Escape behavior:
+
+- Closes context menu if one is open.
+- Cancels an unsubmitted tactical draft when appropriate.
+- Must not hijack an existing higher-priority modal, drawing or target-selection operation.
+
+Do not create duplicate event listeners.
+
+## 16. Classic View compatibility
+
+The existing COP form in `IncidentCop.tsx` must remain available.
+
+The new `TRIAGE_POINT` kind must be recognized by both views.
+
+Classic View retains:
+
+- current object editor;
+- existing drawing tools;
+- advanced geometry entry;
+- existing command confirmation;
+- existing command-role restrictions;
+- existing object lists and histories.
+
+Switching between Classic and Command Map must not create or delete any object.
+
+Do not duplicate existing COP state providers or map instances.
+
+## 17. Responsive and accessible behavior
+
+Desktop:
+
+- Context menu near clicked coordinate.
+- Compact create/edit form attached to the Command Map.
+- No full-page navigation needed.
+- No map resizing when validation/status messages appear.
+
+Tablet/mobile:
+
+- Long press or visible "Dejanja" action.
+- Compact bottom sheet/drawer if appropriate.
+- Reasonable touch targets.
+- No hover dependency.
+- No horizontal overflow.
+- No blocking essential map controls.
+
+Keyboard:
+
+- Accessible action selection.
+- Labelled inputs.
+- Focus management.
+- Escape and cancel.
+- Focus return after dismissal.
+
+Localization:
+
+- Slovenian and German labels.
+- Creation/edit/archive feedback.
+- Validation errors.
+- Authorization/permission messages.
+- `TRIAGE_POINT` label in all relevant dictionaries.
+
+Do not hardcode untranslated visible text into the component.
+
+## 18. Operational safety
+
+Preserve:
+
+**COMMAND INTENT != EXECUTION PLAN != OBSERVED TELEMETRY**
+
+A tactical object is a map annotation, not:
+
+- a task assignment;
+- proof that a vehicle arrived;
+- a navigation session;
+- GPS telemetry;
+- a real-time inventory record;
+- a permanent hydrant.
+
+Do not automatically move units when a tactical object is created.
+
+Do not automatically create a task when a command post or triage point is created.
+
+Only use actual configured actions when a user explicitly chooses to send units to an existing point object.
+
+SIM objects are incident-scoped training records, never ordinary operational annotations.
+
+The shared Supabase project must not allow cross-incident or cross-org mutations.
+
+## 19. Acceptance criteria
+
+- [ ] PR is based on the merged F2 `main`.
+- [ ] Existing COP map-object infrastructure is reused.
+- [ ] No duplicate tactical-object table.
+- [ ] `COMMAND_POST` quick-create works.
+- [ ] `STAGING` quick-create works.
+- [ ] `WATER_SOURCE` quick-create works.
+- [ ] `TRIAGE_POINT` is supported end-to-end.
+- [ ] Right-click on empty map captures the correct point.
+- [ ] Creation form opens with correct type and coordinates.
+- [ ] Cancel creates no persisted record.
+- [ ] Authorized confirmation uses existing COP command path.
+- [ ] Unauthorized users cannot create/edit/deactivate.
+- [ ] Incident commander and sector-scope rules are enforced server-side.
+- [ ] Created objects appear after confirmed save without page reload.
+- [ ] Persisted objects survive page reload.
+- [ ] Right-click on object opens correct details and authorized actions.
+- [ ] Edit preserves object identity and version protection.
+- [ ] Deactivation preserves history.
+- [ ] Hydrant registry is unaffected.
+- [ ] Existing `MOVE_TO` actions still work.
+- [ ] No false navigation, GPS or SIM position changes.
+- [ ] Classic View retains advanced COP editing.
+- [ ] F1 responsive sizing and stable map-height fixes remain intact.
+- [ ] F2 right-click, long press and keyboard handling remain intact.
+- [ ] Existing translations and new triage translations are correct.
+- [ ] No new external frontend dependencies.
+- [ ] Any database changes are delivered as forward-only migrations.
+
+## 20. Development restrictions
+
+Do NOT run:
+
+- tests;
+- builds;
+- lint;
+- typecheck;
+- CI;
+- browser or runtime verification;
+- Android/Gradle tasks;
+- database migrations;
+- Supabase deployments.
+
+Do not merge the PR.
+
+Do not alter deployed infrastructure.
+
+Do not use destructive Git cleanup commands.
+
+Preserve all user-specific local customizations, including:
+
+- `android/app/build.gradle.kts`
+- `android/build.gradle.kts`
+- `android/gradle.properties`
+- `android/app/schemas/`
+- `pnpm-lock.yaml`
+- `web/next-env.d.ts`
+
+Do not unnecessarily modify lockfiles or dependencies.
+
+Do not add the implementation prompt as a large `.txt` file to the repository.
+
+## 21. Deliverables
+
+Create one focused pull request containing:
+
+1. Complete working source implementation.
+2. Minimal additive migration, only if needed for new `TRIAGE_POINT` validity.
+3. Existing COP command integration.
+4. F2 right-click / long-press integration.
+5. Contextual creation, editing and deactivation.
+6. SI/DE localization.
+7. MapLibre symbology changes.
+8. Authorization and audit preservation.
+9. Full changed-file summary.
+10. Manual verification checklist.
+11. List of all unverified behavior and checks not executed.
+
+In the PR description, explicitly document:
+
+- Which existing tables/RPCs/commands were reused.
+- Why no duplicate tactical-object model was created.
+- What SQL migration, if any, must be manually applied.
+- Whether existing database deployment requires a separate manual step.
+- Any limitations discovered in the pre-existing COP authorization or audit model.
+
+**Final goal:** From the Command Map, a real authorized incident commander must be able to right-click a location, create a persistent tactical object, subsequently inspect/edit/deactivate it, and use it as operational map context — without leaving the map or creating any parallel architecture.
+
+**Next milestone, not part of this PR:** M14.5F4 — live operational updates and notifications.
