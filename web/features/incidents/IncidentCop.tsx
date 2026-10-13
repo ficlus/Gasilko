@@ -29,7 +29,6 @@ export function IncidentCop({locale,account,org,incidentId,refresh,feedback,disa
  const searchController=useRef<AbortController|null>(null),seenFeedback=useRef(feedback.sequence);
  const readController=useRef<AbortController|null>(null);
  const [linkId,setLinkId]=useState('');
-
  const [bounds,setBounds]=useState<ViewportBounds|null>(null),[background,setBackground]=useState(true);
  const context=useHydrantContext(account,bounds,background&&!!cop,refresh+epoch);
  const selected=workspace?(workspace.selected&&['INCIDENT_SECTOR','MAP_OBJECT','HYDRANT'].includes(workspace.selected.kind)?workspace.selected.id:''):localSelected;
@@ -119,6 +118,14 @@ export function IncidentCop({locale,account,org,incidentId,refresh,feedback,disa
  const mapHydrants=resolvedHydrant&&resolvedHydrant.longitude!==null&&resolvedHydrant.latitude!==null&&!context.rows.some(h=>h.id===resolvedHydrant.id)?[...context.rows,{...resolvedHydrant,latitude:resolvedHydrant.latitude,longitude:resolvedHydrant.longitude}]:context.rows;
  const linked=(!workspace||kind==='HYDRANT')?cop?.links.find(l=>l.hydrant?.id===selected):undefined;
  const shownHydrant=backgroundHydrant??linked?.hydrant??resolvedHydrant;
+ // Preserve the Classic layout, but keep Command Map's changing network
+ // status out of the map's sizing flow. Show background loading only when
+ // there is not already valid content to display.
+ const initialMapLoading=(loading&&!cop)||(context.loading&&context.rows.length===0&&background&&!!cop);
+ const classicMapStatus=<>
+  {loading&&<p role="status">{t('loading')}</p>}{error&&<p role="alert">{t(error)}</p>}
+  {context.loading&&<p role="status">{t('loading')}</p>}{context.error&&<p role="alert">{t('workspaceHydrantError')}</p>}{context.more&&<p role="status">{t('workspaceHydrantLimit')}</p>}
+ </>;
  return <section className="admin-card cop-surface">
   <details className="cop-map-controls" open={workspace?.view!=='command'}><summary>{workspaceText(locale)('controls')}</summary>
    <h2>{t('copTitle')}</h2><p>{t('copAuthority')}</p>
@@ -130,8 +137,25 @@ export function IncidentCop({locale,account,org,incidentId,refresh,feedback,disa
     <p className="workspace-map-legend">{t('workspaceMarkerLegend')}</p>
    </>}
   </details>
-  {loading&&<p role="status">{t('loading')}</p>}{error&&<p role="alert">{t(error)}</p>}
-  {context.loading&&<p role="status">{t('loading')}</p>}{context.error&&<p role="alert">{t('workspaceHydrantError')}</p>}{context.more&&<p role="status">{t('workspaceHydrantLimit')}</p>}
+  {workspace?.view==='command' ? (
+   (initialMapLoading||error||context.error||context.more)&&
+   <div
+    aria-live="polite"
+    style={{
+     position:'absolute',top:'3.25rem',left:'.5rem',right:'3.75rem',zIndex:4,
+     pointerEvents:'none',width:'max-content',maxWidth:'min(24rem, calc(100% - 5rem))',
+     maxHeight:'35%',overflow:'hidden',padding:'.2rem .55rem',
+     border:'1px solid #a6b6c0',borderRadius:'.35rem',
+     background:'rgba(255,255,255,.94)',boxShadow:'0 2px 8px rgba(0,0,0,.12)',
+     color:'#202e35',fontSize:'.8rem'
+    }}
+   >
+    {initialMapLoading&&<p role="status">{t('loading')}</p>}
+    {error&&<p role="alert">{t(error)}</p>}
+    {context.error&&<p role="alert">{t('workspaceHydrantError')}</p>}
+    {context.more&&<p role="status">{t('workspaceHydrantLimit')}</p>}
+   </div>
+  ) : classicMapStatus}
   {cop&&<>
    <CopMap selected={selection||shownHydrant||selected==='primary'?selected:''} contextHydrants={mapHydrants} onBounds={setBounds} locale={locale} cop={cop} layers={layers} drawing={locked?null:drawing} draft={draft?.geometry??null} vertices={vertices} onPoint={point} onSelect={setSelected}/>
    {selected==='primary'&&<p>{t('copLocation')}: {cop.incident.latitude}, {cop.incident.longitude}</p>}
