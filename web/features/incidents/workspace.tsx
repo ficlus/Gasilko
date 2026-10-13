@@ -17,7 +17,6 @@ import {IncidentViewSwitch,useIncidentView,type IncidentView} from './IncidentVi
 import {workspaceText} from '../../lib/incidents/workspaceMessages';
 import {useRts} from './rtsSession';
 import {incidentText} from '../../lib/incidents/messages';
-
 // Identity references only; DTOs and permissions remain owned by their domain readers.
 export type SelectedEntity={kind:'INCIDENT_SECTOR'|'MAP_OBJECT'|'HYDRANT'|'INCIDENT_UNIT'|'TASK'|'ALLOCATION';id:string};
 export type ContextAction={id:string;label:string;enabled:boolean;disabledReason?:string;requiresConfirmation:boolean;execute:()=>void};
@@ -45,7 +44,7 @@ export function IncidentWorkspace({locale,header,operations,secondary,children,v
  const root=useRef<HTMLElement>(null),heading=useRef<HTMLDivElement>(null),switchHost=useRef<HTMLDivElement>(null);
  const [wide,setWide]=useState(false),[left,setLeft]=useState<boolean|null>(null),[right,setRight]=useState<boolean|null>(null);
  const [tools,setTools]=useState(false),[history,setHistory]=useState(false),[expanded,setExpanded]=useState(false);
- const [dimensions,setDimensions]=useState({height:600,header:0});
+ const [headerHeight,setHeaderHeight]=useState(0);
  const ids=useId(),command=view==='command';
  const leftOpen=!expanded&&(left??wide),rightOpen=!expanded&&(right??false),toolsOpen=!expanded&&tools,historyOpen=!expanded&&history;
  const buttons=useRef<Partial<Record<'left'|'right'|'tools'|'history',HTMLButtonElement|null>>>({});
@@ -65,17 +64,24 @@ export function IncidentWorkspace({locale,header,operations,secondary,children,v
  useEffect(()=>{
   if(!command)return;
   let frame=0;
-  const measure=()=>{cancelAnimationFrame(frame);frame=requestAnimationFrame(()=>{
-   if(!root.current||!heading.current)return;
-   const rect=heading.current.getBoundingClientRect(),viewport=window.visualViewport;
-   const height=Math.max(180,Math.floor((viewport?.height??window.innerHeight)+(viewport?.offsetTop??0)-Math.max(0,rect.bottom)-12));
-   setDimensions(old=>old.height===height&&old.header===rect.height?old:{height,header:rect.height});
-   setWide(root.current.clientWidth>=1200);
-  });};
-  const observer=new ResizeObserver(measure);if(root.current)observer.observe(root.current);if(heading.current)observer.observe(heading.current);
-  measure();window.addEventListener('resize',measure);window.addEventListener('scroll',measure,{passive:true});
-  window.visualViewport?.addEventListener('resize',measure);
-  return()=>{cancelAnimationFrame(frame);observer.disconnect();window.removeEventListener('resize',measure);window.removeEventListener('scroll',measure);window.visualViewport?.removeEventListener('resize',measure);};
+  const measure=()=>{
+   cancelAnimationFrame(frame);
+   frame=requestAnimationFrame(()=>{
+    if(!root.current||!heading.current)return;
+    // Only the heading's own size matters. Its position changes while scrolling,
+    // but that must never change the map's height.
+    const measuredHeight=heading.current.getBoundingClientRect().height;
+    const nextWide=root.current.clientWidth>=1200;
+    setHeaderHeight(current=>current===measuredHeight?current:measuredHeight);
+    setWide(current=>current===nextWide?current:nextWide);
+   });
+  };
+  const observer=new ResizeObserver(measure);
+  if(root.current)observer.observe(root.current);
+  if(heading.current)observer.observe(heading.current);
+  measure();
+  window.addEventListener('resize',measure);
+  return()=>{cancelAnimationFrame(frame);observer.disconnect();window.removeEventListener('resize',measure);};
  },[command]);
  useEffect(()=>{if(!wide){setLeft(false);setRight(false);setTools(false);setHistory(false);}else setLeft(null);},[wide]);
  useEffect(()=>{if(!command)setExpanded(false);},[command]);
@@ -108,7 +114,12 @@ export function IncidentWorkspace({locale,header,operations,secondary,children,v
  return <Context.Provider value={context}>
   <section ref={root} className={'incident-workspace'+(command?' command-workspace':'')+(expanded?' command-expanded':'')}
    data-wide={wide} data-left={leftOpen} data-right={rightOpen||toolsOpen}
-   style={command?{'--command-height':dimensions.height+'px','--command-header-height':dimensions.header+'px'} as CSSProperties:undefined}>
+   style={command?{
+    // svh is stable while scrolling, including on mobile browsers with dynamic chrome.
+    // The map should resize only when the available viewport or heading size changes.
+    '--command-height':`max(180px, calc(100svh - ${headerHeight}px - 12px))`,
+    '--command-header-height':headerHeight+'px'
+   } as CSSProperties:undefined}>
    <div className="workspace-heading" ref={heading}>{header}
     <div className="workspace-view-bar" ref={switchHost}>
      <IncidentViewSwitch locale={locale} view={view} onChange={onView}/>
@@ -148,7 +159,6 @@ export function IncidentWorkspace({locale,header,operations,secondary,children,v
   </section>
  </Context.Provider>;
 }
-
 function WorkspaceViews({operational,...props}:{operational:boolean;locale:Locale;header:ReactNode;operations:ReactNode;secondary:ReactNode;children:ReactNode}){
  const {view,choose}=useIncidentView();
  // Operational incidents retain the exact component/portal/map identity across modes.
@@ -157,7 +167,6 @@ function WorkspaceViews({operational,...props}:{operational:boolean;locale:Local
  return <><div className="workspace-heading">{props.header}<div className="workspace-view-bar"><IncidentViewSwitch locale={props.locale} view={view} onChange={choose}/></div></div>
  <SimulationPanel locale={props.locale}/><IncidentNavigationPanel locale={props.locale}/><AutonomousSimulationPanel locale={props.locale}/>{props.operations}{props.children}{props.secondary}</>;
 }
-
 export function IncidentLayout({operational,locked,onAccessLost,simulation,...props}:{operational:boolean;locked:boolean;onAccessLost:()=>void;simulation:{account:string;org:string;incidentId:string;refresh:number;read:TaskRead;onInventoryChanged:()=>void};locale:Locale;header:ReactNode;operations:ReactNode;secondary:ReactNode;children:ReactNode}){
  return <RtsProvider enabled={operational} locked={locked} onAccessLost={onAccessLost}><SimulationProvider key={simulation.account+':'+simulation.org+':'+simulation.incidentId} {...simulation} locale={props.locale}><IncidentNavigationProvider {...simulation} locale={props.locale}><AutonomousSimulationProvider {...simulation} locale={props.locale}><WorkspaceViews operational={operational} {...props}/></AutonomousSimulationProvider></IncidentNavigationProvider></SimulationProvider></RtsProvider>;
 }
