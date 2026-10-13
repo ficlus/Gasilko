@@ -140,8 +140,14 @@ class RoomHydrantRepository(
                 val next=dao.nextChange(account,organization) ?: break
                 if(next.operation!=CREATE_INSPECTION || next.state!="PENDING" || next.entityId!=hydrantId)break
                 val event=rows.find { it.id==next.operationId } ?: break
-                if(!acknowledgeHydrantOperation(database,next,serverHydrant,event) { checkAccount(account) })break
-            }
+                if (!acknowledgeHydrantOperation(
+                    database,
+                    next,
+                    serverHydrant,
+                    event,
+                    checkContext = { checkAccount(account) }
+                )) break
+                        }
             checkAccount(account)
         }
         // Continue any earlier/later work through the existing ordered worker, never
