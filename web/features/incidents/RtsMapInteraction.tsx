@@ -12,7 +12,7 @@ export type RecipientPositionLayer={id:string;recipients:ReadonlyMap<string,RtsR
  {origin:'ACTUAL_GPS'}|{origin:'SIMULATED';scenarioId:string;incidentId:string});
 export type ActualRecipientLayer=RecipientPositionLayer&{origin:'ACTUAL_GPS'};
 const noPositionLayers:readonly RecipientPositionLayer[]=[];
-function recipientFeature(feature:MapGeoJSONFeature,layers:readonly RecipientPositionLayer[]):RtsRecipient|null{
+export function recipientFeature(feature:MapGeoJSONFeature,layers:readonly RecipientPositionLayer[]):RtsRecipient|null{
  if(feature.geometry.type!=='Point'||!validPosition(feature.geometry.coordinates))return null;
  const type=feature.properties?.recipient_type,id=feature.properties?.recipient_id;
  if((type!=='INCIDENT_UNIT'&&type!=='INCIDENT_CREW_MEMBER')||typeof id!=='string')return null;

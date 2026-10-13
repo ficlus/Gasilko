@@ -4,6 +4,7 @@ import {SimulationOverview} from './SimulationOverview';
 import {SimulationBanner} from './SimulationProvider';
 import {simulationErrors,defaultSimulationSetup} from '../../lib/operational/simulation';
 import {simulationText} from '../../lib/operational/simulationMessages';
+import {contextText} from '../../lib/operational/contextMessages';
 import {IncidentTasks} from './IncidentTasks';
 import {taskErrors,taskMutations} from '../../lib/operational/tasks';
 import {WorkspaceHeaderDetails,IncidentLayout,WorkspaceSection} from './workspace';
@@ -235,10 +236,11 @@ export function IncidentArea({locale,account,destination,initialOrg}:{locale:Loc
    </>}
    secondary={<IncidentTimeline locale={locale} account={account} org={org} incident={detail.id} revision={refresh} read={rpc}/>}>
    <IncidentCop key={`cop/${account}/${org}/${detail.id}`} locale={locale} account={account} org={org} incidentId={detail.id} refresh={refresh} feedback={copFeedback} disabled={loading||busy||!!pending} read={rpc} onAction={ask}/>
-   <IncidentTasks key={`tasks/${account}/${org}/${detail.id}`} locale={locale} account={account} org={org} incidentId={detail.id} version={detail.version} incidentReference={detail.reference_number} organizationName={entry?.organizations.find(o=>o.id===org)?.name??org} operational={['ACTIVE','STABILIZED'].includes(detail.status)} refresh={refresh} feedback={taskFeedback} disabled={loading||busy||!!pending} read={rpc} onAction={ask}/>
+   <IncidentTasks submission={pending?.action==='issue_task'?(busy?'sending':'pending'):confirmation?.action==='issue_task'&&error?'rejected':'idle'} key={`tasks/${account}/${org}/${detail.id}`} locale={locale} account={account} org={org} incidentId={detail.id} version={detail.version} incidentReference={detail.reference_number} organizationName={entry?.organizations.find(o=>o.id===org)?.name??org} operational={['ACTIVE','STABILIZED'].includes(detail.status)} refresh={refresh} feedback={taskFeedback} disabled={loading||busy||!!pending} read={rpc} onAction={ask}/>
    <IncidentResources crewOutcomes={crewOutcomes} key={`resources/${account}/${org}/${detail.id}`} locale={locale} account={account} org={org} incidentId={detail.id} refresh={refresh} feedback={resourceFeedback} disabled={loading||busy||!!pending} read={rpc} onAction={ask}/>
   </IncidentLayout>}
   {confirmation&&<ConfirmationDialog title={t(confirmation.action)} text={t('confirmation')} busy={busy||!!pending} onDismiss={()=>setConfirmation(null)}>
+    {confirmation.action==='issue_task'&&<p role="status">{contextText(locale)(busy?'sending':pending?'pending':error?'rejected':'draft')}</p>
    {confirmation.training&&<SimulationBanner locale={locale}/>}
    {confirmation.description&&<p className="incident-prose">{confirmation.description}</p>}
    {confirmation.action==='recover_command'&&<p role="alert">{t('recoveryWarning')}</p>}

@@ -13,17 +13,19 @@ import {taskText} from '../../lib/operational/taskMessages';
 import {ParameterInputs} from '../operational/ActionFields';
 import {useRtsSession} from './rtsSession';
 import {recipientKey,typingTarget,type RtsRecipient} from '../../lib/operational/rts';
+import {contextText} from '../../lib/operational/contextMessages';
 import {rtsText} from '../../lib/operational/rtsMessages';
 import {ContextActions,WorkspaceSlot,WorkspaceSection,useWorkspace} from './workspace';
 
-type Props={locale:Locale;account:string;org:string;incidentId:string;version:string;incidentReference:string;organizationName:string;operational:boolean;refresh:number;feedback:CopFeedback;disabled:boolean;read:TaskRead;
+type Props={submission?:'idle'|'sending'|'pending'|'rejected';locale:Locale;account:string;org:string;incidentId:string;version:string;incidentReference:string;organizationName:string;operational:boolean;refresh:number;feedback:CopFeedback;disabled:boolean;read:TaskRead;
  onAction:(action:Mutation,payload:Record<string,unknown>,item?:InboxItem,description?:string)=>void};
 type HydrantOption={id:string;code:string|null;address:string|null};
 type Chosen=RtsRecipient;
-export function IncidentTasks({locale,account,org,incidentId,version,incidentReference,organizationName,operational,refresh,feedback,disabled,read,onAction}:Props){
+export function IncidentTasks({submission='idle',locale,account,org,incidentId,version,incidentReference,organizationName,operational,refresh,feedback,disabled,read,onAction}:Props){
  const navigation=useIncidentNavigation(),nt=navigationText(locale);
  const urlQuery=useSearchParams();
  const rts=useRtsSession(),rt=rtsText(locale);
+ const ct=contextText(locale);
  const t=taskText(locale),workspace=useWorkspace(),alive=useRef(true),blocked=useRef(false);
  const [page,setPage]=useState(0),[history,setHistory]=useState(false),[reload,setReload]=useState(0),[rows,setRows]=useState<TaskPage<Task>|null>(null),[error,setError]=useState('');
  const [localSelected,setLocalSelected]=useState<string|null>(null),[detail,setDetail]=useState<TaskDetail|null>(null);
@@ -32,7 +34,8 @@ export function IncidentTasks({locale,account,org,incidentId,version,incidentRef
  const formSession=useRef(0),editor=useRef<HTMLElement>(null);
  const {open,setOpen,action,setAction,recipients:chosen,setRecipients:setChosen,setTarget}=rts,target=rts.preview.target;
  const [taskUuid,setTaskUuid]=useState(''),[baseVersion,setBaseVersion]=useState(version);
- const [catalog,setCatalog]=useState<TaskPage<ActionDefinition>|null>(null),[catalogQuery,setCatalogQuery]=useState(''),[catalogPage,setCatalogPage]=useState(0);
+ const {catalog,setCatalog}=rts;
+ const [catalogQuery,setCatalogQuery]=useState(''),[catalogPage,setCatalogPage]=useState(0);
  const [candidates,setCandidates]=useState<TaskPage<Recipient>|null>(null),[query,setQuery]=useState(''),[recipientPage,setRecipientPage]=useState(0);
  const [lon,setLon]=useState(''),[lat,setLat]=useState(''),[cop,setCop]=useState<Cop|null>(null);
  const [hydrantQuery,setHydrantQuery]=useState(''),[hydrants,setHydrants]=useState<HydrantOption[]>([]);
@@ -41,11 +44,13 @@ export function IncidentTasks({locale,account,org,incidentId,version,incidentRef
  const [readUnavailable,setReadUnavailable]=useState(false);
  const [checking,setChecking]=useState(false),[verifyEpoch,setVerifyEpoch]=useState(0),[actionChanged,setActionChanged]=useState(false);
  const verified=useRef(new Map<string,Recipient|null>()),verifiedEpoch=useRef(''),seenLaunch=useRef(0);
+ const commandView=workspace?.view==='command',catalogEnabled=open||commandView;
+ const [contextForm,setContextForm]=useState(false);
  const locked=disabled||rts.locked||rts.copEditing||rts.externalEditing;
  const selectionKeys=chosen.map(recipientKey).sort().join('|');
  const scope={p_incident_id:incidentId,p_acting_organization_id:org};
  useEffect(()=>{alive.current=true;return()=>{alive.current=false;};},[]);
- function failure(e:unknown){const code=taskErrorCode(e);setError(code);setReadUnavailable(true);
+ function failure(e:unknown){const code=taskErrorCode(e);setError(code);setReadUnavailable(true);rts.setCommandTypes([]);
   if(['NOT_AUTHORIZED','EXPIRED'].includes(code)){rts.revoke();blocked.current=true;setRows(null);setDetail(null);setCatalog(null);setCandidates(null);setChosen([]);setCop(null);setHydrants([]);setOpen(false);}}
  useEffect(()=>{
   if(feedback.kind==='blocked'){failure(new Error('NOT_AUTHORIZED'));return;}
@@ -63,15 +68,15 @@ export function IncidentTasks({locale,account,org,incidentId,version,incidentRef
   return()=>ac.abort();
  },[taskId,account,org,incidentId,refresh,reload,read]);
  useEffect(()=>{
-  if(!open||blocked.current)return;const ac=new AbortController();setCatalog(null);
+  if(!catalogEnabled||blocked.current)return;const ac=new AbortController();setCatalog(null);rts.setCatalogError(false);
   const timer=setTimeout(()=>{void read<TaskPage<ActionDefinition>>('operational_action_catalog',{p_organization_id:org,p_query:catalogQuery,p_page:catalogPage},ac.signal,account)
-   .then(r=>{if(!ac.signal.aborted&&!blocked.current){setCatalog(r);const current=r.rows.find(d=>d.id===action?.id);if(current&&current.configuration.id!==action?.configuration.id)setActionChanged(true);}}).catch(e=>{if(!ac.signal.aborted)failure(e);});},300);
+   .then(r=>{if(!ac.signal.aborted&&!blocked.current){setCatalog(r);const current=r.rows.find(d=>d.id===action?.id);if(current&&current.configuration.id!==action?.configuration.id)setActionChanged(true);}}).catch(e=>{if(!ac.signal.aborted){rts.setCatalogError(true);failure(e);}});},300);
   return()=>{clearTimeout(timer);ac.abort();};
- },[open,account,org,catalogQuery,catalogPage,refresh,reload,read]);
+ },[catalogEnabled,account,org,catalogQuery,catalogPage,refresh,reload,read]);
  useEffect(()=>{
-  if(!operational||blocked.current)return;const ac=new AbortController();setCandidates(null);
+  if(!operational||blocked.current)return;const ac=new AbortController();setCandidates(null);rts.setCommandTypes(null);
   const timer=setTimeout(()=>{void read<TaskPage<Recipient>>('incident_task_recipients',{...scope,p_query:query,p_page:recipientPage},ac.signal,account)
-   .then(r=>{if(!ac.signal.aborted&&!blocked.current){setCandidates(r);verified.current=new Map([...verified.current].filter(([key])=>chosen.some(row=>recipientKey(row)===key)));r.rows.forEach(row=>verified.current.set(recipientKey(row),row));}}).catch(e=>{if(!ac.signal.aborted)failure(e);});},300);
+   .then(r=>{if(!ac.signal.aborted&&!blocked.current){setCandidates(r);rts.setCommandTypes([...new Set(r.rows.map(row=>row.type))]);verified.current=new Map([...verified.current].filter(([key])=>chosen.some(row=>recipientKey(row)===key)));r.rows.forEach(row=>verified.current.set(recipientKey(row),row));}}).catch(e=>{if(!ac.signal.aborted)failure(e);});},300);
   return()=>{clearTimeout(timer);ac.abort();};
  },[operational,account,org,incidentId,query,recipientPage,refresh,reload,read]);
  useEffect(()=>{
@@ -116,7 +121,7 @@ export function IncidentTasks({locale,account,org,incidentId,version,incidentRef
   return()=>ac.abort();
  },[selectionKeys,refresh,reload,verifyEpoch,operational,account,org,incidentId,read]);
  useEffect(()=>{
-  if(rts.launch===seenLaunch.current)return;seenLaunch.current=rts.launch;begin(false,true);
+  if(rts.launch===seenLaunch.current)return;seenLaunch.current=rts.launch;begin(false,true,rts.contextLaunch);
  },[rts.launch]);
  useEffect(()=>{
   if(!open||target.kind!=='COORDINATE'||!rts.preview.geometry)return;
@@ -132,11 +137,11 @@ export function IncidentTasks({locale,account,org,incidentId,version,incidentRef
   rts.setIntent(!open&&detail?{...detail,label:actionLabel(detail.configuration,locale)}:null);
  },[detail,open,locale,rts.setIntent]);
 
- function begin(prefill=false,preserveRecipients=false){
+ function begin(prefill=false,preserveRecipients=false,fromContext=false){
   if(locked||!operational)return;
-  const session=++formSession.current;
-  setTaskUuid(crypto.randomUUID());setBaseVersion(version);setOpen(true);setError('');setReadUnavailable(false);setStale(false);setAction(null);if(!preserveRecipients)setChosen([]);setActionChanged(false);setParameters({});setTitle('');setNotes('');setPriority('NORMAL');setLon('');setLat('');
-  setTarget(prefill&&selected&&['HYDRANT','INCIDENT_SECTOR','MAP_OBJECT'].includes(selected.kind)?selected.kind==='HYDRANT'?{kind:'HYDRANT',entityId:selected.id}:
+  const session=++formSession.current;setContextForm(fromContext);if(fromContext)setVerifyEpoch(v=>v+1);
+  setTaskUuid(crypto.randomUUID());setBaseVersion(version);setOpen(true);setError('');setReadUnavailable(false);setStale(false);if(!fromContext)setAction(null);if(!preserveRecipients)setChosen([]);setActionChanged(false);setParameters({});setTitle('');setNotes('');setPriority(fromContext&&action?action.configuration.default_priority:'NORMAL');setLon(fromContext&&target.kind==='COORDINATE'?String(target.coordinate[0]):'');setLat(fromContext&&target.kind==='COORDINATE'?String(target.coordinate[1]):'');
+  if(!fromContext)setTarget(prefill&&selected&&['HYDRANT','INCIDENT_SECTOR','MAP_OBJECT'].includes(selected.kind)?selected.kind==='HYDRANT'?{kind:'HYDRANT',entityId:selected.id}:
    {kind:selected.kind==='MAP_OBJECT'?'INCIDENT_MAP_OBJECT':'INCIDENT_SECTOR',entityId:selected.id,incidentId}:{kind:'NONE'});
   if(prefill&&selected?.kind==='INCIDENT_UNIT'){
    void read<TaskPage<Recipient>>('incident_task_recipients',{...scope,p_id:selected.id},undefined,account).then(r=>{
@@ -158,7 +163,7 @@ export function IncidentTasks({locale,account,org,incidentId,version,incidentRef
   return (v.kind==='INCIDENT_SECTOR'?cop?.sectors.find(s=>s.id===v.entityId)?.name:cop?.objects.find(o=>o.id===v.entityId)?.label)??v.entityId;
  }
  function review(e:FormEvent){
-  e.preventDefault();if(!action||!chosen.length||stale||locked||checking||actionChanged||readUnavailable||!catalog||!cop)return;
+  e.preventDefault();if(!action||!action.active||!action.configuration.active_for_new_commands||!chosen.length||stale||locked||checking||actionChanged||readUnavailable||!catalog||!cop)return;
   if(chosen.some(r=>r.eligibility!=='ELIGIBLE')){setError('INVALID_TASK_RECIPIENT');return;}
   const cfg=action.configuration;
   const v:TaskTarget=target.kind==='COORDINATE'?{kind:'COORDINATE',coordinate:[lon.trim()===''?NaN:Number(lon),lat.trim()===''?NaN:Number(lat)]}:target;
@@ -190,9 +195,7 @@ export function IncidentTasks({locale,account,org,incidentId,version,incidentRef
  const invalidRecipients=chosen.some(r=>r.eligibility!=='ELIGIBLE'||!!cfg&&!cfg.recipient_types.includes(r.type));
  const currentHydrantId=target.kind==='HYDRANT'?target.entityId:'';
  const hydrantOptions=Array.from(new Map([...(cop?.links.flatMap(l=>l.hydrant?[{id:l.hydrant.id,code:l.hydrant.code,address:l.hydrant.address}]:[])??[]),...hydrants].map(h=>[h.id,h])).values());
- if(blocked.current)return <WorkspaceSlot name="operational"><p role="alert">{t(error||'NOT_AUTHORIZED')}</p></WorkspaceSlot>;
- return <>
-  <WorkspaceSlot name="operational">{operational&&<WorkspaceSection title={rt('rtsTitle')} open>
+ const recipientPicker=<>
    <p>{rt('listHints')}</p><p>{rt('eligibilityNotice')}</p>
    <label>{t('search')}<input maxLength={100} value={query} onChange={e=>{setQuery(e.target.value);setRecipientPage(0);}}/></label>
    <div className="actions"><button type="button" disabled={locked||!candidates} onClick={()=>rts.selectMany(visibleRecipients.filter(r=>!cfg||cfg.recipient_types.includes(r.type)),rts.merge)}>{rt('visible')}</button>
@@ -204,8 +207,8 @@ export function IncidentTasks({locale,account,org,incidentId,version,incidentRef
     }
    }}>
     {!candidates?<p>{t('loading')}</p>:!visibleRecipients.length?<p>{t('empty')}</p>:visibleRecipients.map(row=><button type="button" key={recipientKey(row)}
-     className="web-row rts-recipient" disabled={locked} aria-pressed={chosen.some(r=>recipientKey(r)===recipientKey(row))}
-     onClick={e=>rts.pick(row,visibleRecipients,{list:'recipients:'+query+':'+recipientPage,toggle:e.ctrlKey||e.metaKey,range:e.shiftKey})}>
+     className="web-row rts-recipient" disabled={locked||(contextForm&&commandView&&!!cfg&&!cfg.recipient_types.includes(row.type))} aria-pressed={chosen.some(r=>recipientKey(r)===recipientKey(row))}
+     onClick={e=>rts.pick(row,visibleRecipients,{list:'recipients:'+query+':'+recipientPage,toggle:(contextForm&&commandView)||e.ctrlKey||e.metaKey,range:e.shiftKey})}>
      <strong>{row.name}</strong><span>{t(row.type)} · {row.organization_name}</span>
      {row.sector_name&&<span>{rt('sector')}: {row.sector_name}</span>}
      <small>{rt(cfg&&!cfg.recipient_types.includes(row.type)?'unsupported':'eligible')}</small>
@@ -213,6 +216,11 @@ export function IncidentTasks({locale,account,org,incidentId,version,incidentRef
    </div>
    <div className="actions"><button type="button" disabled={locked||recipientPage===0} onClick={()=>setRecipientPage(v=>v-1)}>{t('previous')}</button>
     <span>{recipientPage+1}</span><button type="button" disabled={locked||!candidates?.more} onClick={()=>setRecipientPage(v=>v+1)}>{t('next')}</button></div>
+ </>;
+ if(blocked.current)return <WorkspaceSlot name="operational"><p role="alert">{t(error||'NOT_AUTHORIZED')}</p></WorkspaceSlot>;
+ return <>
+  <WorkspaceSlot name="operational">{operational&&!(contextForm&&open&&commandView)&&<WorkspaceSection title={rt('rtsTitle')} open>
+   {recipientPicker}
   </WorkspaceSection>}<WorkspaceSection title={t('tasks')}>
    {error&&<p role="alert">{t(error)}</p>}<p>{t('intentNotice')}</p>
    <div className="actions">{operational&&<button disabled={locked} onClick={()=>begin()}>{t('newTask')}</button>}
@@ -226,12 +234,17 @@ export function IncidentTasks({locale,account,org,incidentId,version,incidentRef
    </article>)}<div className="actions"><button disabled={page===0} onClick={()=>setPage(v=>v-1)}>{t('previous')}</button><button disabled={!rows.more} onClick={()=>setPage(v=>v+1)}>{t('next')}</button></div></>}
   </WorkspaceSection></WorkspaceSlot>
   {supportedSelected&&operational&&<WorkspaceSlot name="selectedPane"><ContextActions actions={[{id:'create-task',label:t(selected.kind==='INCIDENT_UNIT'?'issueToUnit':'createHere'),enabled:!locked,requiresConfirmation:false,execute:()=>begin(true)}]}/></WorkspaceSlot>}
-  {open&&operational&&<WorkspaceSlot name="selectedPane"><section className="admin-card rts-editor" ref={editor} data-rts-editor tabIndex={-1}><h3>{rt('palette')}</h3><p>{rt('paletteHelp')}</p>
+  {open&&operational&&<WorkspaceSlot name="selectedPane"><section className="admin-card rts-editor" ref={editor} data-rts-editor tabIndex={-1}><h3>{contextForm?ct('draft'):rt('palette')}</h3><p>{rt('paletteHelp')}</p>
+   {contextForm&&<div className="rts-command-preview"><strong>{action? actionLabel(action.configuration,locale):t('action')}</strong>
+    <p>{ct('target')}: {targetLabel(target)}</p><p>{ct('selected')}: {chosen.length}/100</p>
+    <p>{ct('parameters')}</p><small>{ct('intent')}</small>
+    {submission!=='idle'&&<p role="status">{ct(submission)}</p>}</div>}
    <p>{rt('incident')}: {incidentReference} · {rt('actingOrg')}: {organizationName}</p>
    {stale&&<><p role="alert">{t('stale')}</p><button disabled={disabled||!catalog} onClick={()=>{setBaseVersion(version);setActionChanged(true);setStale(false);setError('');setVerifyEpoch(v=>v+1);}}>{t('reedit')}</button></>}
    {error&&<p role="alert">{t(error)}</p>}
    {readUnavailable&&<p role="alert">{rt('readUnavailable')}</p>}
    {actionChanged&&<p role="alert">{rt('actionChanged')}</p>}
+   {contextForm&&<section className="rts-context-recipients"><h4>{ct('recipients')}</h4><p>{ct('pickerHelp')}</p>{recipientPicker}</section>}
    <form className="task-editor" onSubmit={review}><fieldset disabled={locked||stale}><legend>{t('action')}</legend>
     <label>{t('search')}<input maxLength={100} value={catalogQuery} onChange={e=>{setCatalogQuery(e.target.value);setCatalogPage(0);}}/></label>
     <label>{t('action')}<select required value={actionChanged?'':action?.id??''} onChange={e=>chooseAction(e.target.value)}><option value="">{t('select')}</option>
@@ -279,7 +292,7 @@ export function IncidentTasks({locale,account,org,incidentId,version,incidentRef
    <button disabled={locked} onClick={()=>{formSession.current++;setOpen(false);rts.cancelMode();}}>{rt('closePalette')}</button>
   </section></WorkspaceSlot>}
   {taskId&&!open&&<WorkspaceSlot name="selectedPane"><section className="admin-card">
-   {!detail?<p>{t('loading')}</p>:<><h3>{actionLabel(detail.configuration,locale)}</h3>
+   {!detail?<p>{t('loading')}</p>:<>{contextForm&&<p role="status">{ct('accepted')} {detail.configuration.requires_acknowledgement&&detail.assignments.some(a=>a.status==='ISSUED')?ct('awaiting'):''}</p>}<h3>{actionLabel(detail.configuration,locale)}</h3>
     <p>{t(detail.configuration.native_behavior)} · {t('version')} {detail.configuration.version_number}</p>
     <p><strong className="task-priority" data-priority={detail.priority}>{t('priority')}: {t(detail.priority)}</strong> · {t(detail.status)} {detail.outcome&&t(detail.outcome)}</p>
     <p>{detail.title}</p><p className="incident-prose">{detail.notes}</p><p>{t('issuer')}: {detail.issuer_name} · {detail.organization_name}</p><p>{t('issued')}: {new Date(detail.issued_at).toLocaleString(locale)}</p>

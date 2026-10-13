@@ -8,6 +8,7 @@ import {useWorkspace} from './workspace';
 import {SimulationMapLayer,useSimulationPositionLayer} from './SimulationMapLayer';
 import {useSimulation} from './SimulationProvider';
 import {pickPositionRecipient,RtsMapInteraction} from './RtsMapInteraction';
+import {RtsContextMenu} from './RtsContextMenu';
 import {TaskIntentLayers} from './TaskIntentLayers';
 import type {TaskTarget} from '../../lib/operational/tasks';
 import {resolveTarget} from '../../lib/operational/target';
@@ -62,7 +63,7 @@ export default function CopMap(props:Props){
    if(!rts?.externalEditing&&!rts?.locked&&positionLayer){
     const recipient=pickPositionRecipient(map,event.point,recipientLayers);
     if(recipient){workspace?.select({kind:'INCIDENT_UNIT',id:recipient.id});
-     rts?.pick(recipient,[...positionLayer.recipients.values()],{list:'simulation:'+positionLayer.id,toggle:event.originalEvent.ctrlKey||event.originalEvent.metaKey});return;}
+     rts?.pick(recipient,[...positionLayer.recipients.values()],{list:'simulation:'+positionLayer.id,toggle:event.originalEvent.ctrlKey||event.originalEvent.metaKey||(workspace?.view==='command'&&event.originalEvent.shiftKey)});return;}
    }
    const taskLayers=map.getStyle().layers.filter(l=>l.id.startsWith('rts-task-target-')).map(l=>l.id);
    const task=taskLayers.length?map.queryRenderedFeatures(event.point,{layers:taskLayers}).find(f=>f.properties?.id===rts?.intent?.id):null;
@@ -70,7 +71,7 @@ export default function CopMap(props:Props){
    const clickable=map.getStyle().layers.filter(l=>(l.id.startsWith('cop-')||l.id.startsWith('context-'))&&!l.id.startsWith('cop-draft')).map(l=>l.id);
    const id=map.queryRenderedFeatures(event.point,{layers:clickable}).find(f=>typeof f.properties?.id==='string')?.properties?.id;
    if(typeof id==='string')props.onSelect(id);
-  }}>{map=><><CopRendering map={map} props={props}/><TaskIntentLayers map={map} locale={props.locale}/><SimulationMapLayer map={map} locale={props.locale}/><IncidentNavigationLayer map={map} locale={props.locale}/><RtsMapInteraction map={map} locale={props.locale} layers={recipientLayers}/></>}</OperationalMapCanvas>;
+  }}>{map=><><CopRendering map={map} props={props}/><TaskIntentLayers map={map} locale={props.locale}/><SimulationMapLayer map={map} locale={props.locale}/><IncidentNavigationLayer map={map} locale={props.locale}/><RtsMapInteraction map={map} locale={props.locale} layers={recipientLayers}/>{workspace?.view==='command'&&<RtsContextMenu busy={!!props.drawing||!!navigation?.picking||!!sim?.move} map={map} locale={props.locale} cop={props.cop} hydrants={props.contextHydrants} layers={recipientLayers}/>}</>}</OperationalMapCanvas>;
 }
 function CopRendering({map,props}:{map:Map;props:Props}){
  const fitted=useRef('');

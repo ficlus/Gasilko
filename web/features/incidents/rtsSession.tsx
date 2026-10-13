@@ -1,6 +1,6 @@
 'use client';
 import {createContext,useCallback,useContext,useEffect,useRef,useState,type Dispatch,type ReactNode,type SetStateAction} from 'react';
-import type {ActionDefinition,TaskTarget} from '../../lib/operational/tasks';
+import type {ActionDefinition,TaskTarget,TaskPage} from '../../lib/operational/tasks';
 import type {Geometry} from '../../lib/incidents/cop';
 import {recipientKey,typingTarget,type RtsMode,type RtsRecipient,type TargetPreview,type TaskIntent} from '../../lib/operational/rts';
 
@@ -12,6 +12,10 @@ type RtsController={
  pick:(row:RtsRecipient,visible:readonly RtsRecipient[],options:PickOptions)=>void;
  selectMany:(rows:readonly RtsRecipient[],add:boolean)=>void;remove:(key:string)=>void;clear:()=>void;
  multiTouch:boolean;setMultiTouch:Dispatch<SetStateAction<boolean>>;merge:boolean;setMerge:Dispatch<SetStateAction<boolean>>;
+ catalogError:boolean;setCatalogError:Dispatch<SetStateAction<boolean>>;
+ catalog:TaskPage<ActionDefinition>|null;setCatalog:Dispatch<SetStateAction<TaskPage<ActionDefinition>|null>>;
+ commandTypes:string[]|null;setCommandTypes:Dispatch<SetStateAction<string[]|null>>;
+ contextLaunch:boolean;openContext:(action:ActionDefinition|null,preview:TargetPreview,recipients?:readonly RtsRecipient[])=>void;
  action:ActionDefinition|null;setAction:Dispatch<SetStateAction<ActionDefinition|null>>;
  preview:TargetPreview;setTarget:(target:TaskTarget,geometry?:Geometry|null,label?:string)=>void;
  hydrateTarget:(target:TaskTarget,geometry:Geometry,label:string)=>void;
@@ -34,6 +38,9 @@ export function RtsProvider({enabled,locked,onAccessLost,children}:{enabled:bool
  const [hasPositionLayers,setHasPositionLayers]=useState(false);
  const [blocked,setBlocked]=useState(false),[copEditing,setCopEditing]=useState(false),[mode,setMode]=useState<RtsMode>('NORMAL');
  const [recipients,writeRecipients]=useState<RtsRecipient[]>([]),selectedRef=useRef<RtsRecipient[]>([]);
+ const [catalogError,setCatalogError]=useState(false);
+ const [catalog,setCatalog]=useState<TaskPage<ActionDefinition>|null>(null),[commandTypes,setCommandTypes]=useState<string[]|null>(null);
+ const [contextLaunch,setContextLaunch]=useState(false);
  const [action,setAction]=useState<ActionDefinition|null>(null),[preview,writePreview]=useState<TargetPreview>(emptyTarget);
  const [mapTargetKind,setMapTargetKind]=useState<TaskTarget['kind']>('COORDINATE');
  const [multiTouch,setMultiTouch]=useState(false),[merge,setMerge]=useState(false);
@@ -82,11 +89,16 @@ export function RtsProvider({enabled,locked,onAccessLost,children}:{enabled:bool
   if(!canInteract())return;
   if(interaction.current.copEditing||interaction.current.externalEditing){setMessage('drawingBusy');return;}
   setMode('NORMAL');
-  if(!interaction.current.open)setLaunch(v=>v+1);
+  if(!interaction.current.open){setContextLaunch(false);setLaunch(v=>v+1);}
   else root.current?.querySelector<HTMLElement>('[data-rts-editor]')?.focus();
  },[]);
+ const openContext=useCallback((definition:ActionDefinition|null,target:TargetPreview,rows?:readonly RtsRecipient[])=>{
+  if(!canInteract()||interaction.current.copEditing||interaction.current.open)return;
+  if(rows)setRecipients([...rows]);
+  setAction(definition);setTarget(target.target,target.geometry,target.label);setContextLaunch(true);setLaunch(v=>v+1);
+ },[setRecipients,setTarget]);
  const revoke=useCallback(()=>{
-  setBlocked(true);setRecipients([]);setAction(null);writePreview(emptyTarget);setIntent(null);setOpen(false);setMode('NORMAL');setMessage('authorityLost');
+  setCatalog(null);setCommandTypes(null);setContextLaunch(false);setBlocked(true);setRecipients([]);setAction(null);writePreview(emptyTarget);setIntent(null);setOpen(false);setMode('NORMAL');setMessage('authorityLost');
   latest.current.onAccessLost();
  },[setRecipients]);
  useEffect(()=>{if(!enabled||locked||copEditing||externalEditing)setMode('NORMAL');},[enabled,locked,copEditing,externalEditing]);
@@ -97,7 +109,7 @@ export function RtsProvider({enabled,locked,onAccessLost,children}:{enabled:bool
   setMapTargetKind((kinds.includes(preview.target.kind)?preview.target.kind:kinds.includes('COORDINATE')?'COORDINATE':kinds[0]??'NONE') as TaskTarget['kind']);
  },[action?.configuration.id]);
  const value:RtsController={enabled,locked,blocked,agentEditing,setAgentEditing,navigationEditing,setNavigationEditing,externalEditing,setExternalEditing,hasPositionLayers,setHasPositionLayers,copEditing,setCopEditing,mode,requestMode,cancelMode,recipients,setRecipients,pick,selectMany,clear,remove,multiTouch,setMultiTouch,merge,setMerge,
-  action,setAction,preview,setTarget,hydrateTarget,mapTargetKind,setMapTargetKind,open,setOpen,launch,openPalette,intent,setIntent,message,setMessage,revoke};
+  catalogError,setCatalogError,catalog,setCatalog,commandTypes,setCommandTypes,contextLaunch,openContext,action,setAction,preview,setTarget,hydrateTarget,mapTargetKind,setMapTargetKind,open,setOpen,launch,openPalette,intent,setIntent,message,setMessage,revoke};
  return <RtsContext.Provider value={value}><div ref={root} className="rts-workspace" onKeyDown={e=>{
   if(e.defaultPrevented||typingTarget(e.target)||e.nativeEvent.isComposing||!enabled||locked||blocked||copEditing||externalEditing||e.target instanceof Element&&e.target.closest('dialog'))return;
   const key=e.key.toLowerCase();
