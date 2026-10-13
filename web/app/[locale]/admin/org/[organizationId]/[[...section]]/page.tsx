@@ -48,13 +48,13 @@ export default async function OrganizationAdmin({ params, searchParams }: {
       <section className="admin-card"><h2>{t.adminHierarchy}</h2><p>{context.path.map(org => org.name).join(' › ')}</p><p>{t.adminPathNotice}</p></section>
     </> : null}
     {['users','organizations','types','audit'].includes(section)&&<Administration key={organization.id+':'+section} locale={locale} root={organization.id} section={section}/>}
-    {section==='dashboard'&&<AdministrationDashboard key={organization.id} locale={locale} root={organization.id}/>}
+    {section==='dashboard'&&<AdministrationDashboard key={`administration-dashboard/${organization.id}`} locale={locale} root={organization.id}/>}
     {section === 'inventory' && <OperationalInventory key={organization.id+':'+(query.entity??'')} locale={locale} org={organization.id} initialEntity={parseEntityRef(query.entity,{organizationId:organization.id})??undefined}/>}
     {section === 'inventory' && <ActionCatalog key={organization.id} locale={locale} org={organization.id}/>}
     {section === 'exchange' && <Exchange key={organization.id} locale={locale} root={organization.id}/>}
     {section === 'teams' && <Teams key={organization.id+':'+(query.team??'')} locale={locale} root={organization.id} initialId={isUuid(query.team)?query.team:undefined}/>}
     {section === 'plans' && <Plans key={organization.id} locale={locale} root={organization.id} initialId={planId}/>}
-    {section === 'dashboard' && <PlanningDashboard key={organization.id} locale={locale} root={organization.id}/>}
+    {section === 'dashboard' && <PlanningDashboard key={`planning-dashboard/${organization.id}`} locale={locale} root={organization.id}/>}
     {['dashboard','hydrants','map','inspections'].includes(section) && <AdminHydrants key={organization.id+':'+section+':'+(hydrantId??'')} locale={locale} root={organization.id} section={section} initialId={section==='hydrants'?hydrantId:undefined}/>}
     <p><Link href={'/' + locale + '/requests'}>{t.currentRequests}</Link></p>
   </AdminShell>;
