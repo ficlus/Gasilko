@@ -54,7 +54,7 @@ function hitContexts({map,cop,hydrants,layers}:Props,point:Position,coordinate:P
 export function RtsContextMenu(props:Props){
  const {map,locale}=props,rts=useRtsSession(),workspace=useWorkspace(),t=contextText(locale),ot=operationalText(locale),id=useId();
  const [menu,setMenu]=useState<Menu|null>(null),[placement,setPlacement]=useState({left:8,top:8,maxHeight:300});
- const panel=useRef<HTMLDivElement>(null),entry=useRef<HTMLButtonElement>(null),returnFocus=useRef<HTMLElement|null>(null),swallowClick=useRef(false);
+ const panel=useRef<HTMLDivElement>(null),entry=useRef<HTMLButtonElement>(null),returnFocus=useRef<HTMLElement|null>(null),swallowClick=useRef(0);
  const latest=useRef({props,rts,menu});latest.current={props,rts,menu};
  const blocked=props.busy||rts.blocked||rts.locked||rts.copEditing||rts.externalEditing||rts.mode!=='NORMAL'||rts.open;
  function close(focus=true){setMenu(null);if(focus)(returnFocus.current?.isConnected?returnFocus.current:map.getCanvas())?.focus({preventScroll:true});}
@@ -91,7 +91,7 @@ export function RtsContextMenu(props:Props){
   };
   const move=(event:PointerEvent)=>{if(held&&held.pointer===event.pointerId){const p=pixel(event);if(Math.hypot(p[0]-held.point[0],p[1]-held.point[1])>8)cancel();}};
   const up=(event:PointerEvent)=>{touches.delete(event.pointerId);cancel();};
-  const click=(event:MouseEvent)=>{if(swallowClick.current||Date.now()<suppressUntil||latest.current.menu){swallowClick.current=false;event.preventDefault();event.stopImmediatePropagation();}};
+  const click=(event:MouseEvent)=>{if(Date.now()<swallowClick.current||Date.now()<suppressUntil||latest.current.menu){swallowClick.current=0;event.preventDefault();event.stopImmediatePropagation();}};
   canvas.addEventListener('contextmenu',context,true);canvas.addEventListener('pointerdown',down,true);canvas.addEventListener('pointermove',move,true);
   canvas.addEventListener('pointerup',up,true);canvas.addEventListener('pointercancel',up,true);canvas.addEventListener('click',click,true);
   map.on('movestart',cancel);window.addEventListener('blur',cancel);
@@ -101,7 +101,7 @@ export function RtsContextMenu(props:Props){
  useEffect(()=>{
   if(!menu)return;
   const frame=requestAnimationFrame(()=>panel.current?.focus({preventScroll:true}));
-  const outside=(event:PointerEvent)=>{if(!panel.current?.contains(event.target as Node)&&!entry.current?.contains(event.target as Node)){swallowClick.current=event.target===map.getCanvas();closeRef.current(false);}};
+  const outside=(event:PointerEvent)=>{if(!panel.current?.contains(event.target as Node)&&!entry.current?.contains(event.target as Node)){swallowClick.current=event.target===map.getCanvas()?Date.now()+700:0;closeRef.current(false);}};
   const escape=(event:KeyboardEvent)=>{if(event.key==='Escape'&&!document.querySelector('dialog[open]')){event.preventDefault();event.stopPropagation();closeRef.current();}};
   document.addEventListener('pointerdown',outside,true);document.addEventListener('keydown',escape,true);
   return()=>{cancelAnimationFrame(frame);document.removeEventListener('pointerdown',outside,true);document.removeEventListener('keydown',escape,true);};

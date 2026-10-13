@@ -149,7 +149,14 @@ export function IncidentTasks({submission='idle',locale,account,org,incidentId,v
    }).catch(e=>{if(alive.current)failure(e);});
   }
  }
- function chooseAction(id:string){const d=catalog?.rows.find(d=>d.id===id)??null;setAction(d);setActionChanged(false);if(d)setPriority(d.configuration.default_priority);}
+ function chooseAction(id:string){
+  const d=catalog?.rows.find(d=>d.id===id)??null;setAction(d);setActionChanged(false);
+  if(d){setPriority(d.configuration.default_priority);
+   if(contextForm&&!d.configuration.target_types.includes(target.kind)&&d.configuration.target_types.includes('COORDINATE')&&rts.preview.geometry?.type==='Point'){
+    setTarget({kind:'COORDINATE',coordinate:[...rts.preview.geometry.coordinates]},rts.preview.geometry,rts.preview.label);
+   }
+  }
+ }
  function chooseRecipient(r:Recipient,checked:boolean){setChosen(current=>checked?current.some(c=>recipientKey(c)===recipientKey(r))?current:[...current,{...r,assignmentId:crypto.randomUUID(),eligibility:'ELIGIBLE'}]:current.filter(c=>recipientKey(c)!==recipientKey(r)));}
  function selectTask(id:string){formSession.current++;setOpen(false);if(workspace)workspace.select({kind:'TASK',id});else setLocalSelected(id);}
  function command(actionName:Mutation,payload:Record<string,unknown>,expected:string,summary:string){
@@ -238,6 +245,7 @@ export function IncidentTasks({submission='idle',locale,account,org,incidentId,v
    {contextForm&&<div className="rts-command-preview"><strong>{action? actionLabel(action.configuration,locale):t('action')}</strong>
     <p>{ct('target')}: {targetLabel(target)}</p><p>{ct('selected')}: {chosen.length}/100</p>
     <p>{ct('parameters')}</p><small>{ct('intent')}</small>
+    {rts.message&&<p role="status">{rt(rts.message)}</p>}
     {submission!=='idle'&&<p role="status">{ct(submission)}</p>}</div>}
    <p>{rt('incident')}: {incidentReference} · {rt('actingOrg')}: {organizationName}</p>
    {stale&&<><p role="alert">{t('stale')}</p><button disabled={disabled||!catalog} onClick={()=>{setBaseVersion(version);setActionChanged(true);setStale(false);setError('');setVerifyEpoch(v=>v+1);}}>{t('reedit')}</button></>}
