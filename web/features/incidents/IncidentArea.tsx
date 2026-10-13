@@ -6,7 +6,7 @@ import {simulationErrors,defaultSimulationSetup} from '../../lib/operational/sim
 import {simulationText} from '../../lib/operational/simulationMessages';
 import {IncidentTasks} from './IncidentTasks';
 import {taskErrors,taskMutations} from '../../lib/operational/tasks';
-import {IncidentLayout,WorkspaceSection} from './workspace';
+import {WorkspaceHeaderDetails,IncidentLayout,WorkspaceSection} from './workspace';
 import {IncidentTimeline} from './IncidentTimeline';
 import type {CrewOutcomes} from './TeamCrewTemplate';
 import {IncidentResources} from './IncidentResources';
@@ -206,8 +206,8 @@ export function IncidentArea({locale,account,destination,initialOrg}:{locale:Loc
   {isNew&&entry&&!entry.organizations.find(o=>o.id===org)?.can_create&&<p>{t('noAccess')}</p>}
   {detail&&<IncidentLayout key={`${account}/${org}/${detail.id}`} locale={locale} simulation={{account,org,incidentId:detail.id,refresh,read:rpc,onInventoryChanged:()=>setRefresh(v=>v+1)}} operational={['ACTIVE','STABILIZED'].includes(detail.status)} locked={loading||busy||!!pending||!!confirmation} onAccessLost={()=>{setDetail(null);setError('noAccess');}}
    header={<header className="admin-card workspace-header">{detail.training&&<SimulationBanner locale={locale}/>}<p>{detail.reference_number}</p><h2>{detail.title}</h2><span className="admin-badge">{t(detail.status)}</span>
-    <p>{t('priority')}: {t(detail.priority)} · {t('severity')}: {t(detail.severity)} · {detail.type.names[locale]??detail.type.code}</p>
-    <p>{t('lead')}: {detail.lead_name}</p><p>{t('commander')}: {detail.commander?.name??t('noCommander')}</p>
+    <WorkspaceHeaderDetails locale={locale}><p>{t('priority')}: {t(detail.priority)} · {t('severity')}: {t(detail.severity)} · {detail.type.names[locale]??detail.type.code}</p>
+    <p>{t('lead')}: {detail.lead_name}</p><p>{t('commander')}: {detail.commander?.name??t('noCommander')}</p></WorkspaceHeaderDetails>
     {detail.commander&&!detail.commander.valid&&['ACTIVE','STABILIZED'].includes(detail.status)&&<p role="alert">{t('invalidCommander')}</p>}
     {['CLOSED','CANCELLED'].includes(detail.status)?<p>{t('terminal')}</p>:!Object.values(detail.actions).some(Boolean)&&<p>{t('readOnly')}</p>}
    </header>}

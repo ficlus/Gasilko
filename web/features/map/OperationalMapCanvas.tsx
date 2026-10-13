@@ -39,8 +39,14 @@ export function OperationalMapCanvas(props:Props){
   m.on('moveend',bounds);
   m.on('click',event=>{if(loaded)latest.current.onClick?.(m,event);});
   m.on('error',()=>{if(!disposed)setError(true);});
-  const resize=new ResizeObserver(()=>m.resize());resize.observe(host.current);
-  return()=>{disposed=true;clearTimeout(timer);resize.disconnect();m.remove();};
+  let resizeFrame=0,lastWidth=-1,lastHeight=-1;
+  const resize=new ResizeObserver(entries=>{
+   const {width,height}=entries[0].contentRect;
+   if(width<=0||height<=0||width===lastWidth&&height===lastHeight)return;
+   lastWidth=width;lastHeight=height;cancelAnimationFrame(resizeFrame);
+   resizeFrame=requestAnimationFrame(()=>{if(!disposed)m.resize();});
+  });resize.observe(host.current);
+  return()=>{disposed=true;clearTimeout(timer);cancelAnimationFrame(resizeFrame);resize.disconnect();m.remove();};
  },[style,attempt]);
  useEffect(()=>{
   if(!map||fitted.current)return;fitted.current=true;

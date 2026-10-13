@@ -263,3 +263,98 @@ button:disabled { opacity: .6; cursor: wait; }
 .navigation-assignment-list {max-height:30rem;overflow:auto;}
 .navigation-map-note {position:absolute;bottom:2.5rem;left:.5rem;max-width:min(24rem,70%);padding:.45rem .7rem;background:#fff;color:#123f62;border:1px solid #085b9b;border-radius:.35rem;pointer-events:none;font-size:.85rem;}
 @media(max-width:600px){.incident-navigation-panel dl{grid-template-columns:1fr;}.incident-navigation-panel button{min-height:44px;white-space:normal;}}
+
+
+/* M14.5F1: a presentation mode, using the same map, providers and portal hosts. */
+.workspace-heading{min-width:0;display:flow-root}
+.workspace-view-bar{display:flex;align-items:center;flex-wrap:wrap;gap:.5rem;padding:.5rem 0;background:#fff}
+.incident-view-switch{display:inline-flex;flex-wrap:wrap;gap:.25rem;padding:.25rem;border:1px solid #bac7ce;border-radius:.65rem;background:#f4f6f7}
+.incident-view-switch button{min-height:44px;white-space:normal;flex:1 1 auto}
+.incident-view-switch button[aria-pressed=true]{background:#94202a;color:#fff;border-color:#94202a;box-shadow:inset 0 -3px #fff}
+.workspace-heading{position:sticky;top:0;z-index:6;background:#fff}
+.cop-map-controls>summary{min-height:44px;cursor:pointer;padding:.5rem;font-weight:700}
+.incident-workspace:not(.command-workspace) .cop-map-controls{display:contents}
+.incident-workspace:not(.command-workspace) .cop-map-controls>summary{display:none}
+.incident-workspace [hidden]{display:none!important}
+/* Incidents use their own route, not AdminShell. Do not widen organization admin. */
+.registry-main:has(.command-workspace){max-width:none;width:auto;margin:.5rem;padding:clamp(.25rem,1vw,1rem)}
+.command-workspace{--command-side:clamp(16rem,19vw,23rem);--command-left:0px;--command-right:0px;position:relative;min-width:0}
+.command-workspace[data-wide=true][data-left=true]{--command-left:var(--command-side)}
+.command-workspace[data-wide=true][data-right=true]{--command-right:var(--command-side)}
+.command-workspace .workspace-heading{padding-top:env(safe-area-inset-top,0px);border-bottom:1px solid #bac7ce}
+.command-workspace .workspace-header{padding:.5rem .75rem;margin:0;border-radius:.5rem;font-size:.85rem}
+.command-workspace .workspace-header h2{font-size:1.1rem;overflow-wrap:anywhere}
+.command-workspace .workspace-view-bar{padding:.4rem 0;gap:.4rem}
+.command-panel-toggles{display:flex;flex-wrap:wrap;gap:.3rem;min-width:0}
+.command-panel-toggles button{min-height:44px;white-space:normal;overflow-wrap:anywhere}
+.command-panel-toggles button[aria-expanded=true]{border-color:#075f93;box-shadow:inset 0 -3px #075f93}
+.command-selection-summary{margin:0;font-size:.85rem;flex-basis:100%;overflow-wrap:anywhere}
+.command-workspace .workspace-grid{display:grid;grid-template-columns:var(--command-left) minmax(0,1fr) var(--command-right);gap:.5rem;align-items:stretch;height:var(--command-height,70vh);min-height:180px}
+.command-workspace .workspace-operational{grid-column:1;grid-row:1}
+.command-workspace .workspace-map{grid-column:2;grid-row:1;min-height:0;min-width:0;width:auto;position:relative}
+.command-workspace .workspace-selected{grid-column:3;grid-row:1}
+.command-workspace .workspace-operational,.command-workspace .workspace-selected{max-height:none;height:100%;min-height:0;overflow:auto;overscroll-behavior:auto;scrollbar-gutter:stable;box-sizing:border-box}
+.command-workspace .workspace-map .cop-surface{height:100%;min-height:0;box-sizing:border-box;display:flex;flex-direction:column;position:relative;gap:.2rem;overflow:hidden}
+.command-workspace .cop-surface>h2{font-size:.95rem}
+.command-workspace .cop-surface>p{margin:.1rem 0;font-size:.78rem}
+.command-workspace .cop-surface>button{align-self:flex-start;min-height:44px}
+.command-workspace .cop-map-controls{flex:0 0 auto;max-height:35%;overflow:auto;min-height:44px;scrollbar-gutter:stable}
+.command-workspace .cop-map-controls .actions{flex-wrap:wrap}
+.command-workspace .workspace-map .web-map-wrap{flex:1 1 0;min-height:0;width:100%}
+.command-workspace .workspace-map .web-map{height:100%;min-height:0;border-radius:.4rem}
+.command-workspace .workspace-tools{position:absolute;right:0;top:var(--command-header-height);width:var(--command-side);height:var(--command-height,70vh);overflow:auto;overscroll-behavior:auto;z-index:5;background:#f4f6f7;border:1px solid #bac7ce;border-radius:.5rem;padding:.6rem;box-sizing:border-box;scrollbar-gutter:stable}
+.command-workspace .workspace-tools .rts-toolbar{margin:.3rem 0}
+.command-workspace .workspace-bottom{position:absolute;z-index:5;bottom:0;left:calc(var(--command-left) + .5rem);right:calc(var(--command-right) + .5rem);max-height:60%;overflow:auto;background:#fff;margin:0;box-shadow:0 -4px 20px #0002;padding:.5rem .75rem;box-sizing:border-box}
+.command-workspace .workspace-bottom .workspace-section{max-height:none;overflow:visible}
+.command-panel-close{position:sticky;top:0;z-index:1;background:#fff;min-height:44px;margin-bottom:.4rem}
+.command-workspace .workspace-tools input,.command-workspace .workspace-tools select,.command-workspace .workspace-tools textarea{max-width:100%;min-width:0;box-sizing:border-box}
+.command-workspace pre{max-width:100%;white-space:pre-wrap;overflow-wrap:anywhere}
+.command-workspace .cop-edit-surface:not(:empty){position:absolute;z-index:4;left:.5rem;right:3.5rem;bottom:3rem;max-height:55%;overflow:auto;background:#fff;border:1px solid #bac7ce;box-shadow:0 4px 16px #0002;padding:.5rem}
+.command-workspace .cop-edit-surface:empty{display:none}
+.command-workspace[data-wide=false] .workspace-grid{grid-template-columns:minmax(0,1fr);gap:0}
+.command-workspace[data-wide=false] .workspace-map{grid-column:1}
+.command-workspace[data-wide=false] .workspace-operational,.command-workspace[data-wide=false] .workspace-selected,
+.command-workspace[data-wide=false] .workspace-tools{position:absolute;top:var(--command-header-height);width:min(26rem,92%);height:min(70%,var(--command-height));max-height:var(--command-height);z-index:5;box-shadow:0 6px 24px #0003;background:#fff;padding-bottom:max(.6rem,env(safe-area-inset-bottom,0px))}
+.command-workspace[data-wide=false] .workspace-operational{left:0}
+.command-workspace[data-wide=false] .workspace-selected,.command-workspace[data-wide=false] .workspace-tools{right:0}
+.command-workspace[data-wide=false] .workspace-bottom{left:0;right:0;max-height:65%}
+.command-workspace.command-expanded{--command-left:0px;--command-right:0px}
+.command-workspace .actions{flex-wrap:wrap}
+.command-workspace :is(button,input,select,textarea){font:inherit}
+.command-workspace :is(button,summary){touch-action:manipulation}
+.command-workspace .workspace-map :is(.rts-map-mode,.web-map-notice){max-height:45%;overflow:auto}
+/* The incident header and map both retain the explicit training banner. */
+.simulation-scope:has(.command-workspace)>.simulation-banner{position:static}
+@media(max-width:40rem){
+ .registry-main:has(.command-workspace){margin:0;padding-inline:env(safe-area-inset-left,0px) env(safe-area-inset-right,0px)}
+ .command-workspace .workspace-header{gap:.2rem .5rem}
+ .command-workspace .workspace-header h2{font-size:1rem}
+ .command-workspace .workspace-view-bar{padding:.25rem}
+ .command-workspace .command-panel-toggles{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));width:100%}
+ .command-workspace .command-panel-toggles>[data-expand]{grid-column:1 / -1}
+ .command-workspace .incident-view-switch{width:100%}
+ .command-workspace .workspace-map .cop-surface{padding:.25rem}
+}
+@media(prefers-reduced-motion:reduce){.command-workspace{scroll-behavior:auto}}
+
+.workspace-identity-details{display:contents}
+.workspace-identity-details>summary{display:none}
+.command-workspace .workspace-identity-details{display:block;flex:1 1 auto}
+.command-workspace .workspace-identity-details>summary{display:block;cursor:pointer;padding:.4rem;min-height:44px;box-sizing:border-box;font-weight:600}
+.command-expanded .command-panel-toggles>button:not([data-expand]){display:none}
+@media(max-width:40rem){.command-workspace .command-panel-toggles{grid-template-columns:repeat(4,minmax(0,1fr))}}
+@media(max-height:550px) and (min-width:40rem){
+ .command-workspace .workspace-view-bar{gap:.2rem;align-items:center}
+ .command-workspace .command-panel-toggles{flex:1}
+ .command-workspace .command-panel-toggles button{padding:.35rem;font-size:.8rem}
+ .command-workspace .workspace-header{font-size:.75rem}
+}
+
+.workspace-map .cop-map-controls>h2{font-size:1.05rem;margin:.2rem 0}
+.workspace-map .cop-map-controls>p{font-size:.85rem;margin:.4rem 0}
+
+/* Preserve the non-operational classic composition as well. */
+.cop-surface .cop-map-controls{display:contents}
+.cop-surface .cop-map-controls>summary{display:none}
+.command-workspace .cop-surface .cop-map-controls{display:block}
+.command-workspace .cop-surface .cop-map-controls>summary{display:list-item}
