@@ -376,7 +376,7 @@ begin
  elsif action='RELATIONSHIP' then
   if request->>'confirmed' is distinct from 'true' then raise exception 'CONFIRM_REQUIRED' using errcode='22023'; end if;
   select * into edge from public.organization_relationships where id=entity for update;before_data:=case when found then to_jsonb(edge) else null end;
-  if request->>'revision' is distinct from case when before_data is null then null else private.web_revision(before_data) end then raise exception 'CONFLICT' using errcode='40001'; end if;
+  if request->>'revision' is distinct from (case when before_data is null then null else private.web_revision(before_data) end) then raise exception 'CONFLICT' using errcode='40001'; end if;
   -- Validate ALL old and new endpoints, even when moving an existing edge.
   for org in select distinct x from unnest(array[edge.parent_organization_id,edge.child_organization_id,(request->>'parent_organization_id')::uuid,(request->>'child_organization_id')::uuid]) x where x is not null order by x loop
    if not private.web_operator() then perform private.web_exact_admin(org); else
@@ -399,7 +399,7 @@ begin
   select to_jsonb(e) into after_data from public.organization_relationships e where id=entity;
  elsif action='TYPE' then
   select to_jsonb(t) into before_data from public.hydrant_types t where id=entity for update;
-  if request->>'revision' is distinct from case when before_data is null then null else private.web_revision(before_data) end then raise exception 'CONFLICT' using errcode='40001'; end if;
+  if request->>'revision' is distinct from (case when before_data is null then null else private.web_revision(before_data) end) then raise exception 'CONFLICT' using errcode='40001'; end if;
   if before_data is not null and (before_data->>'organization_id')::uuid is distinct from organization then raise exception 'NOT_AUTHORIZED' using errcode='42501'; end if;
   insert into public.hydrant_types(id,organization_id,code,name,names,display_order,active) values(entity,organization,request->>'code',btrim(request->>'name'),request->'names',(request->>'display_order')::integer,(request->>'active')::boolean)
    on conflict(id) do update set name=excluded.name,names=excluded.names,display_order=excluded.display_order,active=excluded.active returning to_jsonb(hydrant_types.*) into after_data;
@@ -432,7 +432,7 @@ begin
   end case;
   keycol:=case when tab='organization_relationship_types' then 'code' else 'id' end;
   execute format('select to_jsonb(t) from public.%I t where %I::text=$1 for update',tab,keycol) into before_data using request->'data'->>keycol;
-  if request->>'revision' is distinct from case when before_data is null then null else private.web_revision(before_data) end then raise exception 'CONFLICT' using errcode='40001'; end if;
+  if request->>'revision' is distinct from (case when before_data is null then null else private.web_revision(before_data) end) then raise exception 'CONFLICT' using errcode='40001'; end if;
   if tab='countries' and before_data is not null and before_data->>'code' is distinct from request->'data'->>'code' then raise exception 'IMMUTABLE_CODE' using errcode='23514'; end if;
   execute format('insert into public.%I(%s) select %s from jsonb_populate_record(null::public.%I,$1)
    on conflict(%I) do update set (%s)=(%s) returning to_jsonb(%I.*)',tab,cols,cols,tab,keycol,cols,
