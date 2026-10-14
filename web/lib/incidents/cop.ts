@@ -1,6 +1,6 @@
 export type Position=[number,number];
 export type Geometry={type:'Point';coordinates:Position}|{type:'LineString';coordinates:Position[]}|{type:'Polygon';coordinates:Position[][]};
-export const mapKinds=['COMMAND_POST','STAGING','HAZARD','WATER_SOURCE','ACCESS_POINT','PERIMETER','NOTE'] as const;
+export const mapKinds=['COMMAND_POST','STAGING','TRIAGE_POINT','HAZARD','WATER_SOURCE','ACCESS_POINT','PERIMETER','NOTE'] as const;
 export type MapKind=typeof mapKinds[number];
 export type Sector={id:string;code:string;name:string;geometry:Geometry|null;version:string;changed_revision:string;can_edit:boolean;can_deactivate:boolean;commander:string|null};
 export type MapObject={id:string;kind:MapKind;label:string;description:string;geometry:Geometry;sector_id:string|null;sector_name:string|null;version:string;changed_revision:string;can_edit:boolean};

@@ -2,6 +2,17 @@ import {taskText} from '../operational/taskMessages';
 import {operationalText} from '../operational/messages';
 import type {Locale} from '../i18n';
 const sl = {
+ copCreateTactical:"Ustvari taktični objekt",
+ copOtherTactical:"Druga taktična oznaka",
+ copTemporaryWater:"Začasni vodni vir",
+ copReviewSave:"Preglej in shrani",
+ copDraft:"Nepotrjen osnutek",
+ copPointPreview:"Prikaži na karti",
+ copTacticalReadOnly:"Za spremembe je potrebna veljavna poveljniška pristojnost za intervencijo ali sektor.",
+ copNameRequired:"Vnesite ime objekta.",
+ copTacticalLegend:"Zastava: poveljniško mesto · skupina: zbirno mesto · križ: triaža · kaplja: začasni vodni vir · puščica: dostop · list: opomba.",
+ copAnnotationOnly:"Ta oznaka ni naloga, GPS položaj enote ali stalni hidrant.",
+ TRIAGE_POINT:"Triažna točka",
  workspaceOperations:"Operativni pregled",
  workspaceClear:"Počisti izbor",
  workspaceSelect:"Izberite objekt na zemljevidu ali enoto/sredstvo na seznamu.",
@@ -187,6 +198,17 @@ const sl = {
  INCIDENT_REACTIVATED:'Intervencija ponovno aktivirana',INCIDENT_CLOSED:'Intervencija zaključena',INCIDENT_CANCELLED:'Osnutek preklican',
 };
 const de:Record<keyof typeof sl,string> = {
+ copCreateTactical:"Taktisches Objekt erstellen",
+ copOtherTactical:"Weitere taktische Markierung",
+ copTemporaryWater:"Temporäre Wasserquelle",
+ copReviewSave:"Prüfen und speichern",
+ copDraft:"Unbestätigter Entwurf",
+ copPointPreview:"Auf der Karte anzeigen",
+ copTacticalReadOnly:"Änderungen erfordern eine gültige Führungsbefugnis für den Einsatz oder Abschnitt.",
+ copNameRequired:"Geben Sie einen Objektnamen ein.",
+ copTacticalLegend:"Flagge: Führungsstelle · Gruppe: Bereitstellung · Kreuz: Triage · Tropfen: temporäre Wasserquelle · Pfeil: Zugang · Blatt: Notiz.",
+ copAnnotationOnly:"Diese Markierung ist kein Auftrag, keine GPS-Einheitenposition und kein dauerhafter Hydrant.",
+ TRIAGE_POINT:"Triagepunkt",
  workspaceOperations:"Operative Übersicht",
  workspaceClear:"Auswahl aufheben",
  workspaceSelect:"Objekt auf der Karte oder Einheit/Ressource in der Liste auswählen.",
