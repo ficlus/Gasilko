@@ -372,3 +372,10 @@ button:disabled { opacity: .6; cursor: wait; }
 .rts-context-recipients{border-block:1px solid #bac7ce;margin-block:.7rem;padding-block:.5rem}
 .rts-context-recipients .rts-recipient-list{max-height:14rem;overflow:auto}
 @media(max-width:40rem){.rts-context-menu{width:calc(100% - 16px)}}
+
+
+.command-workspace .cop-quick-editor{max-width:30rem}
+.cop-point-preview{padding:.5rem;border:1px solid #bac7ce;border-radius:.4rem;font-variant-numeric:tabular-nums}
+.rts-tactical-actions{border-block:1px solid #bac7ce;margin:.5rem 0;padding:.5rem 0}
+.rts-tactical-actions h3{font-size:.9rem;margin:.1rem 0 .4rem}
+.rts-tactical-actions details{margin:.25rem 0}

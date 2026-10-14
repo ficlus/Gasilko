@@ -8,7 +8,8 @@ import {useWorkspace} from './workspace';
 import {SimulationMapLayer,useSimulationPositionLayer} from './SimulationMapLayer';
 import {useSimulation} from './SimulationProvider';
 import {pickPositionRecipient,RtsMapInteraction} from './RtsMapInteraction';
-import {RtsContextMenu} from './RtsContextMenu';
+import {installCopSymbols} from './copSymbols';
+import {RtsContextMenu,type TacticalObjectActions} from './RtsContextMenu';
 import {TaskIntentLayers} from './TaskIntentLayers';
 import type {TaskTarget} from '../../lib/operational/tasks';
 import {resolveTarget} from '../../lib/operational/target';
@@ -19,7 +20,7 @@ import type {ContextHydrant} from '../../lib/hydrants/viewport';
 import {OperationalMapCanvas,orderOperationalLayers,type ViewportBounds} from '../map/OperationalMapCanvas';
 
 export type CopLayers={sectors:boolean;markers:boolean;zones:boolean;hydrants:boolean};
-type Props={locale:Locale;cop:Cop;layers:CopLayers;drawing:Geometry['type']|null;draft:Geometry|null;vertices:Position[];
+type Props=TacticalObjectActions&{busy:boolean;previewRequest:number;locale:Locale;cop:Cop;layers:CopLayers;drawing:Geometry['type']|null;draft:Geometry|null;vertices:Position[];
  selected:string;contextHydrants:ContextHydrant[];onBounds:(b:ViewportBounds)=>void;onPoint:(p:Position)=>void;onSelect:(id:string)=>void};
 const ids=['cop-primary','cop-sectors','cop-markers','cop-zones','cop-hydrants','cop-draft'] as const;
 const features=(items:{id:string;geometry:Geometry;label:string;kind?:string;status?:string}[])=>({type:'FeatureCollection' as const,
@@ -71,10 +72,15 @@ export default function CopMap(props:Props){
    const clickable=map.getStyle().layers.filter(l=>(l.id.startsWith('cop-')||l.id.startsWith('context-'))&&!l.id.startsWith('cop-draft')).map(l=>l.id);
    const id=map.queryRenderedFeatures(event.point,{layers:clickable}).find(f=>typeof f.properties?.id==='string')?.properties?.id;
    if(typeof id==='string')props.onSelect(id);
-  }}>{map=><><CopRendering map={map} props={props}/><TaskIntentLayers map={map} locale={props.locale}/><SimulationMapLayer map={map} locale={props.locale}/><IncidentNavigationLayer map={map} locale={props.locale}/><RtsMapInteraction map={map} locale={props.locale} layers={recipientLayers}/>{workspace?.view==='command'&&<RtsContextMenu busy={!!props.drawing||!!navigation?.picking||!!sim?.move} map={map} locale={props.locale} cop={props.cop} hydrants={props.contextHydrants} layers={recipientLayers}/>}</>}</OperationalMapCanvas>;
+  }}>{map=><><CopRendering map={map} props={props}/><TaskIntentLayers map={map} locale={props.locale}/><SimulationMapLayer map={map} locale={props.locale}/><IncidentNavigationLayer map={map} locale={props.locale}/><RtsMapInteraction map={map} locale={props.locale} layers={recipientLayers}/>{workspace?.view==='command'&&<RtsContextMenu onCreateObject={props.onCreateObject} onEditObject={props.onEditObject} onDeactivateObject={props.onDeactivateObject} busy={props.busy||!!props.drawing||!!navigation?.picking||!!sim?.move} map={map} locale={props.locale} cop={props.cop} hydrants={props.contextHydrants} layers={recipientLayers}/>}</>}</OperationalMapCanvas>;
 }
 function CopRendering({map,props}:{map:Map;props:Props}){
- const fitted=useRef('');
+ const fitted=useRef(''),previewed=useRef(0);
+ useEffect(()=>{
+  if(previewed.current===props.previewRequest)return;previewed.current=props.previewRequest;
+  if(!props.draft)return;const points=geometryPositions(props.draft);if(!points.length)return;
+  const xs=points.map(p=>p[0]),ys=points.map(p=>p[1]);map.fitBounds([[Math.min(...xs),Math.min(...ys)],[Math.max(...xs),Math.max(...ys)]],{padding:60,maxZoom:16});
+ },[map,props.previewRequest,props.draft]);
  useEffect(()=>{
   if(!props.selected){fitted.current='';return;}if(fitted.current===props.selected)return;
   const c=props.cop;
@@ -86,19 +92,21 @@ function CopRendering({map,props}:{map:Map;props:Props}){
   fitted.current=props.selected;
  },[map,props.selected,props.cop,props.contextHydrants]);
  useEffect(()=>{
-  const m=map;
+  const m=map,symbols=installCopSymbols(map);
    for(const id of ids)m.addSource(id,{type:'geojson',data:features([])});
    for(const source of ['cop-sectors','cop-zones','cop-draft']){
     m.addLayer({id:source+'-fill',type:'fill',source,filter:['==',['geometry-type'],'Polygon'],paint:{'fill-color':source==='cop-sectors'?'#1865a0':source==='cop-draft'?'#802ea5':'#b45200','fill-opacity':0.18}});
     m.addLayer({id:source+'-line',type:'line',source,filter:['!=',['geometry-type'],'Point'],paint:{'line-color':source==='cop-sectors'?'#1865a0':source==='cop-draft'?'#802ea5':'#b45200','line-width':3,...(source==='cop-draft'?{'line-dasharray':[2,2]}:{})}});
    }
    for(const source of ['cop-primary','cop-markers','cop-zones','cop-hydrants','cop-draft']){
-    m.addLayer({id:source+'-point',type:'circle',source,filter:['==',['geometry-type'],'Point'],paint:{'circle-radius':source==='cop-primary'?12:9,'circle-color':
+    m.addLayer({id:source+'-point',type:'circle',source,filter:['==',['geometry-type'],'Point'],paint:{'circle-radius':source==='cop-primary'?12:source==='cop-markers'?14:9,'circle-color':
      source==='cop-hydrants'?['match',['get','status'],'WORKING','#16803c','NOT_WORKING','#bb242b','NEEDS_INSPECTION','#f3ad18','#68767e']:
-      source==='cop-primary'?'#a9232e':source==='cop-draft'?'#802ea5':['match',['get','kind'],'COMMAND_POST','#a9232e','WATER_SOURCE','#1865a0','HAZARD','#b45200','#263238'],
+      source==='cop-primary'?'#a9232e':source==='cop-draft'?'#802ea5':['match',['get','kind'],'COMMAND_POST','#a9232e','TRIAGE_POINT','#16723b','WATER_SOURCE','#1865a0','HAZARD','#b45200','#263238'],
      'circle-stroke-color':source==='cop-hydrants'?'#1865a0':'#fff','circle-stroke-width':source==='cop-hydrants'?4:2}});
    }
-   for(const source of ids.filter(s=>s!=='cop-draft')){
+   m.addLayer({id:'cop-markers-icon',type:'symbol',source:'cop-markers',filter:['==',['geometry-type'],'Point'],
+    layout:{'icon-image':['concat','cop-symbol-',['get','kind']],'icon-allow-overlap':true,'icon-ignore-placement':true}});
+   for(const source of ids){
     m.addLayer({id:source+'-label',type:'symbol',source,layout:{'text-field':['get','label'],'text-size':12,'text-offset':[0,1.5]},paint:{'text-color':'#20252a','text-halo-color':'#fff','text-halo-width':2}});
    }
 
@@ -127,6 +135,7 @@ function CopRendering({map,props}:{map:Map;props:Props}){
    if(!m.getStyle())return;
    for(const layer of [...m.getStyle().layers].reverse())if(layer.id.startsWith('cop-')||layer.id.startsWith('context-'))m.removeLayer(layer.id);
    for(const id of [...ids,'context-hydrants','cop-selection'])if(m.getSource(id))m.removeSource(id);
+   for(const id of symbols)if(m.hasImage(id))m.removeImage(id);
   };
  },[map]);
  useEffect(()=>{
@@ -153,8 +162,8 @@ function CopRendering({map,props}:{map:Map;props:Props}){
   const m=map;
   m.getCanvas().style.cursor=props.drawing?'crosshair':'';
   const drawingGeometry:Geometry|null=props.vertices.length>1?{type:'LineString',coordinates:props.vertices}:props.vertices.length===1?{type:'Point',coordinates:props.vertices[0]}:props.draft;
-  (m.getSource('cop-draft') as GeoJSONSource|undefined)?.setData(features(drawingGeometry?[{id:'draft',geometry:drawingGeometry,label:''}]:[]));
- },[props.draft,props.vertices,props.drawing,map]);
+  (m.getSource('cop-draft') as GeoJSONSource|undefined)?.setData(features(drawingGeometry?[{id:'draft',geometry:drawingGeometry,label:incidentText(props.locale)('copDraft')}]:[]));
+ },[props.draft,props.vertices,props.drawing,props.locale,map]);
 
  useEffect(()=>{
   const linked=new Set(props.cop.links.flatMap(l=>l.hydrant?[l.hydrant.id]:[]));

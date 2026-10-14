@@ -7,6 +7,7 @@ import {incidentText} from '../../lib/incidents/messages';
 import {mapKinds,type Cop,type CopFeedback,type Geometry,type Position,type MapKind} from '../../lib/incidents/cop';
 import type {CommandAction} from './CommandSection';
 import type {CopLayers} from './CopMap';
+import {validPosition} from '../../lib/operational/target';
 import {isUuid} from '../../lib/operational/entity';
 import type {ContextHydrant} from '../../lib/hydrants/viewport';
 import {useRts} from './rtsSession';
@@ -16,7 +17,7 @@ import {useHydrantContext} from './useHydrantContext';
 import type {ViewportBounds} from '../map/OperationalMapCanvas';
 const CopMap=dynamic(()=>import('./CopMap'),{ssr:false});
 type Read=<T>(name:string,args:Record<string,unknown>,signal?:AbortSignal,account?:string)=>Promise<T>;
-type Draft={type:'sector'|'object';id:string;version:string;incidentVersion:string;code:string;label:string;description:string;kind:MapKind;sector:string;geometry:Geometry|null};
+type Draft={quick?:boolean;type:'sector'|'object';id:string;version:string;incidentVersion:string;code:string;label:string;description:string;kind:MapKind;sector:string;geometry:Geometry|null};
 type Candidate={id:string;code:string|null;address:string|null;status:string};
 export function IncidentCop({locale,account,org,incidentId,refresh,feedback,disabled,read,onAction}:{locale:Locale;account:string;org:string;incidentId:string;refresh:number;feedback:CopFeedback;disabled:boolean;read:Read;onAction:CommandAction}){
  const workspace=useWorkspace(),rts=useRts();
@@ -27,11 +28,13 @@ export function IncidentCop({locale,account,org,incidentId,refresh,feedback,disa
  const [query,setQuery]=useState(''),[candidates,setCandidates]=useState<Candidate[]>([]),[candidate,setCandidate]=useState(''),[purpose,setPurpose]=useState('WATER_SUPPLY');
  const [finding,setFinding]=useState(false),[coordinateText,setCoordinateText]=useState('');
  const searchController=useRef<AbortController|null>(null),seenFeedback=useRef(feedback.sequence);
- const readController=useRef<AbortController|null>(null);
+ const readController=useRef<AbortController|null>(null),draftRef=useRef<Draft|null>(null),nameInput=useRef<HTMLInputElement>(null);
+ const [previewRequest,setPreviewRequest]=useState(0),[saved,setSaved]=useState(false);
  const [linkId,setLinkId]=useState('');
  const [bounds,setBounds]=useState<ViewportBounds|null>(null),[background,setBackground]=useState(true);
  const context=useHydrantContext(account,bounds,background&&!!cop,refresh+epoch);
  const selected=workspace?(workspace.selected&&['INCIDENT_SECTOR','MAP_OBJECT','HYDRANT'].includes(workspace.selected.kind)?workspace.selected.id:''):localSelected;
+ function cancelDraft(){draftRef.current=null;setDraft(null);setDrawing(null);setVertices([]);setStale(false);setError('');}
  function setSelected(id:string){
   setLinkId('');
   if(!workspace){setLocalSelected(id);return;}
@@ -48,18 +51,29 @@ export function IncidentCop({locale,account,org,incidentId,refresh,feedback,disa
  },[incidentId,org,account,refresh,epoch,read]);
  useEffect(()=>{
   if(feedback.sequence===seenFeedback.current)return;seenFeedback.current=feedback.sequence;
-  if(feedback.kind==='saved'){setDraft(null);setDrawing(null);setVertices([]);setStale(false);setCandidate('');setLinkId('');setCandidates([]);}
+  if(feedback.kind==='saved'){if(draft?.type==='object'){setSelected(draft.id);}draftRef.current=null;setSaved(true);setDraft(null);setDrawing(null);setVertices([]);setStale(false);setCandidate('');setLinkId('');setCandidates([]);}
   else if(feedback.kind==='stale'){setStale(true);setEpoch(n=>n+1);}
-  else {readController.current?.abort();searchController.current?.abort();setCop(null);setDraft(null);setCandidates([]);setDrawing(null);setVertices([]);setLoading(false);setFinding(false);}
+  else {draftRef.current=null;setSaved(false);readController.current?.abort();searchController.current?.abort();setCop(null);setDraft(null);setCandidates([]);setDrawing(null);setVertices([]);setLoading(false);setFinding(false);}
  },[feedback]);
  useEffect(()=>()=>searchController.current?.abort(),[]);
  useEffect(()=>{rts?.setCopEditing(!!draft||!!drawing);return()=>rts?.setCopEditing(false);},[!!draft,!!drawing,rts?.setCopEditing]);
- const locked=disabled||loading||!!rts?.locked||!!rts?.externalEditing,actionLocked=locked||!!draft||(rts?.mode??'NORMAL')!=='NORMAL';
+ const locked=disabled||loading||!!rts?.locked||!!rts?.blocked||!!rts?.externalEditing,actionLocked=locked||!!draft||!!rts?.open||(rts?.mode??'NORMAL')!=='NORMAL';
+ const quick=!!draft?.quick&&workspace?.view==='command';
+ useEffect(()=>{
+  if(!quick||locked||drawing)return;
+  const escape=(event:KeyboardEvent)=>{if(event.key==='Escape'&&!event.defaultPrevented&&!document.querySelector('dialog[open]')&&(rts?.mode??'NORMAL')==='NORMAL'){event.preventDefault();event.stopPropagation();cancelDraft();}};
+  document.addEventListener('keydown',escape,true);return()=>document.removeEventListener('keydown',escape,true);
+ },[quick,locked,drawing,rts?.mode]);
+ function createAt(kind:MapKind,coordinate:Position){
+  if(!cop||actionLocked||draftRef.current||!validPosition(coordinate)||!(cop.can_manage||cop.sectors.some(s=>s.can_edit)))return;
+  const value:Draft={quick:true,type:'object',id:crypto.randomUUID(),version:'0',incidentVersion:cop.incident.version,code:'',label:t(kind==='WATER_SOURCE'?'copTemporaryWater':kind),description:'',kind,sector:cop.can_manage?'':cop.sectors.find(s=>s.can_edit)!.id,geometry:{type:'Point',coordinates:[...coordinate]}};
+  draftRef.current=value;setSaved(false);setDraft(value);setCoordinateText(JSON.stringify(value.geometry));setStale(false);setDrawing(null);setVertices([]);
+ }
  function begin(type:'sector'|'object',id?:string){
-  if(!cop||locked||(rts?.mode??'NORMAL')!=='NORMAL')return;const s=cop.sectors.find(x=>x.id===id),o=cop.objects.find(x=>x.id===id);
-  const value:Draft={type,id:id??crypto.randomUUID(),version:s?.version??o?.version??'0',incidentVersion:cop.incident.version,code:s?.code??'',
+  if(!cop||actionLocked||draftRef.current)return;const s=cop.sectors.find(x=>x.id===id),o=cop.objects.find(x=>x.id===id);
+  const value:Draft={quick:workspace?.view==='command'&&type==='object'&&o?.geometry.type==='Point',type,id:id??crypto.randomUUID(),version:s?.version??o?.version??'0',incidentVersion:cop.incident.version,code:s?.code??'',
    label:s?.name??o?.label??'',description:o?.description??'',kind:o?.kind??'NOTE',sector:o?.sector_id??(cop.can_manage?'':cop.sectors.find(x=>x.can_edit)?.id??''),geometry:s?.geometry??o?.geometry??null};
-  setDraft(value);setCoordinateText(value.geometry?JSON.stringify(value.geometry):'');setStale(false);setDrawing(null);setVertices([]);
+  draftRef.current=value;setSaved(false);setDraft(value);setCoordinateText(value.geometry?JSON.stringify(value.geometry):'');setStale(false);setDrawing(null);setVertices([]);
  }
  function geometry(value:Geometry|null){setDraft(d=>d?{...d,geometry:value}:d);setCoordinateText(value?JSON.stringify(value):'');}
  function point(value:Position){
@@ -74,9 +88,11 @@ export function IncidentCop({locale,account,org,incidentId,refresh,feedback,disa
   setDrawing(null);setVertices([]);
  }
  const current=draft?.type==='sector'?cop?.sectors.find(s=>s.id===draft.id):cop?.objects.find(o=>o.id===draft?.id);
- const canSave=!!cop&&!!draft&&(draft.version==='0'?(draft.type==='sector'?cop.can_manage:cop.can_manage||cop.sectors.some(s=>s.id===draft.sector&&s.can_edit)):!!current?.can_edit);
+ const targetEditable=!!cop&&(cop.can_manage||cop.sectors.some(s=>s.id===draft?.sector&&s.can_edit));
+ const canSave=!!cop&&!!draft&&(draft.version==='0'?(draft.type==='sector'?cop.can_manage:targetEditable):!!current?.can_edit&&(draft.type==='sector'||targetEditable));
  function save(e:FormEvent){
-  e.preventDefault();if(!draft||!cop||stale||drawing||!canSave)return;
+  e.preventDefault();if(locked||!draft||!cop||stale||drawing||!canSave)return;
+  if(!draft.label.trim()){setError('copNameRequired');nameInput.current?.focus();return;}
   if(draft.type==='sector'&&!/^[A-Z0-9][A-Z0-9_-]{0,63}$/.test(draft.code)){setError('workspaceSectorCode');return;}
   let g:Geometry|null=null;
   try{g=coordinateText.trim()?JSON.parse(coordinateText):null;if(g&&(!['Point','LineString','Polygon'].includes(g.type)||!Array.isArray(g.coordinates)))throw Error();}catch{setError('INVALID_GEOMETRY');return;}
@@ -84,10 +100,10 @@ export function IncidentCop({locale,account,org,incidentId,refresh,feedback,disa
   const payload=draft.type==='sector'?{id:draft.id,...(draft.version==='0'?{code:draft.code}:{version:draft.version}),name:draft.label,geometry:g}:
    {id:draft.id,version:draft.version,kind:draft.kind,label:draft.label,description:draft.description,geometry:g,sector_id:draft.sector||null};
   onAction(draft.type==='sector'?(draft.version==='0'?'sector_create':'sector_update'):'object_put',payload,
-   {id:draft.id,incident_id:incidentId,organization_id:org,version:draft.incidentVersion,title:'',reference_number:''},draft.label);
+   {id:draft.id,incident_id:incidentId,organization_id:org,version:draft.incidentVersion,title:'',reference_number:''},draft.type==='object'?[t(draft.kind),draft.label,draft.description,g?.type==='Point'?t('latitude')+': '+g.coordinates[1]+' · '+t('longitude')+': '+g.coordinates[0]:coordinateText,cop.sectors.find(s=>s.id===draft.sector)?.name??t('copIncidentWide')].filter(Boolean).join('\n'):draft.label);
  }
  function deactivate(type:'sector'|'object'|'link',id:string,version:string,label:string){
-  if(!cop)return;onAction(type==='sector'?'sector_deactivate':type==='object'?'object_deactivate':'hydrant_unlink',{id,version},
+  if(!cop||actionLocked)return;onAction(type==='sector'?'sector_deactivate':type==='object'?'object_deactivate':'hydrant_unlink',{id,version},
    {id,incident_id:incidentId,organization_id:org,version:cop.incident.version,title:'',reference_number:''},label);
  }
  async function search(e:FormEvent){
@@ -134,11 +150,11 @@ export function IncidentCop({locale,account,org,incidentId,refresh,feedback,disa
     <p>{t('status')}: {t(cop.incident.status)} · {t('copRevision')}: {cop.incident.revision}</p>
     <div className="actions">{(Object.keys(layers) as (keyof CopLayers)[]).map(k=><label key={k}><input type="checkbox" checked={layers[k]} onChange={e=>setLayers(v=>({...v,[k]:e.target.checked}))}/>{t('copLayer_'+k)}</label>)}</div>
     <label><input type="checkbox" checked={background} onChange={e=>setBackground(e.target.checked)}/>{t('workspaceHydrants')}</label>
-    <p className="workspace-map-legend">{t('workspaceMarkerLegend')}</p>
+    <p className="workspace-map-legend">{t('workspaceMarkerLegend')}</p><p className="workspace-map-legend">{t('copTacticalLegend')}</p>
    </>}
   </details>
   {workspace?.view==='command' ? (
-   (initialMapLoading||error||context.error||context.more)&&
+   (initialMapLoading||error||context.error||context.more||saved)&&
    <div
     aria-live="polite"
     style={{
@@ -150,14 +166,14 @@ export function IncidentCop({locale,account,org,incidentId,refresh,feedback,disa
      color:'#202e35',fontSize:'.8rem'
     }}
    >
-    {initialMapLoading&&<p role="status">{t('loading')}</p>}
+    {saved&&<p role="status">{t('saved')}</p>}{initialMapLoading&&<p role="status">{t('loading')}</p>}
     {error&&<p role="alert">{t(error)}</p>}
     {context.error&&<p role="alert">{t('workspaceHydrantError')}</p>}
     {context.more&&<p role="status">{t('workspaceHydrantLimit')}</p>}
    </div>
   ) : classicMapStatus}
   {cop&&<>
-   <CopMap selected={selection||shownHydrant||selected==='primary'?selected:''} contextHydrants={mapHydrants} onBounds={setBounds} locale={locale} cop={cop} layers={layers} drawing={locked?null:drawing} draft={draft?.geometry??null} vertices={vertices} onPoint={point} onSelect={setSelected}/>
+   <CopMap busy={actionLocked} previewRequest={previewRequest} onCreateObject={createAt} onEditObject={id=>begin('object',id)} onDeactivateObject={id=>{const object=cop.objects.find(o=>o.id===id);if(object)deactivate('object',object.id,object.version,object.label);}} selected={selection||shownHydrant||selected==='primary'?selected:''} contextHydrants={mapHydrants} onBounds={setBounds} locale={locale} cop={cop} layers={layers} drawing={locked?null:drawing} draft={draft?.geometry??null} vertices={vertices} onPoint={point} onSelect={setSelected}/>
    {selected==='primary'&&<p>{t('copLocation')}: {cop.incident.latitude}, {cop.incident.longitude}</p>}
    <WorkspaceSlot name="selectedPane">
    {selected==='primary'&&<p>{t('copLocation')}: {cop.incident.latitude}, {cop.incident.longitude}</p>}
@@ -182,25 +198,25 @@ export function IncidentCop({locale,account,org,incidentId,refresh,feedback,disa
     ]}/>
    </section>}
    </WorkspaceSlot>
-   <div className="cop-edit-surface">
+   <div className={"cop-edit-surface"+(quick?" cop-quick-editor":"")}>
    {stale&&<section className="admin-notice" role="alert"><h3>{t('copStale')}</h3><p>{t('copStaleHelp')}</p>
     {draft&&<><h4>{t('copLocal')}</h4><pre style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere',maxHeight:220,overflow:'auto'}}>{coordinateText||'—'}</pre>
      <h4>{t('copServer')}</h4><pre style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere',maxHeight:220,overflow:'auto'}}>{current?JSON.stringify(current,null,2):t('copMissing')}</pre>
      {(current||draft.version==='0')&&<button disabled={locked||!canSave} onClick={()=>{setDraft({...draft,version:current?.version??'0',incidentVersion:cop.incident.version});setStale(false);}}>{t('copReedit')}</button>}</>}
    </section>}
    {draft&&<form onSubmit={save} className="incident-form"><fieldset disabled={locked}>
-    <legend>{t(draft.type==='sector'?'copSector':'copObject')}</legend>
-    {draft.type==='sector'?<label>{t('copCode')}<input required pattern={'[A-Z0-9][A-Z0-9_\\-]{0,63}'} maxLength={64} disabled={draft.version!=='0'} value={draft.code} onChange={e=>{
+    <legend>{quick?t(draft.kind):t(draft.type==='sector'?'copSector':'copObject')}</legend>{quick&&<><p role="status">{t('copDraft')}</p><small>{t('copAnnotationOnly')}</small></>}
+    {!quick&&(draft.type==='sector'?<label>{t('copCode')}<input required pattern={'[A-Z0-9][A-Z0-9_\\-]{0,63}'} maxLength={64} disabled={draft.version!=='0'} value={draft.code} onChange={e=>{
      const input=e.currentTarget,pos=input.selectionStart??input.value.length;
      const clean=(value:string)=>value.replace(/[a-z]/g,ch=>ch.toUpperCase()).replace(/[^A-Z0-9_-]/g,'').slice(0,64);
      const caret=clean(input.value.slice(0,pos)).length,code=clean(input.value);
      input.setCustomValidity('');setDraft({...draft,code});requestAnimationFrame(()=>input.setSelectionRange(caret,caret));
     }} onInvalid={e=>e.currentTarget.setCustomValidity(t('workspaceSectorCode'))}/></label>:
-     <label>{t('type')}<select value={draft.kind} disabled={draft.version!=='0'} onChange={e=>{setDraft({...draft,kind:e.target.value as MapKind,geometry:null});setCoordinateText('');setDrawing(null);setVertices([]);}}>{mapKinds.map(k=><option key={k} value={k}>{t(k)}</option>)}</select></label>}
-    <label>{t('copLabel')}<input required maxLength={200} value={draft.label} onChange={e=>setDraft({...draft,label:e.target.value})}/></label>
+     <label>{t('type')}<select value={draft.kind} disabled={draft.version!=='0'} onChange={e=>{setDraft({...draft,kind:e.target.value as MapKind,geometry:null});setCoordinateText('');setDrawing(null);setVertices([]);}}>{mapKinds.map(k=><option key={k} value={k}>{t(k)}</option>)}</select></label>)}
+    <label>{t('copLabel')}<input ref={nameInput} required maxLength={200} value={draft.label} onChange={e=>setDraft({...draft,label:e.target.value})}/></label>
     {draft.type==='object'&&<><label>{t('copDescription')}<textarea maxLength={4000} value={draft.description} onChange={e=>setDraft({...draft,description:e.target.value})}/></label>
      <label>{t('copSector')}<select value={draft.sector} onChange={e=>setDraft({...draft,sector:e.target.value})}><option value="" disabled={!cop.can_manage}>{t('copIncidentWide')}</option>{cop.sectors.filter(s=>cop.can_manage||s.can_edit).map(s=><option key={s.id} value={s.id}>{s.code} · {s.name}</option>)}</select></label></>}
-    <p>{t('copDrawHelp')}</p><div className="actions">
+    {quick&&draft.geometry?.type==='Point'?<div className="cop-point-preview"><p>{t('latitude')}: {draft.geometry.coordinates[1]}<br/>{t('longitude')}: {draft.geometry.coordinates[0]}</p><button type="button" onClick={()=>setPreviewRequest(n=>n+1)}>{t('copPointPreview')}</button></div>:<><p>{t('copDrawHelp')}</p><div className="actions">
      {(draft.type==='sector'?['Polygon']:draft.kind==='HAZARD'?['Point','Polygon']:draft.kind==='PERIMETER'?['LineString','Polygon']:['Point']).map(k=><button type="button" key={k} onClick={()=>{setDrawing(k as Geometry['type']);setVertices([]);setError('');}}>{t('copDraw_'+k)}</button>)}
      {draft.type==='sector'&&<button type="button" onClick={()=>{geometry(null);setDrawing(null);setVertices([]);}}>{t('copNoGeometry')}</button>}
     </div>
@@ -208,9 +224,9 @@ export function IncidentCop({locale,account,org,incidentId,refresh,feedback,disa
      <button type="button" disabled={drawing==='Point'} onClick={finish}>{t('copFinish')}</button>
      <button type="button" onClick={()=>setVertices(v=>v.slice(0,-1))}>{t('copUndo')}</button>
      <button type="button" onClick={()=>{setDrawing(null);setVertices([]);}}>{t('copCancelDrawing')}</button></div></div>}
-    <label>{t('copGeometry')}<textarea rows={4} value={coordinateText} onChange={e=>setCoordinateText(e.target.value)}/></label>
-    <div className="actions"><button type="submit" disabled={stale||!!drawing||!canSave}>{t('save')}</button>
-     <button type="button" onClick={()=>{setDraft(null);setDrawing(null);setVertices([]);setStale(false);}}>{t('dismiss')}</button></div>
+    <label>{t('copGeometry')}<textarea rows={4} value={coordinateText} onChange={e=>setCoordinateText(e.target.value)}/></label></>}
+    <div className="actions"><button type="submit" disabled={stale||!!drawing||!canSave}>{t(quick?'copReviewSave':'save')}</button>
+     <button type="button" onClick={cancelDraft}>{t('dismiss')}</button></div>
    </fieldset></form>}
    </div>
    <WorkspaceSlot name="operational"><WorkspaceSection title={t('copSectors')} open>

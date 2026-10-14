@@ -2,24 +2,26 @@
 import {useEffect,useLayoutEffect,useRef,useState,useId} from 'react';
 import type {Map as LibreMap} from 'maplibre-gl';
 import type {Locale} from '../../lib/i18n';
-import type {Cop,Position} from '../../lib/incidents/cop';
+import type {Cop,Position,MapKind} from '../../lib/incidents/cop';
 import type {ContextHydrant} from '../../lib/hydrants/viewport';
 import {resolveTarget,validPosition} from '../../lib/operational/target';
 import {actionLabel} from '../../lib/operational/tasks';
 import {recipientKey} from '../../lib/operational/rts';
 import {contextCommands,type MapCommandContext} from '../../lib/operational/contextCommands';
+import {incidentText} from '../../lib/incidents/messages';
 import {contextText} from '../../lib/operational/contextMessages';
 import {operationalText} from '../../lib/operational/messages';
 import {recipientFeature,type RecipientPositionLayer} from './RtsMapInteraction';
 import {useRtsSession} from './rtsSession';
 import {useWorkspace} from './workspace';
 
-type Props={busy:boolean;map:LibreMap;locale:Locale;cop:Cop;hydrants:ContextHydrant[];layers:readonly RecipientPositionLayer[]};
+export type TacticalObjectActions={onCreateObject:(kind:MapKind,point:Position)=>void;onEditObject:(id:string)=>void;onDeactivateObject:(id:string)=>void};
+type Props=TacticalObjectActions&{busy:boolean;map:LibreMap;locale:Locale;cop:Cop;hydrants:ContextHydrant[];layers:readonly RecipientPositionLayer[]};
 type Menu={point:Position;choices:MapCommandContext[];selected:string|null};
 const entityLayers:Record<string,string[]>={
  'cop-hydrants':['cop-hydrants-point','cop-hydrants-label'],
  'context-hydrants':['context-hydrants-point','context-hydrants-label'],
- 'cop-markers':['cop-markers-point','cop-markers-label'],
+ 'cop-markers':['cop-markers-point','cop-markers-icon','cop-markers-label'],
  'cop-zones':['cop-zones-point','cop-zones-line','cop-zones-fill','cop-zones-label'],
  'cop-sectors':['cop-sectors-line','cop-sectors-fill','cop-sectors-label']
 };
@@ -52,7 +54,7 @@ function hitContexts({map,cop,hydrants,layers}:Props,point:Position,coordinate:P
 
 /** Menu presentation only. Operational draft, selection and sending stay in RTS/IncidentTasks. */
 export function RtsContextMenu(props:Props){
- const {map,locale}=props,rts=useRtsSession(),workspace=useWorkspace(),t=contextText(locale),ot=operationalText(locale),id=useId();
+ const {map,locale}=props,rts=useRtsSession(),workspace=useWorkspace(),t=contextText(locale),ot=operationalText(locale),it=incidentText(locale),id=useId();
  const [menu,setMenu]=useState<Menu|null>(null),[placement,setPlacement]=useState({left:8,top:8,maxHeight:300});
  const panel=useRef<HTMLDivElement>(null),entry=useRef<HTMLButtonElement>(null),returnFocus=useRef<HTMLElement|null>(null),swallowClick=useRef(0);
  const latest=useRef({props,rts,menu});latest.current={props,rts,menu};
@@ -122,6 +124,12 @@ export function RtsContextMenu(props:Props){
   return()=>{observer.disconnect();window.removeEventListener('scroll',measure);window.removeEventListener('resize',measure);};
  },[map,menu]);
  const context=menu?.choices.find(c=>c.key===menu.selected);
+ const object=context?.kind==='ENTITY'&&context.entity.kind==='MAP_OBJECT'?props.cop.objects.find(o=>o.id===context.entity.id):undefined;
+ const canCreate=['ACTIVE','STABILIZED'].includes(props.cop.incident.status)&&(props.cop.can_manage||props.cop.sectors.some(s=>s.can_edit));
+ const create=(kind:MapKind)=>{
+  if(blocked||!canCreate||context?.kind!=='COORDINATE'||context.preview.target.kind!=='COORDINATE')return;
+  props.onCreateObject(kind,[...context.preview.target.coordinate]);close(false);
+ };
  const included=context?.kind==='UNIT'&&rts.recipients.some(r=>recipientKey(r)===recipientKey(context.recipient));
  const recipients=context?.kind==='UNIT'&&!included?[context.recipient]:rts.recipients;
  const commands=context?contextCommands(context,rts.catalog?.rows??[],recipients,rts.commandTypes):[];
@@ -142,6 +150,18 @@ export function RtsContextMenu(props:Props){
    <div className="rts-context-heading"><strong>{context?.label??t('chooseObject')}</strong><button type="button" onClick={()=>close()}>{t('close')}</button></div>
    {!context?menu.choices.map(choice=><button key={choice.key} type="button" onClick={()=>setMenu({...menu,selected:choice.key})}>{choice.label} · {choice.key}</button>):<>
     {context.kind!=='COORDINATE'&&<button type="button" onClick={showDetails}>{t('details')} · {context.label}</button>}
+    {context.kind==='COORDINATE'&&<section aria-label={it('copCreateTactical')} className="rts-tactical-actions">
+     <h3>{it('copCreateTactical')}</h3>
+     {(['COMMAND_POST','STAGING','TRIAGE_POINT','WATER_SOURCE'] as const).map(kind=><button key={kind} type="button" disabled={!canCreate||blocked} onClick={()=>create(kind)}>{it(kind==='WATER_SOURCE'?'copTemporaryWater':kind)}</button>)}
+     <details><summary>{it('copOtherTactical')}</summary>
+      {(['ACCESS_POINT','NOTE'] as const).map(kind=><button key={kind} type="button" disabled={!canCreate||blocked} onClick={()=>create(kind)}>{it(kind)}</button>)}
+     </details>
+     {!canCreate&&<small>{it('copTacticalReadOnly')}</small>}
+    </section>}
+    {object?.can_edit&&<>
+     <button type="button" disabled={blocked} onClick={()=>{props.onEditObject(object.id);close(false);}}}>{it('copEdit')}</button>
+     <button type="button" disabled={blocked} onClick={()=>{props.onDeactivateObject(object.id);close(false);}}>{it('object_deactivate')}</button>
+    </>}
     {context.kind==='UNIT'?<>
      {context.recipient.status&&<p>{ot(context.recipient.status)}</p>}
      <button type="button" disabled={!rts.enabled} onClick={()=>{rts.selectMany([context.recipient],false);close();}}>{t('select')}</button>
