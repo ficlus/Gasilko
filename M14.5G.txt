@@ -1,0 +1,564 @@
+# CODEX IMPLEMENTATION PROMPT — M14.5G
+## Visual Command Hierarchy & Sector Coordination
+
+Repository: https://github.com/ficlus/Gasilko
+
+Implement **M14.5G — Visual Command Hierarchy & Sector Coordination**.
+
+This milestone follows M14.5F1–F4: responsive Command Map, RTS context commands, tactical COP objects, and live operational updates.
+
+Create one focused PR targeting the latest `main`. Do not merge it.
+
+## 1. Product objective
+
+Give incident commanders a coherent, visual overview of the actual incident command structure and enable authorized command-management workflows directly from **Poveljniška karta**.
+
+The experience should resemble a tactical RTS hierarchy while respecting real fire-service incident authority.
+
+Primary workflows:
+
+1. Open a compact **Poveljniška struktura** panel.
+2. See the incident commander, actual delegated roles, sectors and their responsible commanders.
+3. Expand a sector to see its associated people, units/resources and tasks, where these relationships are supported by authoritative data.
+4. Select a sector to highlight its actual COP geometry and associated visible units.
+5. Right-click a sector or commander to see relevant authorized actions.
+6. Open existing authorized assignment/delegation/transfer workflows in a compact UI.
+7. Confirm an actual organizational change through the existing server-authoritative command model.
+8. See confirmed changes reflected automatically through the F4 live refresh mechanism.
+
+No drag-and-drop authority reassignment.
+
+Do not create a parallel command hierarchy or a new permission model.
+
+## 2. Inspect actual current architecture
+
+Before editing, trace the latest code and SQL for:
+
+- `web/features/incidents/CommandSection.tsx` or its current equivalent.
+- `web/features/incidents/IncidentArea.tsx`.
+- `web/features/incidents/workspace.tsx`.
+- `web/features/incidents/IncidentResources.tsx`.
+- `web/features/incidents/IncidentTasks.tsx`.
+- `web/features/incidents/IncidentCop.tsx`.
+- `web/features/incidents/CopMap.tsx`.
+- `web/features/incidents/RtsContextMenu.tsx`.
+- `web/features/incidents/rtsSession.tsx`.
+- `web/features/incidents/IncidentLiveProvider.tsx`.
+- `web/features/incidents/IncidentLiveStatus.tsx`.
+- Existing incident context and command DTOs.
+- Existing sector membership and agency/organization participation models.
+- M14.2 command authority, delegation, transfer and acceptance workflows.
+- Existing incident command RPCs and their authorization checks.
+- Existing COP sectors, sector geometries and object-to-sector associations.
+- Existing unit/resource sector assignments, if supported.
+- Existing task sector/recipient relationships.
+- Existing confirmation and expected-version/idempotency workflows.
+- Existing Slovenian/German translations and responsive CSS.
+
+Determine which relationships are actually represented in the database.
+
+Do not infer a command relationship from the location of a vehicle, an organization's hierarchy, or the existence of a sector polygon.
+
+Document the discovered model before editing.
+
+## 3. Critical architectural rule
+
+**Organization hierarchy, incident command authority, operational sector membership, and task assignment are different concepts.**
+
+They must not be conflated.
+
+For example:
+
+- A municipal or organizational administrator is not automatically the incident commander.
+- An agency's leader is not automatically authorized to command all participating agencies.
+- A sector commander only has authority within actual delegated scope.
+- A vehicle appearing inside a sector polygon does not automatically belong to that sector.
+- A task recipient is not necessarily a permanent member of the task's sector.
+- A command post COP point is a map object, not an automatic source of command authority.
+
+All displayed relationships must have an identifiable authoritative source.
+
+If a relationship is not modeled, show **Unassigned / Not available**, or omit it.
+
+Never fabricate hierarchy edges.
+
+## 4. Scope
+
+### MUST implement
+
+- Visual read-only command hierarchy tree.
+- Incident commander and current delegated command roles.
+- Existing sector nodes and responsible personnel.
+- Contextual detail panels for people, sectors and command roles.
+- Actual unit/resource associations where modeled.
+- Actual task associations where modeled.
+- Bidirectional interaction between hierarchy selection and map selection.
+- Authorized command-management actions using existing server workflows.
+- Clear pending/confirmed/conflict feedback.
+- F4 live refresh integration.
+- Mobile/tablet accessibility.
+- SI/DE localization.
+
+### SHOULD implement
+
+- Expand/collapse branches.
+- Filtering/search within the hierarchy.
+- Summary counts of associated units and tasks.
+- Clearly visible vacant roles and unassigned resources.
+- Highlighting command scope without claiming spatial coverage.
+- Compact context actions within the existing F2 menu architecture.
+
+### MUST NOT implement
+
+- New organization hierarchy.
+- A new command-role system.
+- Automatic command delegation.
+- Silent transfer of incident command.
+- Automatic unit reassignment based on GPS proximity.
+- Drag-and-drop authority changes.
+- New bulk-task dispatch engine (reserved for M14.5H).
+- New GPS telemetry.
+- New simulation behavior.
+- A second Realtime coordinator.
+- A second map implementation.
+- Minimap.
+- New SQL tables unless unavoidable after repository inspection.
+
+## 5. Visual hierarchy panel
+
+Add a compact **Poveljniška struktura** panel or tab within Command Map.
+
+Suggested presentation:
+
+```text
+VODENJE INTERVENCIJE
+  └─ Vodja intervencije
+       ├─ Namestnik / delegated role (if actually present)
+       ├─ Sektor A — existing role and authority
+       │    ├─ Authorized sector commander
+       │    ├─ Assigned units/resources
+       │    └─ Related tasks
+       └─ Sektor B
+            ├─ Authorized sector commander
+            ├─ Assigned units/resources
+            └─ Related tasks
+```
+
+The structure is illustrative, not an instruction to invent missing levels.
+
+Render only levels that exist in the current incident command model.
+
+Each node should show:
+
+- Display name.
+- Actual role or entity type.
+- Active/inactive status where supported.
+- Scope where meaningful.
+- Number of associated resources/tasks when reliably derivable.
+- Warning when a role is vacant or an authorized assignment is pending.
+
+A node click must immediately highlight the relevant item in the hierarchy.
+
+Do not fetch a complete organization directory merely to render the tree.
+
+Use existing scoped incident DTOs and readers.
+
+## 6. Sector interaction
+
+Selecting a sector should:
+
+1. Mark its node selected.
+2. Highlight the corresponding existing COP sector geometry, if present and authorized.
+3. Show its responsible command role.
+4. Show linked units/resources and tasks only when the authoritative model supports those relationships.
+5. Offer existing authorized actions.
+
+The Command Map must remain stable:
+
+- Do not remount MapLibre.
+- Preserve camera unless the user explicitly chooses **Prikaži na karti**.
+- Do not steal focus while a command modal is open.
+- Do not cancel a current RTS unit selection merely because a sector was inspected.
+- Do not confuse sector geometry with command scope.
+
+If a sector has no geographic polygon, it should still exist in the hierarchy if it exists in the command model.
+
+If a polygon exists without an authoritative command-sector association, show it as a COP geometry rather than manufacturing a hierarchy mapping.
+
+## 7. People and command roles
+
+Show actual active incident command-role assignments.
+
+Support relevant states already represented in the backend:
+
+- Current holder.
+- Delegated scope.
+- Pending assignment or acceptance, if applicable.
+- Effective and expired authority.
+- Vacant role.
+
+Use exact current DTO fields.
+
+Avoid assuming role names or status enums from this prompt.
+
+On clicking a person or role:
+
+- Show identity and actual incident command role.
+- Show assigned sector/agency scope where available.
+- Show currently authorized command actions.
+- Provide a safe way to open the existing detailed command structure workflow.
+
+No personnel data beyond the existing permitted incident view should be fetched or exposed.
+
+## 8. Authorized hierarchy actions
+
+Contextual actions should reuse existing command-management operations.
+
+Examples, only if actually supported:
+
+- View command role details.
+- Assign a commander to an existing sector.
+- Delegate an existing supported incident role.
+- Change an authorized role holder.
+- Revoke an existing delegation.
+- Start existing command transfer.
+- View pending acceptance or handover.
+- Open existing sector management workflow.
+
+Do not invent RPC commands.
+
+Do not use direct browser table writes.
+
+Do not silently elevate an organization or agency administrator to incident command authority.
+
+### Required interaction contract
+
+For any modifying action:
+
+1. Check current server-derived UI eligibility.
+2. Open the actual existing command-management form or compact adapter.
+3. Show affected role, scope, current holder and proposed change.
+4. Perform the existing validation.
+5. Require explicit confirmation.
+6. Use existing server RPC and version/idempotency rules.
+7. Wait for authoritative confirmation.
+8. Refresh the existing incident context.
+9. Render confirmed hierarchy state.
+
+A right-click never directly transfers command or grants permission.
+
+If the existing command workflow requires a recipient's acceptance, preserve that requirement.
+
+Do not show a pending transfer as completed.
+
+If an operation is too complex to implement safely in a compact drawer, open the existing Classic workflow prefilled where supported.
+
+## 9. Shared selection and context menus
+
+Reuse the existing F2 context-menu architecture.
+
+For sector interactions:
+
+- Right-click an actual sector can open sector details and authorized command-management options.
+- Retain existing compatible action-catalog commands.
+- Do not replace Move To or tactical object actions.
+- Do not treat polygon click coordinates as a navigable target unless the action explicitly accepts that geometry type.
+
+For unit interactions:
+
+- Show its actual assignment/scope if modeled.
+- Provide a link to its sector or responsible commander where such a relationship exists.
+- Do not change unit sector automatically when selected.
+
+For command role/person interactions:
+
+- Context actions may originate in the hierarchy tree.
+- There is no requirement to place all people as geographical markers.
+
+Keep the source of truth for RTS-selected units in the existing RTS session.
+
+Do not create a parallel selection store that can issue commands to stale recipients.
+
+## 10. Unit/resource sector association
+
+Inspect whether the database already has explicit:
+
+- incident unit-to-sector assignment;
+- resource-to-sector allocation;
+- task sector association;
+- command scope association.
+
+Use only actual authoritative associations.
+
+If unit assignment to sectors is already supported by a safe RPC:
+
+- Expose the existing authorized assignment workflow.
+- Show origin and destination sector.
+- Require explicit confirmation.
+- Preserve conflict/version protections and audit.
+
+If sector assignment is NOT supported:
+
+- Implement the read-only visualization of currently supported relationships.
+- Provide a clearly labelled unassigned state.
+- Do not create a shortcut that writes a guessed `sector_id`.
+- Do not introduce a new assignment table in this PR.
+- Explain the gap in the PR description for a future focused milestone.
+
+Do not misuse `incident_map_objects.sector_id` as a universal unit-sector relationship.
+
+## 11. Scope-aware permissions
+
+Server-side authorization remains authoritative.
+
+The UI must enforce the existing M14.2 security model, including:
+
+- Incident commander authority.
+- Delegated/sector command scope.
+- Agency participation boundaries.
+- Cross-organization visibility rules.
+- Read-only incident participant restrictions.
+- Expiry/revocation of authority.
+- Incident lifecycle restrictions.
+
+A user who may read the entire hierarchy does not automatically have permission to modify all its nodes.
+
+Never trust frontend flags as the sole authorization mechanism.
+
+Avoid exposing unauthorized personnel or sector membership through broad search endpoints.
+
+On definitive access loss:
+
+- Close privileged modification drafts.
+- Clear inaccessible hierarchy data.
+- Unsubscribe/stop relevant incident refresh work through existing scope lifecycle.
+- Prevent stale context menus from issuing mutations.
+
+## 12. Live updates through F4
+
+Reuse the new `IncidentLiveProvider`.
+
+Relevant server-confirmed changes should refresh:
+
+- Command role holders.
+- Delegations and command transfers.
+- Sector associations.
+- Unit/resource assignments where modeled.
+- Related task summaries.
+
+Do not add a second polling coordinator.
+
+Do not add another 8-second timer.
+
+Do not add a new Realtime Broadcast layer in this PR.
+
+The hierarchy should render from the latest authorized incident context and existing domain readers.
+
+Preserve open user drafts on ordinary background refresh.
+
+If the hierarchy changes while a modification dialog is open, show a stale-version warning before confirmation.
+
+Never silently submit an old command against an updated hierarchy.
+
+## 13. Interaction and responsiveness
+
+Desktop:
+
+- Hierarchy panel should coexist with the dominant Command Map.
+- Make it collapsible.
+- Avoid shrinking the map into a small column.
+- Scrolling within the hierarchy should not resize the map.
+
+Tablet/mobile:
+
+- Accessible hierarchy drawer.
+- Clear breadcrumb/back navigation into a selected branch.
+- Comfortable touch targets.
+- No hover-only operations.
+- Only one obstructive drawer at a time.
+
+Keyboard:
+
+- Expand/collapse branches.
+- Navigate nodes.
+- Open details and authorized actions.
+- Escape closes the appropriate surface.
+- Correct focus return after dialogs.
+
+Use the existing SI/DE localization conventions.
+
+Do not add a new UI library unless essential.
+
+## 14. Feedback and status
+
+Show concise, accurate states:
+
+- Role change requested.
+- Waiting for acceptance.
+- Command role changed.
+- Assignment updated.
+- Update rejected.
+- Authority expired.
+- Conflict: hierarchy changed since preview.
+
+Use actual backend states, not invented completion claims.
+
+The F4 notification panel may display existing authoritative events when supported.
+
+Do not generate a notification merely because a hierarchy node was selected.
+
+Do not create duplicate notifications or audit records.
+
+## 15. Performance
+
+Avoid expensive global refetches on each tree expand/collapse.
+
+Requirements:
+
+- Memoize the hierarchy projection from stable authoritative data.
+- Render only visible/expanded branches where practical.
+- Reuse existing scoped readers.
+- Avoid refetching resources/tasks solely to highlight a node if data is already loaded.
+- Avoid re-rendering the full MapLibre source collection on local panel interaction.
+- Preserve camera, selected RTS units and pending command drafts.
+- Keep hierarchy UI state local and incident-scoped.
+- Reset hierarchy UI when switching to a different incident/account/organization.
+
+Do not introduce unbounded client caches of command/personnel data.
+
+## 16. Database and migrations
+
+Default expectation: **frontend integration using existing command hierarchy and sector APIs**.
+
+Do not create new migrations just for visual presentation.
+
+A forward-only migration is permitted only if inspection reveals a small, essential server-side authorization or read-projection gap that cannot be safely handled through existing RPCs.
+
+If a migration is genuinely required:
+
+- Use a new timestamped migration.
+- Do not edit old migrations.
+- Preserve exact organization/incident/sector authorization.
+- Preserve audit, confirmation and version checks.
+- Do not create a second incident command structure.
+- Do not weaken existing RLS.
+- Document the manual migration step.
+
+Do not implement an entire new team-assignment or organizational model as part of this milestone.
+
+## 17. Important invariants
+
+Keep the existing distinction:
+
+**COMMAND INTENT != EXECUTION PLAN != OBSERVED TELEMETRY.**
+
+Also preserve:
+
+**ORGANIZATION ROLE != INCIDENT COMMAND ROLE.**
+
+And:
+
+**SECTOR GEOMETRY != SECTOR COMMAND AUTHORITY.**
+
+A selected person, sector or unit is not proof of authorization.
+
+A visual connection in the hierarchy must represent an actual modeled relationship.
+
+SIM incidents and real incidents use the same authorized command hierarchy presentation, with their data kept incident-scoped.
+
+Do not create fake commanders, unit assignments or sector memberships for simulation.
+
+## 18. Acceptance criteria
+
+- [ ] PR starts from latest merged F4 main.
+- [ ] Existing M14.2 command structure is reused.
+- [ ] Command hierarchy panel is available in Command Map.
+- [ ] Current incident commander and actual delegates are shown.
+- [ ] Actual existing sectors are shown.
+- [ ] Sector selection highlights real associated map geometry, where available.
+- [ ] Existing unit/resource/task associations are shown only when modeled.
+- [ ] Vacant and unassigned states are explicit.
+- [ ] Actual supported command-management actions are accessible contextually.
+- [ ] Unauthorized users cannot mutate hierarchy.
+- [ ] Command transfer/acceptance semantics are preserved.
+- [ ] Mutations go through existing confirmed, version-guarded server workflows.
+- [ ] No new parallel command hierarchy or role model.
+- [ ] F4 automatically updates the hierarchy from authorized state.
+- [ ] No new polling loop.
+- [ ] MapLibre instance and camera remain stable.
+- [ ] RTS selected units are not unexpectedly cleared.
+- [ ] Existing Move To and F3 tactical-object commands remain functional.
+- [ ] Classic View retains all current command-management forms.
+- [ ] Desktop/tablet/mobile and keyboard interactions are supported.
+- [ ] SI/DE localization is complete.
+- [ ] No organizational data leaks across incident scope.
+- [ ] No new UI dependencies unless justified.
+
+## 19. Development restrictions
+
+Do NOT run:
+
+- tests;
+- builds;
+- lint;
+- typechecks;
+- CI;
+- browser/runtime checks;
+- Android/Gradle tasks;
+- migrations;
+- Supabase deployments.
+
+Do not merge the PR.
+
+Do not use destructive Git operations.
+
+Do not change unrelated Android or development configuration files.
+
+Preserve the user's custom local files:
+
+- `android/app/build.gradle.kts`
+- `android/build.gradle.kts`
+- `android/gradle.properties`
+- `android/app/schemas/`
+- `pnpm-lock.yaml`
+- `web/next-env.d.ts`
+
+Avoid new dependencies and lockfile modifications.
+
+Do not add the prompt as a `.txt` file in the repository root.
+
+## 20. Deliverables
+
+Produce one focused PR containing:
+
+1. A responsive visual incident command hierarchy.
+2. Sector/person/role detail interactions.
+3. Authoritative unit/resource/task associations where modeled.
+4. Integration with existing M14.2 management operations.
+5. F2 context-menu integration where useful.
+6. F4 live invalidation reuse.
+7. SI/DE localization.
+8. A precise list of modified files.
+9. An architecture summary showing which existing DTOs/RPCs were reused.
+10. Explicit list of unsupported relationships or operations discovered in the current model.
+11. Any required forward-only migration and exact manual deployment instructions, if essential.
+12. Manual verification checklist for:
+    - incident commander;
+    - delegated sector commander;
+    - read-only participant;
+    - multiple participating agencies;
+    - SIM versus normal incident;
+    - actual sector geometry versus non-geographic sector;
+    - cross-user command-role updates;
+    - pending role transfer;
+    - authority revocation;
+    - stale version conflict;
+    - F2 commands;
+    - F3 tactical objects;
+    - F4 live updates;
+    - mobile and desktop layouts.
+13. An explicit statement that automated and manual checks were not executed.
+
+**Final goal:** The Gasilko Command Map becomes a commander's visual overview of who is responsible for which operational sector, unit and task, while preserving all established incident authority and audit semantics.
+
+**Next milestone (not part of this PR): M14.5H — Multi-Unit Coordination, Control Groups & Bulk Task Workflows.**
