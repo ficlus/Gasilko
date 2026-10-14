@@ -5,7 +5,7 @@ alter table public.incident_map_objects add constraint incident_map_objects_kind
 
 -- Preserve the COP command contract and authorization path. Object mutations now
 -- record immutable before/after snapshots on the existing organization audit log.
-create function private.incident_cop_command(p_action text,p_operation uuid,p_org uuid,p_incident uuid,p_expected bigint,p_payload jsonb)
+create or replace function private.incident_cop_command(p_action text,p_operation uuid,p_org uuid,p_incident uuid,p_expected bigint,p_payload jsonb)
 returns jsonb language plpgsql volatile security definer set search_path='' as $$
 declare
  actor_id uuid:=auth.uid(); organization_id_value uuid; profile_id_value uuid; incident_row public.incidents;
