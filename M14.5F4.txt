@@ -1,0 +1,864 @@
+# CODEX IMPLEMENTATION PROMPT — M14.5F4
+## Live Operational Updates, Command Feedback & Tactical Notifications
+
+You are implementing **M14.5F4 — Live Operational Updates, Command Feedback & Tactical Notifications** in the existing Gasilko monorepo.
+
+Repository: `https://github.com/ficlus/Gasilko`
+
+**Prerequisite:** M14.5F3 / PR #67 has been merged into `main`.
+
+Create one focused branch and pull request targeting the latest `main`.
+
+Do not merge the PR.
+
+---
+
+## 1. Product goal
+
+Transform the existing **Poveljniška karta** into a live operational command workspace.
+
+Currently, command, COP, resources, navigation, and simulation components have separate refresh mechanisms. Some changes require clicking **Osveži** or waiting for an independent provider refresh.
+
+The goal is:
+
+**An authorized commander should see operational changes automatically, promptly, and consistently, without refreshing the browser or manually refreshing each panel.**
+
+Examples:
+
+- Another commander creates a tactical command post. It appears on the map.
+- An authorized unit assignment changes status. The related task card updates.
+- A command is accepted by the server. The UI clearly distinguishes accepted, acknowledged, in progress, blocked, and completed.
+- A simulated unit moves along its existing valid navigation route. Its SIM marker updates without resetting the map.
+- A simulated unit arrives or encounters an injected failure. A relevant notification appears.
+- Another commander changes or deactivates a tactical object. The map updates.
+- A session loses authorization. Privileged operational data and controls are revoked appropriately.
+
+This is an operational synchronization and presentation milestone.
+
+**Do not change the semantics of command execution, real-world telemetry, simulation, navigation, or incident authority.**
+
+---
+
+## 2. Inspect current code before implementation
+
+Inspect the actual latest `main`, including:
+
+- `web/features/incidents/IncidentArea.tsx`
+- `web/features/incidents/workspace.tsx`
+- `web/features/incidents/IncidentCop.tsx`
+- `web/features/incidents/CopMap.tsx`
+- `web/features/incidents/IncidentTasks.tsx`
+- `web/features/incidents/IncidentResources.tsx`
+- `web/features/incidents/IncidentTimeline.tsx`
+- `web/features/incidents/IncidentNavigationProvider.tsx`
+- `web/features/incidents/SimulationProvider.tsx`
+- `web/features/incidents/AutonomousSimulationProvider.tsx`
+- `web/features/incidents/AutonomousSimulationPanel.tsx`
+- `web/features/incidents/rtsSession.tsx`
+- `web/features/incidents/IncidentViewSwitch.tsx`
+- current incident event and timeline DTOs
+- existing Supabase browser client
+- incident-scoped read RPCs
+- existing database Realtime publication, if any
+- RLS and incident command-role authorization
+- current localization and CSS
+- M14.5F3 migration and tactical-object audit changes
+
+Trace the actual refresh dependencies.
+
+Identify which components already poll, which are refresh-triggered, and which use revision/version values.
+
+Document the refresh architecture discovered before editing.
+
+Do not invent backend tables or RPC names.
+
+---
+
+## 3. Required capabilities
+
+### MUST
+
+1. Automatic incident data refresh.
+2. Live updates for COP tactical objects.
+3. Live updates for tasks and recipient assignment states.
+4. Live updates for deployed units/resources.
+5. Live SIM position updates using actual simulator data.
+6. Existing navigation state refresh.
+7. Compact tactical event notifications.
+8. Clear connection/synchronization status.
+9. Recovery after network loss or browser suspension.
+10. Strong account/organization/incident isolation.
+11. No repeated notifications for the same event.
+12. No whole-page refresh or MapLibre remount for routine updates.
+
+### SHOULD
+
+- Smooth visual rendering of newly received SIM position samples.
+- Selected-object highlighting when related status changes.
+- Clickable notifications that focus the relevant object.
+- A compact recent-notifications panel.
+- Suppression of noisy or low-priority events.
+
+### NOT IN SCOPE
+
+- Push notifications via Firebase.
+- Email or SMS alerts.
+- Sound notifications.
+- A separate dispatch/CAD system.
+- New task types.
+- New tactical object kinds.
+- A new simulator.
+- Automatic actions based on alerts.
+- New command authorization rules.
+- Unit drag-and-drop.
+- Minimap.
+- Patient medical or triage-management workflow.
+- Replaying the entire incident history.
+
+---
+
+## 4. Architectural principle
+
+**Server-authoritative state with event-driven refresh and bounded fallback.**
+
+The architecture must distinguish:
+
+1. **Change signal** — something may have changed.
+2. **Authorized read** — determine the current server-confirmed state.
+3. **UI state update** — refresh only the affected operational domain.
+4. **Notification** — present an important confirmed transition.
+
+A Realtime event is NOT itself an authorized operational snapshot.
+
+The client must never trust an arbitrary socket payload as proof of task acknowledgment, successful command execution, vehicle arrival, or permission to access an incident.
+
+Use existing server-side RPCs to obtain authoritative state.
+
+Required invariant:
+
+**COMMAND INTENT != EXECUTION PLAN != OBSERVED TELEMETRY.**
+
+---
+
+## 5. Shared incident live coordinator
+
+Introduce one lightweight incident-scoped live-update coordinator.
+
+Suggested conceptual structure:
+
+```text
+IncidentWorkspace
+└── IncidentLiveProvider
+    ├── Scope & connection lifecycle
+    ├── Change-signal subscription
+    ├── Adaptive fallback refresh
+    ├── Revision / sequence tracking
+    ├── Domain invalidation dispatcher
+    └── Notification derivation
+         ├── COP
+         ├── Tasks
+         ├── Resources
+         ├── Navigation
+         └── SIM / Autonomous agents
+```
+
+Adapt to the existing provider nesting.
+
+Do not create a second source of truth for domain data.
+
+The coordinator should provide stable, lightweight refresh/invalidation signals to existing readers rather than owning duplicate copies of every COP object, task, resource, and navigation record.
+
+Suggested domain invalidation categories:
+
+```typescript
+type IncidentLiveDomain =
+  | 'INCIDENT'
+  | 'COP'
+  | 'TASKS'
+  | 'RESOURCES'
+  | 'NAVIGATION'
+  | 'SIMULATION'
+  | 'AGENTS'
+  | 'TIMELINE';
+```
+
+These are examples, not mandatory backend identifiers.
+
+### Required behavior
+
+- One coordinator per mounted incident workspace.
+- Scoped by authenticated account, acting organization, and incident UUID.
+- Stable cleanup on navigation or unmount.
+- No duplicated subscriptions when switching Classic/Command modes.
+- No duplicate timers when opening/closing panels.
+- No event listeners that survive their owning provider.
+- Abort or discard stale requests when their scope becomes invalid.
+- Coalesce multiple rapid invalidations.
+- Preserve the existing loading and mutation feedback mechanisms.
+
+---
+
+## 6. Realtime transport decision
+
+Inspect existing Supabase capabilities before choosing a transport.
+
+### Preferred approach
+
+Use **authenticated, incident-scoped, private Supabase Realtime invalidation events**, provided that the repository can establish correct authorization and delivery.
+
+Supabase's current documentation recommends Broadcast for scalable realtime changes.
+
+Important requirements:
+
+- Private channels only.
+- Channel authorization must validate actual incident read access, not just authentication or a guessed incident ID.
+- Respect acting-organization scope.
+- Do not assume all incident participants can access every organization-specific record.
+- Never expose secrets, sensitive command payloads, profiles, complete audit snapshots, or privileged metadata in broadcast messages.
+- Emit only minimal change hints, such as an opaque incident-scoped revision or permitted domain identifier.
+- Revalidate permissions using existing authoritative reads.
+- Cleanly unsubscribe and remove channels when the scope changes.
+- Handle token refresh, reconnect, timeout, and channel errors.
+- Do not accept user-generated broadcasts as authoritative evidence of server changes.
+- Do not make a broad RLS policy such as `USING (true)` merely to get Realtime working.
+- Do not expose private simulation configuration or runner secrets.
+
+Before implementing private Broadcast, inspect existing database functions and exact authorization APIs.
+
+If an appropriate secure notification path does not exist, create the smallest possible forward-only migration to implement it, documenting the topic naming, RLS authorization, trigger source, events and rollback procedure.
+
+### Important database safety
+
+Do not add sensitive tables indiscriminately to `supabase_realtime`.
+
+Do not enable broad replication of:
+
+- audit logs;
+- private simulator configuration;
+- entire task command payloads;
+- profiles;
+- permission/role details;
+- sensitive incident records.
+
+Do not expose raw database row changes merely for UI convenience.
+
+If the necessary secure authorization cannot be proven for this PR, use a **bounded, coordinated server-RPC polling strategy as the reliable implementation**, and explicitly document Realtime as deferred.
+
+The implementation must remain useful when Realtime is disabled.
+
+Do not deliver a UI that simply says it is live while no updates are arriving.
+
+---
+
+## 7. Fallback refresh strategy
+
+A fallback mechanism is mandatory even if Realtime is implemented.
+
+Requirements:
+
+- Perform an authoritative initial read.
+- Refresh after an event signal.
+- Refresh after reconnect.
+- Refresh when a hidden tab becomes visible again.
+- Refresh after the browser comes back online.
+- Periodically reconcile even if no events arrive.
+- Avoid concurrent duplicate requests for the same domain.
+- Avoid exponential request accumulation on errors.
+- Abort or ignore obsolete requests.
+- Back off on repeated failures.
+- Do not trigger full-page router refreshes for ordinary state changes.
+
+Suggested baseline:
+
+| Situation | Suggested strategy |
+|---|---|
+| Successful Realtime connection | Event-driven refresh plus low-frequency reconciliation |
+| Realtime unavailable | Bounded fallback polling |
+| Visible active incident | Approximately 5–10 seconds for important changing domains |
+| Active SIM movement | Reuse the existing 5-second autonomous-agent polling |
+| Hidden browser tab | Pause unnecessary high-frequency reads |
+| Tab becomes visible | Immediately reconcile |
+| Network offline | Stop futile retries and show disconnected status |
+| Network returns | Immediate authorized reconciliation |
+
+These timings are suggestions. Tune them after inspecting current RPC cost and existing timers.
+
+Do not globally poll every incident.
+
+Do not poll historical pages, large action catalogs, all hydrants, or the entire organization repeatedly.
+
+### Critical existing behavior
+
+`AutonomousSimulationProvider.tsx` already runs a 5-second read loop.
+
+Do not leave this loop running alongside a second independent 5-second read of the same endpoint.
+
+Either reuse the existing loop or consolidate it into the coordinator while preserving its current functionality.
+
+Avoid repeatedly invoking `SimulationProvider.refresh()` in a way that creates cascading reload loops.
+
+---
+
+## 8. Change detection and ordering
+
+Use authoritative versions, revisions, sequence numbers, timestamps, or stable event UUIDs already present in existing DTOs.
+
+Inspect the actual fields and use their established semantics.
+
+Requirements:
+
+- Ignore stale responses from older request epochs.
+- Do not let an older snapshot overwrite newer accepted state.
+- Deduplicate repeated event signals.
+- Detect gaps in event sequences when available.
+- Reconcile after reconnect or missed events.
+- Preserve pagination position for currently opened history pages.
+- Do not reset user selection simply because a new snapshot arrives.
+- Do not close open command/task drafts because a background update arrived.
+- Do not regenerate immutable client UUIDs or operation IDs.
+- Never silently rebase a pending operation to a new server version.
+
+### Version conflicts
+
+If another commander changes the incident while a local edit is open:
+
+- Update background operational data as permitted.
+- Preserve the local draft.
+- Show a clear stale/conflict warning when necessary.
+- Require explicit re-review before resubmission.
+- Never overwrite the other commander's update.
+
+---
+
+## 9. COP tactical-object live updates
+
+M14.5F3 introduced quick-create for:
+
+- `COMMAND_POST`
+- `STAGING`
+- `TRIAGE_POINT`
+- `WATER_SOURCE`
+- `ACCESS_POINT`
+- `NOTE`
+
+All are backed by the existing COP object model.
+
+Required behavior:
+
+- Another authorized commander's new object appears without browser refresh.
+- Changes to name, description, position, sector and active state refresh correctly.
+- Deactivation removes the object from the active layer only after authoritative confirmation.
+- Current object selection persists if the object remains valid.
+- If the selected object becomes unavailable or deactivated, show a clear explanation and close privileged edit controls appropriately.
+- MapLibre source updates should not remount the map.
+- Do not reload permanent hydrant context merely because an unrelated tactical object changed.
+- Preserve the F1.1 stable map-height and loading fixes.
+
+### Security
+
+All COP reads must still use the existing scoped RPC.
+
+Never populate the map directly from unrestricted Realtime payloads.
+
+---
+
+## 10. Task and command feedback
+
+The Command Map must clearly distinguish command lifecycle states.
+
+Examples:
+
+- Command draft
+- Awaiting confirmation
+- Sending
+- Accepted by server
+- Waiting for recipient acknowledgment
+- Acknowledged
+- In progress
+- Blocked / unable
+- Completed
+- Rejected / version conflict
+
+Use the actual available task, assignment and command statuses from existing M14.5A–F2 infrastructure.
+
+Do not invent server states if an equivalent is not present.
+
+### Notifications
+
+Examples:
+
+- "GVC-1 je prejela novo nalogo."
+- "GVC-1 je potrdila nalogo."
+- "GVV-1 ne more izvesti ukaza."
+- "Naloga je zaključena."
+- "Ukaz je bil zavrnjen."
+
+The notification must reflect the actual confirmed state.
+
+For example:
+
+**Server accepted a task creation request** does not imply that the firefighter acknowledged it.
+
+Preserve pending, ambiguous-response and exact-retry behavior.
+
+Do not show a successful command toast solely because the browser sent a request.
+
+For transitions affecting multiple recipients, use compact grouped summaries rather than flooding the display with 100 separate toasts.
+
+---
+
+## 11. SIM movement updates
+
+Reuse the existing M14.5C–E simulator and navigation state.
+
+The background scheduler and `incident-simulation-runner` are already external operational infrastructure.
+
+Do not replace or reschedule that worker in F4.
+
+### Required behavior
+
+- Automatically read new SIM positions from existing authorized simulation endpoints.
+- Apply actual confirmed position samples to MapLibre.
+- Show progress, heading and status when supplied by the server.
+- Preserve obvious SIM identification.
+- Keep simulator time and real wall-clock time distinguishable.
+- Show a stale-data indicator when updates stop arriving.
+- Show runner unavailable/connection lost where supported.
+
+### Optional visual smoothing
+
+Smooth rendering between consecutive authoritative position samples when feasible.
+
+Strict requirements:
+
+- Visual animation must not write database positions.
+- Do not use visual interpolation as proof of new telemetry.
+- Do not extrapolate indefinitely beyond the latest authoritative sample.
+- Do not invent a movement route.
+- Do not move markers along a route that is missing, invalid, or belongs to another navigation session.
+- Avoid teleporting a vehicle across missing data silently.
+- If samples are too old or inconsistent, stop animation and mark the position stale.
+- Preserve actual server samples as the underlying truth.
+- Real-world vehicle markers must never use SIM-only animation.
+
+Prefer simple, robust interpolation over a complicated animation engine.
+
+If safe interpolation is not feasible in the current architecture, skip it and provide stable 5-second sample updates.
+
+---
+
+## 12. Live notification center
+
+Add a compact notification experience to **Poveljniška karta**.
+
+### Primary interface
+
+A small notification bell or event indicator within the Command Map controls.
+
+Show a badge/count when important new operational changes occur.
+
+The badge must remain usable on mobile.
+
+### Notification types
+
+Include only events supported by authoritative state:
+
+- Command accepted/rejected
+- Recipient acknowledgment
+- Assignment blocked/unable
+- Assignment completed
+- Navigation planning failure or meaningful status transition
+- SIM arrival
+- SIM breakdown or injected failure
+- Tactical object created/changed/deactivated
+- Important incident state changes
+- Access/connection loss
+
+Classify priority:
+
+- **Critical:** access loss, major command failure, explicitly critical operational failure
+- **Warning:** blocked unit, unable assignment, route unavailable, stale SIM position
+- **Information:** task acknowledgment, completed task, tactical object created
+
+Do not infer emergency severity solely from a generic error string.
+
+### Interaction
+
+- Click to open compact recent-event list.
+- Click an event to select/focus its existing object when permitted.
+- If object data is no longer accessible, show a safe message instead of linking to stale privileged information.
+- Allow dismissing local toast notifications.
+- Provide a "mark seen" function for this browser session.
+- Allow turning off low-priority toast interruptions.
+- Do not automatically center the map on every incoming event.
+- Do not steal focus from an open command form or confirmation dialog.
+
+### Lifecycle
+
+Notification presentation state is separate from immutable incident history.
+
+Do not modify event records merely because the user dismissed a toast.
+
+---
+
+## 13. Prevent notification storms and duplicates
+
+This requirement is especially important during autonomous simulation.
+
+The simulator may update many positions repeatedly.
+
+Do not generate a notification for every marker position update.
+
+Generate notifications for **meaningful state transitions**, such as:
+
+- start of movement;
+- arrival;
+- blocked/failed execution;
+- acknowledgment;
+- completion;
+- SIM incident event.
+
+Use stable identifiers and sequences.
+
+Suggested notification identity:
+
+```typescript
+type NotificationIdentity = {
+  incidentId: string;
+  eventId?: string;
+  domain: string;
+  entityId: string;
+  transition: string;
+  version?: string;
+};
+```
+
+Use actual event IDs where available.
+
+Requirements:
+
+- Do not replay historic events as new alerts on initial mount.
+- Do not duplicate events after reconnect.
+- Do not duplicate alerts when both Realtime and polling report the same transition.
+- Deduplicate across Classic/Command switching.
+- Bound in-memory notifications.
+- Avoid persistent sensitive notification caches.
+- Respect incident and organization boundaries.
+- Handle browser reloads without showing a large flood of old events.
+
+When a domain lacks reliable history or versions, do not fabricate event identity. Use a safe conservative strategy or omit that alert category until a trustworthy transition can be established.
+
+---
+
+## 14. Connection and freshness indicators
+
+Add a small operational synchronization indicator.
+
+Examples:
+
+- **V živo**
+- **Povezovanje**
+- **Ponovno povezovanje**
+- **Posodabljanje**
+- **Povezava prekinjena**
+- **Podatki zastareli**
+- **Dostop potekel**
+
+Localize in Slovenian and German.
+
+Distinguish:
+
+1. Realtime transport status.
+2. Last successful authoritative refresh.
+3. SIM runner operational heartbeat, when available.
+
+These are different states.
+
+A healthy Realtime WebSocket does not prove the simulation runner is working.
+
+A successful simulator tick does not prove the browser is connected.
+
+Display a live status only when the application has a recent, successful authorized snapshot and a functioning update path.
+
+On connection loss:
+
+- Keep the last permitted state visible when safe.
+- Mark it clearly stale.
+- Never imply that current positions or task states are fresh.
+- For authorization revocation, clear sensitive state according to the existing security rules.
+
+---
+
+## 15. Refresh efficiency
+
+The Command Map may display hundreds of hydrants and several tactical units.
+
+Do not rerender all layers when one task status changes.
+
+Requirements:
+
+- Do not remount MapLibre on incoming events.
+- Preserve center, zoom, selected object and open drawers.
+- Update only the affected data sources where practical.
+- Avoid rebuilding large GeoJSON objects when underlying data is unchanged.
+- Do not clear existing markers during background refresh.
+- Do not show/hide "Nalaganje..." elements that change map dimensions.
+- Batch rapid event signals.
+- Limit concurrent network requests.
+- Avoid duplicate reload cascades between simulation, tasks and navigation providers.
+- Preserve current hydrant viewport caching behavior.
+
+The application should feel responsive even during sustained autonomous SIM movement.
+
+---
+
+## 16. Classic View compatibility
+
+Classic View remains fully functional.
+
+The new live coordinator may improve shared data freshness in both modes if that does not destabilize existing components.
+
+However:
+
+- Notification UI may be primarily exposed in Command Map.
+- Classic forms and dropdowns remain unchanged.
+- Switching modes must not duplicate subscriptions.
+- Switching modes must not reset command drafts.
+- Existing task validation and confirmation remain authoritative.
+- The existing COP editor must not be replaced.
+- Existing manual **Osveži** buttons must remain available as recovery tools.
+
+---
+
+## 17. Cross-user behavior
+
+Support a realistic multi-commander scenario.
+
+Example:
+
+1. User A opens an incident in Command Map.
+2. User B opens the same incident from another authorized account.
+3. User B creates a tactical object.
+4. User A sees the server-confirmed object without refreshing.
+5. User A issues a task.
+6. User B sees the authoritative task status.
+7. User A loses permission or incident membership.
+8. User A's UI no longer exposes privileged incident controls or content after authoritative access revocation is detected.
+
+Do not send all organizations' activity through one open channel.
+
+Incident permissions may depend on acting organization, command role and sector.
+
+Use real authorization boundaries in both subscription design and server reads.
+
+### Authorization freshness
+
+Supabase Realtime channel membership may temporarily outlive a changed database authorization policy.
+
+Therefore:
+
+- Do not regard a previously established socket subscription as permanent authorization.
+- Periodically revalidate through an existing authorized incident read.
+- Handle auth-state changes and refreshed JWTs.
+- Revoke UI permissions on definitive authorization failure.
+- Clear data and subscriptions when switching account/organization/incident.
+- Do not expose sensitive row contents in notification broadcasts.
+
+---
+
+## 18. Error handling and recovery
+
+Implement coherent behavior for:
+
+- WebSocket connection failure;
+- unavailable Realtime publication;
+- network offline;
+- browser backgrounding;
+- stale session;
+- RPC timeout;
+- RPC authorization rejection;
+- temporarily unavailable Supabase backend;
+- duplicate event delivery;
+- out-of-order events;
+- delayed SIM runner;
+- event gap after reconnect;
+- unexpected server response.
+
+Use bounded retries with backoff.
+
+Do not repeatedly emit the same error toast.
+
+A reconnect must never submit or retry a task mutation automatically.
+
+**Read recovery is allowed; command replay is not.**
+
+A pending ambiguous mutation must remain under the existing exact-payload retry workflow.
+
+---
+
+## 19. Database and infrastructure policy
+
+Prefer frontend changes and existing authorized RPCs.
+
+A new SQL migration is allowed **only if essential** for a secure, incident-scoped change-notification mechanism or a minimal revision-read endpoint.
+
+If adding a migration:
+
+- Use the next available timestamp.
+- Make it forward-only.
+- Preserve existing RLS and role checks.
+- Never modify historical migration files.
+- Never create broad public notification access.
+- Never change task, COP, SIM or navigation mutation semantics.
+- Never leak private data through database replication.
+- Keep any new notification payload minimal and non-sensitive.
+- Do not create a second audit/event history table.
+- Clearly document manual deployment steps.
+
+No new Edge Functions unless a proven architectural necessity exists. If one is truly required, explain why before implementation.
+
+No new scheduler is required.
+
+Do not modify `incident-simulation-runner` or the existing user-managed 5-second Cron schedule.
+
+---
+
+## 20. Localization and accessibility
+
+Support existing Slovenian and German locales.
+
+Notification and connection status controls must be:
+
+- keyboard accessible;
+- screen-reader accessible;
+- usable on touch;
+- non-obstructive;
+- safe for reduced-motion preferences;
+- legible on wide and narrow viewports.
+
+Use appropriate live regions:
+
+- important errors: `role="alert"`;
+- routine status: polite announcement;
+- repetitive SIM position ticks: no screen-reader announcement every tick.
+
+Do not use continuous animated badges merely to suggest activity.
+
+Do not make color the only indication of warning or status.
+
+---
+
+## 21. Acceptance criteria
+
+- [ ] Existing merged F3 code is preserved.
+- [ ] No duplicate Realtime subscriptions per incident.
+- [ ] No duplicate 5-second autonomous-agent polling.
+- [ ] Initial incident data loads correctly.
+- [ ] COP object created by another commander appears automatically.
+- [ ] COP object edit/deactivation appears automatically.
+- [ ] Task/assignment changes appear without manual refresh.
+- [ ] Resource/unit state changes appear automatically.
+- [ ] Navigation state refreshes correctly.
+- [ ] SIM markers update from actual server samples.
+- [ ] SIM markers remain visibly marked SIM.
+- [ ] Real markers never move due to command intent alone.
+- [ ] Important task events produce concise notifications.
+- [ ] Repeated SIM movement ticks do not flood notifications.
+- [ ] Duplicate Realtime/polling signals do not generate duplicate toasts.
+- [ ] Initial page load does not replay all old incidents as new alerts.
+- [ ] Notification click opens or focuses the correct authorized object.
+- [ ] Connection/freshness state is accurate.
+- [ ] Reconnect causes safe data reconciliation.
+- [ ] Offline mode does not show false live status.
+- [ ] Auth revocation clears unauthorized operational data.
+- [ ] Account/org/incident navigation cannot leak old information.
+- [ ] Classic/Command switching does not recreate the whole data layer.
+- [ ] Map camera, selection and open command drafts remain stable.
+- [ ] No loading-label layout jumps or map-height oscillations.
+- [ ] Existing F2 context commands continue working.
+- [ ] Existing F3 tactical-object editing continues working.
+- [ ] No additional SIM worker or scheduler introduced.
+- [ ] Existing server-side authorization remains authoritative.
+- [ ] Any new SQL changes are forward-only and explicitly documented.
+
+---
+
+## 22. Development restrictions
+
+Do NOT run:
+
+- tests;
+- builds;
+- lint;
+- typechecks;
+- CI workflows;
+- browser/runtime checks;
+- Android/Gradle tasks;
+- database migrations;
+- Supabase deployments.
+
+Do not merge the PR.
+
+Do not modify production infrastructure.
+
+Do not automatically reconfigure Realtime publications or Cron in the user's Supabase project.
+
+Do not use destructive Git commands.
+
+Do not overwrite user-specific local changes, especially:
+
+- `android/app/build.gradle.kts`
+- `android/build.gradle.kts`
+- `android/gradle.properties`
+- `android/app/schemas/`
+- `pnpm-lock.yaml`
+- `web/next-env.d.ts`
+
+Avoid dependency and lockfile changes unless strictly necessary.
+
+Use existing Supabase client and React infrastructure.
+
+Do not add this prompt as a root-level `.txt` file.
+
+---
+
+## 23. Deliverables
+
+Produce one focused pull request containing:
+
+1. Live incident synchronization implementation.
+2. Reused/consolidated domain refresh mechanisms.
+3. Connection and freshness indicator.
+4. Compact operational notification UI.
+5. Authoritative task/COP/resource/navigation/SIM change handling.
+6. SI/DE localization.
+7. Responsive and accessible notification presentation.
+8. Minimal forward-only SQL migration only if needed.
+9. Clear PR description.
+10. List of all modified files.
+11. Architecture explanation describing:
+    - chosen Realtime/polling approach;
+    - actual authorization boundaries;
+    - event invalidation flow;
+    - deduplication;
+    - recovery;
+    - handling of existing autonomous-agent polling.
+12. Manual verification checklist for:
+    - two users on the same incident;
+    - different organizations;
+    - read-only versus commander;
+    - real versus SIM incidents;
+    - active simulation with several moving units;
+    - disconnected and reconnected browser;
+    - hidden/visible tab;
+    - permission revocation;
+    - command conflict and ambiguous mutation;
+    - Classic/Command view switching;
+    - sustained map interaction and responsiveness.
+13. Explicit list of checks not performed.
+
+If the selected Realtime design requires manual Supabase setup, provide exact SQL or dashboard instructions in the PR description, but do not execute them.
+
+**Final goal:** Gasilko's Command Map displays fresh, server-confirmed operational information and meaningful notifications without requiring commanders to repeatedly click Refresh, while preserving strict incident authorization, correct simulation provenance and existing command safety.
+
+**Next milestone (out of scope): M14.5G — Visual Command Hierarchy & Team Coordination.**
