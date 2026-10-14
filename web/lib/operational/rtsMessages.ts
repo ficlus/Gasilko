@@ -200,6 +200,34 @@ const messages:Record<string,readonly [string,string]>={
   "Strežnik ob izdaji ponovno preveri kanonični cilj; predogled ni dokaz pooblastila.",
   "Server prüft das kanonische Ziel bei Erteilung erneut; Vorschau ist kein Berechtigungsnachweis."
  ],
+ "controlGroups": [
+  "Začasne skupine",
+  "Temporäre Gruppen"
+ ],
+ "groupSave": [
+  "Shrani izbiro v skupino",
+  "Auswahl in Gruppe speichern"
+ ],
+ "groupRecall": [
+  "Prikliči skupino",
+  "Gruppe aufrufen"
+ ],
+ "groupClear": [
+  "Počisti skupino",
+  "Gruppe leeren"
+ ],
+ "groupsTemporary": [
+  "Skupine so začasne za to sejo in se po osvežitvi strani lahko izgubijo.",
+  "Gruppen sind nur für diese Sitzung und können beim Neuladen verloren gehen."
+ ],
+ "groupUnavailable": [
+  "Nekateri člani skupine niso več dostopni in niso bili izbrani.",
+  "Einige Gruppenmitglieder sind nicht mehr zugänglich und wurden nicht ausgewählt."
+ ],
+ "noCommandRoles": [
+  "Ni izbranih enot.",
+  "Keine Einheiten ausgewählt."
+ ],
  "actionChanged": [
   "Izbrana različica ni več na voljo. Namen je ohranjen; izrecno ponovno izberi dejanje in preveri parametre.",
   "Gewählte Version ist nicht mehr verfügbar. Absicht bleibt erhalten; Aktion ausdrücklich erneut auswählen und Parameter prüfen."
