@@ -83,10 +83,10 @@ export function CommandSection({locale,account,org,incident,disabled,read,onActi
   if(item.sector_id)workspace?.select({kind:'INCIDENT_SECTOR',id:item.sector_id});
   else workspace?.showDetails();
  }
- function tree(rows:CommandRole[],visited:string[]=[]):ReactNode {
-  return <ul className="command-hierarchy-tree" role="tree">{rows.filter(r=>!visited.includes(r.id)&&hasMatch(r,visited)).map(r=>{
+ function tree(rows:CommandRole[],visited:string[]=[],nested=false):ReactNode {
+  return <ul className="command-hierarchy-tree" role={nested?'group':'tree'}>{rows.filter(r=>!visited.includes(r.id)&&hasMatch(r,visited)).map(r=>{
    const children=view?.roles.filter(c=>c.parent_id===r.id)??[];
-   const open=expanded.has(r.id);
+   const open=expanded.has(r.id)||(filter.trim()!==''&&children.some(child=>hasMatch(child,[...visited,r.id])));
    return <li key={r.id} role="treeitem" aria-expanded={children.length?open:undefined}>
     <div className="command-hierarchy-node">
      {children.length>0&&<button type="button" className="command-hierarchy-expand" aria-label={open?t('dismiss'):t('more')} onClick={()=>setExpanded(current=>{const next=new Set(current);if(next.has(r.id))next.delete(r.id);else next.add(r.id);return next;})}>{open?'−':'+'}</button>}
@@ -96,7 +96,7 @@ export function CommandSection({locale,account,org,incident,disabled,read,onActi
     {r.sector_name&&<p>{t('copSector')}: <button type="button" onClick={()=>workspace?.select(r.sector_id?{kind:'INCIDENT_SECTOR',id:r.sector_id}:null)}>{r.sector_name}</button></p>}
     {r.unit_name&&<p>{t('UNIT_LEADER')}: {r.unit_name}</p>}
     {r.can_end&&<button disabled={disabled} onClick={()=>onAction('end_role',{assignment_id:r.id},undefined,[r.name,t(r.role),r.organization_name].join(' · '))}>{t('end_role')}</button>}
-    {children.length>0&&open&&tree(children,[...visited,r.id])}
+    {children.length>0&&open&&tree(children,[...visited,r.id],true)}
    </li>;
   })}</ul>;
  }
@@ -105,8 +105,8 @@ export function CommandSection({locale,account,org,incident,disabled,read,onActi
   {error?<p role="alert">{t('unavailable')}</p>:!view?<p role="status">{t('loading')}</p>:<>
    {view.operational&&!view.valid_commander&&<p role="alert">{t('recoveryWarning')}</p>}
    <div className="command-hierarchy-toolbar"><label>{t('search')}<input value={filter} maxLength={100} onChange={event=>setFilter(event.target.value)}/></label><span>{view.roles.filter(role=>role.valid).length} · {view.sectors.length}</span></div>
-   {view.roles.length===0?<p>{t('noEvents')}</p>:tree(view.roles.filter(r=>!r.parent_id||!view.roles.some(p=>p.id===r.parent_id)))}
-   <section className="command-sector-summary"><h3>{t('copSectors')}</h3>{view.sectors.length===0?<p>{t('copEmpty')}</p>:<ul>{view.sectors.map(item=>{const holder=view.roles.find(role=>role.valid&&role.sector_id===item.id);return <li key={item.id}><button type="button" onClick={()=>workspace?.select({kind:'INCIDENT_SECTOR',id:item.id})}>{item.code} · {item.name}</button><small> · {holder?(holder.name??'—')+' · '+t(holder.role):t('noCommander')}</small></li>;})}</ul>}</section>
+   {view.roles.length===0?<p>{t('noCommandRoles')}</p>:tree(view.roles.filter(r=>!r.parent_id||!view.roles.some(p=>p.id===r.parent_id)))}
+   <section className="command-sector-summary"><h3>{t('copSectors')}</h3>{view.sectors.length===0?<p>{t('copEmpty')}</p>:<ul>{view.sectors.map(item=>{const holder=view.roles.find(role=>role.valid&&role.role==='SECTOR_COMMANDER'&&role.sector_id===item.id);return <li key={item.id}><button type="button" onClick={()=>workspace?.select({kind:'INCIDENT_SECTOR',id:item.id})}>{item.code} · {item.name}</button><small> · {holder?(holder.name??'—')+' · '+t(holder.role):t('sectorWithoutCommander')}</small></li>;})}</ul>}</section>
    {(view.can_assign||view.can_transfer||view.can_recover)&&<fieldset disabled={disabled}>
     <legend>{t('commandActions')}</legend><label>{t('action')}<select value={mode} onChange={e=>{setMode(e.target.value);setTarget(e.target.value==='recover_command'?incident.lead_organization_id:org);}}>
      <option value="">{t('select')}</option>{view.can_assign&&<option value="offer_role">{t('offer_role')}</option>}
