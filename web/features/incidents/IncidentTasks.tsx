@@ -199,6 +199,7 @@ export function IncidentTasks({submission='idle',locale,account,org,incidentId,v
  const supportedSelected=selected&&['HYDRANT','INCIDENT_SECTOR','MAP_OBJECT','INCIDENT_UNIT'].includes(selected.kind)&&selected.id!=='primary';
  const cfg=action?.configuration,targetAllowed=!cfg||cfg.target_types.includes(target.kind);
  const visibleRecipients:Chosen[]=(candidates?.rows??[]).map(r=>({...r,assignmentId:chosen.find(c=>recipientKey(c)===recipientKey(r))?.assignmentId??crypto.randomUUID(),eligibility:'ELIGIBLE',sector_name:cop?.sectors.find(s=>s.id===r.sector_id)?.name}));
+ useEffect(()=>{rts.rememberRecipients(visibleRecipients);},[rts,visibleRecipients]);
  const invalidRecipients=chosen.some(r=>r.eligibility!=='ELIGIBLE'||!!cfg&&!cfg.recipient_types.includes(r.type));
  const currentHydrantId=target.kind==='HYDRANT'?target.entityId:'';
  const hydrantOptions=Array.from(new Map([...(cop?.links.flatMap(l=>l.hydrant?[{id:l.hydrant.id,code:l.hydrant.code,address:l.hydrant.address}]:[])??[]),...hydrants].map(h=>[h.id,h])).values());

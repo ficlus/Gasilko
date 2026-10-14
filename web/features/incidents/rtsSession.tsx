@@ -2,13 +2,14 @@
 import {createContext,useCallback,useContext,useEffect,useRef,useState,type Dispatch,type ReactNode,type SetStateAction} from 'react';
 import type {ActionDefinition,TaskTarget,TaskPage} from '../../lib/operational/tasks';
 import type {Geometry} from '../../lib/incidents/cop';
-import {recipientKey,typingTarget,type RtsMode,type RtsRecipient,type TargetPreview,type TaskIntent} from '../../lib/operational/rts';
+import {recipientKey,typingTarget,type RecipientKey,type RtsMode,type RtsRecipient,type TargetPreview,type TaskIntent} from '../../lib/operational/rts';
 
 type PickOptions={toggle?:boolean;range?:boolean;list:string};
 type RtsController={
  enabled:boolean;locked:boolean;blocked:boolean;agentEditing:boolean;setAgentEditing:Dispatch<SetStateAction<boolean>>;navigationEditing:boolean;setNavigationEditing:Dispatch<SetStateAction<boolean>>;externalEditing:boolean;setExternalEditing:Dispatch<SetStateAction<boolean>>;hasPositionLayers:boolean;setHasPositionLayers:Dispatch<SetStateAction<boolean>>;copEditing:boolean;setCopEditing:Dispatch<SetStateAction<boolean>>;
  mode:RtsMode;requestMode:(mode:RtsMode)=>void;cancelMode:()=>void;
  recipients:RtsRecipient[];setRecipients:Dispatch<SetStateAction<RtsRecipient[]>>;
+ groups:ReadonlyMap<number,readonly RecipientKey[]>;saveGroup:(number:number)=>void;clearGroup:(number:number)=>void;recallGroup:(number:number)=>void;rememberRecipients:(rows:readonly RtsRecipient[])=>void;
  pick:(row:RtsRecipient,visible:readonly RtsRecipient[],options:PickOptions)=>void;
  selectMany:(rows:readonly RtsRecipient[],add:boolean)=>void;remove:(key:string)=>void;clear:()=>void;
  multiTouch:boolean;setMultiTouch:Dispatch<SetStateAction<boolean>>;merge:boolean;setMerge:Dispatch<SetStateAction<boolean>>;
@@ -38,6 +39,7 @@ export function RtsProvider({enabled,locked,onAccessLost,children}:{enabled:bool
  const [hasPositionLayers,setHasPositionLayers]=useState(false);
  const [blocked,setBlocked]=useState(false),[copEditing,setCopEditing]=useState(false),[mode,setMode]=useState<RtsMode>('NORMAL');
  const [recipients,writeRecipients]=useState<RtsRecipient[]>([]),selectedRef=useRef<RtsRecipient[]>([]);
+ const [groups,setGroups]=useState<Map<number,readonly RecipientKey[]>>(()=>new Map()),directory=useRef(new Map<string,RtsRecipient>());
  const [catalogError,setCatalogError]=useState(false);
  const [catalog,setCatalog]=useState<TaskPage<ActionDefinition>|null>(null),[commandTypes,setCommandTypes]=useState<string[]|null>(null);
  const [contextLaunch,setContextLaunch]=useState(false);
@@ -54,6 +56,10 @@ export function RtsProvider({enabled,locked,onAccessLost,children}:{enabled:bool
   selectedRef.current=unique;writeRecipients(unique);
  },[]);
  const canInteract=()=>latest.current.enabled&&!latest.current.locked&&!interaction.current.blocked&&!interaction.current.externalEditing;
+ const rememberRecipients=useCallback((rows:readonly RtsRecipient[])=>{for(const row of rows)directory.current.set(recipientKey(row),row);},[]);
+ const saveGroup=useCallback((number:number)=>{if(!canInteract()||number<1||number>9)return;setGroups(current=>{const next=new Map(current);if(selectedRef.current.length)next.set(number,selectedRef.current.map(row=>({type:row.type,id:row.id})));else next.delete(number);return next;});},[]);
+ const clearGroup=useCallback((number:number)=>{setGroups(current=>{const next=new Map(current);next.delete(number);return next;});},[]);
+ const recallGroup=useCallback((number:number)=>{if(!canInteract())return;const refs=groups.get(number)??[];const resolved=refs.map(ref=>directory.current.get(recipientKey(ref))).filter((row):row is RtsRecipient=>!!row);if(resolved.length!==refs.length)setMessage('groupUnavailable');setRecipients(resolved);},[groups,setRecipients]);
  const selectMany=useCallback((rows:readonly RtsRecipient[],add:boolean)=>{
   if(!canInteract())return;
   setRecipients(previous=>add?[...previous,...rows.filter(r=>!previous.some(p=>recipientKey(p)===recipientKey(r)))]:rows.map(r=>previous.find(p=>recipientKey(p)===recipientKey(r))??r));
@@ -98,11 +104,11 @@ export function RtsProvider({enabled,locked,onAccessLost,children}:{enabled:bool
   setAction(definition);setTarget(target.target,target.geometry,target.label);setContextLaunch(true);setLaunch(v=>v+1);
  },[setRecipients,setTarget]);
  const revoke=useCallback(()=>{
-  setCatalog(null);setCommandTypes(null);setContextLaunch(false);setBlocked(true);setRecipients([]);setAction(null);writePreview(emptyTarget);setIntent(null);setOpen(false);setMode('NORMAL');setMessage('authorityLost');
+  setCatalog(null);setCommandTypes(null);setContextLaunch(false);setBlocked(true);setGroups(new Map());directory.current.clear();setRecipients([]);setAction(null);writePreview(emptyTarget);setIntent(null);setOpen(false);setMode('NORMAL');setMessage('authorityLost');
   latest.current.onAccessLost();
  },[setRecipients]);
  useEffect(()=>{if(!enabled||locked||copEditing||externalEditing)setMode('NORMAL');},[enabled,locked,copEditing,externalEditing]);
- useEffect(()=>{if(!enabled){setRecipients([]);setOpen(false);setAction(null);writePreview(emptyTarget);anchor.current=null;}},[enabled,setRecipients]);
+ useEffect(()=>{if(!enabled){setGroups(new Map());directory.current.clear();setRecipients([]);setOpen(false);setAction(null);writePreview(emptyTarget);anchor.current=null;}},[enabled,setRecipients]);
  useEffect(()=>{if(!open)setMode('NORMAL');},[open]);
  useEffect(()=>{
   const kinds=action?.configuration.target_types.filter(k=>k!=='NONE')??[];
@@ -117,6 +123,7 @@ export function RtsProvider({enabled,locked,onAccessLost,children}:{enabled:bool
    if(mode!=='NORMAL'){e.preventDefault();e.stopPropagation();setMode('NORMAL');}
    else if(open){e.preventDefault();e.stopPropagation();setOpen(false);}
   }else if((e.ctrlKey||e.metaKey)&&!e.altKey&&key==='k'){e.preventDefault();openPalette();}
+  else if(/^[1-9]$/.test(key)&&!e.altKey){if(e.ctrlKey||e.metaKey){e.preventDefault();e.stopPropagation();saveGroup(Number(key));}else if(!e.shiftKey){e.preventDefault();e.stopPropagation();recallGroup(Number(key));}}
   else if(!e.ctrlKey&&!e.metaKey&&!e.altKey&&(key==='b'||key==='l')){e.preventDefault();requestMode(key==='b'?'SELECT_BOX':'SELECT_LASSO');}
  }}>{children}</div></RtsContext.Provider>;
 }
