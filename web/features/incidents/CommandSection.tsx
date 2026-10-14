@@ -1,7 +1,7 @@
 'use client';
 import {SimulationBanner} from './SimulationProvider';
 import {useEffect,useRef,useState,type FormEvent,type ReactNode} from 'react';
-import {WorkspaceSlot,WorkspaceSection} from './workspace';
+import {WorkspaceSlot,WorkspaceSection,useWorkspace} from './workspace';
 import type {Locale} from '../../lib/i18n';
 import {incidentText} from '../../lib/incidents/messages';
 import type {Candidate,CommandRequest,CommandRole,CommandView,Incident,Mutation,InboxItem} from '../../lib/incidents/model';
@@ -28,7 +28,9 @@ export function CommandRequests({locale,items,disabled,onAction}:{locale:Locale;
 }
 
 export function CommandSection({locale,account,org,incident,disabled,read,onAction}:{locale:Locale;account:string;org:string;incident:Incident;disabled:boolean;read:Read;onAction:CommandAction}) {
- const t=incidentText(locale);
+ const t=incidentText(locale),workspace=useWorkspace();
+ const [expanded,setExpanded]=useState<Set<string>>(()=>new Set());
+ const [filter,setFilter]=useState('');
  const [view,setView]=useState<CommandView|null>(null),[error,setError]=useState(false);
  const [page,setPage]=useState<{created:string;id:string}|null>(null);
  const [mode,setMode]=useState(''),[role,setRole]=useState('DEPUTY_COMMANDER'),[target,setTarget]=useState(org),[parent,setParent]=useState('');
@@ -45,6 +47,7 @@ export function CommandSection({locale,account,org,incident,disabled,read,onActi
  },[incident.id,incident.version,org,account,page,read]);
  useEffect(()=>{searchController.current?.abort();setCandidates([]);setSelected('');setFinding(false);setCandidateError(false);},[mode,role,target,unitScope]);
  useEffect(()=>()=>searchController.current?.abort(),[]);
+ useEffect(()=>{setExpanded(new Set());setFilter('');},[incident.id,org,account]);
  async function search(e:FormEvent) {
   e.preventDefault();searchController.current?.abort();const ac=new AbortController();searchController.current=ac;
   setCandidates([]);setSelected('');setFinding(true);setCandidateError(false);
@@ -67,19 +70,43 @@ export function CommandSection({locale,account,org,incident,disabled,read,onActi
   onAction(mode as Mutation,payload,undefined,[t('commander'),current?.name??'—',t('proposed'),person.name,participantChoices.find(p=>p.organization_id===target)?.name,
    mode==='offer_role'?t(role):t(target===incident.lead_organization_id?'commandOnly':'combinedTransfer'),role==='SECTOR_COMMANDER'?view?.sectors.find(s=>s.id===sector)?.name:role==='UNIT_LEADER'?view?.units.find(u=>u.id===unitScope)?.name:''].filter(Boolean).join(' · '));
  }
+ function matchesRole(item:CommandRole):boolean {
+  const needle=filter.trim().toLocaleLowerCase();
+  if(!needle)return true;
+  return [item.name,item.organization_name,item.role,item.sector_name,item.unit_name].some(value=>value?.toLocaleLowerCase().includes(needle));
+ }
+ function hasMatch(item:CommandRole,visited:string[]=[]):boolean {
+  if(matchesRole(item))return true;
+  return view?.roles.filter(child=>child.parent_id===item.id&&!visited.includes(child.id)).some(child=>hasMatch(child,[...visited,item.id]))??false;
+ }
+ function selectRole(item:CommandRole){
+  if(item.sector_id)workspace?.select({kind:'INCIDENT_SECTOR',id:item.sector_id});
+  else workspace?.showDetails();
+ }
  function tree(rows:CommandRole[],visited:string[]=[]):ReactNode {
-  return <ul>{rows.filter(r=>!visited.includes(r.id)).map(r=><li key={r.id}><strong>{r.name??'—'}</strong> · {t(r.role)}
-   <p>{r.organization_name} · {t(r.valid?'ACTIVE':'invalidAuthority')}</p>
-   {r.unit_name&&<p>{t('UNIT_LEADER')}: {r.unit_name}</p>}
-   {r.sector_name&&<p>{t('copSector')}: {r.sector_name}</p>}
-   {r.can_end&&<button disabled={disabled} onClick={()=>onAction('end_role',{assignment_id:r.id},undefined,[r.name,t(r.role),r.organization_name].join(' · '))}>{t('end_role')}</button>}
-   {view&&tree(view.roles.filter(c=>c.parent_id===r.id),[...visited,r.id])}</li>)}</ul>;
+  return <ul className="command-hierarchy-tree" role="tree">{rows.filter(r=>!visited.includes(r.id)&&hasMatch(r,visited)).map(r=>{
+   const children=view?.roles.filter(c=>c.parent_id===r.id)??[];
+   const open=expanded.has(r.id);
+   return <li key={r.id} role="treeitem" aria-expanded={children.length?open:undefined}>
+    <div className="command-hierarchy-node">
+     {children.length>0&&<button type="button" className="command-hierarchy-expand" aria-label={open?t('dismiss'):t('more')} onClick={()=>setExpanded(current=>{const next=new Set(current);if(next.has(r.id))next.delete(r.id);else next.add(r.id);return next;})}>{open?'−':'+'}</button>}
+     <button type="button" className="command-hierarchy-select" onClick={()=>selectRole(r)}><strong>{r.name??'—'}</strong> · {t(r.role)}</button>
+    </div>
+    <p>{r.organization_name} · {t(r.valid?'ACTIVE':'invalidAuthority')}</p>
+    {r.sector_name&&<p>{t('copSector')}: <button type="button" onClick={()=>workspace?.select(r.sector_id?{kind:'INCIDENT_SECTOR',id:r.sector_id}:null)}>{r.sector_name}</button></p>}
+    {r.unit_name&&<p>{t('UNIT_LEADER')}: {r.unit_name}</p>}
+    {r.can_end&&<button disabled={disabled} onClick={()=>onAction('end_role',{assignment_id:r.id},undefined,[r.name,t(r.role),r.organization_name].join(' · '))}>{t('end_role')}</button>}
+    {children.length>0&&open&&tree(children,[...visited,r.id])}
+   </li>;
+  })}</ul>;
  }
  return <section className="admin-card"><h2>{t('commandTree')}</h2>
   <p>{t('capabilityNotice')}</p>
   {error?<p role="alert">{t('unavailable')}</p>:!view?<p role="status">{t('loading')}</p>:<>
    {view.operational&&!view.valid_commander&&<p role="alert">{t('recoveryWarning')}</p>}
-   {tree(view.roles.filter(r=>!r.parent_id||!view.roles.some(p=>p.id===r.parent_id)))}
+   <div className="command-hierarchy-toolbar"><label>{t('search')}<input value={filter} maxLength={100} onChange={event=>setFilter(event.target.value)}/></label><span>{view.roles.filter(role=>role.valid).length} · {view.sectors.length}</span></div>
+   {view.roles.length===0?<p>{t('noEvents')}</p>:tree(view.roles.filter(r=>!r.parent_id||!view.roles.some(p=>p.id===r.parent_id)))}
+   <section className="command-sector-summary"><h3>{t('copSectors')}</h3>{view.sectors.length===0?<p>{t('copEmpty')}</p>:<ul>{view.sectors.map(item=>{const holder=view.roles.find(role=>role.valid&&role.sector_id===item.id);return <li key={item.id}><button type="button" onClick={()=>workspace?.select({kind:'INCIDENT_SECTOR',id:item.id})}>{item.code} · {item.name}</button><small> · {holder?(holder.name??'—')+' · '+t(holder.role):t('noCommander')}</small></li>;})}</ul>}</section>
    {(view.can_assign||view.can_transfer||view.can_recover)&&<fieldset disabled={disabled}>
     <legend>{t('commandActions')}</legend><label>{t('action')}<select value={mode} onChange={e=>{setMode(e.target.value);setTarget(e.target.value==='recover_command'?incident.lead_organization_id:org);}}>
      <option value="">{t('select')}</option>{view.can_assign&&<option value="offer_role">{t('offer_role')}</option>}
