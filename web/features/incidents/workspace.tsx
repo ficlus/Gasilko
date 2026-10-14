@@ -4,6 +4,7 @@ import {useSearchParams} from 'next/navigation';
 import {parseEntityRef} from '../../lib/operational/entity';
 import {createPortal} from 'react-dom';
 import type {Locale} from '../../lib/i18n';
+import {IncidentLiveProvider} from './IncidentLiveProvider';
 import {IncidentNavigationProvider} from './IncidentNavigationProvider';
 import {IncidentNavigationPanel} from './IncidentNavigationPanel';
 import {AutonomousSimulationProvider} from './AutonomousSimulationProvider';
@@ -171,5 +172,6 @@ function WorkspaceViews({operational,...props}:{operational:boolean;locale:Local
  <SimulationPanel locale={props.locale}/><IncidentNavigationPanel locale={props.locale}/><AutonomousSimulationPanel locale={props.locale}/>{props.operations}{props.children}{props.secondary}</>;
 }
 export function IncidentLayout({operational,locked,onAccessLost,simulation,...props}:{operational:boolean;locked:boolean;onAccessLost:()=>void;simulation:{account:string;org:string;incidentId:string;refresh:number;read:TaskRead;onInventoryChanged:()=>void};locale:Locale;header:ReactNode;operations:ReactNode;secondary:ReactNode;children:ReactNode}){
- return <RtsProvider enabled={operational} locked={locked} onAccessLost={onAccessLost}><SimulationProvider key={simulation.account+':'+simulation.org+':'+simulation.incidentId} {...simulation} locale={props.locale}><IncidentNavigationProvider {...simulation} locale={props.locale}><AutonomousSimulationProvider {...simulation} locale={props.locale}><WorkspaceViews operational={operational} {...props}/></AutonomousSimulationProvider></IncidentNavigationProvider></SimulationProvider></RtsProvider>;
+ const content=<SimulationProvider key={simulation.account+':'+simulation.org+':'+simulation.incidentId} {...simulation} locale={props.locale}><IncidentNavigationProvider {...simulation} locale={props.locale}><AutonomousSimulationProvider {...simulation} locale={props.locale}><WorkspaceViews operational={operational} {...props}/></AutonomousSimulationProvider></IncidentNavigationProvider></SimulationProvider>;
+ return <RtsProvider enabled={operational} locked={locked} onAccessLost={onAccessLost}>{operational?<IncidentLiveProvider account={simulation.account} org={simulation.org} incidentId={simulation.incidentId} read={simulation.read} onInvalidate={simulation.onInventoryChanged} onAccessLost={onAccessLost}>{content}</IncidentLiveProvider>:content}</RtsProvider>;
 }

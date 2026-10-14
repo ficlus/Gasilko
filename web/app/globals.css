@@ -379,3 +379,12 @@ button:disabled { opacity: .6; cursor: wait; }
 .rts-tactical-actions{border-block:1px solid #bac7ce;margin:.5rem 0;padding:.5rem 0}
 .rts-tactical-actions h3{font-size:.9rem;margin:.1rem 0 .4rem}
 .rts-tactical-actions details{margin:.25rem 0}
+
+
+.incident-live-status{display:inline-block;position:relative;margin-inline-start:.35rem}
+.incident-live-indicator{min-height:36px;border-radius:999px;font-size:.78rem;white-space:nowrap}
+.incident-live-indicator.live{border-color:#16723b}.incident-live-indicator.refreshing,.incident-live-indicator.connecting{border-color:#1865a0}.incident-live-indicator.stale,.incident-live-indicator.offline,.incident-live-indicator.access_lost{border-color:#b45200}
+.incident-live-panel{position:absolute;z-index:6;top:calc(100% + .35rem);right:0;width:min(22rem,calc(100vw - 1rem));max-height:min(24rem,60vh);overflow:auto;padding:.65rem;background:#fff;border:1px solid #bac7ce;border-radius:.5rem;box-shadow:0 4px 16px #0004}
+.incident-live-panel ol{margin:.5rem 0;padding-inline-start:1.2rem}.incident-live-note{display:flex;gap:.35rem;align-items:start;margin:.35rem 0}.incident-live-note button{text-align:start;flex:1}.incident-live-note small{white-space:nowrap}.incident-live-note.warning small{color:#8c5100}.incident-live-note.critical small{color:#a9232e}
+@media(max-width:40rem){.incident-live-status{margin:.25rem 0}.incident-live-indicator{max-width:100%;white-space:normal}.incident-live-panel{left:0;right:auto}}
+.incident-live-toast{position:absolute;right:0;top:calc(100% + .35rem);z-index:6;width:min(20rem,calc(100vw - 1rem));padding:.45rem;background:#fff;border:1px solid #1865a0;border-radius:.4rem;box-shadow:0 3px 12px #0003}.incident-live-toast.warning{border-color:#b45200}.incident-live-toast.critical{border-color:#a9232e}.incident-live-toast button{width:100%;text-align:start}
