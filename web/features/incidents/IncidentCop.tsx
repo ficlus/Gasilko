@@ -12,6 +12,8 @@ import {isUuid} from '../../lib/operational/entity';
 import type {ContextHydrant} from '../../lib/hydrants/viewport';
 import {useRts} from './rtsSession';
 import {useWorkspace,WorkspaceSlot,WorkspaceSection,ContextActions} from './workspace';
+import {IncidentLiveStatus} from './IncidentLiveStatus';
+import {useIncidentLive} from './IncidentLiveProvider';
 import {HydrantDetailsAction} from './HydrantDetailsAction';
 import {useHydrantContext} from './useHydrantContext';
 import type {ViewportBounds} from '../map/OperationalMapCanvas';
@@ -20,7 +22,7 @@ type Read=<T>(name:string,args:Record<string,unknown>,signal?:AbortSignal,accoun
 type Draft={quick?:boolean;type:'sector'|'object';id:string;version:string;incidentVersion:string;code:string;label:string;description:string;kind:MapKind;sector:string;geometry:Geometry|null};
 type Candidate={id:string;code:string|null;address:string|null;status:string};
 export function IncidentCop({locale,account,org,incidentId,refresh,feedback,disabled,read,onAction}:{locale:Locale;account:string;org:string;incidentId:string;refresh:number;feedback:CopFeedback;disabled:boolean;read:Read;onAction:CommandAction}){
- const workspace=useWorkspace(),rts=useRts();
+ const workspace=useWorkspace(),rts=useRts(),live=useIncidentLive();
  const t=incidentText(locale),[cop,setCop]=useState<Cop|null>(null),[loading,setLoading]=useState(false),[error,setError]=useState('');
  const [epoch,setEpoch]=useState(0),[localSelected,setLocalSelected]=useState(''),[draft,setDraft]=useState<Draft|null>(null),[stale,setStale]=useState(false);
  const [drawing,setDrawing]=useState<Geometry['type']|null>(null),[vertices,setVertices]=useState<Position[]>([]);
@@ -32,7 +34,7 @@ export function IncidentCop({locale,account,org,incidentId,refresh,feedback,disa
  const [previewRequest,setPreviewRequest]=useState(0),[saved,setSaved]=useState(false);
  const [linkId,setLinkId]=useState('');
  const [bounds,setBounds]=useState<ViewportBounds|null>(null),[background,setBackground]=useState(true);
- const context=useHydrantContext(account,bounds,background&&!!cop,refresh+epoch);
+ const context=useHydrantContext(account,bounds,background&&!!cop,epoch);
  const selected=workspace?(workspace.selected&&['INCIDENT_SECTOR','MAP_OBJECT','HYDRANT'].includes(workspace.selected.kind)?workspace.selected.id:''):localSelected;
  function cancelDraft(){draftRef.current=null;setDraft(null);setDrawing(null);setVertices([]);setStale(false);setError('');}
  function setSelected(id:string){
@@ -145,7 +147,7 @@ export function IncidentCop({locale,account,org,incidentId,refresh,feedback,disa
  return <section className="admin-card cop-surface">
   <details className="cop-map-controls" open={workspace?.view!=='command'}><summary>{workspaceText(locale)('controls')}</summary>
    <h2>{t('copTitle')}</h2><p>{t('copAuthority')}</p>
-   <button disabled={locked} onClick={()=>setEpoch(n=>n+1)}>{t('refresh')}</button>
+   <button disabled={locked} onClick={()=>{setEpoch(n=>n+1);live?.requestRefresh();}}>{t('refresh')}</button>{workspace?.view==='command'&&<IncidentLiveStatus locale={locale}/>}
    {cop&&<>
     <p>{t('status')}: {t(cop.incident.status)} · {t('copRevision')}: {cop.incident.revision}</p>
     <div className="actions">{(Object.keys(layers) as (keyof CopLayers)[]).map(k=><label key={k}><input type="checkbox" checked={layers[k]} onChange={e=>setLayers(v=>({...v,[k]:e.target.checked}))}/>{t('copLayer_'+k)}</label>)}</div>
