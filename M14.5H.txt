@@ -1,0 +1,562 @@
+# CODEX IMPLEMENTATION PROMPT — M14.5H
+## Multi-Unit RTS Coordination, Control Groups & Operational Readiness
+
+Repository: https://github.com/ficlus/Gasilko
+
+Implement **M14.5H — Multi-Unit RTS Coordination, Control Groups & Operational Readiness**.
+
+**Prerequisite:** M14.5G / PR #69, including its final review fixes, must be merged into `main`.
+
+Create one focused implementation PR targeting the latest `main`. Do not merge it.
+
+## 1. Goal
+
+Make the existing Gasilko **Poveljniška karta** faster and more practical for coordinating multiple fire-service units.
+
+The user should be able to:
+
+- Select multiple incident units using the existing RTS selection tools.
+- Save that selection to a temporary control group.
+- Recall the group immediately using a button or keyboard shortcut.
+- Inspect selected units' real operational status and current tasks.
+- Issue one configured action to multiple eligible recipients through the existing M14.5A/F2 command workflow.
+- See per-recipient eligibility and assignment feedback.
+- Recognize which units are available, busy, blocked, unavailable, or without a known position, based only on existing authoritative data.
+
+This milestone is an RTS interaction and operational-coordination improvement.
+
+**Do not invent a new task engine, command hierarchy, sector allocation system, or telemetry model.**
+
+## 2. Inspect the actual repository
+
+Before implementation, inspect:
+
+- `web/features/incidents/rtsSession.tsx`
+- `web/features/incidents/RtsSelectionToolbar.tsx`
+- `web/features/incidents/RtsMapInteraction.tsx`
+- `web/features/incidents/RtsContextMenu.tsx`
+- `web/features/incidents/IncidentTasks.tsx`
+- `web/features/incidents/IncidentResources.tsx`
+- `web/features/incidents/CommandSection.tsx`
+- `web/features/incidents/CopMap.tsx`
+- `web/features/incidents/workspace.tsx`
+- `web/features/incidents/IncidentLiveProvider.tsx`
+- `web/features/incidents/IncidentLiveStatus.tsx`
+- current recipient/task/resource DTOs
+- existing task-assignment and unit-status RPCs
+- command authority and agency/sector scope
+- navigation and SIM marker provenance
+- localization and incident CSS
+
+Trace the current recipient selection, task submission, per-recipient assignment state, live invalidation and error recovery flows.
+
+Document the actual limitations before making changes.
+
+## 3. Reuse existing RTS infrastructure
+
+The current RTS session already supports:
+
+- selected recipients;
+- multiple selections;
+- deduplication using `recipientKey`;
+- box and lasso selection;
+- selection limits of 100 recipients;
+- configured actions;
+- target previews;
+- task editor opening;
+- existing conflict and permission handling.
+
+Reuse this state as the sole authoritative frontend source of RTS-selected units.
+
+Do not introduce an independent command-recipient store.
+
+Control groups are selection presets, not command assignments or backend operational entities.
+
+## 4. Control groups — groups 1–9
+
+Implement nine optional, temporary control groups.
+
+Required interactions:
+
+- Select several units.
+- Press `Ctrl+1` (or `Cmd+1` where appropriate) to save the current selection to group 1.
+- Press `1` to recall group 1.
+- Repeat for groups 2–9.
+- Provide visible clickable group buttons for mouse and touch.
+- Provide an accessible way to replace or clear a saved group.
+- Display a compact group count and recognizable label.
+
+The shortcuts must be scoped to the Command Map interaction surface.
+
+### Important shortcut safety
+
+Do not intercept number keys when:
+
+- an input, textarea, select, editable element, or form owns focus;
+- a modal or confirmation dialog is open;
+- a target-picking or drawing tool owns the interaction;
+- an incompatible navigation/SIM editor is active;
+- browser/system shortcuts would take priority;
+- the session is disabled or command access is revoked.
+
+Prevent conflicts with existing `B`, `L`, `Esc`, and `Ctrl+K` RTS shortcuts.
+
+Users must be able to use all group functionality without a physical keyboard.
+
+### MVP persistence decision
+
+For this milestone, control groups should be **session-local and incident-scoped**.
+
+Do not create a database table for saved groups.
+
+Do not persist potentially sensitive membership lists to unrestricted browser storage.
+
+Clearly communicate that control groups are temporary and may be lost on reload.
+
+If the user later wants cross-device or persistent saved groups, implement that as a separately authorized milestone.
+
+## 5. Group membership and validation
+
+A saved control group stores stable recipient references, not copies of authority or stale full recipient objects.
+
+On recall:
+
+1. Resolve the saved references against the latest authorized incident recipient data.
+2. Preserve only currently accessible and supported recipients.
+3. Clearly report unavailable, removed, expired, or inaccessible references.
+4. Never silently issue a command to a different recipient with a similar name.
+5. Never fabricate a selected unit's position.
+6. Preserve existing 100-recipient limits.
+
+### Security and scope
+
+Group membership must be invalidated or revalidated when:
+
+- incident identity changes;
+- account changes;
+- acting organization changes;
+- the user's incident authority is revoked;
+- a recipient is removed from the incident;
+- an incident becomes non-operational.
+
+A recalled group must not grant command permission.
+
+The server remains authoritative for every action.
+
+Do not preserve a group's privileged recipient references across unrelated incidents or organizations.
+
+## 6. Command Map group toolbar
+
+Add a compact toolbar to Poveljniška karta:
+
+```text
+IZBRANE ENOTE · 4
+
+GVC-1  GVV-1  GVC-2  GV-1
+
+Skupine:
+[1 · 4] [2 · 2] [3 · —] [4 · —] ... [9 · —]
+
+[Dejanja] [Počisti izbor]
+```
+
+The illustration is conceptual.
+
+Requirements:
+
+- Groups must not cover essential MapLibre controls.
+- Large screens: compact toolbar near existing RTS controls.
+- Mobile: compact horizontally scrollable toolbar or accessible drawer.
+- Keyboard users must be able to navigate every control.
+- Do not alter Classic View behavior.
+- Do not remount the map when saving/recalling groups.
+- Selection changes must feel immediate.
+
+## 7. Multi-unit status overview
+
+Add a compact panel summarizing the currently selected units.
+
+Examples of information, only when present in authoritative DTOs:
+
+- Unit name and organization.
+- Current operational status.
+- Assigned sector, if explicitly modeled.
+- Current task/assignment state.
+- Whether the unit has available authorized map coordinates.
+- SIM versus real provenance.
+- Navigation session status where supported.
+- Relevant blocked/unavailable conditions.
+
+Do not infer status from icon color, map position or elapsed time alone.
+
+### Status grouping
+
+Provide a clear visual distinction between:
+
+- available for an eligible action;
+- already assigned to a task;
+- awaiting acknowledgment;
+- in progress;
+- unable/blocked;
+- unavailable or inaccessible;
+- unknown status.
+
+Map these labels to actual existing server states.
+
+Do not invent status values or present an unsupported classification as factual.
+
+If the backend does not expose a reliable availability state, show the known task/unit status instead of inventing one.
+
+## 8. Multi-unit command workflow
+
+Required primary flow:
+
+1. Select or recall a group.
+2. Right-click an appropriate destination on the map.
+3. Choose a configured compatible action.
+4. Open the existing F2 task editor with the selected recipients and target.
+5. Display recipients and eligibility.
+6. Enter required action parameters.
+7. Review and confirm.
+8. Submit through the existing M14.5A task creation path.
+9. Show the real authoritative task/assignment outcome.
+
+Never issue a command directly merely because a group was recalled.
+
+### Preserve domain semantics
+
+One task sent to multiple recipients is not necessarily the same as multiple independent tasks.
+
+Inspect the existing API and preserve its current task/assignment model.
+
+Do not create a loop that submits separate task commands for each recipient if the existing backend already supports one task with multiple assignments.
+
+Do not introduce an unreviewed bulk-mutation RPC.
+
+Do not treat group membership as permanent sector membership.
+
+## 9. Per-recipient eligibility
+
+Before confirming a group command, show:
+
+- eligible recipients;
+- ineligible recipients;
+- missing parameters;
+- unsupported recipient types;
+- unavailable recipients;
+- scope or authorization limitations;
+- stale recipient references;
+- current selection limit.
+
+Do not silently discard recipients from the submitted command.
+
+If a recipient cannot be included, require the user to explicitly resolve or remove it before submission.
+
+Do not auto-submit to the remaining recipients without clear user review.
+
+Do not bypass configured action limits or target validation.
+
+### Mixed selections
+
+A group may contain recipient types that do not all support the same action.
+
+Use actual action-catalog recipient compatibility.
+
+Either:
+
+- show only a compatible action for the complete selection; or
+- show an explicit conflict and require adjustment.
+
+Do not silently split the group into separate commands.
+
+## 10. Per-unit assignment feedback
+
+After a valid task is accepted by the server:
+
+- Show the task identifier or suitable existing reference.
+- Show each actual recipient assignment status.
+- Distinguish server acceptance from human acknowledgment.
+- Distinguish acknowledged from in progress and completed.
+- Show blocked/unable status when actually reported.
+- Preserve server rejection and ambiguous-response states.
+- Preserve existing immutable operation and assignment identifiers.
+
+A task created for four units does not mean all four acknowledged it.
+
+If only two units acknowledge, show two actual acknowledgments.
+
+Do not invent acknowledgment times.
+
+Do not automatically mark units as moving merely because a Move To command was accepted.
+
+## 11. SIM and real-world separation
+
+Preserve:
+
+**COMMAND INTENT != EXECUTION PLAN != OBSERVED TELEMETRY.**
+
+Requirements:
+
+- Actual live GPS remains the only source of real unit movement.
+- A task does not move a real marker.
+- SIM position updates originate only from existing authorized simulator state.
+- No fabricated human acknowledgments.
+- No new worker, scheduler or simulation model.
+- Navigation planning remains separate from task intent.
+- SIM visual movement must not imply an actual fire-service vehicle is moving.
+
+Groups may include actual authorized incident recipients under the existing task engine, but SIM/real provenance must always be unmistakable.
+
+Do not introduce an unsafe shortcut that sends simulation actions to operational incidents.
+
+## 12. Unit selection and map interactions
+
+Preserve existing:
+
+- left-click;
+- Ctrl/Shift multiselection;
+- rectangle selection;
+- lasso selection;
+- right-click context menu;
+- long press;
+- keyboard action entry;
+- hydrant target handling;
+- tactical COP objects;
+- sector highlighting;
+- navigation target picking;
+- open command drafts;
+- expanded Command Map layout.
+
+Right-click on a selected member of a group must not silently discard the group.
+
+Selecting a different sector must not automatically select all units geographically inside its polygon.
+
+A saved control group is an explicit set of recipients, not a spatial query.
+
+No drag-and-drop unit movement.
+
+No minimap.
+
+## 13. Sector and command-hierarchy integration
+
+Reuse M14.5G.
+
+A control group is not:
+
+- a sector;
+- a team assignment;
+- a delegated command role;
+- an agency;
+- a new command-authority boundary.
+
+Show sector/commander association only when the existing authoritative DTO provides it.
+
+If reliable unit-to-sector assignment exists elsewhere in incident resource data, show it through that established relation.
+
+Do not derive hierarchy from names, matching coordinates or organizational structure.
+
+Do not write command-role changes while creating or recalling a control group.
+
+## 14. Live updates through F4
+
+Reuse the existing incident live coordinator.
+
+When authoritative state changes:
+
+- Refresh selected-unit statuses.
+- Refresh task assignment states.
+- Resolve group references against current accessibility and eligibility.
+- Show important changes in the existing F4 notification mechanism.
+- Keep group selection stable when the refreshed data still refers to the same authorized recipients.
+
+Do not introduce another timer or Supabase Realtime subscription.
+
+Do not create one RPC request per displayed group button.
+
+Do not generate a toast for every routine SIM position update.
+
+## 15. Performance
+
+The UI must remain responsive with several selected units.
+
+Requirements:
+
+- Local group recall should not cause a MapLibre remount.
+- Do not rebuild every hydrant marker when selection changes.
+- Avoid refetching the entire action catalog per group.
+- Reuse already loaded recipient data.
+- Fetch additional recipient details only through existing authorized, bounded APIs.
+- Do not fetch all incident history for a simple group recall.
+- Memoize derived summaries when appropriate.
+- Avoid full workspace remounts and page refreshes.
+- Avoid unnecessary rerenders of unrelated map sources.
+
+## 16. Accessibility and responsive design
+
+Desktop:
+
+- Accessible numbered group buttons.
+- Tooltip/help for supported shortcuts.
+- Clear selected and empty states.
+- Sufficient contrast and keyboard focus indicators.
+
+Tablet/mobile:
+
+- No physical keyboard required.
+- Group save, recall and clear actions are touch-accessible.
+- Do not obstruct map panning or zooming.
+- Keep controls usable in portrait and landscape.
+- No horizontal document overflow.
+
+Use Slovenian and German localization.
+
+Avoid hardcoded user-visible strings.
+
+Do not add a new dependency solely for a toolbar or shortcut implementation.
+
+## 17. Error handling
+
+Handle:
+
+- saved group contains deleted/inaccessible recipients;
+- selected unit has no known GPS;
+- current action does not support selected recipients;
+- mixed recipient types;
+- expired incident authority;
+- missing target;
+- invalid navigation target;
+- incident switched while a command draft is open;
+- network error;
+- server rejection;
+- version conflict;
+- ambiguous submission result.
+
+Preserve exact-payload idempotent retries.
+
+Never silently regenerate task UUIDs for an ambiguous retry.
+
+Never issue a command merely to test whether it is valid.
+
+On authorization loss, clear privileged selection and pending command controls using the established lifecycle.
+
+## 18. Database and infrastructure scope
+
+Default implementation: **frontend-only**.
+
+No new SQL migration is expected.
+
+Do not create a database table for control groups in this MVP.
+
+Do not introduce new:
+
+- Edge Functions;
+- schedulers;
+- database triggers;
+- Realtime channels;
+- task mutation paths;
+- RLS policies;
+- action types;
+- navigation providers;
+- simulation agents.
+
+If repository inspection uncovers a genuine prerequisite that cannot be solved without backend changes, document it explicitly and minimize the change rather than inventing a parallel API.
+
+Do not modify historical migrations.
+
+## 19. Acceptance criteria
+
+- [ ] Works on latest merged M14.5G main.
+- [ ] Groups 1–9 are available.
+- [ ] User can save an existing RTS selection to a group.
+- [ ] User can recall a group using buttons.
+- [ ] Keyboard shortcuts work in appropriate map contexts.
+- [ ] Shortcuts do not interfere with forms, browser shortcuts or modals.
+- [ ] Groups reset or are revalidated on account/org/incident changes.
+- [ ] Stale/unavailable references cannot become valid command recipients by recall alone.
+- [ ] Existing 100-recipient limit is enforced.
+- [ ] Map selection and group selection share the existing RTS source of truth.
+- [ ] Multi-unit Move To preserves the exact clicked target.
+- [ ] Existing action engine is reused.
+- [ ] Required parameters and per-recipient eligibility are enforced.
+- [ ] Ineligible recipients are not silently omitted.
+- [ ] Task confirmation and idempotency remain unchanged.
+- [ ] Per-recipient server states are displayed accurately.
+- [ ] SIM and real-world provenance remain distinct.
+- [ ] M14.5G command hierarchy behavior is preserved.
+- [ ] M14.5F4 live updates are reused.
+- [ ] MapLibre instance/camera remain stable.
+- [ ] Existing F2/F3 command menus work.
+- [ ] Classic View remains operational.
+- [ ] Mobile/touch access is supported.
+- [ ] SI/DE labels are complete.
+- [ ] No new backend command path or duplicate selection store.
+- [ ] No migration or Edge Function is required unless specifically justified.
+
+## 20. Development restrictions
+
+Do NOT run:
+
+- tests;
+- builds;
+- lint;
+- typechecks;
+- CI;
+- browser/runtime checks;
+- Android/Gradle tasks;
+- SQL migrations;
+- Supabase deployments.
+
+Do not merge the PR.
+
+Do not modify production infrastructure.
+
+Do not use `git reset --hard`, destructive cleanup or commands that discard user changes.
+
+Preserve local customizations involving:
+
+- `android/app/build.gradle.kts`
+- `android/build.gradle.kts`
+- `android/gradle.properties`
+- `android/app/schemas/`
+- `pnpm-lock.yaml`
+- `web/next-env.d.ts`
+
+Avoid dependency changes and lockfile modifications.
+
+Do not add this prompt as a root-level `.txt` file.
+
+## 21. Deliverables
+
+Produce one focused PR with:
+
+1. RTS control groups 1–9.
+2. Compact Command Map group toolbar.
+3. Selected-unit operational overview.
+4. Existing multi-recipient command workflow integration.
+5. Authoritative per-recipient task feedback.
+6. Safe handling of invalid and revoked group membership.
+7. SI/DE localization.
+8. Responsive and accessible controls.
+9. Source-file change summary.
+10. Description of reused RTS/task/resource APIs.
+11. Clear explanation of what is session-local versus server-persisted.
+12. Manual verification checklist covering:
+    - one/multiple units;
+    - groups 1–9;
+    - keyboard and touch;
+    - missing unit positions;
+    - mixed recipient eligibility;
+    - multi-unit Move To;
+    - SIM versus real incidents;
+    - commander versus read-only participant;
+    - organization/scope switching;
+    - F4 background status changes;
+    - M14.5G sector selection;
+    - task acceptance and recipient acknowledgment;
+    - retries/conflicts;
+    - wide, tablet and mobile layouts.
+13. Explicit disclosure that automated and manual checks were not executed.
+
+**Final goal:** Gasilko supports fast, RTS-style multi-unit selection and command coordination without compromising existing fire-service command authority, accurate telemetry, task audit or server-side validation.
+
+**Potential following milestone:** M14.6 — Scenario Director & Dynamic Incident Events.
