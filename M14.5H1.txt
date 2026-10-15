@@ -1,0 +1,979 @@
+# CODEX IMPLEMENTATION PROMPT — M14.5H1
+## Automatic SIM Command Execution, Route Planning & Navigation Orchestration
+
+**Repository:** https://github.com/ficlus/Gasilko
+
+Implement **M14.5H1 — Automatic SIM Command Execution, Route Planning & Navigation Orchestration** in the existing Gasilko monorepo.
+
+Create one focused implementation PR targeting `main`. **Do not merge it.**
+
+This is a backend and frontend integration milestone, not merely a UI shortcut.
+
+---
+
+## 1. Critical branch prerequisites
+
+Before modifying code:
+
+1. Inspect the current `main`.
+2. Ensure M14.5H / PR #70 has been merged.
+3. Ensure the corrective PR #71 (F3–H integration fixes) has been merged, or otherwise incorporate its finalized changes without reverting them.
+4. If PR #71 is still open, do not blindly overwrite or duplicate its fixes. Explicitly identify the integration dependency and coordinate the branch accordingly.
+5. Preserve the existing F1.1 stable map-height and hydrant-loading fixes.
+
+PR #71 corrects important behavior involving:
+
+- RTS context-menu JSX.
+- COP draft version protection.
+- F4 live reconciliation and timeline paging.
+- Preservation of task drafts and navigation routes.
+- Command hierarchy and sector associations.
+- RTS control-group state and recipient revalidation.
+- Fresh task/assignment identities with stable retry identities.
+
+**M14.5H1 must not reintroduce any of these defects.**
+
+Inspect the actual current repository before assuming a previous implementation detail remains unchanged.
+
+---
+
+## 2. Product goal
+
+Make SIM incident commands behave like a practical RTS command system.
+
+When a commander issues a configured task from the **Poveljniška karta**, the system should automatically execute the appropriate simulation preparation and execution steps.
+
+Example:
+
+1. Select SIM unit GVC-1.
+2. Right-click an appropriate target on the map.
+3. Choose a configured action.
+4. Review and confirm the task.
+5. The backend accepts the task.
+6. If automatic SIM execution is enabled, the backend enrolls the eligible assignment.
+7. If the action requires road navigation, calculate an actual route using the existing OSRM/GraphHopper infrastructure.
+8. Create or reuse the authorized navigation session.
+9. Start the corresponding virtual simulation agent.
+10. The existing background runner advances the simulated unit.
+11. The map and notification system display server-confirmed progress.
+
+**No manual route calculation or separate agent START step should be required for eligible automatic SIM commands.**
+
+Support more than `MOVE_TO`.
+
+The system must respect the configured action's actual native behavior rather than blindly routing every task.
+
+---
+
+## 3. Mandatory architecture inspection
+
+Inspect the relevant current implementation and identify the real call chain.
+
+### Action and task domain
+
+- `web/lib/operational/tasks.ts`
+- `web/features/incidents/IncidentTasks.tsx`
+- `web/features/incidents/RtsContextMenu.tsx`
+- `web/features/incidents/rtsSession.tsx`
+- M14.5H control-group implementation.
+- Action Catalog definitions.
+- `issue_task` and assignment creation.
+- Task command receipts.
+- Assignment versions, cancellation and lifecycle.
+- Existing recipient eligibility and command authorization.
+
+### Navigation domain
+
+- `web/features/incidents/IncidentNavigationProvider.tsx`
+- `web/lib/operational/navigation.ts`
+- `supabase/functions/incident-navigation/index.ts`
+- Existing shared road-provider implementation.
+- M14.5D navigation migration and schema.
+- Navigation session ownership, planning, route validation and commit.
+
+### Simulation domain
+
+- `web/features/incidents/SimulationProvider.tsx`
+- `web/features/incidents/AutonomousSimulationProvider.tsx`
+- `web/features/incidents/AutonomousSimulationPanel.tsx`
+- `web/lib/operational/agents.ts`
+- `supabase/functions/incident-simulation-runner/index.ts`
+- M14.5C/M14.5E simulation schema and RPCs.
+- Scenario lifecycle and simulated positions.
+- Virtual ACK and response profiles.
+- Protected simulation environment and training operator permissions.
+
+### UI and refresh domain
+
+- M14.5F4 `IncidentLiveProvider`.
+- M14.5F4 notifications.
+- M14.5G command hierarchy.
+- M14.5H selected-unit and group feedback.
+- SI/DE localization.
+- Existing responsive Command Map CSS.
+
+### Required inspection output
+
+Identify and document:
+
+- Which native action behaviors currently exist.
+- Which behaviors need navigation.
+- Which existing APIs create navigation sessions.
+- Which backend transitions create simulation agent runs.
+- Which operations currently require a human JWT.
+- Which operations can safely be performed by a background simulation worker.
+- Which idempotency keys and optimistic versions already exist.
+- Which migration and Edge Function changes are actually necessary.
+
+Do not invent RPCs, tables, functions or state enums.
+
+---
+
+## 4. Action execution policy
+
+Provide one centralized, explicit SIM execution policy for each supported native behavior.
+
+Expected behaviors to inspect:
+
+| Native behavior | Automatic SIM treatment |
+|---|---|
+| `MOVE_TO` | Route planning followed by simulated movement |
+| `WITHDRAW_TO` | Route planning to the withdrawal destination followed by simulated movement |
+| `HOLD_POSITION` | Supported virtual non-moving execution |
+| `REQUEST_STATUS` | Supported virtual non-moving response workflow |
+| `NONE` | No implicit automatic execution |
+
+Do not infer eligibility merely from the presence of coordinates.
+
+The backend must check the actual configured action behavior, target type, recipient type and training policy.
+
+### Moving behavior
+
+For `MOVE_TO` and `WITHDRAW_TO`:
+
+- Resolve the real configured destination.
+- Require a supported point destination.
+- Calculate an appropriate road route.
+- Create a navigation session belonging to the correct assignment and unit.
+- Start a virtual agent against the valid current route.
+- Let the existing simulator advance movement.
+
+### Non-moving behavior
+
+For `HOLD_POSITION` and `REQUEST_STATUS`:
+
+- Do not calculate a road route.
+- Do not change the simulated geographic position.
+- Use only supported virtual response/ACK/completion semantics.
+- Never fabricate a human response or acknowledgment.
+- Do not silently interrupt an unrelated active run.
+
+### Unsupported behavior
+
+For unknown actions or `NONE`:
+
+- Leave the assignment available for manual handling.
+- Show a clear unsupported/manual status.
+- Do not execute an arbitrary guessed behavior.
+
+Future action types must be addable through a centralized execution-policy mapping.
+
+Do not scatter unrelated string comparisons across components.
+
+---
+
+## 5. Scenario-level automatic execution setting
+
+Add a server-persisted setting:
+
+**Samodejno izvajaj SIM ukaze**
+
+Support:
+
+- OFF — existing manual simulation workflow.
+- ON — automatically process eligible newly accepted SIM assignments.
+
+### Requirements
+
+- Default OFF.
+- Stored durably per simulation scenario.
+- Server-authoritative.
+- Controlled by an authorized training controller.
+- Only available for actual SIM incidents.
+- Explicit user confirmation when enabling.
+- Visible effective state in the Command Map.
+- SI/DE localization.
+- Audit setting changes.
+- No localStorage-only implementation.
+
+### Enrollment boundary
+
+Enabling automatic execution must **not** automatically execute historical unresolved tasks.
+
+Only new assignments accepted after automation was enabled may be automatically enrolled.
+
+Capture this decision durably at authoritative task acceptance.
+
+If recovery of an older assignment is needed, it must require a separate explicit authorized action.
+
+### Disabling
+
+Turning the switch OFF:
+
+- Stops future automatic enrollment.
+- Must not silently stop or cancel already running agent executions.
+- Does not change real incident behavior.
+- Does not erase past job history.
+
+Use an existing explicit STOP operation for active runs.
+
+---
+
+## 6. Durable orchestration state
+
+Implement a small, durable, simulation-only automation workflow.
+
+Suggested logical states:
+
+```text
+TASK_ACCEPTED
+      |
+      v
+ELIGIBILITY_CHECK
+      |
+      +---- UNSUPPORTED / BLOCKED
+      |
+      +---- NEEDS_NAVIGATION
+      |             |
+      |             v
+      |       ROUTE_PENDING
+      |             |
+      |             v
+      |       ROUTE_READY
+      |             |
+      +-------------+
+                    |
+                    v
+              START_PENDING
+                    |
+                    v
+              AGENT_STARTED
+                    |
+                    v
+           EXISTING SIM RUNNER
+                    |
+                    v
+        ACK / MOVE / ARRIVE / COMPLETE
+```
+
+Use actual persisted statuses appropriate to the existing database.
+
+### Durable job requirements
+
+Each eligible assignment must have:
+
+- Stable job UUID.
+- Scenario UUID.
+- Incident UUID.
+- Task UUID.
+- Assignment UUID.
+- SIM incident-unit UUID.
+- Native behavior and relevant action version.
+- Current orchestration state.
+- Retry counter.
+- Next eligible processing time.
+- Navigation session reference, when applicable.
+- Agent run reference, when applicable.
+- Error code and safe error details.
+- Creation/update timestamps.
+- Immutable logical operation identity for retries.
+
+Prefer extending an existing suitable persistence structure if one already exists.
+
+Only create a new queue table if necessary.
+
+### Concurrency
+
+- Claim work atomically.
+- Support bounded worker leases.
+- Prevent duplicate processing of the same assignment.
+- Use row locking or another suitable concurrency mechanism.
+- Support overlapping Cron invocations safely.
+- Recover from interrupted workers.
+- Use idempotent navigation/session/run creation.
+- Never create two active agent runs for one logical assignment.
+- Prevent older results from overwriting newer authoritative state.
+
+Do not implement this queue in React state or browser memory.
+
+---
+
+## 7. Enqueue only after server-confirmed task acceptance
+
+Enqueue automation at the authoritative server-side transaction boundary.
+
+The workflow must not depend on:
+
+- React `useEffect`.
+- A browser remaining open.
+- A Realtime message.
+- The F4 polling coordinator.
+- A local optimistic UI update.
+
+The original task must already have been authorized and committed.
+
+### Multi-recipient tasks
+
+One accepted task can have several assignments.
+
+Create a distinct eligible automation job per relevant SIM assignment.
+
+Reuse the existing task and assignment IDs.
+
+Do not create new tasks just to start agents.
+
+Do not regenerate assignment UUIDs during ambiguous task retries.
+
+Preserve PR #71's distinction between:
+
+- New task identity.
+- Retry identity of the same logical task.
+
+---
+
+## 8. Secure navigation planning
+
+For actions requiring a route:
+
+1. Validate the existing automation job.
+2. Revalidate the scenario and assignment.
+3. Confirm the task remains active and eligible.
+4. Confirm the recipient is an actual SIM unit.
+5. Resolve the supported destination.
+6. Read the latest valid SIM position.
+7. Create or reuse the correct navigation session.
+8. Call the existing shared OSRM/GraphHopper routing provider.
+9. Validate returned road geometry and route metadata.
+10. Commit the route through existing navigation rules.
+11. Revalidate position/session versions.
+12. Start an agent only after a valid current route exists.
+
+### Supported destinations
+
+Use existing target resolution contracts for:
+
+- Geographic coordinates.
+- Permanent hydrants when supported.
+- Incident tactical point objects.
+- Other point entities supported by the navigation system.
+
+Do not assume polygon and line objects represent road destinations.
+
+Do not silently use the center of a sector polygon.
+
+Do not create fake coordinates.
+
+### Critical security requirement
+
+The current user-facing navigation workflow uses authenticated human authority.
+
+**Do not impersonate a human commander using a service-role token.**
+
+Introduce a narrowly constrained simulation-only planning path if required.
+
+This path may operate only on:
+
+- An existing authorized SIM task assignment.
+- An eligible persisted automation job.
+- A protected training scenario.
+- A supported navigation action.
+- A valid current SIM position.
+
+It must not be capable of preparing arbitrary navigation sessions for real incidents.
+
+Reuse the existing navigation validation and route-commit infrastructure.
+
+Do not create a second independent routing engine.
+
+---
+
+## 9. Road-access safety
+
+Preserve the simulator's existing road-access checks, including its current tolerance.
+
+If the unit's SIM position is not suitable for the calculated route:
+
+- Do not teleport the unit.
+- Do not silently snap the SIM marker to a new location.
+- Do not start invalid movement.
+- Report that explicit road-access correction is required.
+- Show the discrepancy and available correction action.
+- Permit retry only after valid authorized correction/recalculation.
+
+If position data is missing, report the missing position.
+
+If the position changes during calculation, invalidate or safely retry the stale route.
+
+A planned route is not observed movement.
+
+---
+
+## 10. Automatic agent creation and execution
+
+Once preparation is valid, create or reuse the corresponding simulation run.
+
+Preserve existing response profiles, including those actually supported by the current backend.
+
+Examples to inspect:
+
+- `NORMAL`
+- `SLOW_RESPONSE`
+- `NO_RESPONSE`
+- `BREAKDOWN`
+- `COMMUNICATION_LOSS`
+- `ROUTE_BLOCKED`
+
+Do not assume these are all valid without inspecting the actual schema.
+
+### Default
+
+Use an existing supported normal profile by default.
+
+### Moving agents
+
+Bind the run to:
+
+- Correct scenario.
+- Correct SIM unit.
+- Correct task assignment.
+- Correct navigation session.
+- Correct current route.
+- Correct current position version.
+
+### Non-moving agents
+
+Do not generate navigation or fake movement.
+
+Use virtual response semantics only.
+
+### Human-versus-SIM separation
+
+Virtual acknowledgments must be explicitly identified as simulation events.
+
+Never create real firefighter ACK records on behalf of virtual agents.
+
+---
+
+## 11. Background execution and Supabase Cron
+
+The user already has an existing Supabase Cron schedule:
+
+`gasilko-sim-runner-5s`
+
+It invokes:
+
+`incident-simulation-runner`
+
+approximately every five seconds.
+
+Reuse this infrastructure where appropriate.
+
+### Required properties
+
+- Worker authentication remains secret-based.
+- Protected simulation environment must be enabled.
+- Worker work remains bounded.
+- Worker processes eligible jobs idempotently.
+- Worker cannot operate on normal incidents.
+- Worker does not depend on an open browser.
+- Overlapping executions are safe.
+- Existing simulation movement ticks continue to work.
+
+### Route-planning latency
+
+OSRM/GraphHopper requests can be slower than ordinary movement ticks.
+
+Do not let long route-planning operations block existing SIM movement indefinitely.
+
+Use bounded work batches and fair scheduling.
+
+If a separate planning Edge Function is necessary, implement it explicitly and document why.
+
+Do not create an unnecessary second high-frequency scheduler.
+
+### Existing runner authentication
+
+Do not accidentally change the existing runner's JWT configuration.
+
+Its established deployment contract includes:
+
+`--no-verify-jwt`
+
+The runner still authenticates requests using its private bearer secret.
+
+Do not expose that secret to the browser.
+
+### Without Cron
+
+When the scheduler is disabled:
+
+- Tasks can still be issued.
+- Eligible automation jobs can remain queued.
+- The UI must not falsely claim the worker is progressing.
+- Manual simulator controls remain available.
+- F4 polling must not secretly become a second execution scheduler.
+
+---
+
+## 12. Conflicts and cancellation
+
+Handle all of the following:
+
+- Active movement run for the same unit.
+- New MOVE_TO while another MOVE_TO is executing.
+- Withdrawal during active movement.
+- HOLD_POSITION while another task is active.
+- REQUEST_STATUS during other activity.
+- Task cancellation.
+- Assignment completion or failure.
+- Scenario pause.
+- Scenario finish.
+- Automation switch disabled.
+- Revoked command/training authority.
+- SIM position change.
+- Navigation route supersession.
+- Duplicate scheduler calls.
+- Ambiguous route or run creation result.
+
+### Required default conflict policy
+
+Do not silently cancel or replace an existing active run.
+
+For conflicting assignments:
+
+- Block or queue according to an explicit existing-compatible policy.
+- Show a clear reason.
+- Require deliberate operator action where necessary.
+
+Never silently overwrite history.
+
+Do not restart a cancelled or completed task.
+
+Paused scenarios must not keep advancing movement.
+
+---
+
+## 13. Multi-unit RTS dispatch
+
+Support the control groups and multi-selection behavior introduced in M14.5H.
+
+Example:
+
+A commander selects four SIM units and issues one Move To task.
+
+Expected backend behavior:
+
+- One original task.
+- Four actual assignments.
+- One eligible orchestration job per supported assignment.
+- One separately planned route per moving SIM unit.
+- Separate navigation sessions.
+- Separate agent runs.
+- Separate progress and failure states.
+
+A route failure for GVC-2 must not fabricate completion or movement for that unit.
+
+Other independent assignments may continue if the existing task semantics allow it.
+
+Do not silently remove incompatible recipients from the original task.
+
+### Example display
+
+```text
+SIM · Samodejno izvajanje
+
+Ukaz: Premik na cilj
+
+GVC-1   Na poti
+GVC-2   Navigacija v pripravi
+GVV-1   Ni veljavnega SIM položaja
+GVC-3   Čaka zaradi aktivne naloge
+```
+
+This is illustrative UI text, not a prescribed database enum.
+
+---
+
+## 14. Command Map user interface
+
+Add a compact panel or section:
+
+**SIM · Samodejno izvajanje**
+
+Display:
+
+- Effective automation switch.
+- Authorized controller status.
+- Response profile.
+- Simulation clock speed.
+- Active automation jobs.
+- Per-unit orchestration status.
+- Navigation state, when relevant.
+- Agent run state.
+- Route and ETA, when authoritative.
+- Error and recovery information.
+- Runner freshness/availability.
+
+### UX rules
+
+- Keep existing manual simulation controls.
+- Do not require opening several panels for routine automatic execution.
+- Preserve the map as the main workspace.
+- Avoid unnecessary scroll and layout shifting.
+- Do not remount MapLibre.
+- Preserve camera, RTS selection and open command drafts.
+- Do not automatically move the camera when a job starts.
+- Use the F4 refresh infrastructure.
+- Avoid duplicate polling.
+- Use Slovenian and German translations.
+- Keep mobile and keyboard controls accessible.
+
+### Optional operator action
+
+Provide a narrowly authorized retry option for recoverable failed jobs, using the original logical job identity.
+
+Do not silently create a second task or agent.
+
+---
+
+## 15. Live updates and notifications
+
+Reuse M14.5F4.
+
+Show server-confirmed transitions, for example:
+
+- Task accepted.
+- Automation queued.
+- Route calculation started.
+- Route ready.
+- SIM agent started.
+- Virtual acknowledgment.
+- Simulated movement in progress.
+- Arrival.
+- Execution completed.
+- Execution blocked.
+- Route planning failed.
+
+Do not create an additional browser polling coordinator.
+
+Do not create a toast for every position tick.
+
+Never present a queued job as an already moving unit.
+
+Preserve the F4 behavior corrected in PR #71:
+
+- Authoritative timeline cursor.
+- Bounded reconciliation.
+- No overlapping request cycles.
+- Preserved open drafts.
+- Preserved navigation route display.
+- Access-loss cleanup.
+
+---
+
+## 16. Authorization and isolation
+
+Mandatory invariants:
+
+**COMMAND INTENT != EXECUTION PLAN != OBSERVED TELEMETRY**
+
+**REAL INCIDENT != TRAINING SCENARIO**
+
+**HUMAN APPROVAL != VIRTUAL AGENT EXECUTION**
+
+### Requirements
+
+- No automated task creation for real incidents.
+- No automated real vehicle movement.
+- No fabricated GPS telemetry.
+- No fabricated human acknowledgment.
+- No human JWT impersonation.
+- No cross-incident automation processing.
+- No cross-organization leakage.
+- No use of stale command authority.
+- No unrestricted privileged worker RPC.
+- No exposed service-role or runner secrets.
+- No browser direct writes into private automation state.
+
+The user operates training and normal incidents in the same Supabase project.
+
+**Separation must be enforced at the database/backend boundary, not merely through UI flags.**
+
+Use protected training environment configuration and scenario ownership checks.
+
+Preserve incident-specific command authorization and training-operator restrictions.
+
+---
+
+## 17. Failure handling and recovery
+
+Handle:
+
+- Routing provider unavailable.
+- Route unreachable.
+- Unsupported target.
+- Missing SIM position.
+- Stale position version.
+- Road-access failure.
+- Missing navigation session.
+- Stale navigation session.
+- Existing conflicting agent run.
+- Cancelled assignment.
+- Paused or finished scenario.
+- Expired authority.
+- Background worker timeout.
+- Worker crash.
+- Duplicate Cron invocation.
+- Network failure.
+- Ambiguous backend response.
+- Concurrent route planning.
+- Unexpected action configuration.
+
+### Retry rules
+
+- Reuse stable operation IDs.
+- Use bounded retries.
+- Apply backoff.
+- Distinguish transient and permanent failure.
+- Do not retry an impossible road route indefinitely.
+- Do not duplicate navigation sessions or agent runs.
+- Do not recreate cancelled tasks.
+- Expose useful status to the controller.
+
+Any automated retry must operate on the already approved task and existing automation identity.
+
+Do not automatically replay a human command mutation.
+
+---
+
+## 18. Database migration
+
+A new forward-only migration is expected.
+
+Inspect available migration timestamps before choosing its filename.
+
+Expected changes may include:
+
+- Scenario automation setting.
+- Durable per-assignment job state.
+- Atomic enrollment.
+- Protected worker job claims.
+- Concurrency and lease safeguards.
+- Idempotent navigation/run references.
+- Retry scheduling.
+- Safe read projection.
+- Audit history.
+- Authorization and SIM-only guards.
+
+### Mandatory
+
+- Do not edit historical migration files.
+- Do not create a second task engine.
+- Do not duplicate navigation semantics.
+- Preserve existing RLS.
+- Preserve command scope.
+- Use exact foreign keys and authoritative identifiers.
+- Protect private processing state from browser writes.
+- Keep background worker permissions narrow.
+- Ensure migration works with the actual current schema.
+
+If an existing structure can safely support a requirement, reuse it rather than creating another table.
+
+---
+
+## 19. Edge Function implementation
+
+Inspect the current `incident-simulation-runner` and `incident-navigation` implementation.
+
+Prefer reusing:
+
+- Existing road-provider shared code.
+- Existing navigation validation.
+- Existing navigation session model.
+- Existing agent-run creation.
+- Existing simulation tick processing.
+
+You may extend the runner or introduce a separate narrowly scoped planning function if needed.
+
+### Security
+
+Do not weaken human authentication on `incident-navigation`.
+
+Do not expose a general-purpose service-role route-planning endpoint.
+
+Do not change the meaning of ordinary incident navigation.
+
+Do not make the training worker capable of executing arbitrary operational tasks.
+
+### Deployment documentation
+
+In the PR description, specify:
+
+1. Exact SQL migration filename.
+2. Which Edge Functions changed.
+3. Which Edge Functions require deployment.
+4. Required environment variables.
+5. Whether the existing Cron request body or frequency changes.
+6. Required deployment order.
+7. Safe rollback or disable procedure.
+
+Do not perform the deployment yourself.
+
+---
+
+## 20. Implementation sequence
+
+Follow this order:
+
+1. Inspect actual schemas, RPCs, actions and worker contracts.
+2. Identify execution policies.
+3. Design durable scenario policy and job state.
+4. Implement secure post-acceptance enrollment.
+5. Implement bounded worker claiming.
+6. Implement automatic navigation preparation.
+7. Implement valid route commit.
+8. Implement automatic agent-run creation.
+9. Integrate existing worker execution.
+10. Expose controller setting and job status.
+11. Integrate F4 notifications.
+12. Document exact migration and deployment steps.
+
+Keep modifications at the domain boundary that actually owns the operation.
+
+Do not add frontend workarounds for backend authorization deficiencies.
+
+---
+
+## 21. Acceptance criteria
+
+- [ ] Based on latest merged M14.5H and corrected PR #71 changes.
+- [ ] Existing F1/F2/F3/F4/G/H behavior is preserved.
+- [ ] Scenario automation defaults OFF.
+- [ ] Authorized training controller can enable/disable automation.
+- [ ] Effective setting persists after browser reload.
+- [ ] Historical assignments do not unexpectedly enroll.
+- [ ] New eligible SIM assignments enroll after task acceptance.
+- [ ] MOVE_TO automatically prepares navigation.
+- [ ] MOVE_TO automatically starts virtual movement after valid planning.
+- [ ] WITHDRAW_TO automatically prepares navigation and starts movement.
+- [ ] HOLD_POSITION uses supported non-moving virtual execution.
+- [ ] REQUEST_STATUS uses supported non-moving virtual execution.
+- [ ] NONE/unknown actions do not automatically execute.
+- [ ] One task with multiple units produces correct per-assignment jobs.
+- [ ] Road-provider abstraction is reused.
+- [ ] Existing navigation session invariants are preserved.
+- [ ] Route and SIM position versions are validated.
+- [ ] Missing/invalid road access blocks movement safely.
+- [ ] No implicit teleporting or fake GPS.
+- [ ] Existing active runs are not silently replaced.
+- [ ] Cancelled/completed tasks are not restarted.
+- [ ] Existing Cron continues running compatible SIM ticks.
+- [ ] Worker overlap cannot duplicate agents.
+- [ ] Browser can close without stopping server execution.
+- [ ] No human impersonation.
+- [ ] No real incident automation.
+- [ ] No new browser polling loop.
+- [ ] Manual simulation still works.
+- [ ] F4 notifications report meaningful transitions without flooding.
+- [ ] UI shows correct per-unit status and failures.
+- [ ] SI/DE localization is complete.
+- [ ] Any SQL and Edge Function deployment steps are documented precisely.
+
+---
+
+## 22. Development restrictions
+
+**Do NOT run:**
+
+- Tests.
+- Builds.
+- Lint.
+- Typechecks.
+- CI.
+- Browser/runtime checks.
+- Android/Gradle tasks.
+- Database migrations.
+- Supabase deployments.
+
+Do not merge the PR.
+
+Do not modify production infrastructure.
+
+Do not automatically change the existing Cron schedule.
+
+Do not use destructive Git operations.
+
+Preserve the user's local customizations:
+
+- `android/app/build.gradle.kts`
+- `android/build.gradle.kts`
+- `android/gradle.properties`
+- `android/app/schemas/`
+- `pnpm-lock.yaml`
+- `web/next-env.d.ts`
+
+Do not introduce unnecessary dependencies or lockfile changes.
+
+Do not add this prompt as a large `.txt` file in the repository root.
+
+---
+
+## 23. Deliverables
+
+Produce one focused PR containing:
+
+1. Secure durable automatic SIM orchestration.
+2. Explicit action execution-policy mapping.
+3. Scenario-level automation switch.
+4. Post-acceptance assignment enrollment.
+5. Automatic routing for moving native behaviors.
+6. Automatic non-moving execution for supported behaviors.
+7. Simulation agent creation and existing worker integration.
+8. Multi-unit assignment handling.
+9. Server-authoritative job and failure reporting.
+10. Compact Command Map automation interface.
+11. SI/DE localization.
+12. Forward-only SQL migration.
+13. Minimal necessary Edge Function modifications.
+14. Full changed-file summary.
+15. Authorization, idempotency and concurrency explanation.
+16. Exact manual SQL migration and Edge Function deployment commands.
+17. Scheduler compatibility and secret requirements.
+18. Safe disable/recovery procedure.
+19. Manual verification checklist covering:
+    - automation OFF/ON;
+    - single and multi-unit commands;
+    - each supported native behavior;
+    - OSRM and GraphHopper failures;
+    - road-access failure;
+    - active-run conflicts;
+    - scenario pause/resume;
+    - task cancellation;
+    - authority revocation;
+    - Cron running/stopped;
+    - browser closure;
+    - duplicate worker invocation;
+    - real versus SIM incident separation;
+    - F2 context-menu actions;
+    - F3 tactical destinations;
+    - F4 live updates;
+    - G command hierarchy;
+    - H control groups;
+    - PR #71 integration fixes.
+20. Explicit declaration that tests, builds and runtime checks were not executed.
+
+Do not claim that implementation is verified without actual evidence.
+
+**Final goal:** A commander issues one authorized configured command from Gasilko's RTS map. In an eligible training scenario with automatic SIM execution enabled, the backend independently prepares the required navigation, starts the appropriate simulated execution and advances the agents through the existing worker — without separate manual navigation or agent START operations, while preserving strict operational safety and authorization.
+
+**Next milestone: M14.6 — Scenario Director & Dynamic Incident Events.**
