@@ -20,7 +20,13 @@ export function useTemplateMutation(account:string,org:string,surface:string,rea
  },[key,org]);
  async function send(request:Request){
   if(locked.current)return;locked.current=true;setBusy(true);setError('');setPending(request);
-  try{sessionStorage.setItem(key,JSON.stringify(request));}catch{/* Same operation retained in memory. */}
+  try{
+   const encoded=JSON.stringify(request);sessionStorage.setItem(key,encoded);
+   if(sessionStorage.getItem(key)!==encoded)throw new Error('storage');
+  }catch{
+   // Do not send an operation whose identity cannot survive an ambiguous response.
+   locked.current=false;setBusy(false);setPending(null);setError('storage');return;
+  }
   try{
    const data=await read<unknown>(request.name,request.args,undefined,account);
    try{sessionStorage.removeItem(key);}catch{}

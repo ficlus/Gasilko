@@ -1,6 +1,6 @@
 import type {Locale} from '../i18n';
 const sl:Record<string,string>={
- startPreview:'Ustvari preizkusno vajo iz osnutka',library:'SIM · Scenariji vaj',blank:'Ustvari prazno vajo',templates:'Predloge vaj',search:'Iskanje',category:'Kategorija',all:'Vse',
+ storage:'Za varno ponavljanje omogočite shrambo seje brskalnika. Dejanje ni bilo poslano.',startPreview:'Ustvari preizkusno vajo iz osnutka',library:'SIM · Scenariji vaj',blank:'Ustvari prazno vajo',templates:'Predloge vaj',search:'Iskanje',category:'Kategorija',all:'Vse',
  BUILT_IN:'Pripravljene predloge',ORGANIZATION:'Predloge organizacije',DRAFT:'Osnutek',PUBLISHED:'Objavljeno',ARCHIVED:'Arhivirano',
  open:'Odpri / predogled',copy:'Prilagodi kopijo',revise:'Nova različica osnutka',save:'Shrani osnutek',publish:'Objavi',archive:'Arhiviraj',start:'Ustvari SIM vajo',
  back:'Nazaj v knjižnico',preview:'Predogled',edit:'Urejanje',configuration:'Nastavitve vaje',inspector:'Izbrani element',map:'Zemljevid predloge',
@@ -33,7 +33,7 @@ const sl:Record<string,string>={
  reviewDefaults:'Nič se ne premika samodejno. Začetni položaji so simulirani.',scope:'Organizacija',refresh:'Osveži'
 };
 const de:Record<string,string>={
- startPreview:'Testübung aus Entwurf erstellen',library:'SIM · Übungsszenarien',blank:'Leere Übung erstellen',templates:'Übungsvorlagen',search:'Suche',category:'Kategorie',all:'Alle',
+ storage:'Für sichere Wiederholungen den Sitzungsspeicher des Browsers aktivieren. Die Aktion wurde nicht gesendet.',startPreview:'Testübung aus Entwurf erstellen',library:'SIM · Übungsszenarien',blank:'Leere Übung erstellen',templates:'Übungsvorlagen',search:'Suche',category:'Kategorie',all:'Alle',
  BUILT_IN:'Vorbereitete Vorlagen',ORGANIZATION:'Organisationsvorlagen',DRAFT:'Entwurf',PUBLISHED:'Veröffentlicht',ARCHIVED:'Archiviert',
  open:'Öffnen / Vorschau',copy:'Kopie anpassen',revise:'Neue Entwurfsversion',save:'Entwurf speichern',publish:'Veröffentlichen',archive:'Archivieren',start:'SIM-Übung erstellen',
  back:'Zur Bibliothek',preview:'Vorschau',edit:'Bearbeiten',configuration:'Übungskonfiguration',inspector:'Ausgewähltes Element',map:'Vorlagenkarte',
