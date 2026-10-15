@@ -29,6 +29,7 @@ export function IncidentNavigationProvider({account,org,incidentId,refresh:exter
   if(['NOT_AUTHORIZED','EXPIRED'].includes(code)){setData(null);setHistoric(null);setPicking(false);setCandidate(null);setProposal(null);setPending(null);rts.revoke();}
  }
  useEffect(()=>{alive.current=true;return()=>{alive.current=false;routeRequest.current++;};},[]);
+ useEffect(()=>{setData(null);setHistoric(null);routeRequest.current++;},[account,org,incidentId,assignment,unit,sessionId,page,before]);
  useEffect(()=>{try{
   const raw=sessionStorage.getItem(key);if(raw&&raw.length<16000){const p=JSON.parse(raw) as Request;
    if(['incident_navigation_calculate','incident_navigation_command'].includes(p.name)&&p.assignment&&
@@ -37,12 +38,12 @@ export function IncidentNavigationProvider({account,org,incidentId,refresh:exter
    }}
  }catch{}},[key,incidentId]);
  useEffect(()=>{
-  const ac=new AbortController();setData(null);setHistoric(null);routeRequest.current++;
-  if(blocked)return()=>ac.abort();
+  const ac=new AbortController();
+  if(rts.blocked){setData(null);setHistoric(null);return()=>ac.abort();}
   void read<NavigationView>('incident_navigation_read',{p_organization_id:org,p_incident_id:incidentId,p_assignment_id:assignment,p_unit_id:unit,p_session_id:sessionId,p_page:page,p_before_revision:before},ac.signal,account)
    .then(v=>{if(!ac.signal.aborted)setData(v);}).catch(e=>{if(!ac.signal.aborted)failure(e);});
   return()=>ac.abort();
- },[account,org,incidentId,assignment,unit,sessionId,page,before,epoch,externalRefresh,read,blocked,sim?.data?.scenario?.version]);
+ },[account,org,incidentId,assignment,unit,sessionId,page,before,epoch,externalRefresh,read,rts.blocked,sim?.data?.scenario?.version]);
  useEffect(()=>{rts.setNavigationEditing(picking||!!proposal||!!pending);return()=>rts.setNavigationEditing(false);},[picking,!!proposal,!!pending,rts.setNavigationEditing]);
  useEffect(()=>{if(blocked){setPicking(false);setCandidate(null);setHistoric(null);setData(null);}},[blocked]);
  useEffect(()=>{if(proposal)dialog.current?.showModal();return()=>dialog.current?.close();},[!!proposal]);

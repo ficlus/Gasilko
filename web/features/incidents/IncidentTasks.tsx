@@ -50,6 +50,18 @@ export function IncidentTasks({submission='idle',locale,account,org,incidentId,v
  const selectionKeys=chosen.map(recipientKey).sort().join('|');
  const scope={p_incident_id:incidentId,p_acting_organization_id:org};
  useEffect(()=>{alive.current=true;return()=>{alive.current=false;};},[]);
+ useEffect(()=>rts.bindGroupResolver(async(refs,signal)=>{
+  const result:RtsRecipient[]=[];let next=0;
+  await Promise.all(Array.from({length:Math.min(4,refs.length)},async()=>{
+   while(next<refs.length&&!signal.aborted){const ref=refs[next++];
+    const page=await read<TaskPage<Recipient>>('incident_task_recipients',{p_incident_id:incidentId,p_acting_organization_id:org,p_id:ref.id},signal,account);
+    const row=page.rows.find(item=>recipientKey(item)===recipientKey(ref));
+    if(row)result.push({...row,assignmentId:'',eligibility:'UNKNOWN'});
+   }
+  }));
+  return refs.flatMap(ref=>{const row=result.find(item=>recipientKey(item)===recipientKey(ref));return row?[row]:[];});
+ }),[rts.bindGroupResolver,account,org,incidentId,read]);
+
  function failure(e:unknown){const code=taskErrorCode(e);setError(code);setReadUnavailable(true);rts.setCommandTypes([]);
   if(['NOT_AUTHORIZED','EXPIRED'].includes(code)){rts.revoke();blocked.current=true;setRows(null);setDetail(null);setCatalog(null);setCandidates(null);setChosen([]);setCop(null);setHydrants([]);setOpen(false);}}
  useEffect(()=>{
@@ -140,7 +152,7 @@ export function IncidentTasks({submission='idle',locale,account,org,incidentId,v
  function begin(prefill=false,preserveRecipients=false,fromContext=false){
   if(locked||!operational)return;
   const session=++formSession.current;setContextForm(fromContext);if(fromContext)setVerifyEpoch(v=>v+1);
-  setTaskUuid(crypto.randomUUID());setBaseVersion(version);setOpen(true);setError('');setReadUnavailable(false);setStale(false);if(!fromContext)setAction(null);if(!preserveRecipients)setChosen([]);setActionChanged(false);setParameters({});setTitle('');setNotes('');setPriority(fromContext&&action?action.configuration.default_priority:'NORMAL');setLon(fromContext&&target.kind==='COORDINATE'?String(target.coordinate[0]):'');setLat(fromContext&&target.kind==='COORDINATE'?String(target.coordinate[1]):'');
+  setTaskUuid(crypto.randomUUID());setBaseVersion(version);setOpen(true);setError('');setReadUnavailable(false);setStale(false);if(!fromContext)setAction(null);if(!preserveRecipients)setChosen([]);else setChosen(current=>current.map(row=>({...row,assignmentId:crypto.randomUUID()})));setActionChanged(false);setParameters({});setTitle('');setNotes('');setPriority(fromContext&&action?action.configuration.default_priority:'NORMAL');setLon(fromContext&&target.kind==='COORDINATE'?String(target.coordinate[0]):'');setLat(fromContext&&target.kind==='COORDINATE'?String(target.coordinate[1]):'');
   if(!fromContext)setTarget(prefill&&selected&&['HYDRANT','INCIDENT_SECTOR','MAP_OBJECT'].includes(selected.kind)?selected.kind==='HYDRANT'?{kind:'HYDRANT',entityId:selected.id}:
    {kind:selected.kind==='MAP_OBJECT'?'INCIDENT_MAP_OBJECT':'INCIDENT_SECTOR',entityId:selected.id,incidentId}:{kind:'NONE'});
   if(prefill&&selected?.kind==='INCIDENT_UNIT'){
@@ -199,7 +211,7 @@ export function IncidentTasks({submission='idle',locale,account,org,incidentId,v
  const supportedSelected=selected&&['HYDRANT','INCIDENT_SECTOR','MAP_OBJECT','INCIDENT_UNIT'].includes(selected.kind)&&selected.id!=='primary';
  const cfg=action?.configuration,targetAllowed=!cfg||cfg.target_types.includes(target.kind);
  const visibleRecipients:Chosen[]=(candidates?.rows??[]).map(r=>({...r,assignmentId:chosen.find(c=>recipientKey(c)===recipientKey(r))?.assignmentId??crypto.randomUUID(),eligibility:'ELIGIBLE',sector_name:cop?.sectors.find(s=>s.id===r.sector_id)?.name}));
- useEffect(()=>{rts.rememberRecipients(visibleRecipients);},[rts,visibleRecipients]);
+
  const invalidRecipients=chosen.some(r=>r.eligibility!=='ELIGIBLE'||!!cfg&&!cfg.recipient_types.includes(r.type));
  const currentHydrantId=target.kind==='HYDRANT'?target.entityId:'';
  const hydrantOptions=Array.from(new Map([...(cop?.links.flatMap(l=>l.hydrant?[{id:l.hydrant.id,code:l.hydrant.code,address:l.hydrant.address}]:[])??[]),...hydrants].map(h=>[h.id,h])).values());
@@ -227,6 +239,9 @@ export function IncidentTasks({submission='idle',locale,account,org,incidentId,v
  </>;
  if(blocked.current)return <WorkspaceSlot name="operational"><p role="alert">{t(error||'NOT_AUTHORIZED')}</p></WorkspaceSlot>;
  return <>
+  {workspace?.selected?.kind==='INCIDENT_SECTOR'&&<WorkspaceSlot name="selectedPane"><WorkspaceSection title={t('tasks')} open><p>{rt('sectorTaskScope')}</p>
+   {rows?.rows.filter(task=>task.target_type==='INCIDENT_SECTOR'&&task.target_entity_id===workspace.selected?.id).map(task=><article key={task.id}><button onClick={()=>selectTask(task.id)}>{actionLabel(task.configuration,locale)} · {task.title??task.id}</button><p>{t(task.status)}</p></article>)}
+  </WorkspaceSection></WorkspaceSlot>}
   <WorkspaceSlot name="operational">{operational&&!(contextForm&&open&&commandView)&&<WorkspaceSection title={rt('rtsTitle')} open>
    {recipientPicker}
   </WorkspaceSection>}<WorkspaceSection title={t('tasks')}>

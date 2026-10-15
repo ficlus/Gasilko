@@ -20,7 +20,7 @@ import type {ContextHydrant} from '../../lib/hydrants/viewport';
 import {OperationalMapCanvas,orderOperationalLayers,type ViewportBounds} from '../map/OperationalMapCanvas';
 
 export type CopLayers={sectors:boolean;markers:boolean;zones:boolean;hydrants:boolean};
-type Props=TacticalObjectActions&{busy:boolean;previewRequest:number;locale:Locale;cop:Cop;layers:CopLayers;drawing:Geometry['type']|null;draft:Geometry|null;vertices:Position[];
+type Props=TacticalObjectActions&{busy:boolean;previewRequest:number;focusRequest:number;locale:Locale;cop:Cop;layers:CopLayers;drawing:Geometry['type']|null;draft:Geometry|null;vertices:Position[];
  selected:string;contextHydrants:ContextHydrant[];onBounds:(b:ViewportBounds)=>void;onPoint:(p:Position)=>void;onSelect:(id:string)=>void};
 const ids=['cop-primary','cop-sectors','cop-markers','cop-zones','cop-hydrants','cop-draft'] as const;
 const features=(items:{id:string;geometry:Geometry;label:string;kind?:string;status?:string}[])=>({type:'FeatureCollection' as const,
@@ -75,24 +75,26 @@ export default function CopMap(props:Props){
   }}>{map=><><CopRendering map={map} props={props}/><TaskIntentLayers map={map} locale={props.locale}/><SimulationMapLayer map={map} locale={props.locale}/><IncidentNavigationLayer map={map} locale={props.locale}/><RtsMapInteraction map={map} locale={props.locale} layers={recipientLayers}/>{workspace?.view==='command'&&<RtsContextMenu onCreateObject={props.onCreateObject} onEditObject={props.onEditObject} onDeactivateObject={props.onDeactivateObject} busy={props.busy||!!props.drawing||!!navigation?.picking||!!sim?.move} map={map} locale={props.locale} cop={props.cop} hydrants={props.contextHydrants} layers={recipientLayers}/>}</>}</OperationalMapCanvas>;
 }
 function CopRendering({map,props}:{map:Map;props:Props}){
- const fitted=useRef(''),previewed=useRef(0);
+ const fitted=useRef(''),previewed=useRef(0),focused=useRef(0),sourceBytes=useRef(new globalThis.Map<string,string>());
  useEffect(()=>{
   if(previewed.current===props.previewRequest)return;previewed.current=props.previewRequest;
   if(!props.draft)return;const points=geometryPositions(props.draft);if(!points.length)return;
   const xs=points.map(p=>p[0]),ys=points.map(p=>p[1]);map.fitBounds([[Math.min(...xs),Math.min(...ys)],[Math.max(...xs),Math.max(...ys)]],{padding:60,maxZoom:16});
  },[map,props.previewRequest,props.draft]);
  useEffect(()=>{
-  if(!props.selected){fitted.current='';return;}if(fitted.current===props.selected)return;
+  if(!props.selected){fitted.current='';return;}if(fitted.current===props.selected&&focused.current===props.focusRequest)return;
   const c=props.cop;
+  if(c.sectors.some(sector=>sector.id===props.selected)&&focused.current===props.focusRequest)return;
+  focused.current=props.focusRequest;
   const kind=c.sectors.some(s=>s.id===props.selected)?'INCIDENT_SECTOR':c.objects.some(o=>o.id===props.selected)?'INCIDENT_MAP_OBJECT':'HYDRANT';
   const g=resolveTarget(kind==='HYDRANT'?{kind,entityId:props.selected}:{kind,entityId:props.selected,incidentId:c.incident.id},{cop:c,hydrants:props.contextHydrants});
   if(!g)return;const points=geometryPositions(g);if(!points.length)return;
   const xs=points.map(p=>p[0]),ys=points.map(p=>p[1]);
   map.fitBounds([[Math.min(...xs),Math.min(...ys)],[Math.max(...xs),Math.max(...ys)]],{padding:60,maxZoom:16});
   fitted.current=props.selected;
- },[map,props.selected,props.cop,props.contextHydrants]);
+ },[map,props.selected,props.cop,props.contextHydrants,props.focusRequest]);
  useEffect(()=>{
-  const m=map,symbols=installCopSymbols(map);
+  const m=map,symbols=installCopSymbols(map);sourceBytes.current.clear();
    for(const id of ids)m.addSource(id,{type:'geojson',data:features([])});
    for(const source of ['cop-sectors','cop-zones','cop-draft']){
     m.addLayer({id:source+'-fill',type:'fill',source,filter:['==',['geometry-type'],'Polygon'],paint:{'fill-color':source==='cop-sectors'?'#1865a0':source==='cop-draft'?'#802ea5':'#b45200','fill-opacity':0.18}});
@@ -140,7 +142,7 @@ function CopRendering({map,props}:{map:Map;props:Props}){
  },[map]);
  useEffect(()=>{
   const m=map;const t=incidentText(props.locale),c=props.cop;
-  const put=(id:string,items:Parameters<typeof features>[0])=>(m.getSource(id) as GeoJSONSource|undefined)?.setData(features(items));
+  const put=(id:string,items:Parameters<typeof features>[0])=>{const source=m.getSource(id) as GeoJSONSource|undefined;if(!source)return;const data=features(items),bytes=JSON.stringify(data);if(sourceBytes.current.get(id)===bytes)return;sourceBytes.current.set(id,bytes);source.setData(data);};
   const primary:Position|null=c.incident.longitude!==null&&c.incident.latitude!==null?[c.incident.longitude,c.incident.latitude]:null;
   put('cop-primary',primary?[{id:'primary',geometry:{type:'Point',coordinates:primary},label:t('copLocation')}]:[]);
   put('cop-sectors',c.sectors.flatMap(s=>s.geometry?[{id:s.id,geometry:s.geometry,label:s.code+' · '+s.name}]:[]));

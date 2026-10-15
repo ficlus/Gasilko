@@ -2,6 +2,10 @@ import {taskText} from '../operational/taskMessages';
 import {operationalText} from '../operational/messages';
 import type {Locale} from '../i18n';
 const sl = {
+ simPositionKnown:'SIM: položaj iz potrjenega simulacijskega vzorca, ne dejanski GPS.',
+ selectedUnitStates:'Stanje izbranih enot',knownUnitStates:'Potrjeno operativno stanje; izbira ne pomeni prostosti za novo nalogo.',
+ explicitSectorRelations:'Izrecne dodelitve sektorju. Viri so povezani prek dodeljene enote.',
+
  liveNotifications:"Operativna obvestila",liveUnread:"nova obvestila",liveNoNotifications:"Ni novih operativnih obvestil.",liveLowOn:"Izklopi manj pomembna obvestila",liveLowOff:"Vklopi manj pomembna obvestila",
  live_CONNECTING:"Povezovanje",live_LIVE:"V živo",live_REFRESHING:"Posodabljanje",live_OFFLINE:"Povezava prekinjena",live_STALE:"Podatki zastareli",live_ACCESS_LOST:"Dostop potekel",
  live_INFO:"Informacija",live_WARNING:"Opozorilo",live_CRITICAL:"Kritično",
@@ -201,6 +205,10 @@ const sl = {
  INCIDENT_REACTIVATED:'Intervencija ponovno aktivirana',INCIDENT_CLOSED:'Intervencija zaključena',INCIDENT_CANCELLED:'Osnutek preklican',
 };
 const de:Record<keyof typeof sl,string> = {
+ simPositionKnown:'SIM: Position aus bestätigter Simulationsprobe, kein tatsächliches GPS.',
+ selectedUnitStates:'Status ausgewählter Einheiten',knownUnitStates:'Bestätigter Einsatzstatus; Auswahl bedeutet keine Verfügbarkeit für neue Aufgaben.',
+ explicitSectorRelations:'Ausdrückliche Abschnittszuordnungen. Ressourcen sind über die zugeordnete Einheit verbunden.',
+
  liveNotifications:"Operative Meldungen",liveUnread:"neue Meldungen",liveNoNotifications:"Keine neuen operativen Meldungen.",liveLowOn:"Niedrige Priorität ausschalten",liveLowOff:"Niedrige Priorität einschalten",
  live_CONNECTING:"Verbinden",live_LIVE:"Live",live_REFRESHING:"Aktualisieren",live_OFFLINE:"Verbindung unterbrochen",live_STALE:"Daten veraltet",live_ACCESS_LOST:"Zugriff abgelaufen",
  live_INFO:"Information",live_WARNING:"Warnung",live_CRITICAL:"Kritisch",

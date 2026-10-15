@@ -74,7 +74,7 @@ export function IncidentArea({locale,account,destination,initialOrg}:{locale:Loc
    if(!coreLoaded.current)setCore(c=>({...c,incident_type_id:value.types[0]?.id??''}));
   }).catch(e=>{if(!ac.signal.aborted){setEntry(null);setDetail(null);setError(safeError(e));}}).finally(()=>{if(!ac.signal.aborted)setLoading(false);});
   return()=>ac.abort();
- },[refresh,initialOrg,account]);
+ },[initialOrg,account]);
  useEffect(()=>{
   const ac=new AbortController();setCommandInbox([]);
   if(isList)rpc<CommandRequest[]>('incident_command_inbox',{},ac.signal,account)
@@ -104,7 +104,7 @@ export function IncidentArea({locale,account,destination,initialOrg}:{locale:Loc
   };
   load().catch(e=>{if(!ac.signal.aborted){setError(safeError(e));setDetail(null);setRows([]);}}).finally(()=>{if(!ac.signal.aborted)setLoading(false);});
   return()=>ac.abort();
- },[entry,org,destination,filter,page,isList,isNew]);
+ },[entry,org,destination,filter,page,isList,isNew,refresh]);
 
  async function send(request:RequestState) {
   if(sending.current)return;sending.current=true;setBusy(true);setError('');setNotice('');setPending(request);
@@ -161,6 +161,7 @@ export function IncidentArea({locale,account,destination,initialOrg}:{locale:Loc
   }else void mutate(isNew?'create':'edit',payload);
  }
  function reload(){setNotice('');setRefresh(n=>n+1);}
+ const commandDraftStale=!!confirmation&&!!detail&&confirmation.incident===detail.id&&['offer_role','end_role','transfer_command','recover_command','accept_command','decline_command','cancel_command','consent_lead'].includes(confirmation.action)&&confirmation.version!==detail.version;
  const coreForm=<form onSubmit={submitCore} className="incident-form"><fieldset disabled={loading||busy||!!pending}>
   <legend>{isNew?t('new'):t('edit')}</legend>
   {isNew&&simulationEnvironment?.can_create&&<label><input type="checkbox" checked={training} onChange={e=>setTraining(e.target.checked)}/>{simText('enable')}</label>}
@@ -205,7 +206,7 @@ export function IncidentArea({locale,account,destination,initialOrg}:{locale:Loc
   </>}
   {isNew&&entry?.organizations.find(o=>o.id===org)?.can_create&&<><p>{t('draftIdentity')}</p>{coreForm}</>}
   {isNew&&entry&&!entry.organizations.find(o=>o.id===org)?.can_create&&<p>{t('noAccess')}</p>}
-  {detail&&<IncidentLayout key={`${account}/${org}/${detail.id}`} locale={locale} simulation={{account,org,incidentId:detail.id,refresh,read:rpc,onInventoryChanged:()=>setRefresh(v=>v+1)}} operational={['ACTIVE','STABILIZED'].includes(detail.status)} locked={loading||busy||!!pending||!!confirmation} onAccessLost={()=>{setDetail(null);setError('noAccess');}}
+  {detail&&<IncidentLayout key={`${account}/${org}/${detail.id}`} locale={locale} simulation={{account,org,incidentId:detail.id,refresh,read:rpc,onInventoryChanged:()=>setRefresh(v=>v+1)}} operational={['ACTIVE','STABILIZED'].includes(detail.status)} locked={loading||busy||!!pending||!!confirmation} onAccessLost={()=>{setDetail(null);setConfirmation(null);setPending(null);setCommandInbox([]);setError('noAccess');}}
    header={<header className="admin-card workspace-header">{detail.training&&<SimulationBanner locale={locale}/>}<p>{detail.reference_number}</p><h2>{detail.title}</h2><span className="admin-badge">{t(detail.status)}</span>
     <WorkspaceHeaderDetails locale={locale}><p>{t('priority')}: {t(detail.priority)} · {t('severity')}: {t(detail.severity)} · {detail.type.names[locale]??detail.type.code}</p>
     <p>{t('lead')}: {detail.lead_name}</p><p>{t('commander')}: {detail.commander?.name??t('noCommander')}</p></WorkspaceHeaderDetails>
@@ -213,7 +214,7 @@ export function IncidentArea({locale,account,destination,initialOrg}:{locale:Loc
     {['CLOSED','CANCELLED'].includes(detail.status)?<p>{t('terminal')}</p>:!Object.values(detail.actions).some(Boolean)&&<p>{t('readOnly')}</p>}
    </header>}
    operations={<>
-    <WorkspaceSection title={t('commandTree')}>   {detail.status!=='DRAFT'&&<CommandSection key={`${account}/${org}/${detail.id}/${detail.version}`} locale={locale} account={account} org={org} incident={detail} disabled={loading||busy||!!pending} read={rpc} onAction={ask}/>}
+    <WorkspaceSection title={t('commandTree')}>   {detail.status!=='DRAFT'&&<CommandSection key={`${account}/${org}/${detail.id}`} locale={locale} account={account} org={org} incident={detail} disabled={loading||busy||!!pending} read={rpc} onAction={ask}/>}
    <section className="admin-card"><h2>{t('commander')}</h2><p>{detail.commander?.name??t('noCommander')}</p>
     {detail.commander&&!detail.commander.valid&&!['CLOSED','CANCELLED'].includes(detail.status)&&<p role="alert">{t('invalidCommander')}</p>}
     {detail.nomination&&<p>{t('nomination')}: {detail.nomination.name} · {t(detail.nomination.status)} · {date(detail.nomination.expires_at)}</p>}
@@ -242,12 +243,13 @@ export function IncidentArea({locale,account,destination,initialOrg}:{locale:Loc
   {confirmation&&<ConfirmationDialog title={t(confirmation.action)} text={t('confirmation')} busy={busy||!!pending} onDismiss={()=>setConfirmation(null)}>
     {confirmation.action==='issue_task'&&<p role="status">{contextText(locale)(busy?'sending':pending?'pending':error?'rejected':'draft')}</p>
    {confirmation.training&&<SimulationBanner locale={locale}/>}
+   {commandDraftStale&&!pending&&<p role="alert">{t('stale')}</p>}
    {confirmation.description&&<p className="incident-prose">{confirmation.description}</p>}
    {confirmation.action==='recover_command'&&<p role="alert">{t('recoveryWarning')}</p>}
-   <form onSubmit={e=>{e.preventDefault();void mutate(confirmation.action,{...confirmation.payload,...(reason?{reason}: {})},confirmation.incident,confirmation.version,confirmation.org);}}>
+   <form onSubmit={e=>{e.preventDefault();if(commandDraftStale&&!pending)return;void mutate(confirmation.action,{...confirmation.payload,...(reason?{reason}: {})},confirmation.incident,confirmation.version,confirmation.org);}}>
     {['reactivate','close','cancel','decline','consent_release','release','transfer_command','recover_command','end_role','decline_command','cancel_command'].includes(confirmation.action)&&<label>{t('reason')}<textarea required maxLength={2000} value={reason} onChange={e=>setReason(e.target.value)}/></label>}
     {['transfer_command','recover_command','accept_command','consent_lead'].includes(confirmation.action)&&<label><input type="checkbox" required/>{t('commandSafetyConfirm')}</label>}
-    <div className="actions"><button disabled={loading||busy||!!pending} type="submit">{t('confirm')}</button><button disabled={loading||busy||!!pending} type="button" onClick={()=>setConfirmation(null)}>{t('dismiss')}</button></div>
+    <div className="actions"><button disabled={loading||busy||!!pending||commandDraftStale} type="submit">{t('confirm')}</button><button disabled={loading||busy||!!pending} type="button" onClick={()=>setConfirmation(null)}>{t('dismiss')}</button></div>
    </form>{error&&<p role="alert">{t(error)}</p>}{error==='stale'&&!pending&&<button onClick={()=>{setConfirmation(null);reload();}}>{t('refresh')}</button>}{pending&&<><p>{t('pending')}</p><button disabled={busy} onClick={()=>void send(pending)}>{t('retry')}</button></>}
   </ConfirmationDialog>}
  </div>;

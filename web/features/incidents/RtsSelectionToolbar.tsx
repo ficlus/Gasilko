@@ -4,11 +4,13 @@ import {taskText} from '../../lib/operational/taskMessages';
 import {operationalText} from '../../lib/operational/messages';
 import {rtsText} from '../../lib/operational/rtsMessages';
 import {recipientKey} from '../../lib/operational/rts';
+import {useWorkspace} from './workspace';
 import {useRts} from './rtsSession';
 
 export function RtsSelectionToolbar({locale}:{locale:Locale}){
- const rts=useRts(),t=rtsText(locale),tt=taskText(locale),ot=operationalText(locale);
+ const workspace=useWorkspace(),rts=useRts(),t=rtsText(locale),tt=taskText(locale),ot=operationalText(locale);
  if(!rts||!rts.enabled||rts.blocked)return null;
+ const groupsLocked=rts.locked||rts.externalEditing||rts.copEditing||rts.open||rts.mode!=='NORMAL'||rts.groupBusy;
  const unsupported=(type:string)=>!!rts.action&&!rts.action.configuration.recipient_types.includes(type);
  const invalid=rts.recipients.filter(r=>unsupported(r.type)||r.eligibility==='UNAVAILABLE').length;
  const unknown=rts.recipients.filter(r=>!unsupported(r.type)&&r.eligibility==='UNKNOWN').length;
@@ -20,11 +22,11 @@ export function RtsSelectionToolbar({locale}:{locale:Locale}){
    <button type="button" aria-pressed={rts.mode==='SELECT_LASSO'} disabled={(rts.locked||rts.externalEditing)||rts.copEditing} onClick={()=>rts.requestMode(rts.mode==='SELECT_LASSO'?'NORMAL':'SELECT_LASSO')}>{t('lasso')}</button>
    {rts.mode!=='NORMAL'&&<button type="button" onClick={rts.cancelMode}>{t('cancelMode')}</button>}
   </div>
-  <section className="rts-control-groups" aria-label={t('controlGroups')}>
+  {workspace?.view==='command'&&<section className="rts-control-groups" aria-label={t('controlGroups')}>
    <strong>{t('controlGroups')}</strong><span>{t('selected')}: {rts.recipients.length}</span>
-   <div className="rts-group-buttons">{Array.from({length:9},(_,offset)=>{const number=offset+1,count=rts.groups.get(number)?.length??0;return <span className="rts-group" key={number}><button type="button" title={t('groupRecall')+' '+number} disabled={(rts.locked||rts.externalEditing)||!count} onClick={()=>rts.recallGroup(number)}>{number} · {count||'—'}</button><button type="button" aria-label={t('groupSave')+' '+number} title={t('groupSave')+' '+number} disabled={(rts.locked||rts.externalEditing)||!rts.recipients.length} onClick={()=>rts.saveGroup(number)}>+</button>{count>0&&<button type="button" aria-label={t('groupClear')+' '+number} title={t('groupClear')+' '+number} disabled={rts.locked||rts.externalEditing} onClick={()=>rts.clearGroup(number)}>×</button>}</span>;})}</div>
-   <small>{t('groupsTemporary')}</small>
-  </section>
+   <div className="rts-group-buttons">{Array.from({length:9},(_,offset)=>{const number=offset+1,count=rts.groups.get(number)?.length??0;return <span className="rts-group" key={number}><button type="button" title={t('groupRecall')+' '+number} disabled={groupsLocked||!count} onClick={()=>rts.recallGroup(number)}>{number} · {count||'—'}</button><button type="button" aria-label={t('groupSave')+' '+number} title={t('groupSave')+' '+number} disabled={groupsLocked||!rts.recipients.length} onClick={()=>rts.saveGroup(number)}>+</button>{count>0&&<button type="button" aria-label={t('groupClear')+' '+number} title={t('groupClear')+' '+number} disabled={groupsLocked} onClick={()=>rts.clearGroup(number)}>×</button>}</span>;})}</div>
+   <small>{t('groupsTemporary')}</small><small>{t('groupShortcuts')}</small>
+  </section>}
   <div className="actions"><label><input type="checkbox" checked={rts.multiTouch} disabled={(rts.locked||rts.externalEditing)} onChange={e=>rts.setMultiTouch(e.target.checked)}/>{t('multiTouch')}</label>
    <label><input type="checkbox" checked={rts.merge} disabled={(rts.locked||rts.externalEditing)} onChange={e=>rts.setMerge(e.target.checked)}/>{t('merge')}</label></div>
   <p>{t('eligibleCount')}: {rts.recipients.length-invalid-unknown} · {t('invalidCount')}: {invalid} · {t('unknownCount')}: {unknown}</p>

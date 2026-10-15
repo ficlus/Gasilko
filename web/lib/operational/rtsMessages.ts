@@ -1,5 +1,6 @@
 import type {Locale} from '../i18n';
 const messages:Record<string,readonly [string,string]>={
+ sectorTaskScope:['Naloge na trenutno naloženi strani, katerih cilj je ta sektor. Cilj ne pomeni članstva prejemnika v sektorju.','Aufgaben auf der aktuell geladenen Seite mit diesem Abschnitt als Ziel. Das Ziel bedeutet keine Abschnittsmitgliedschaft des Empfängers.'],
  "rtsTitle": [
   "Izbira prejemnikov",
   "Empfängerauswahl"
@@ -200,6 +201,8 @@ const messages:Record<string,readonly [string,string]>={
   "Strežnik ob izdaji ponovno preveri kanonični cilj; predogled ni dokaz pooblastila.",
   "Server prüft das kanonische Ziel bei Erteilung erneut; Vorschau ist kein Berechtigungsnachweis."
  ],
+ "groupRecalled":["Skupina je priklicana. Pred izdajo preveri prejemnike.","Gruppe aufgerufen. Empfänger vor Erteilung prüfen."],
+ "groupShortcuts":["Na poveljniški karti: 1–9 prikliče skupino; Ctrl/⌘ + 1–9 shrani izbor. Ne velja med urejanjem.","Auf der Führungskarte: 1–9 ruft eine Gruppe auf; Strg/⌘ + 1–9 speichert die Auswahl. Nicht während der Bearbeitung."],
  "controlGroups": [
   "Začasne skupine",
   "Temporäre Gruppen"

@@ -31,6 +31,7 @@ export function IncidentCop({locale,account,org,incidentId,refresh,feedback,disa
  const [finding,setFinding]=useState(false),[coordinateText,setCoordinateText]=useState('');
  const searchController=useRef<AbortController|null>(null),seenFeedback=useRef(feedback.sequence);
  const readController=useRef<AbortController|null>(null),draftRef=useRef<Draft|null>(null),nameInput=useRef<HTMLInputElement>(null);
+ const [focusRequest,setFocusRequest]=useState(0);
  const [previewRequest,setPreviewRequest]=useState(0),[saved,setSaved]=useState(false);
  const [linkId,setLinkId]=useState('');
  const [bounds,setBounds]=useState<ViewportBounds|null>(null),[background,setBackground]=useState(true);
@@ -46,7 +47,10 @@ export function IncidentCop({locale,account,org,incidentId,refresh,feedback,disa
  useEffect(()=>{
   const ac=new AbortController();readController.current=ac;setLoading(true);setError('');
   read<Cop>('incident_cop',{p_incident_id:incidentId,p_acting_organization_id:org},ac.signal,account)
-   .then(value=>{if(!ac.signal.aborted)setCop(value);})
+   .then(value=>{if(!ac.signal.aborted)setCop(previous=>!previous?value:{...value,
+    sectors:JSON.stringify(previous.sectors)===JSON.stringify(value.sectors)?previous.sectors:value.sectors,
+    objects:JSON.stringify(previous.objects)===JSON.stringify(value.objects)?previous.objects:value.objects,
+    links:JSON.stringify(previous.links)===JSON.stringify(value.links)?previous.links:value.links});})
    .catch(e=>{if(!ac.signal.aborted){setCop(null);setError('unavailable');if(e instanceof Error&&['NOT_AUTHORIZED','EXPIRED'].includes(e.message)){rts?.revoke();searchController.current?.abort();setDraft(null);setVertices([]);setCandidates([]);setSelected('');setDrawing(null);}}})
    .finally(()=>{if(!ac.signal.aborted)setLoading(false);});
   return()=>ac.abort();
@@ -90,6 +94,7 @@ export function IncidentCop({locale,account,org,incidentId,refresh,feedback,disa
   setDrawing(null);setVertices([]);
  }
  const current=draft?.type==='sector'?cop?.sectors.find(s=>s.id===draft.id):cop?.objects.find(o=>o.id===draft?.id);
+ useEffect(()=>{if(draft&&cop&&draft.incidentVersion!==cop.incident.version)setStale(true);},[draft?.incidentVersion,cop?.incident.version]);
  const targetEditable=!!cop&&(cop.can_manage||cop.sectors.some(s=>s.id===draft?.sector&&s.can_edit));
  const canSave=!!cop&&!!draft&&(draft.version==='0'?(draft.type==='sector'?cop.can_manage:targetEditable):!!current?.can_edit&&(draft.type==='sector'||targetEditable));
  function save(e:FormEvent){
@@ -175,7 +180,7 @@ export function IncidentCop({locale,account,org,incidentId,refresh,feedback,disa
    </div>
   ) : classicMapStatus}
   {cop&&<>
-   <CopMap busy={actionLocked} previewRequest={previewRequest} onCreateObject={createAt} onEditObject={id=>begin('object',id)} onDeactivateObject={id=>{const object=cop.objects.find(o=>o.id===id);if(object)deactivate('object',object.id,object.version,object.label);}} selected={selection||shownHydrant||selected==='primary'?selected:''} contextHydrants={mapHydrants} onBounds={setBounds} locale={locale} cop={cop} layers={layers} drawing={locked?null:drawing} draft={draft?.geometry??null} vertices={vertices} onPoint={point} onSelect={setSelected}/>
+   <CopMap focusRequest={focusRequest} busy={actionLocked} previewRequest={previewRequest} onCreateObject={createAt} onEditObject={id=>begin('object',id)} onDeactivateObject={id=>{const object=cop.objects.find(o=>o.id===id);if(object)deactivate('object',object.id,object.version,object.label);}} selected={selection||shownHydrant||selected==='primary'?selected:''} contextHydrants={mapHydrants} onBounds={setBounds} locale={locale} cop={cop} layers={layers} drawing={locked?null:drawing} draft={draft?.geometry??null} vertices={vertices} onPoint={point} onSelect={setSelected}/>
    {selected==='primary'&&<p>{t('copLocation')}: {cop.incident.latitude}, {cop.incident.longitude}</p>}
    <WorkspaceSlot name="selectedPane">
    {selected==='primary'&&<p>{t('copLocation')}: {cop.incident.latitude}, {cop.incident.longitude}</p>}
@@ -183,7 +188,7 @@ export function IncidentCop({locale,account,org,incidentId,refresh,feedback,disa
    {selection&&!shownHydrant&&<aside className="admin-notice" aria-live="polite"><h3>{t('copSelected')}</h3>
     {'code'in selection?<p>{selection.code} · {selection.name}</p>:'label'in selection?<div><p>{t(selection.kind)} · {selection.label} · {selection.description}</p><p>{selection.sector_name??t('copIncidentWide')}</p></div>:
      <div><p>{selection.hydrant?.code??t(selection.hydrant?'copPendingCode':'copHiddenHydrant')} · {t(selection.purpose)}</p><p>{selection.hydrant?t(selection.hydrant.status):''}</p><p>{selection.hydrant?.address||selection.hydrant?.location_description}</p></div>}
-    <p>{t('copVersion')}: {selection.version}</p>
+    <p>{t('copVersion')}: {selection.version}</p><button type="button" disabled={actionLocked} onClick={()=>setFocusRequest(value=>value+1)}>{t('copPointPreview')}</button>
     {'can_edit'in selection&&selection.can_edit&&<button disabled={actionLocked} onClick={()=>begin('code'in selection?'sector':'object',selection.id)}>{t('copEdit')}</button>}
    </aside>}
    {shownHydrant&&<section className="admin-notice">
