@@ -50,7 +50,7 @@ begin
  elsif tg_table_name='simulation_template_instances' then
   if (new.scenario_id,new.source_version_id,new.definition,new.organization_id,new.created_by,new.created_at)
    is distinct from (old.scenario_id,old.source_version_id,old.definition,old.organization_id,old.created_by,old.created_at)
-   or old.state='READY' then raise exception 'INVALID_TRANSITION'; end if;
+   or not(old.state='WAITING_COMMAND' and new.state='INITIALIZING' or old.state='INITIALIZING' and new.state='READY') then raise exception 'INVALID_TRANSITION'; end if;
  else
   if old.organization_id is null or (new.id,new.organization_id,new.code,new.created_by,new.created_at)
    is distinct from (old.id,old.organization_id,old.code,old.created_by,old.created_at)
@@ -63,6 +63,24 @@ create trigger simulation_template_version_history before update or delete on pu
 create trigger simulation_template_instance_history before update or delete on private.simulation_template_instances for each row execute function private.simulation_template_immutable();
 
 -- Exact object keys, including required fields. There is no opaque executable extension bag.
+create function private.simulation_template_provenance_guard() returns trigger
+language plpgsql security definer set search_path='' as $
+begin
+ if not exists(select 1 from public.simulation_scenarios s
+  join public.simulation_scenario_template_versions v on v.id=new.source_version_id
+  join public.simulation_scenario_templates t on t.id=v.template_id
+  where s.id=new.scenario_id and s.organization_id=new.organization_id and s.created_by=new.created_by
+  and s.status='DRAFT' and t.organization_id=new.organization_id and not t.archived
+  and v.definition=new.definition) then raise exception 'VALIDATION_FAILED';end if;
+ return new;
+end; $;
+create trigger simulation_template_provenance_scope before insert on private.simulation_template_instances for each row execute function private.simulation_template_provenance_guard();
+create trigger simulation_template_receipts_immutable before update or delete on private.simulation_template_receipts for each row execute function private.audit_immutable();
+create trigger simulation_templates_no_truncate before truncate on public.simulation_scenario_templates for each statement execute function private.audit_immutable();
+create trigger simulation_template_versions_no_truncate before truncate on public.simulation_scenario_template_versions for each statement execute function private.audit_immutable();
+create trigger simulation_template_instances_no_truncate before truncate on private.simulation_template_instances for each statement execute function private.audit_immutable();
+create trigger simulation_template_receipts_no_truncate before truncate on private.simulation_template_receipts for each statement execute function private.audit_immutable();
+
 create function private.sim_template_keys(v jsonb,keys text[]) returns void
 language plpgsql immutable set search_path='' as $$
 begin
@@ -175,7 +193,7 @@ begin
  order by t.id limit 25) q),'[]');
 end; $$;
 create function public.simulation_template_read(p_organization_id uuid,p_template_id uuid,p_version_id uuid default null) returns jsonb
-language plpgsql stable security definer set search_path='' as $$
+language plpgsql volatile security definer set search_path='' as $$
 declare t public.simulation_scenario_templates;v public.simulation_scenario_template_versions;
 begin
  if not private.simulation_template_editor(p_organization_id) then raise exception 'NOT_AUTHORIZED' using errcode='42501';end if;
@@ -320,7 +338,8 @@ begin
  -- Intentionally no instructor briefing, objectives or full definition.
  return jsonb_build_object('state',p.state,'scenario_version',s.version::text,'incident_version',i.version::text,
  'objects',jsonb_array_length(p.definition->'initial_objects'),'units',jsonb_array_length(p.definition->'virtual_units'),
- 'clock_scale',p.definition#>'{simulation_defaults,clock_scale}','response_profile',p.definition#>>'{simulation_defaults,response_profile}',
+ 'clock_scale',case when p.organization_id=p_organization_id and private.simulation_template_editor(p_organization_id) then p.definition#>'{simulation_defaults,clock_scale}' end,
+ 'response_profile',case when p.organization_id=p_organization_id and private.simulation_template_editor(p_organization_id) then p.definition#>>'{simulation_defaults,response_profile}' end,
  'can_initialize',p.state='WAITING_COMMAND' and i.status in ('ACTIVE','STABILIZED') and s.status='DRAFT'
  and private.simulation_template_editor(p_organization_id) and private.simulation_controller(s.id,p_organization_id));
 end; $$;
@@ -437,4 +456,5 @@ revoke all on function public.simulation_template_initialization(uuid,uuid) from
 grant execute on function public.simulation_template_initialization(uuid,uuid) to authenticated;
 revoke all on function public.simulation_template_initialize(uuid,uuid,uuid,bigint,bigint) from public,anon,authenticated,service_role;
 grant execute on function public.simulation_template_initialize(uuid,uuid,uuid,bigint,bigint) to authenticated;
+revoke all on function private.simulation_template_provenance_guard() from public,anon,authenticated,service_role;
 commit;

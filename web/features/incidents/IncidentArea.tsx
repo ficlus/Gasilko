@@ -1,5 +1,8 @@
 'use client';
 import {SimulationSetup} from './SimulationSetup';
+import {TemplateLibrary} from './TemplateLibrary';
+import {TemplateInitialization} from './TemplateInitialization';
+import {templateText} from '../../lib/operational/templateMessages';
 import {SimulationOverview} from './SimulationOverview';
 import {SimulationBanner} from './SimulationProvider';
 import {simulationErrors,defaultSimulationSetup} from '../../lib/operational/simulation';
@@ -34,6 +37,7 @@ const emptyCore:Core={title:'',summary:'',incident_type_id:'',priority:'NORMAL',
 export function IncidentArea({locale,account,destination,initialOrg}:{locale:Locale;account:string;destination?:string;initialOrg?:string}) {
  const baseText=incidentText(locale),simText=simulationText(locale),t=(key:string)=>key==='create_simulation'?simText('new'):(simulationErrors as readonly string[]).includes(key)?simText(key):baseText(key),router=useRouter();
  const requestedTraining=useSearchParams().get('training')==='1';
+ const requestedTemplates=useSearchParams().get('templates')==='1';
  const [simulationEnvironment,setSimulationEnvironment]=useState<{enabled:boolean;can_create:boolean}|null>(null),[training,setTraining]=useState(false),[simulationSetup,setSimulationSetup]=useState(defaultSimulationSetup);
  const [entry,setEntry]=useState<Entry|null>(null),[org,setOrg]=useState(initialOrg??''),[rows,setRows]=useState<IncidentRow[]>([]);
  const [detail,setDetail]=useState<Incident|null>(null);
@@ -48,7 +52,7 @@ export function IncidentArea({locale,account,destination,initialOrg}:{locale:Loc
  const [taskFeedback,setTaskFeedback]=useState<CopFeedback>({sequence:0,kind:'saved'});
  const [resourceFeedback,setResourceFeedback]=useState<CopFeedback>({sequence:0,kind:'saved'});
  const alive=useRef(true),sending=useRef(false),coreLoaded=useRef(false);
- const isNew=destination==='new',isList=!destination;
+ const isNew=destination==='new',isList=!destination&&!requestedTemplates;
  const url=(id?:string,acting=org)=>`/${locale}/incidents${id?'/'+id:''}${acting?'?org='+encodeURIComponent(acting):''}`;
  const date=(value:string|null|undefined)=>value?new Date(value).toLocaleString(locale==='de'?'de-DE':'sl-SI'): '—';
  const safeError=(e:unknown)=>{
@@ -95,7 +99,7 @@ export function IncidentArea({locale,account,destination,initialOrg}:{locale:Loc
   const load=async()=>{
    if(!entry.organizations.some(o=>o.id===org))throw new IncidentError('NOT_AUTHORIZED');
    if(isList)setRows(await rpc<IncidentRow[]>('incident_list',{...args,p_status:filter,p_before_created:page?.created??null,p_before_id:page?.id??null},ac.signal));
-   else if(!isNew){
+   else if(destination&&!isNew){
     const value=await rpc<Incident|null>('incident_context',{...args,p_incident_id:destination},ac.signal,account);
     if(ac.signal.aborted)return;if(!value)throw new IncidentError('NOT_AUTHORIZED');setDetail(value);
     if(!coreLoaded.current){setCore({title:value.title,summary:value.summary,incident_type_id:value.incident_type_id,severity:value.severity,priority:value.priority,
@@ -181,13 +185,14 @@ export function IncidentArea({locale,account,destination,initialOrg}:{locale:Loc
  if(!sessionValid)return <p role="alert">{t('expired')}</p>;
  const organizationActions=<div className="registry-toolbar"><label>{t('organization')}<select value={org} disabled={loading||busy||!!pending} onChange={e=>router.push(url(destination,e.target.value))}>
    <option value="">{t('select')}</option>{entry?.organizations.map(o=><option value={o.id} key={o.id}>{o.name}</option>)}</select></label>
-   <Link href={url()}>{t('list')}</Link>{simulationEnvironment?.can_create&&<Link href={url('new')+'&training=1'}>{simText('new')}</Link>}{entry?.organizations.find(o=>o.id===org)?.can_create&&<Link href={url('new')}>{t('new')}</Link>}
+   <Link href={url()}>{t('list')}</Link>{simulationEnvironment?.can_create&&<Link href={url()+'&templates=1'}>{templateText(locale)('library')}</Link>}{simulationEnvironment?.can_create&&<Link href={url('new')+'&training=1'}>{simText('new')}</Link>}{entry?.organizations.find(o=>o.id===org)?.can_create&&<Link href={url('new')}>{t('new')}</Link>}
    <button disabled={loading||busy||!!pending} onClick={reload}>{t('refresh')}</button></div>;
  return <div className="registry incident-area">
   {!detail&&organizationActions}
   {(error||notice||loading)&&<div className="incident-feedback">{error&&<p role="alert">{t(error)}</p>}{notice&&<p role="status">{t(notice)}</p>}{loading&&<p role="status">{t('loading')}</p>}</div>}
   {pending&&<section className="admin-notice"><p>{t('pending')}</p><button disabled={busy} onClick={()=>void send(pending)}>{t('retry')}</button></section>}
   {entry?.organizations.length===0&&<p>{t('noOrg')}</p>}
+  {requestedTemplates&&!destination&&entry&&org&&<TemplateLibrary key={account+'/'+org} locale={locale} account={account} org={org} types={entry.types} read={rpc}/>}
   {isList&&entry&&<>
    {simulationEnvironment?.enabled&&org&&<SimulationOverview key={account+org} locale={locale} account={account} org={org} read={rpc}/>}
    {commandInbox.length>0&&<section className="admin-card"><h2>{t('commandInbox')}</h2><p>{t('commandInboxLimit')}</p><CommandRequests locale={locale} items={commandInbox} disabled={loading||busy||!!pending} onAction={ask}/></section>}
@@ -209,6 +214,7 @@ export function IncidentArea({locale,account,destination,initialOrg}:{locale:Loc
   {isNew&&entry&&!entry.organizations.find(o=>o.id===org)?.can_create&&<p>{t('noAccess')}</p>}
   {detail&&<IncidentLayout key={`${account}/${org}/${detail.id}`} locale={locale} simulation={{account,org,incidentId:detail.id,refresh,read:rpc,onInventoryChanged:()=>setRefresh(v=>v+1)}} operational={['ACTIVE','STABILIZED'].includes(detail.status)} locked={loading||busy||!!pending||!!confirmation} onAccessLost={()=>{setDetail(null);setConfirmation(null);setPending(null);setCommandInbox([]);setError('noAccess');}}
    header={<header className="admin-card workspace-header">{organizationActions}{detail.training&&<SimulationBanner locale={locale}/>}<p>{detail.reference_number}</p><h2>{detail.title}</h2><span className="admin-badge">{t(detail.status)}</span>
+    {detail.training&&<TemplateInitialization key={account+'/'+org+'/'+detail.id} locale={locale} account={account} org={org} incident={detail.id} refresh={refresh} read={rpc} onRefresh={reload}/>}
     <WorkspaceHeaderDetails locale={locale}><p>{t('priority')}: {t(detail.priority)} · {t('severity')}: {t(detail.severity)} · {detail.type.names[locale]??detail.type.code}</p>
     <p>{t('lead')}: {detail.lead_name}</p><p>{t('commander')}: {detail.commander?.name??t('noCommander')}</p></WorkspaceHeaderDetails>
     {detail.commander&&!detail.commander.valid&&['ACTIVE','STABILIZED'].includes(detail.status)&&<p role="alert">{t('invalidCommander')}</p>}

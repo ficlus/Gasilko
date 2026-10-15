@@ -1,0 +1,27 @@
+/* Outside the operational workspace: no command-map layout or camera changes. */
+.template-library { min-width:0; }
+.template-library .actions { flex-wrap:wrap; }
+.template-library input,.template-library select,.template-library textarea { max-width:100%;box-sizing:border-box; }
+.template-library label,.template-editor label { display:grid;gap:.35rem;min-width:0;margin-block:.65rem; }
+.template-editor fieldset { border:0;padding:0;min-width:0; }
+.template-editor-grid { display:grid;grid-template-columns:minmax(220px,280px) minmax(0,1fr) minmax(220px,280px);gap:1rem;align-items:start; }
+.template-editor-grid>* { min-width:0; }
+.template-editor details>summary { cursor:pointer;font-weight:700;padding-block:.6rem; }
+.template-editor .template-map-pane { min-width:0; }
+.template-editor .web-map { height:clamp(350px,65svh,800px); }
+.template-editor textarea { min-height:5rem;resize:vertical; }
+.template-editor .template-coordinates { border:1px solid var(--border,#d1d5db);border-radius:.5rem;padding:.6rem;margin-block:.7rem; }
+.template-items { padding:0;list-style:none;display:flex;flex-wrap:wrap;gap:.4rem;max-height:15rem;overflow:auto; }
+.template-items button { text-align:start;overflow-wrap:anywhere; }
+.template-items button[aria-pressed=true] { outline:2px solid currentColor;outline-offset:1px; }
+.template-cards { display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr));gap:1rem;margin-block:1rem; }
+.template-confirm { max-width:min(42rem,calc(100vw - 2rem));max-height:85svh;overflow:auto; }
+.template-confirm label { display:flex;gap:.6rem;margin-block:1rem; }
+.template-editor button,.template-library button { min-height:44px;white-space:normal; }
+.template-mode p { flex-basis:100%; }
+@media(max-width:1100px){
+ .template-editor-grid { grid-template-columns:minmax(0,1fr); }
+ .template-map-pane { grid-row:2; }
+ .template-editor details { max-height:55svh;overflow:auto; }
+ .template-editor .web-map { height:55svh;min-height:300px; }
+}

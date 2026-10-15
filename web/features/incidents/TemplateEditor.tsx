@@ -3,7 +3,7 @@ import dynamic from 'next/dynamic';
 import {useState,useEffect} from 'react';
 import type {Locale} from '../../lib/i18n';
 import type {Position,Geometry,MapKind} from '../../lib/incidents/cop';
-import {blankDefinition,placeUnset,placementMissing,templateCategories,templateProfiles,type Definition,type Template} from '../../lib/operational/templates';
+import {placeUnset,placementMissing,templateCategories,templateProfiles,type Definition,type Template} from '../../lib/operational/templates';
 import {templateText} from '../../lib/operational/templateMessages';
 const TemplateMap=dynamic(()=>import('./TemplateMap'),{ssr:false});
 type Props={locale:Locale;value:Template;draft:Definition;onChange:(d:Definition)=>void;disabled:boolean};
@@ -12,10 +12,12 @@ export function TemplateEditor({locale,value,draft:d,onChange,disabled}:Props){
  const t=templateText(locale),[preview,setPreview]=useState(value.builtin||value.state==='PUBLISHED'),[selected,setSelected]=useState('center');
  const [placing,setPlacing]=useState(false),[drawing,setDrawing]=useState(false),[vertices,setVertices]=useState<Position[]>([]);
  const [kind,setKind]=useState<MapKind>('COMMAND_POST');
+ const [configurationOpen,setConfigurationOpen]=useState(true),[inspectorOpen,setInspectorOpen]=useState(true);
+ useEffect(()=>{if(window.matchMedia('(max-width:1100px)').matches){setConfigurationOpen(false);setInspectorOpen(false);}},[]);
  const canEdit=!disabled&&!value.builtin&&!value.archived&&value.state==='DRAFT'&&!preview;
  const object=d.initial_objects.find(o=>o.id===selected),unit=d.virtual_units.find(u=>u.id===selected);
  const point=selected==='center'?d.world.center:selected==='incident'?d.world.incident_location:unit?.position??(object?.geometry?.type==='Point'?object.geometry.coordinates:null);
- function choose(id:string){setSelected(id);setPlacing(false);setDrawing(false);setVertices([]);}
+ function choose(id:string){setSelected(id);setInspectorOpen(true);setPlacing(false);setDrawing(false);setVertices([]);}
  function move(p:Position){
   if(!canEdit)return;
   if(selected==='center')onChange(placeUnset(d,p));
@@ -43,7 +45,7 @@ export function TemplateEditor({locale,value,draft:d,onChange,disabled}:Props){
    <p>{t('reviewDefaults')}</p></div>
   {placementMissing(d)&&<p className="admin-notice" role="status">{t('missing')}</p>}
   <div className="template-editor-grid">
-   <details className="admin-card template-configuration" open><summary>{t('configuration')}</summary>
+   <details className="admin-card template-configuration" open={configurationOpen} onToggle={e=>setConfigurationOpen(e.currentTarget.open)}><summary>{t('configuration')}</summary>
     <fieldset disabled={!canEdit}>
      <label>{t('title')}<input maxLength={200} value={d.metadata.title} onChange={e=>meta('title',e.target.value)}/></label>
      <label>{t('description')}<textarea maxLength={2000} value={d.metadata.description} onChange={e=>meta('description',e.target.value)}/></label>
@@ -69,7 +71,7 @@ export function TemplateEditor({locale,value,draft:d,onChange,disabled}:Props){
     <TemplateMap locale={locale} definition={d} selected={selected} editable={canEdit} placing={placing} vertices={vertices} onSelect={choose} onMove={move}
      onPoint={p=>{if(drawing){if(vertices.length<32)setVertices(v=>[...v,p]);}else{move(p);setPlacing(false);}}}/>
    </div>
-   <details className="admin-card template-inspector" open><summary>{t('inspector')}</summary>
+   <details className="admin-card template-inspector" open={inspectorOpen} onToggle={e=>setInspectorOpen(e.currentTarget.open)}><summary>{t('inspector')}</summary>
     {!canEdit&&<p>{t('readonly')}</p>}
     <strong>{selected==='center'?t('center'):selected==='incident'?t('incident'):object?.label??(unit?'SIM-'+(d.virtual_units.indexOf(unit)+1):t('select'))}</strong>
     {(selected==='center'||selected==='incident'||unit||object?.kind!=='PERIMETER'&&(!object?.geometry||object.geometry.type==='Point'))&&

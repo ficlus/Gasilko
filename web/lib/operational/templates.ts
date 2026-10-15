@@ -12,7 +12,7 @@ export type Definition={
 };
 export type Template={id:string;revision:string;builtin:boolean;archived:boolean;version_id:string;version:number;state:'DRAFT'|'PUBLISHED';definition:Definition};
 export type TemplateRow=Omit<Template,'definition'>&{title:string;description:string;category:string};
-export type Initialization={state:'WAITING_COMMAND'|'READY';scenario_version:string;incident_version:string;objects:number;units:number;clock_scale:number;response_profile:string;can_initialize:boolean};
+export type Initialization={state:'WAITING_COMMAND'|'READY';scenario_version:string;incident_version:string;objects:number;units:number;clock_scale:number|null;response_profile:string|null;can_initialize:boolean};
 export type TemplateRead=<T>(name:string,args:Record<string,unknown>,signal?:AbortSignal,account?:string)=>Promise<T>;
 export const templateRpcs=['simulation_template_list','simulation_template_read','simulation_template_command','simulation_template_initialization','simulation_template_initialize'] as const;
 export function blankDefinition(title:string):Definition{
@@ -29,7 +29,7 @@ export function offsetPosition(center:Position,meters:number,bearing:number):Pos
 }
 export function placeUnset(d:Definition,center:Position):Definition{
  return {...d,world:{...d.world,center,incident_location:d.world.incident_location??center},
- initial_objects:d.initial_objects.map((o,i)=>({...o,geometry:o.geometry??{type:'Point',coordinates:offsetPosition(center,Math.min(100,d.world.radius_m/3),i*80)}})),
+ initial_objects:d.initial_objects.map((o,i)=>({...o,geometry:o.geometry??(o.kind==='PERIMETER'?null:{type:'Point',coordinates:offsetPosition(center,Math.min(100,d.world.radius_m/3),i*80)})})),
  virtual_units:d.virtual_units.map((u,i)=>({...u,position:u.position??offsetPosition(center,Math.min(150,d.world.radius_m/2),200+i*8)}))};
 }
 export function placementMissing(d:Definition){
