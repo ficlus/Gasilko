@@ -1,5 +1,8 @@
 'use client';
 import {useEffect,useRef,useState} from 'react';
+import {copErrors} from '../../lib/incidents/cop';
+import {simulationErrors} from '../../lib/operational/simulation';
+import {resourceErrors} from '../../lib/operational/model';
 import type {TemplateRead} from '../../lib/operational/templates';
 import {templateError} from '../../lib/operational/templateMessages';
 type Request={name:string;args:Record<string,unknown>};
@@ -27,7 +30,7 @@ export function useTemplateMutation(account:string,org:string,surface:string,rea
    const code=e instanceof Error?e.message:'SERVER';setError(templateError(code));
    // Network/unknown failures retain the exact intent. Known rejection cannot have committed.
    if(!['SERVER','Failed to fetch','NetworkError'].includes(code)&&
-    ['NOT_AUTHORIZED','EXPIRED','SIMULATION_DISABLED','STALE_VERSION','VALIDATION_FAILED','INVALID_TRANSITION','OPERATION_REUSED',
+    [...copErrors,...simulationErrors,...resourceErrors,'NOT_AUTHORIZED','EXPIRED','SIMULATION_DISABLED','STALE_VERSION','VALIDATION_FAILED','INVALID_TRANSITION','OPERATION_REUSED',
      'INVALID_GEOMETRY','UNSUPPORTED_GEOMETRY','GEOMETRY_TOO_LARGE','INVALID_SIMULATION_STATE','INVALID_SIMULATION_UNIT','TEMPLATE_SETUP_REQUIRED'].includes(code)){
     setPending(null);try{sessionStorage.removeItem(key);}catch{}
    }

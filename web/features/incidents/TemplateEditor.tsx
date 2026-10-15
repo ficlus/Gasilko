@@ -14,7 +14,8 @@ export function TemplateEditor({locale,value,draft:d,onChange,disabled}:Props){
  const [kind,setKind]=useState<MapKind>('COMMAND_POST');
  const [configurationOpen,setConfigurationOpen]=useState(true),[inspectorOpen,setInspectorOpen]=useState(true);
  useEffect(()=>{if(window.matchMedia('(max-width:1100px)').matches){setConfigurationOpen(false);setInspectorOpen(false);}},[]);
- const canEdit=!disabled&&!value.builtin&&!value.archived&&value.state==='DRAFT'&&!preview;
+ const previewOnly=preview||value.builtin||value.archived||value.state==='PUBLISHED';
+ const canEdit=!disabled&&!previewOnly;
  const object=d.initial_objects.find(o=>o.id===selected),unit=d.virtual_units.find(u=>u.id===selected);
  const point=selected==='center'?d.world.center:selected==='incident'?d.world.incident_location:unit?.position??(object?.geometry?.type==='Point'?object.geometry.coordinates:null);
  function choose(id:string){setSelected(id);setInspectorOpen(true);setPlacing(false);setDrawing(false);setVertices([]);}
@@ -39,7 +40,7 @@ export function TemplateEditor({locale,value,draft:d,onChange,disabled}:Props){
  const meta=(key:keyof Definition['metadata'],val:unknown)=>onChange({...d,metadata:{...d.metadata,[key]:val}});
  const ring=object?.geometry?.type==='Polygon'?object.geometry.coordinates[0]:object?.geometry?.type==='LineString'?object.geometry.coordinates:null;
  return <section className="template-editor">
-  <div className="actions template-mode"><strong>{t(preview?'preview':'edit')}</strong>
+  <div className="actions template-mode"><strong>{t(previewOnly?'preview':'edit')}</strong>
    {!value.builtin&&!value.archived&&value.state==='DRAFT'&&<button type="button" disabled={disabled} aria-pressed={preview}
     onClick={()=>{setPreview(!preview);setPlacing(false);setDrawing(false);setVertices([]);}}>{t(preview?'edit':'preview')}</button>}
    <p>{t('reviewDefaults')}</p></div>
@@ -67,7 +68,7 @@ export function TemplateEditor({locale,value,draft:d,onChange,disabled}:Props){
      {(drawing||placing)&&<button type="button" onClick={()=>{setDrawing(false);setPlacing(false);setVertices([]);}}>{t('cancel')}</button>
     </div>
     <p role="status">{t('placeHelp')}</p>
-    {drawing&&<div className="actions"><span>{vertices.length}/32</span><button type="button" disabled={vertices.length<3} onClick={finish}>{t('finish')}</button><button type="button" disabled={!vertices.length} onClick={()=>setVertices(v=>v.slice(0,-1))}>{t('undo')}</button></div>}
+    {drawing&&<div className="actions"><CoordinateEditor locale={locale} value={null} disabled={!canEdit||vertices.length>=32} onApply={p=>{if(vertices.length<32)setVertices(v=>[...v,p]);}}/><span>{vertices.length}/32</span><button type="button" disabled={vertices.length<3} onClick={finish}>{t('finish')}</button><button type="button" disabled={!vertices.length} onClick={()=>setVertices(v=>v.slice(0,-1))}>{t('undo')}</button></div>}
     <TemplateMap locale={locale} definition={d} selected={selected} editable={canEdit} placing={placing} vertices={vertices} onSelect={choose} onMove={move}
      onPoint={p=>{if(drawing){if(vertices.length<32)setVertices(v=>[...v,p]);}else{move(p);setPlacing(false);}}}/>
    </div>

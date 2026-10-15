@@ -14,7 +14,7 @@ export default function TemplateMap(props:Props){
  return <OperationalMapCanvas locale={props.locale} label={templateText(props.locale)('map')} initialPoints={initial.current}
   onClick={(map,e)=>{
    if(props.editable&&props.placing){props.onPoint([e.lngLat.lng,e.lngLat.lat]);return;}
-   const hit=map.getLayer('template-points')?map.queryRenderedFeatures(e.point,{layers:['template-points','template-fill']})[0]:null;
+   const hit=map.getLayer('template-points')?map.queryRenderedFeatures(e.point,{layers:['template-points','template-fill']}).find(f=>f.properties?.id!=='bounds'&&f.properties?.id!=='drawing'):null;
    if(hit?.properties?.id)props.onSelect(String(hit.properties.id));
   }}>{map=><Layers map={map} {...props}/>}</OperationalMapCanvas>;
 }
@@ -24,7 +24,7 @@ function Layers({map,definition:d,selected,editable,placing,vertices,onMove,loca
  const add=(id:string,label:string,geometry:GeoGeometry,color:string)=>items.push({type:'Feature',geometry,properties:{id,label,color}});
  const t=templateText(locale);
  if(d.world.center){
-  const ring=Array.from({length:65},(_,i)=>offsetPosition(d.world.center!,d.world.radius_m,i*360/64));
+  const ring=Array.from({length:65},(_,i)=>offsetPosition(d.world.center!,Math.max(10,Math.min(5000,d.world.radius_m||10)),i*360/64));
   add('bounds','',{type:'Polygon',coordinates:[ring]},'#64748b');
   add('center',t('center'),{type:'Point',coordinates:d.world.center},'#64748b');
  }

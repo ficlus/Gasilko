@@ -192,7 +192,7 @@ export function IncidentArea({locale,account,destination,initialOrg}:{locale:Loc
   {(error||notice||loading)&&<div className="incident-feedback">{error&&<p role="alert">{t(error)}</p>}{notice&&<p role="status">{t(notice)}</p>}{loading&&<p role="status">{t('loading')}</p>}</div>}
   {pending&&<section className="admin-notice"><p>{t('pending')}</p><button disabled={busy} onClick={()=>void send(pending)}>{t('retry')}</button></section>}
   {entry?.organizations.length===0&&<p>{t('noOrg')}</p>}
-  {requestedTemplates&&!destination&&entry&&org&&<TemplateLibrary key={account+'/'+org} locale={locale} account={account} org={org} types={entry.types} read={rpc}/>}
+  {requestedTemplates&&!destination&&entry&&org&&<TemplateLibrary key={account+'/'+org} locale={locale} account={account} org={org} organizationName={entry.organizations.find(o=>o.id===org)?.name??org} types={entry.types} read={rpc}/>}
   {isList&&entry&&<>
    {simulationEnvironment?.enabled&&org&&<SimulationOverview key={account+org} locale={locale} account={account} org={org} read={rpc}/>}
    {commandInbox.length>0&&<section className="admin-card"><h2>{t('commandInbox')}</h2><p>{t('commandInboxLimit')}</p><CommandRequests locale={locale} items={commandInbox} disabled={loading||busy||!!pending} onAction={ask}/></section>}
@@ -214,13 +214,13 @@ export function IncidentArea({locale,account,destination,initialOrg}:{locale:Loc
   {isNew&&entry&&!entry.organizations.find(o=>o.id===org)?.can_create&&<p>{t('noAccess')}</p>}
   {detail&&<IncidentLayout key={`${account}/${org}/${detail.id}`} locale={locale} simulation={{account,org,incidentId:detail.id,refresh,read:rpc,onInventoryChanged:()=>setRefresh(v=>v+1)}} operational={['ACTIVE','STABILIZED'].includes(detail.status)} locked={loading||busy||!!pending||!!confirmation} onAccessLost={()=>{setDetail(null);setConfirmation(null);setPending(null);setCommandInbox([]);setError('noAccess');}}
    header={<header className="admin-card workspace-header">{organizationActions}{detail.training&&<SimulationBanner locale={locale}/>}<p>{detail.reference_number}</p><h2>{detail.title}</h2><span className="admin-badge">{t(detail.status)}</span>
-    {detail.training&&<TemplateInitialization key={account+'/'+org+'/'+detail.id} locale={locale} account={account} org={org} incident={detail.id} refresh={refresh} read={rpc} onRefresh={reload}/>}
     <WorkspaceHeaderDetails locale={locale}><p>{t('priority')}: {t(detail.priority)} · {t('severity')}: {t(detail.severity)} · {detail.type.names[locale]??detail.type.code}</p>
     <p>{t('lead')}: {detail.lead_name}</p><p>{t('commander')}: {detail.commander?.name??t('noCommander')}</p></WorkspaceHeaderDetails>
     {detail.commander&&!detail.commander.valid&&['ACTIVE','STABILIZED'].includes(detail.status)&&<p role="alert">{t('invalidCommander')}</p>}
     {['CLOSED','CANCELLED'].includes(detail.status)?<p>{t('terminal')}</p>:!Object.values(detail.actions).some(Boolean)&&<p>{t('readOnly')}</p>}
    </header>}
    operations={<>
+    {detail.training&&<TemplateInitialization key={account+'/'+org+'/'+detail.id} locale={locale} account={account} org={org} incident={detail.id} refresh={refresh} read={rpc} onRefresh={reload}/>}
     <WorkspaceSection title={t('commandTree')}>   {detail.status!=='DRAFT'&&<CommandSection key={`${account}/${org}/${detail.id}`} locale={locale} account={account} org={org} incident={detail} disabled={loading||busy||!!pending} read={rpc} onAction={ask}/>}
    <section className="admin-card"><h2>{t('commander')}</h2><p>{detail.commander?.name??t('noCommander')}</p>
     {detail.commander&&!detail.commander.valid&&!['CLOSED','CANCELLED'].includes(detail.status)&&<p role="alert">{t('invalidCommander')}</p>}

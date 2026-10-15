@@ -64,7 +64,7 @@ create trigger simulation_template_instance_history before update or delete on p
 
 -- Exact object keys, including required fields. There is no opaque executable extension bag.
 create function private.simulation_template_provenance_guard() returns trigger
-language plpgsql security definer set search_path='' as $
+language plpgsql security definer set search_path='' as $$
 begin
  if not exists(select 1 from public.simulation_scenarios s
   join public.simulation_scenario_template_versions v on v.id=new.source_version_id
@@ -73,7 +73,7 @@ begin
   and s.status='DRAFT' and t.organization_id=new.organization_id and not t.archived
   and v.definition=new.definition) then raise exception 'VALIDATION_FAILED';end if;
  return new;
-end; $;
+end; $$;
 create trigger simulation_template_provenance_scope before insert on private.simulation_template_instances for each row execute function private.simulation_template_provenance_guard();
 create trigger simulation_template_receipts_immutable before update or delete on private.simulation_template_receipts for each row execute function private.audit_immutable();
 create trigger simulation_templates_no_truncate before truncate on public.simulation_scenario_templates for each statement execute function private.audit_immutable();
@@ -104,7 +104,7 @@ begin
 end; $$;
 create function private.validate_simulation_template(d jsonb,ready boolean) returns void
 language plpgsql immutable set search_path='' as $$
-declare v jsonb;m jsonb:=d->'metadata';w jsonb:=d->'world';cfg jsonb:=d->'simulation_defaults';ids text[]:='{}';g jsonb;pt jsonb;
+declare v jsonb;m jsonb:=d->'metadata';w jsonb:=d->'world';cfg jsonb:=d->'simulation_defaults';ids text[]:=array['center','incident','bounds','drawing'];g jsonb;
 begin
  if d is null or octet_length(d::text)>48000 then raise exception 'VALIDATION_FAILED'; end if;
  perform private.sim_template_keys(d,array['schema_version','metadata','world','initial_objects','virtual_units','briefings','simulation_defaults']);
@@ -179,7 +179,8 @@ create function public.simulation_template_list(p_organization_id uuid,p_query t
 language plpgsql stable security definer set search_path='' as $$
 begin
  if not private.simulation_template_editor(p_organization_id) then raise exception 'NOT_AUTHORIZED' using errcode='42501';end if;
- if p_query is null or length(p_query)>100 or p_category is null or p_status is null then raise exception 'VALIDATION_FAILED';end if;
+ if p_query is null or length(p_query)>100 or p_category is null or p_status is null or p_category not in ('','STRUCTURE_FIRE','WILDFIRE','TRAFFIC_ACCIDENT','SANDBOX')
+ or p_status not in ('','BUILT_IN','ORGANIZATION','DRAFT','PUBLISHED','ARCHIVED') then raise exception 'VALIDATION_FAILED';end if;
  return coalesce((select jsonb_agg(q.dto order by q.id) from (
  select t.id,jsonb_build_object('id',t.id,'revision',t.revision::text,'builtin',t.organization_id is null,'archived',t.archived,
  'version_id',v.id,'version',v.version,'state',v.state,'title',v.definition#>>'{metadata,title}','category',v.definition#>>'{metadata,category}',
@@ -212,7 +213,7 @@ create function public.simulation_template_command(
 ) returns jsonb language plpgsql security definer set search_path='' as $$
 declare t public.simulation_scenario_templates;v public.simulation_scenario_template_versions;
  saved private.simulation_template_receipts;req jsonb;result_value jsonb;new_id uuid;new_version uuid;d jsonb;core jsonb;
- scenario uuid;allowed text[];source_id uuid;
+ scenario uuid;allowed text[];
 begin
  if auth.uid() is null or p_operation is null or p_expected_version is null or p_action is null
  or p_action not in ('CREATE','COPY','REVISE','SAVE','PUBLISH','ARCHIVE','START') or jsonb_typeof(p_payload) is distinct from 'object' or octet_length(p_payload::text)>50000 then raise exception 'VALIDATION_FAILED';end if;
@@ -341,7 +342,9 @@ begin
  'clock_scale',case when p.organization_id=p_organization_id and private.simulation_template_editor(p_organization_id) then p.definition#>'{simulation_defaults,clock_scale}' end,
  'response_profile',case when p.organization_id=p_organization_id and private.simulation_template_editor(p_organization_id) then p.definition#>>'{simulation_defaults,response_profile}' end,
  'can_initialize',p.state='WAITING_COMMAND' and i.status in ('ACTIVE','STABILIZED') and s.status='DRAFT'
- and private.simulation_template_editor(p_organization_id) and private.simulation_controller(s.id,p_organization_id));
+ and private.simulation_template_editor(p_organization_id) and private.simulation_controller(s.id,p_organization_id)
+ and (jsonb_array_length(p.definition->'virtual_units')=0 or private.can_manage_incident_unit(i.id,p_organization_id,p_organization_id,null,'DEPLOY'))
+ and (jsonb_array_length(p.definition->'initial_objects')=0 or private.has_incident_capability(i.id,p_organization_id,'MANAGE_COP')));
 end; $$;
 create function public.simulation_template_initialize(
  p_organization_id uuid,p_incident_id uuid,p_operation uuid,p_expected_version bigint,p_incident_version bigint

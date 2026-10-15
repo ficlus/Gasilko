@@ -9,7 +9,7 @@ import {TemplateEditor} from './TemplateEditor';
 import {useTemplateMutation} from './useTemplateMutation';
 import './templates.css';
 type Action='CREATE'|'COPY'|'REVISE'|'SAVE'|'PUBLISH'|'ARCHIVE'|'START';
-export function TemplateLibrary({locale,account,org,types,read}:{locale:Locale;account:string;org:string;types:IncidentType[];read:TemplateRead}){
+export function TemplateLibrary({locale,account,org,organizationName,types,read}:{locale:Locale;account:string;org:string;organizationName:string;types:IncidentType[];read:TemplateRead}){
  const t=templateText(locale),router=useRouter(),alive=useRef(true);
  const [rows,setRows]=useState<TemplateRow[]>([]),[value,setValue]=useState<Template|null>(null),[draft,setDraft]=useState<Definition|null>(null);
  const [query,setQuery]=useState(''),[category,setCategory]=useState(''),[status,setStatus]=useState(''),[after,setAfter]=useState<string|null>(null);
@@ -76,7 +76,7 @@ export function TemplateLibrary({locale,account,org,types,read}:{locale:Locale;a
   {denied?<button onClick={()=>{mutation.setError('');setEpoch(v=>v+1);}}>{t('refresh')}</button>:value&&draft?<>
    <div className="actions">
     <button disabled={busy} onClick={()=>{if(!dirty||window.confirm(t('discard'))){setValue(null);setDraft(null);}}>{t('back')}</button>
-    <span className="admin-badge">{t(value.state)} · {t('version')} {value.version}</span>
+    <span className="admin-badge">{t(value.archived?'ARCHIVED':value.state)} · {t('version')} {value.version}</span>
     <span role="status">{t(dirty?'unsaved':'saved')}</span>
     <button disabled={busy||dirty} onClick={()=>void open(value.id)}>{t('refresh')}</button>
     {!value.archived&&<button disabled={busy||dirty} onClick={()=>command('COPY')}>{t('copy')}</button>}
@@ -86,13 +86,13 @@ export function TemplateLibrary({locale,account,org,types,read}:{locale:Locale;a
      <button disabled={busy||dirty||placementMissing(draft)} onClick={()=>setConfirm('PUBLISH')}>{t('publish')}</button>
     </>}
     {!value.builtin&&!value.archived&&<>
-     <button disabled={busy||dirty||placementMissing(draft)} onClick={()=>setConfirm('START')}>{t('start')}</button>
+     <button disabled={busy||dirty||placementMissing(draft)} onClick={()=>setConfirm('START')}>{t(value.state==='DRAFT'?'startPreview':'start')}</button>
      <button disabled={busy||dirty} onClick={()=>setConfirm('ARCHIVE')}>{t('archive')}</button>
     </>}
    </div>
    <TemplateEditor key={value.id+':'+value.version_id} locale={locale} value={value} draft={draft} onChange={setDraft} disabled={busy||!!confirm}/>
    {confirm&&<TemplateConfirmation locale={locale} busy={busy} onCancel={()=>setConfirm(null)} onConfirm={()=>command(confirm)}>
-    <h3>{draft.metadata.title}</h3><p>{t(confirm==='START'?'reviewStart':confirm==='PUBLISH'?'reviewPublish':'reviewArchive')}</p>
+    <h3>{draft.metadata.title}</h3><p>{t(value.state)} · {t('version')} {value.version}</p><p>{t('scope')}: {organizationName}</p><p>{t(confirm==='START'?'reviewStart':confirm==='PUBLISH'?'reviewPublish':'reviewArchive')}</p>
     <p>{t('objects')}: {draft.initial_objects.length} · {t('units')}: {draft.virtual_units.length}</p>
     <p>{t('center')}: {draft.world.center?.join(', ')} · {t('radius')}: {draft.world.radius_m}</p>
     {confirm==='START'&&<label>{t('type')}<select required value={type} onChange={e=>setType(e.target.value)}>{types.map(x=><option key={x.id} value={x.id}>{x.names[locale]??x.code}</option>)}</select></label>}
