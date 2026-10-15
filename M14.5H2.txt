@@ -1,0 +1,783 @@
+# CODEX IMPLEMENTATION PROMPT — M14.5H2
+## Command Map UX, Live Navigation Routes, Unit Task Inspection & SIM Automation Integration
+
+**Repository:** https://github.com/ficlus/Gasilko
+
+Implement **M14.5H2 — RTS Command Map UX & Live Route Visualization**.
+
+Create one focused PR against the latest `main`. Do not merge.
+
+### Prerequisites
+
+- M14.5H1 / PR #72 must be corrected and merged first.
+- Preserve merged PR #71 fixes.
+- Inspect the existing H1 automatic execution implementation, not an older snapshot.
+- Do not modify the H1 orchestration engine unless a narrowly justified integration correction is necessary.
+
+The user has reported concrete issues while testing the Command Map.
+
+This milestone must address those issues with production-quality architecture, not cosmetic CSS patches.
+
+---
+
+## 1. Product objective
+
+Make Gasilko's Poveljniška karta a clear, efficient RTS-style command workspace.
+
+Required outcomes:
+
+1. The incident header consumes much less vertical space.
+2. All relevant active navigation routes are visible by default.
+3. The selected unit's route is visually emphasized.
+4. Other units' routes remain visible but semi-transparent.
+5. Active route lines shorten as the corresponding unit advances.
+6. Left-clicking a unit immediately reveals its current authoritative task and navigation.
+7. The selected unit's destination and original departure point are easy to inspect.
+8. A simple setting allows routes to be hidden without affecting navigation execution.
+9. H1 automatic SIM execution is clearly integrated so routine commands do not require manual "Avtonomno vozi" steps when automation is enabled.
+10. Preserve performance, security and the existing single MapLibre instance.
+
+This PR must address both desktop and mobile use.
+
+---
+
+## 2. Inspect existing architecture
+
+Inspect actual current source:
+
+- `web/features/incidents/IncidentArea.tsx`
+- `web/features/incidents/IncidentCop.tsx`
+- `web/features/incidents/CopMap.tsx`
+- `web/features/incidents/workspace.tsx`
+- `web/features/incidents/rtsSession.tsx`
+- `web/features/incidents/RtsMapInteraction.tsx`
+- `web/features/incidents/RtsContextMenu.tsx`
+- `web/features/incidents/RtsSelectionToolbar.tsx`
+- `web/features/incidents/IncidentNavigationProvider.tsx`
+- `web/features/incidents/AutonomousSimulationProvider.tsx`
+- `web/features/incidents/AutonomousSimulationPanel.tsx`
+- `web/features/incidents/IncidentTasks.tsx`
+- `web/features/incidents/IncidentLiveProvider.tsx`
+- Existing SIM map layers and marker sources.
+- Existing route and task DTOs.
+- Current H1 automation projection.
+- Existing resource/recipient selection and detail panels.
+- `web/app/globals.css`
+- SI/DE localization.
+
+Trace how map selection, recipient selection, task assignments, navigation sessions, agent progress and live refresh interact.
+
+Document which authoritative API already supplies each required value.
+
+Do not infer a task or destination from geographic proximity.
+
+---
+
+## 3. Compact incident header
+
+The current incident page has an excessive vertical header above the Command Map.
+
+The user provided a screenshot showing:
+
+- Large empty area below "Intervencije".
+- Organization selector and incident links spread across multiple rows.
+- Separate large SIM warning area.
+- Incident summary card.
+- Another toolbar row before the Command Map.
+- The map beginning too low on the screen.
+
+Redesign this into a clean, compact, responsive command header.
+
+### Desired layout
+
+Desktop concept:
+
+```text
+GASILKO / INTERVENCIJE   [PGD Podlehnik ▼]  [Seznam]  [+]
+
+TESTNA VAJA  [SIM] [AKTIVNA] [INC-...]        [Podrobnosti ▾]
+
+[Klasični pogled] [Poveljniška karta] [Enote]
+[Kontrole] [Zgodovina]                       [Razširi]
+
+---------------------------------------------------------
+|                 COMMAND MAP                           |
+|                                                       |
+|                                                       |
+---------------------------------------------------------
+```
+
+The actual implementation must follow the existing page semantics and accessibility requirements.
+
+### Requirements
+
+- Remove excessive fixed margins, padding and empty vertical space.
+- Compact the organization selector and incident actions.
+- Display incident name, status and SIM state in one concise summary.
+- Preserve the unmistakable **SIM — NI RESNIČNA INTERVENCIJA** warning.
+- Make incident metadata expandable.
+- Keep confirmation/error messages accessible without reserving large unused areas.
+- Avoid duplicating the same information in multiple visible bars.
+- Reduce the number of always-visible header rows where possible.
+- Preserve incident switching and organization selection.
+- Do not remove important actions or authorization information.
+- Do not introduce layout jumps when the SIM banner, status or notifications update.
+- Keep the map's existing stable-height behavior.
+- Do not recreate the MapLibre instance due to header collapse/expand.
+- Do not automatically move the camera during resize.
+- Ensure mobile controls wrap or collapse intelligently.
+- No horizontal page overflow.
+
+The Command Map should occupy most of the usable viewport.
+
+The Classic View must remain usable and must not suffer regressions.
+
+---
+
+## 4. Always-visible active routes
+
+Currently navigation paths are difficult to follow unless the corresponding navigation panel or unit is selected.
+
+Implement an incident-scoped visual layer that renders the authorized active routes of multiple units simultaneously.
+
+### Default behavior
+
+**Prikaži navigacijske poti: ON**
+
+When enabled:
+
+- Display active planned/in-progress navigation routes for authorized units.
+- Keep routes visible even if no unit is selected.
+- Do not require opening the navigation panel.
+- Show an appropriate destination marker for each route.
+- Never show a route that is inaccessible to the current user.
+- Differentiate simulated and real navigation provenance.
+
+Avoid presenting a planned route as proof of actual movement.
+
+### Display styling
+
+Selected route:
+
+- High opacity.
+- Thicker line.
+- Clearly distinguishable.
+- Drawn above background routes.
+- Visible destination emphasis.
+
+Other active routes:
+
+- Lower opacity.
+- Thinner line.
+- Still distinguishable when needed.
+- Should not overwhelm roads, hydrants, units or tactical objects.
+
+Use accessible colors and more than color alone when necessary.
+
+Do not assign arbitrary meaning to colors that contradict existing map styling.
+
+Route overlap must not cause severe rendering clutter.
+
+---
+
+## 5. Route visibility setting
+
+Add a Command Map layer setting:
+
+**Prikaži navigacijske poti**
+
+Requirements:
+
+- Default ON.
+- User can toggle at any time.
+- When OFF, hide route geometry and associated route-only decorations.
+- Do not disable routing, active navigation sessions or SIM movement.
+- Do not cancel tasks.
+- Do not mutate backend state.
+- Preserve the user's chosen preference across normal map view changes during the same browser session.
+- Do not store privileged route coordinates or unit membership in browser storage.
+- Do not affect other accounts/incidents through stale stored data.
+- Work on desktop and touch devices.
+
+Prefer an existing map-layer settings mechanism if present.
+
+If no such mechanism exists, introduce a minimal display-preference control rather than a second map state manager.
+
+---
+
+## 6. Live remaining-route visualization
+
+When a vehicle advances along an existing committed route, the displayed route must progressively shorten.
+
+The user should see the **remaining route**, not the entire original route drawn permanently behind the unit.
+
+### Algorithm requirements
+
+For each moving unit:
+
+1. Read its currently authoritative navigation route.
+2. Read the actual permitted position/progress source.
+3. For SIM units, prefer authoritative agent progress along the assigned route when available.
+4. For real units, use real observed GPS position only when available and valid.
+5. Calculate or read the corresponding progress location on the route.
+6. Clip the route polyline from progress to destination.
+7. Display the remaining segment.
+8. Update only when relevant state changes.
+
+Do not modify the original stored route geometry.
+
+Do not rewrite navigation history.
+
+Do not call OSRM for every position tick.
+
+Do not teleport a unit to the nearest segment.
+
+Do not interpret an uncertain or stale GPS fix as reliable route progress.
+
+### Numerical robustness
+
+Account for:
+
+- Short segments.
+- Repeated coordinates.
+- Long or complex polylines.
+- Self-intersecting routes.
+- Reversed travel directions.
+- Position/progress precision differences.
+- Zero-length sections.
+- Route replacement.
+- Stale or out-of-order location updates.
+- Off-route positions.
+
+Do not use a naive nearest-point algorithm that can jump to a later segment when the same road is traversed twice.
+
+For SIM, rely on existing `progress_m`/route identity where available.
+
+Clamp the displayed progress to the valid route length.
+
+Avoid showing a route snapping backward from out-of-order telemetry.
+
+Route shortening is a visualization concern, not a mutation of execution state.
+
+---
+
+## 7. Preserve original departure information
+
+The user must be able to inspect where a vehicle began a navigation task.
+
+When a route is prepared, use the existing immutable origin snapshot.
+
+Keep:
+
+- Original departure coordinates.
+- Original departure time where actually recorded.
+- Route/session identifier.
+- Task/assignment reference.
+- Route destination.
+- Route revision/provider when available.
+- Original route distance and duration.
+- Remaining distance/progress, when authoritative.
+
+Do not invent an exact departure timestamp if the existing snapshot only records a position observation timestamp.
+
+If missing, display an honest unavailable state.
+
+### Unit details
+
+When the user clicks a unit:
+
+**Začetek poti** should show the available original origin information.
+
+Offer an explicit map focus action for the original origin.
+
+Do not automatically move the camera.
+
+The complete original route may be shown through an explicit historical/details mode if appropriate, while the normal active layer continues to display the remaining route.
+
+---
+
+## 8. Left-click unit = current task and navigation
+
+This is a high-priority user requirement.
+
+When a user left-clicks an authorized unit on the map:
+
+1. Select that exact unit.
+2. Keep existing RTS selection semantics.
+3. Display the unit's actual current task or task assignments.
+4. Show the current navigation session, if any.
+5. Highlight the associated route.
+6. Show the task target/destination marker.
+7. Show current execution state and progress where available.
+8. Allow opening full task details.
+
+The current problem is that clicking a moving unit does not clearly show what the unit is doing.
+
+### Unit details panel
+
+Suggested content:
+
+```text
+GVC-1 · SIM
+STANJE: NA POTI
+
+Aktualna naloga
+Premik na cilj
+Naloga: #...
+Dodelitev: #...
+
+Začetek poti: [izvorna točka]
+Cilj: [lokacija]
+Razdalja: 2.4 km
+Preostalo: 0.9 km
+Napredek: 63 %
+
+Navigacija: Aktivna
+SIM agent: V izvajanju
+
+[Pokaži cilj] [Pokaži začetek] [Podrobnosti naloge]
+```
+
+Display only real authorized values.
+
+If progress or ETA cannot be established, do not fabricate it.
+
+### Multiple active assignments
+
+One unit may have more than one operational assignment.
+
+If multiple valid assignments exist:
+
+- Show all applicable current assignments.
+- Identify the assignment associated with the current navigation run.
+- Do not arbitrarily choose the newest assignment as the only active task.
+- Distinguish movement from another task that is waiting or blocked.
+- Provide a clear way to inspect individual assignments.
+
+### No active task
+
+Show:
+
+**Enota nima aktivne naloge.**
+
+Do not infer a task from position, heading or proximity to an object.
+
+---
+
+## 9. Map target and command visualization
+
+When a unit is selected:
+
+- Emphasize the current navigation destination.
+- Show a concise target label, when authorized.
+- Display the selected unit's task relationship to that target.
+- Make the goal recognizable even when the route is long.
+- Keep the existing hydrant and tactical-object symbols intact.
+- Avoid drawing duplicate target markers when the same target is already represented.
+- Make overlapping destination markers inspectable.
+
+Do not confuse destination selection with issuing a new task.
+
+Clicking a route or destination should provide inspection, not trigger a command mutation.
+
+No automatic sector selection based on geographic containment.
+
+---
+
+## 10. H1 automatic SIM execution integration
+
+M14.5H1 introduces durable server-side SIM automation.
+
+This PR must make that automation understandable and practical in Command Map.
+
+### Expected workflow
+
+When scenario automatic execution is ON:
+
+```text
+Select unit / group
+        ↓
+Right-click map target
+        ↓
+Choose configured action
+        ↓
+Review and confirm
+        ↓
+Server accepts task
+        ↓
+H1 auto-enrolls eligible assignments
+        ↓
+Route planning where required
+        ↓
+Navigation becomes visible
+        ↓
+SIM agent starts automatically
+        ↓
+Existing Cron advances movement
+```
+
+The user must not need to press **Avtonomno vozi** separately for an eligible automatically handled assignment.
+
+### Automatic execution state
+
+Display the actual effective state:
+
+- Automatic execution ON/OFF.
+- Queued.
+- Planning route.
+- Route ready.
+- Starting agent.
+- Running.
+- Blocked.
+- Failed.
+- Manual handling required.
+
+Never show running before server confirmation.
+
+### Important boundary
+
+If automatic execution is OFF, preserve the existing manual workflow.
+
+Do not secretly enable scenario automation.
+
+Do not bypass required human confirmation.
+
+Do not duplicate the H1 task/worker engine in React.
+
+Do not add a browser polling scheduler.
+
+If an actual H1 integration defect prevents automatic execution, implement a minimal fix in the owning component and explain exactly why it was needed.
+
+Do not reimplement the whole orchestration engine.
+
+---
+
+## 11. Data and access architecture
+
+The UI must obtain current routes and assignments from authoritative, incident-scoped data.
+
+Inspect whether existing DTOs already provide everything required.
+
+Possible data sources include:
+
+- Existing navigation session/route projection.
+- Existing incident task assignments.
+- Existing simulation agent state.
+- H1 automation projection.
+- Existing selected-unit workspace details.
+
+### Multi-route requirements
+
+Do not fetch one full incident response for every route.
+
+Do not create uncontrolled N+1 calls for each vehicle.
+
+Prefer a single bounded scoped collection read or existing authorized shared projection.
+
+If a new read-only RPC is necessary:
+
+- Return only current authorized incident routes.
+- Support paging/bounds where appropriate.
+- Include stable route/session/assignment/unit identity.
+- Include sufficient geometry/progress to render efficiently.
+- Enforce existing incident and organization scope.
+- Maintain normal incident versus SIM data separation.
+- Do not add mutation powers.
+- Document a new forward-only migration.
+
+Do not fabricate route data on the client.
+
+Do not expose private simulator worker tables directly.
+
+Reuse existing route and task permissions.
+
+---
+
+## 12. MapLibre performance
+
+Preserve the existing single MapLibre map instance.
+
+### Requirements
+
+- Render routes using GeoJSON sources and layers, not hundreds of independent React map mounts.
+- Keep selection highlighting independent of base route data whenever feasible.
+- Do not rebuild hydrants when SIM positions update.
+- Do not rebuild all sector or tactical-object geometry for a single route change.
+- Do not call `setData()` repeatedly for identical GeoJSON.
+- Avoid reconstructing large route geometry from scratch on every React render.
+- Bound visible route data and memory use.
+- Preserve current camera, zoom, center and rotation.
+- Respect the current stable map height fixes.
+- Preserve current Web Worker configuration.
+
+### Smooth visualization
+
+Between authoritative position samples, do not invent new telemetry.
+
+If visual interpolation is used, it must be explicitly cosmetic, short-lived, bounded by known samples and never presented as an actual observed position.
+
+Default implementation should remain conservative and accurate.
+
+No unbounded animation loop.
+
+---
+
+## 13. Interaction compatibility
+
+Preserve:
+
+- Left-click selection.
+- Ctrl/Shift multi-selection.
+- Rectangle selection.
+- Lasso selection.
+- Right-click context commands.
+- Long press.
+- Keyboard action entry.
+- Control groups 1–9.
+- Selected-unit toolbar.
+- Tactical-object selection/editing.
+- Sector selection and explicit focus.
+- Hydrant interactions.
+- Navigation target picking.
+- Existing confirmations.
+- SIM scenario controls.
+- Command hierarchy.
+- Classic View.
+
+Important:
+
+- A simple left-click must not start or confirm an operation.
+- Multiple selected RTS units must not be unexpectedly discarded when inspecting one unit.
+- Selecting a unit must not automatically move the camera.
+- Opening unit details must not invalidate a task draft.
+- An F4 refresh must not close task details or clear route visualization unnecessarily.
+- Normal refresh must not reset route-visibility preferences.
+
+---
+
+## 14. Live updates
+
+Reuse the existing F4 successful-refresh mechanism.
+
+On refresh:
+
+- Update the unit's actual task state.
+- Update navigation validity.
+- Update SIM agent progress.
+- Update authoritative SIM position.
+- Shorten the remaining route when relevant data advances.
+- Preserve selection when unit identity remains authorized.
+- Preserve open dialogs and drafts.
+- Remove/hide routes that are no longer authorized.
+
+Do not create another polling timer.
+
+Do not subscribe separately to one Realtime channel per route.
+
+Do not display repeated notifications for every simulated position update.
+
+Handle disconnection and revoked access safely.
+
+---
+
+## 15. Responsive and visual design
+
+The Command Map should look like a modern, functional incident command interface rather than a tall administrative form above a map.
+
+### Desktop
+
+- Compact page header.
+- Map occupies the main viewport.
+- Readable side panels.
+- Selected unit/task information immediately visible.
+- Clear layer settings.
+- Reduced visual clutter.
+
+### Mobile and tablet
+
+- Compact incident header.
+- Collapsible panels.
+- Map remains usable for touch gestures.
+- Unit/task details accessible through a bottom sheet or existing responsive drawer.
+- Route-visibility toggle accessible.
+- No horizontal document overflow.
+- Controls should not obstruct essential MapLibre interactions.
+
+Preserve Slovenian/German localization and accessibility.
+
+Keyboard focus must remain predictable.
+
+---
+
+## 16. Failure and empty states
+
+Handle:
+
+- No route available.
+- Route still planning.
+- SIM automation disabled.
+- Route planning failed.
+- Multiple active assignments.
+- Missing destination.
+- Missing SIM position.
+- Route becomes invalid.
+- Task cancelled.
+- Assignment completed.
+- Scenario paused.
+- Unit inaccessible.
+- Incident switched.
+- Network disconnected.
+- Partial route dataset.
+- Large incidents with many routes.
+
+Do not display stale route geometry as current navigation.
+
+If a route exists but is invalid or historical, display it only through clearly labeled historical inspection.
+
+Do not falsely show an ETA.
+
+---
+
+## 17. Security and domain invariants
+
+Mandatory:
+
+**COMMAND INTENT != EXECUTION PLAN != TELEMETRY**
+
+**REAL GPS != SIM POSITION**
+
+**TASK ACCEPTANCE != HUMAN ACKNOWLEDGMENT**
+
+- A navigation route is an execution plan, not proof of movement.
+- Only actual simulation position/progress advances SIM visualization.
+- Only actual observed GPS advances real units.
+- Task issuance must never move a real unit.
+- No simulated ACK may become a human ACK.
+- No new authority inferred from control groups.
+- No authority inferred from sector geometry.
+- No new task mutation through map inspection.
+- No access to routes belonging to unauthorized incidents or organizations.
+- No browser service-role keys.
+- No changes to the existing H1 runner secret or Cron security.
+
+Preserve server-side validation and version guards.
+
+---
+
+## 18. Database and infrastructure scope
+
+Prefer frontend-only changes where current authorized reads are sufficient.
+
+A new SQL migration is permitted only if a narrow read projection is genuinely necessary for multi-route display.
+
+No changes to:
+
+- Incident task creation model.
+- Automatic simulation scheduling.
+- Service-role worker authentication.
+- Scenario lifecycle semantics.
+- Real telemetry ingestion.
+- Existing operating Cron schedule.
+
+Do not edit historical migrations.
+
+If a new migration or Edge Function change is essential, document the exact reason and deployment order.
+
+---
+
+## 19. Acceptance criteria
+
+- [ ] Latest merged M14.5H1 is the starting point.
+- [ ] PR #71 corrections remain intact.
+- [ ] Compact incident header substantially reduces wasted vertical space.
+- [ ] SIM warning remains obvious.
+- [ ] Main Command Map gains usable height.
+- [ ] No layout jumps or map remount.
+- [ ] Active navigation routes are visible by default.
+- [ ] Selected unit's route is emphasized.
+- [ ] Other routes are semi-transparent.
+- [ ] Route layer toggle defaults ON.
+- [ ] Toggle OFF does not affect execution.
+- [ ] Active routes shorten as SIM vehicles advance.
+- [ ] No unnecessary OSRM requests for progress visualization.
+- [ ] Original route and start point remain inspectable.
+- [ ] Left-click on unit displays current authorized task details.
+- [ ] Current destination is visibly identified.
+- [ ] Task/assignment/route/run identities remain correct.
+- [ ] Multiple active assignments are handled honestly.
+- [ ] No active task is shown clearly.
+- [ ] No camera jump from unit selection.
+- [ ] RTS group selection remains functional.
+- [ ] F4 updates preserve task details and route layers.
+- [ ] H1 automatically handles eligible commands when ON.
+- [ ] H1 manual workflow remains available when OFF.
+- [ ] No fabricated GPS/ACK/progress.
+- [ ] No unauthorized route disclosure.
+- [ ] SI/DE translations.
+- [ ] Desktop/tablet/mobile layout.
+
+---
+
+## 20. Development restrictions
+
+Do NOT run:
+
+- Tests.
+- Builds.
+- Lint.
+- Typechecks.
+- CI.
+- Browser/runtime checks.
+- SQL migrations.
+- Supabase deployments.
+- Android/Gradle tasks.
+
+Do not merge.
+
+Do not modify production infrastructure.
+
+Do not change or recreate the Supabase Cron job.
+
+Do not use destructive Git commands.
+
+Preserve local files:
+
+- `android/app/build.gradle.kts`
+- `android/build.gradle.kts`
+- `android/gradle.properties`
+- `android/app/schemas/`
+- `pnpm-lock.yaml`
+- `web/next-env.d.ts`
+
+Do not add unnecessary dependencies or lockfile changes.
+
+Do not add this prompt as a root-level `.txt` file.
+
+---
+
+## 21. Deliverables
+
+Create one focused PR with:
+
+1. Compact incident/Command Map header.
+2. Multi-unit active route layers.
+3. Selected-route highlighting.
+4. Route visibility setting.
+5. Remaining-route clipping.
+6. Original route/start-point inspection.
+7. Left-click unit task/navigation details.
+8. Destination and execution progress display.
+9. H1 automation UX integration.
+10. F4 refresh compatibility.
+11. SI/DE localization.
+12. Mobile/responsive improvements.
+13. Exact changed-file summary.
+14. Explanation of route geometry and progress algorithms.
+15. Explanation of authoritative DTO/RPC reuse.
+16. Any necessary forward-only read migration.
+17. Exact manual verification instructions.
+18. Disclosure that automated/runtime checks were not executed.
+
+**Final goal:** The commander sees units moving on the tactical map with persistent, clear, live-updating routes. Selecting any unit immediately reveals what it is doing, where it started, where it is going and how far it has progressed. Non-selected routes remain unobtrusive. The Command Map uses screen space efficiently, and H1 automatic SIM execution works without unnecessary manual navigation controls.
+
+**Following milestone:** M14.6A — Scenario Designer & Reusable Exercise Templates.
