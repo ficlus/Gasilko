@@ -1,0 +1,819 @@
+# CODEX IMPLEMENTATION PROMPT — M14.6A
+## Scenario Designer, Reusable Templates & Custom Training Exercises
+
+Repository: https://github.com/ficlus/Gasilko
+
+Implement **M14.6A — Scenario Designer & Reusable Training Templates**.
+
+Create one focused pull request targeting the latest `main`. Do not merge.
+
+**Prerequisite:** M14.5H2 / PR #73 must be corrected and merged before implementation.
+
+This is the first milestone of M14.6 — Dynamic Incident Simulation.
+
+## 1. Product objective
+
+Build a user-friendly, map-based training scenario designer that allows Gasilko users to:
+
+1. Choose an existing prepared exercise template.
+2. Customize a prepared template.
+3. Create an entirely new exercise from a blank map.
+4. Configure initial incident conditions.
+5. Position the incident and training objects geographically.
+6. Configure which virtual units participate.
+7. Save draft exercise definitions.
+8. Publish reusable exercise templates.
+9. Start new protected SIM incidents from saved definitions.
+10. Reuse the same scenario for multiple independent training sessions.
+
+The primary workflow should feel like designing an RTS mission.
+
+**Prepared scenarios AND fully custom scenarios are mandatory.**
+
+Do not build only a form with template selection.
+
+Do not build only a template library without a visual editor.
+
+Do not yet implement dynamic fire propagation or autonomous scenario events. Those belong to M14.6B–E.
+
+---
+
+## 2. Inspect current architecture first
+
+Inspect the latest merged repository.
+
+Especially:
+
+- `web/features/incidents/SimulationSetup.tsx`
+- `web/features/incidents/SimulationProvider.tsx`
+- `web/features/incidents/SimulationPanel.tsx`
+- `web/features/incidents/IncidentArea.tsx`
+- `web/features/incidents/IncidentCop.tsx`
+- `web/features/incidents/CopMap.tsx`
+- `web/features/incidents/workspace.tsx`
+- `web/lib/operational/simulation.ts`
+- Existing incident creation and command APIs.
+- Existing SIM fixture-unit provision and attachment workflows.
+- Existing tactical-object and sector models.
+- Current protected training environment.
+- `public.simulation_scenarios`
+- `public.simulation_unit_positions`
+- Existing scenario lifecycle, identity guards and receipts.
+- Existing MapLibre drawing and selection interactions.
+- M14.5H1 automated execution.
+- M14.5H2 route projection and selection.
+- F4 live-update architecture.
+- Slovenian and German translations.
+
+Review these migrations:
+
+- M14.5C simulation foundation.
+- M14.5D navigation.
+- M14.5E autonomous simulation.
+- M14.5H1 automatic execution.
+- M14.5H2 command-map read projection.
+
+Identify which existing entities are reusable and which requirements genuinely need new persisted scenario-definition data.
+
+**Important:** `simulation_scenarios` represents an actual simulation instance. A reusable template is a different concept. Do not confuse template definitions with running scenario instances.
+
+---
+
+## 3. Training scenario library
+
+Add a new interface:
+
+**SIM · Scenariji vaj**
+
+Provide the following entry points:
+
+- Ready-made templates.
+- My organization's templates.
+- Create blank scenario.
+- Copy existing template.
+- Edit draft.
+- Preview.
+- Publish.
+- Start exercise.
+
+Initial built-in categories:
+
+1. Structure fire.
+2. Wildfire.
+3. Traffic accident.
+4. Blank sandbox.
+
+Provide meaningful predefined examples, not just category names.
+
+Suggested prepared examples:
+
+- Residential building fire.
+- Industrial warehouse fire.
+- Forest-edge wildfire.
+- Multi-vehicle road collision.
+- Blank custom training area.
+
+Each example should provide an initial configuration suitable for editing.
+
+Built-in templates should be available without granting users permission to modify the master definition.
+
+A user may copy a built-in template into an authorized organization-specific draft.
+
+---
+
+## 4. Scenario editor
+
+Create a proper visual editor around the existing MapLibre infrastructure.
+
+The layout should contain:
+
+### Left panel — scenario configuration
+
+- Scenario title.
+- Description.
+- Exercise category.
+- Training objectives.
+- Difficulty.
+- Estimated exercise duration.
+- Default simulation clock speed.
+- Expected participating unit count.
+- Initial situation description.
+- Optional instructor-only briefing.
+- Optional commander-facing briefing.
+
+### Center — interactive map
+
+- Choose scenario center.
+- Position initial incident.
+- Configure exercise radius.
+- Add initial tactical objects.
+- Preview the starting deployment area.
+- Preview initial SIM unit positions.
+- Inspect selected configuration elements.
+
+### Right panel — selected object
+
+- Object name/type.
+- Coordinates.
+- Relevant scenario properties.
+- Edit/remove controls.
+- Validation and warnings.
+
+On narrow screens, use existing responsive drawer patterns rather than forcing a three-column layout.
+
+Avoid remounting MapLibre when editing a property or switching panels.
+
+---
+
+## 5. Map-based scenario objects
+
+The designer should support declarative initial objects, including:
+
+- Incident location.
+- Command post.
+- Staging area.
+- Triage point.
+- Temporary water source.
+- Access point.
+- Exercise note.
+- Editable points or bounded polygons where the existing COP model supports them.
+
+These are **template definitions**, not already activated live incident objects.
+
+Upon creating a real SIM training instance, supported starting objects may be instantiated into that specific incident through an authorized server workflow.
+
+Preserve their incident-scoped identity and audit history.
+
+Do not bypass existing `incident_put_map_object`, authorization or version rules merely to simplify template creation.
+
+If existing tactical-object APIs cannot safely support atomic initialization, implement a narrow training-only initialization operation with appropriate domain guards.
+
+Do not create ordinary incident objects on the production incident during template editing.
+
+---
+
+## 6. Virtual units and initial placement
+
+Allow the editor to configure the training unit composition:
+
+- Number of SIM units.
+- Unit category/capability where supported.
+- Callsign preview.
+- Suggested starting location.
+- Starting orientation, if explicitly modeled.
+- Default response profile.
+- Optional initial staging or deployment association.
+
+The user should be able to preview and adjust suggested initial positions on the map.
+
+### Important compatibility
+
+The existing simulator provisions virtual fixture units and stores protected positions using dedicated APIs.
+
+Reuse those mechanisms.
+
+Do not create a second virtual resource registry.
+
+Do not allow a template to impersonate a real vehicle.
+
+Do not attach real vehicles to a SIM scenario through the designer.
+
+Do not make template placement a fake GPS observation.
+
+Any initial position applied to an actual training instance must be explicitly marked as simulated and validated by the existing simulation domain.
+
+### MVP placement workflow
+
+Prefer defining initial spawn positions in the template and applying them during protected scenario initialization.
+
+If the current backend requires initial provisioning followed by explicit simulated position commands, implement an authorized, idempotent bootstrap sequence instead of browser-side unchecked table inserts.
+
+Preserve version guards and audit events.
+
+---
+
+## 7. Prepared template customization
+
+A user must be able to:
+
+1. Open a prepared example.
+2. Preview its map and configuration.
+3. Choose **Customize**.
+4. Create an organization-scoped editable copy.
+5. Modify the exercise.
+6. Save as draft.
+7. Publish when ready.
+8. Start a new training session.
+
+Editing a copied template must not mutate the original built-in.
+
+Editing a published template should create a new draft revision rather than silently changing previous training definitions.
+
+Prior sessions must retain their original configuration snapshot.
+
+---
+
+## 8. Data model
+
+Introduce the smallest necessary persistent scenario-definition model.
+
+Suggested conceptual tables:
+
+### `simulation_scenario_templates`
+
+- `id uuid primary key`
+- `organization_id uuid null` — null only for platform-provisioned built-ins.
+- `code text`
+- `name text`
+- `category text`
+- `description text`
+- `visibility text`
+- `status text`
+- `current_published_version_id uuid null`
+- `created_by uuid`
+- `created_at timestamptz`
+- `updated_at timestamptz`
+
+### `simulation_scenario_template_versions`
+
+- `id uuid primary key`
+- `template_id uuid`
+- `version integer`
+- `schema_version integer`
+- `state text` — DRAFT or PUBLISHED.
+- `definition jsonb`
+- `created_by uuid`
+- `created_at timestamptz`
+- `published_at timestamptz null`
+
+### Training instance provenance
+
+Record the exact template version from which a SIM scenario was initialized.
+
+Use an appropriately constrained reference or dedicated provenance record.
+
+A running instance must retain an immutable snapshot of the definition used to create it.
+
+The actual table names and fields may differ after inspecting the repository.
+
+### Required guarantees
+
+- Organization isolation.
+- Immutable published versions.
+- No cross-organization editing.
+- No browser direct writes.
+- No silent changes to an already running scenario.
+- No copying private instructor information into the commander-facing read DTO.
+- Bounded JSON definitions.
+- Schema versioning.
+- Valid coordinates and supported geometry.
+- Audit history.
+- Stable template/version identifiers.
+- No destructive edits to previous versions.
+
+---
+
+## 9. Definition schema
+
+Create a precise, versioned definition schema.
+
+Suggested logical structure:
+
+```json
+{
+  "schema_version": 1,
+  "metadata": {
+    "title": "Industrial warehouse fire",
+    "category": "STRUCTURE_FIRE",
+    "description": "A configurable training exercise",
+    "difficulty": "INTERMEDIATE",
+    "objectives": []
+  },
+  "world": {
+    "center": [15.0, 46.0],
+    "radius_m": 1000,
+    "incident_location": [15.0, 46.0]
+  },
+  "initial_objects": [],
+  "virtual_units": [],
+  "briefings": {
+    "commander": "",
+    "instructor": ""
+  },
+  "simulation_defaults": {
+    "clock_scale": 1,
+    "automatic_execution": false,
+    "response_profile": "NORMAL"
+  }
+}
+```
+
+This is conceptual; derive the final schema from existing domain types.
+
+Do not treat sample coordinates as actual defaults or user location.
+
+### Strict validation
+
+Enforce:
+
+- Supported schema version.
+- Valid categories.
+- Valid coordinate ranges.
+- Bounded scenario radius.
+- Bounded unit count.
+- Bounded number of objects.
+- Bounded text lengths.
+- Bounded JSON size.
+- Supported geometry.
+- Unique stable object-local IDs.
+- Supported SIM response profiles.
+- Consistent template references.
+- No real vehicle references.
+- No unauthorized organization IDs.
+
+Use server-side validation. Frontend validation is supplementary.
+
+Reject unknown security-sensitive configuration fields.
+
+---
+
+## 10. Template lifecycle
+
+Required states:
+
+```text
+BUILT_IN
+    |
+    +--> COPY AS DRAFT
+
+DRAFT
+    |
+    +--> EDIT
+    |
+    +--> PREVIEW
+    |
+    +--> PUBLISH
+              |
+              +--> START NEW SIM EXERCISE
+              |
+              +--> CREATE NEW DRAFT REVISION
+```
+
+The lifecycle should be server-authoritative.
+
+Do not let editing a draft overwrite a published immutable revision.
+
+Do not delete templates referenced by historical training sessions.
+
+Archive or deactivate safely rather than destructively deleting history.
+
+---
+
+## 11. Secure template APIs
+
+Prefer a small set of explicit authenticated RPCs.
+
+Suggested operations:
+
+- `simulation_template_list`
+- `simulation_template_read`
+- `simulation_template_create`
+- `simulation_template_save_draft`
+- `simulation_template_publish`
+- `simulation_template_copy`
+- `simulation_template_archive`
+- `simulation_template_start`
+
+Adapt names to existing conventions and avoid unnecessary duplicate endpoints.
+
+### Mutation requirements
+
+- Authenticated user.
+- Active acting organization.
+- Protected TRAINING environment.
+- Authorized scenario/template editor role.
+- Expected version.
+- Idempotent operation UUID.
+- Exact-payload retry semantics.
+- Audit event.
+- Server validation.
+- No cross-org writes.
+- No effect on normal incidents.
+
+### Read requirements
+
+- Organization-scoped.
+- Bounded pages.
+- Search/filter by category and status.
+- Built-ins readable to eligible users.
+- Drafts visible only according to scoped permissions.
+- Instructor-only content hidden from ordinary command-view readers.
+
+Do not grant broad table writes to authenticated users.
+
+---
+
+## 12. Creating an exercise from a template
+
+This is one of the most important requirements.
+
+Required workflow:
+
+1. Select published template or explicitly choose a valid draft preview.
+2. Select authorized organization.
+3. Review initial location, objects and virtual units.
+4. Confirm creation of a protected SIM incident.
+5. Create the real simulation instance through the existing secured simulation-creation domain.
+6. Record immutable source-template version.
+7. Initialize supported starting objects.
+8. Provision/attach supported virtual units.
+9. Apply validated initial simulated positions.
+10. Leave the scenario in DRAFT or another existing safe pre-start state.
+11. Show a review of what was created and what remains manual.
+12. Start the scenario only after the user explicitly confirms.
+
+Do not implicitly START the exercise simply because a template was selected.
+
+Do not silently enable H1 automation when the stored template suggests it.
+
+The effective automatic-execution setting must remain server-authorized, default OFF, and require its existing explicit confirmation.
+
+### Idempotency and recovery
+
+A retry after ambiguous network failure must not create a second incident.
+
+Use durable operation identity for creation and bootstrap.
+
+Any partial initialization must be recoverable without duplicate tactical objects, duplicate virtual units or conflicting identity assignments.
+
+If an all-or-nothing transactional bootstrap is impractical because of existing API boundaries, implement durable initialization progress and explicit recovery states.
+
+Do not solve this with a browser-only sequence of unchecked mutations.
+
+---
+
+## 13. Existing operational systems
+
+Preserve compatibility with:
+
+- M14.5A Action Catalog.
+- F2 RTS context commands.
+- F3 tactical objects.
+- F4 incident refresh.
+- G command hierarchy.
+- H control groups.
+- H1 automatic SIM execution.
+- H2 shared route visualization.
+- Existing manual navigation.
+- Existing autonomous runner.
+- Existing simulation clock.
+- Existing scenario pause/resume/finish.
+- Existing protected fixture units.
+
+A template is not a command role, an operational task or an execution plan.
+
+Do not infer sector authority from template map geometry.
+
+Do not start moving a virtual unit as a side effect of opening or editing a template.
+
+---
+
+## 14. Scenario preview and map interaction
+
+The editor needs a true preview mode.
+
+Requirements:
+
+- Use the existing MapLibre infrastructure.
+- Preview initial units, objects and scenario bounds.
+- Drag/move editor-only configuration objects where appropriate.
+- Explicitly distinguish edit mode from the operational RTS command map.
+- Support keyboard-accessible alternatives to dragging.
+- Support touch interactions.
+- Preserve current draft values when changing map zoom.
+- No accidental operational task issuance.
+- No accidental incident mutation.
+- Clear unsaved-changes warning.
+- Explicit Save and Publish actions.
+
+Do not use the existing operational map's right-click command handler while editing an exercise definition.
+
+Do not introduce a new MapLibre instance inside the live operational Command Map.
+
+A separate editor preview map outside the active command workspace is acceptable if needed.
+
+---
+
+## 15. Training visibility and instructor content
+
+Separate two information classes:
+
+### Commander-visible information
+
+- Dispatch description.
+- Reported incident location.
+- Public scenario briefing.
+- Initial authorized unit roster.
+- Objects intentionally exposed at exercise start.
+
+### Instructor-only information
+
+- Hidden scenario objectives.
+- Internal exercise notes.
+- Future planned event definitions.
+- Evaluation criteria not yet disclosed.
+- Full reference configuration.
+
+Do not expose instructor-only data through ordinary incident read DTOs.
+
+Do not rely on hiding an HTML element to protect instructor data.
+
+Enforce visibility in backend projections.
+
+---
+
+## 16. Future dynamic events compatibility
+
+M14.6B will add dynamic incident events and scenario timelines.
+
+M14.6C will add hazard simulation.
+
+M14.6D will add simulated operational effects.
+
+M14.6E will add virtual unit behavior and decision responses.
+
+M14.6F will add instructor control.
+
+Design the template version schema so future optional sections can be added safely.
+
+For M14.6A:
+
+- Do not implement fire spread.
+- Do not add a second movement engine.
+- Do not introduce autonomous event scheduling.
+- Do not introduce hidden triggers that already execute.
+- Do not introduce a second Cron.
+- Do not add a new Edge Function merely for template listing.
+
+If future events are represented as non-executable draft data, clearly label them as unsupported until M14.6B.
+
+---
+
+## 17. Responsive user experience
+
+Desktop:
+
+- Template library with search/categories.
+- Scenario preview.
+- Map-based editing.
+- Object inspector.
+- Save/publish/start actions.
+
+Mobile/tablet:
+
+- Compact template cards.
+- Collapsible editor panels.
+- Touch-accessible map controls.
+- Clear save state.
+- No horizontal overflow.
+- No oversized headers.
+- Preserve access to existing navigation.
+
+Translations:
+
+- Slovenian.
+- German.
+
+Use existing design tokens and components where possible.
+
+Avoid unnecessary third-party dependencies.
+
+---
+
+## 18. Data safety and training isolation
+
+Critical invariants:
+
+**SCENARIO DEFINITION != SIMULATION INSTANCE**
+
+**COMMAND INTENT != EXECUTION PLAN != TELEMETRY**
+
+**REAL INCIDENT != TRAINING EXERCISE**
+
+**HUMAN COMMAND != SIMULATED RESPONSE**
+
+Requirements:
+
+- No real incident affected by template editing.
+- No shared mutable template data between active scenarios.
+- No real GPS inserted through a template.
+- No fabricated firefighter ACK.
+- No copying of real operational vehicle identity as SIM fixtures.
+- No unauthorized cross-organization templates.
+- No automatic unit movement during setup.
+- No task creation merely by saving a scenario.
+- No new privileges from being a scenario author.
+- No real operational command authority granted by a template.
+- No service-role secrets in browser code.
+
+The existing single Supabase project contains both real and training data. Enforce isolation at the database boundary.
+
+---
+
+## 19. Database and infrastructure
+
+A forward-only SQL migration is expected.
+
+It may introduce:
+
+- Template metadata.
+- Immutable template versions.
+- Scenario source-provenance.
+- Scoped read/write RPCs.
+- Template mutation receipts.
+- Audit history.
+- Server-side definition validation.
+- Safe instance initialization.
+
+Prefer reusing existing command and idempotency infrastructure.
+
+Do not edit historical migrations.
+
+Do not change the current H1 runner, navigation service, or five-second Cron unless a proven compatibility issue requires it.
+
+Prefer no new Edge Function for this milestone.
+
+If backend changes outside SQL are necessary, justify them narrowly.
+
+---
+
+## 20. Implementation sequence
+
+1. Inspect repository/domain constraints.
+2. Define versioned scenario template schema.
+3. Implement server validation.
+4. Implement safe template CRUD/version lifecycle.
+5. Implement built-in starter examples.
+6. Implement template library.
+7. Implement map-based scenario editor.
+8. Implement unit and object previews.
+9. Implement secure scenario instantiation.
+10. Implement confirmation, retry and recovery.
+11. Integrate existing protected SIM setup.
+12. Add SI/DE localization and responsive styling.
+13. Document deployment and manual verification.
+
+Ensure the final MVP is usable end to end, not just a collection of disconnected forms.
+
+---
+
+## 21. Acceptance criteria
+
+- [ ] Starts from merged H2 main.
+- [ ] User can browse prepared exercise templates.
+- [ ] User can create a fully custom exercise.
+- [ ] Built-in categories are available.
+- [ ] Prepared templates contain meaningful starting configurations.
+- [ ] Built-ins cannot be overwritten by ordinary users.
+- [ ] Templates can be copied and customized.
+- [ ] Drafts can be saved and reopened.
+- [ ] Published versions are immutable.
+- [ ] New draft revisions do not mutate existing sessions.
+- [ ] Editor supports map-based placement and inspection.
+- [ ] Scenario location and radius can be configured.
+- [ ] Initial tactical objects are supported.
+- [ ] SIM unit count and positions can be configured.
+- [ ] Validation rejects unsupported geometry and identities.
+- [ ] Scenario can be started from a reviewed template through existing authorized APIs.
+- [ ] Instance records exact source-template provenance.
+- [ ] Ambiguous retries cannot create duplicate incidents or fixtures.
+- [ ] Exercise does not start until explicitly confirmed.
+- [ ] H1 automation remains OFF unless explicitly authorized.
+- [ ] Instructor-only configuration is protected.
+- [ ] Training/real separation is enforced.
+- [ ] No task or movement created during template editing.
+- [ ] Existing F2/F3/F4/G/H/H1/H2 flows still work.
+- [ ] No MapLibre remount or camera jump in live Command Map.
+- [ ] SI/DE and responsive accessibility are complete.
+- [ ] Forward-only migration is documented.
+- [ ] Manual verification checklist is supplied.
+
+---
+
+## 22. Development restrictions
+
+Do NOT run:
+
+- Tests.
+- Builds.
+- Lint.
+- Typechecks.
+- CI.
+- Browser/runtime checks.
+- Database migrations.
+- Supabase deployments.
+- Android/Gradle tasks.
+
+Do not merge.
+
+Do not modify live production data or Cron configuration.
+
+Do not use destructive Git operations.
+
+Preserve local customizations:
+
+- `android/app/build.gradle.kts`
+- `android/build.gradle.kts`
+- `android/gradle.properties`
+- `android/app/schemas/`
+- `pnpm-lock.yaml`
+- `web/next-env.d.ts`
+
+Avoid unnecessary dependencies and lockfile changes.
+
+Do not add this prompt as a root-level `.txt` file.
+
+### Required source-only review before PR completion
+
+Because previous milestones repeatedly introduced malformed JSX and SQL delimiters, carefully inspect all changed TSX and SQL source for:
+
+- Unclosed JSX conditionals and fragments.
+- Extra braces in event handlers.
+- Invalid JSX nesting.
+- Mismatched SQL dollar quotes.
+- Invalid trigger/function ordering.
+- Missing columns or foreign keys.
+- Duplicated or conflicting function signatures.
+
+Do not claim code compiles or migration succeeds without execution.
+
+---
+
+## 23. Deliverables
+
+Produce one focused PR containing:
+
+1. Reusable scenario template model.
+2. Built-in training examples.
+3. Organization-scoped custom templates.
+4. Versioned draft/published lifecycle.
+5. Map-based training exercise designer.
+6. Initial incident object placement.
+7. Configurable virtual-unit composition and starting positions.
+8. Immutable training instance provenance.
+9. Secure template-to-exercise creation workflow.
+10. Audit, idempotency and version guards.
+11. Protected instructor-versus-commander data.
+12. SI/DE translations.
+13. Responsive UI.
+14. Forward-only SQL migration.
+15. Explanation of reused existing simulation APIs.
+16. Exact manual migration instructions.
+17. Edge Function deployment requirements, if any.
+18. Changed-file summary.
+19. Manual verification checklist.
+20. Explicit disclosure that build, tests and runtime checks were not executed.
+
+**Final result:** A Gasilko instructor can open a prepared exercise, customize it or create a new exercise from scratch on a map, save and publish the definition, then launch a separate protected SIM incident with authorized initial objects and virtual units. Existing automatic navigation and RTS execution remain unchanged.
+
+**Next milestone: M14.6B — Dynamic Incident Events & Scenario Timeline.**
