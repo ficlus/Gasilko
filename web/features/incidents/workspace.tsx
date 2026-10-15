@@ -26,7 +26,7 @@ export function ContextActions({actions}:{actions:ContextAction[]}){
  return <div className="actions">{actions.map(a=><div key={a.id}><button type="button" disabled={!a.enabled} title={!a.enabled?a.disabledReason:undefined}
   onClick={a.execute}>{a.label}</button>{!a.enabled&&a.disabledReason&&<small>{a.disabledReason}</small>}</div>)}</div>;
 }
-type Workspace={view:IncidentView;selected:SelectedEntity|null;showDetails:()=>void;select:(entity:SelectedEntity|null)=>void;operational:HTMLElement|null;selectedPane:HTMLElement|null;bottom:HTMLElement|null};
+type Workspace={view:IncidentView;selected:SelectedEntity|null;showDetails:()=>void;showOperations:()=>void;select:(entity:SelectedEntity|null)=>void;operational:HTMLElement|null;selectedPane:HTMLElement|null;bottom:HTMLElement|null};
 const Context=createContext<Workspace|null>(null);
 export const useWorkspace=()=>useContext(Context);
 export function WorkspaceSlot({name,children}:{name:'operational'|'selectedPane'|'bottom';children:ReactNode}){
@@ -114,7 +114,8 @@ export function IncidentWorkspace({locale,header,operations,secondary,children,v
  const showDetails=useCallback(()=>{setExpanded(false);setRight(true);setTools(false);if(!wide){setLeft(false);setHistory(false);}
   requestAnimationFrame(()=>document.getElementById(ids+'-right')?.querySelector<HTMLButtonElement>('.command-panel-close')?.focus());
  },[wide,ids]);
- const context=useMemo(()=>({view,selected,select,showDetails,operational,selectedPane,bottom}),[view,selected,select,showDetails,operational,selectedPane,bottom]);
+ const showOperations=useCallback(()=>{setExpanded(false);setLeft(true);if(!wide){setRight(false);setTools(false);setHistory(false);}},[wide]);
+ const context=useMemo(()=>({view,selected,select,showDetails,showOperations,operational,selectedPane,bottom}),[view,selected,select,showDetails,showOperations,operational,selectedPane,bottom]);
  return <Context.Provider value={context}>
   <section ref={root} className={'incident-workspace'+(command?' command-workspace':'')+(expanded?' command-expanded':'')}
    data-wide={wide} data-left={leftOpen} data-right={rightOpen||toolsOpen}
@@ -173,5 +174,5 @@ function WorkspaceViews({operational,...props}:{operational:boolean;locale:Local
 }
 export function IncidentLayout({operational,locked,onAccessLost,simulation,...props}:{operational:boolean;locked:boolean;onAccessLost:()=>void;simulation:{account:string;org:string;incidentId:string;refresh:number;read:TaskRead;onInventoryChanged:()=>void};locale:Locale;header:ReactNode;operations:ReactNode;secondary:ReactNode;children:ReactNode}){
  const content=<SimulationProvider key={simulation.account+':'+simulation.org+':'+simulation.incidentId} {...simulation} locale={props.locale}><IncidentNavigationProvider {...simulation} locale={props.locale}><AutonomousSimulationProvider {...simulation} locale={props.locale}><WorkspaceViews operational={operational} {...props}/></AutonomousSimulationProvider></IncidentNavigationProvider></SimulationProvider>;
- return <RtsProvider enabled={operational} locked={locked} onAccessLost={onAccessLost}>{operational?<IncidentLiveProvider account={simulation.account} org={simulation.org} incidentId={simulation.incidentId} read={simulation.read} onInvalidate={simulation.onInventoryChanged} onAccessLost={onAccessLost}>{content}</IncidentLiveProvider>:content}</RtsProvider>;
+ return <RtsProvider key={simulation.account+':'+simulation.org+':'+simulation.incidentId} enabled={operational} locked={locked} onAccessLost={onAccessLost}>{operational?<IncidentLiveProvider account={simulation.account} org={simulation.org} incidentId={simulation.incidentId} read={simulation.read} onInvalidate={simulation.onInventoryChanged} onAccessLost={onAccessLost}>{content}</IncidentLiveProvider>:content}</RtsProvider>;
 }

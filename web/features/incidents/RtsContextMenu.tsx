@@ -159,7 +159,7 @@ export function RtsContextMenu(props:Props){
      {!canCreate&&<small>{it('copTacticalReadOnly')}</small>}
     </section>}
     {object?.can_edit&&<>
-     <button type="button" disabled={blocked} onClick={()=>{props.onEditObject(object.id);close(false);}}}>{it('copEdit')}</button>
+     <button type="button" disabled={blocked} onClick={()=>{props.onEditObject(object.id);close(false);}}>{it('copEdit')}</button>
      <button type="button" disabled={blocked} onClick={()=>{props.onDeactivateObject(object.id);close(false);}}>{it('object_deactivate')}</button>
     </>}
     {context.kind==='UNIT'?<>
