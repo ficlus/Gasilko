@@ -185,7 +185,7 @@ export function IncidentArea({locale,account,destination,initialOrg}:{locale:Loc
    <button disabled={loading||busy||!!pending} onClick={reload}>{t('refresh')}</button></div>;
  return <div className="registry incident-area">
   {!detail&&organizationActions}
-  {error&&<p role="alert">{t(error)}</p>}{notice&&<p role="status">{t(notice)}</p>}{loading&&<p role="status">{t('loading')}</p>}
+  {(error||notice||loading)&&<div className="incident-feedback">{error&&<p role="alert">{t(error)}</p>}{notice&&<p role="status">{t(notice)}</p>}{loading&&<p role="status">{t('loading')}</p>}</div>}
   {pending&&<section className="admin-notice"><p>{t('pending')}</p><button disabled={busy} onClick={()=>void send(pending)}>{t('retry')}</button></section>}
   {entry?.organizations.length===0&&<p>{t('noOrg')}</p>}
   {isList&&entry&&<>
