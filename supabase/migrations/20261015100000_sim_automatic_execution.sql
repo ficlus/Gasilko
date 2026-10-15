@@ -498,7 +498,7 @@ create trigger simulation_automation_cancel after update of status on public.inc
  for each row execute function private.automation_cancel();
 
 create function private.automation_scenario_end() returns trigger
-language plpgsql security definer set search_path='' as $
+language plpgsql security definer set search_path='' as $$
 declare j private.simulation_automation_jobs;
 begin
  if new.status<>'FINISHED' then return null;end if;
@@ -507,7 +507,7 @@ begin
  where scenario_id=new.id and state not in ('STARTED','CANCELLED')
  returning * loop perform private.automation_event(j,'SIM_AUTO_CANCELLED');end loop;
  return null;
-end; $;
+end; $$;
 create trigger simulation_automation_scenario_end after update of status on public.simulation_scenarios
  for each row execute function private.automation_scenario_end();
 
