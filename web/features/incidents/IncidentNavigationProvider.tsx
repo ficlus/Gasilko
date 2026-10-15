@@ -6,6 +6,7 @@ import type {TaskRead} from '../../lib/operational/tasks';
 import {navigationErrors,type NavigationAssignment,type NavigationView,type NavigationRoute} from '../../lib/operational/navigation';
 import {navigationText} from '../../lib/operational/navigationMessages';
 import {typingTarget} from '../../lib/operational/rts';
+import {useIncidentLive} from './IncidentLiveProvider';
 import {useRtsSession} from './rtsSession';
 import {useSimulation} from './SimulationProvider';
 type Request={name:string;args:Record<string,unknown>;assignment:string;label:string};
@@ -16,7 +17,7 @@ type ContextValue={data:NavigationView|null;route:NavigationRoute|null;assignmen
 const Context=createContext<ContextValue|null>(null);
 export const useIncidentNavigation=()=>useContext(Context);
 export function IncidentNavigationProvider({account,org,incidentId,refresh:externalRefresh,locale,read,children}:{account:string;org:string;incidentId:string;refresh:number;locale:Locale;read:TaskRead;children:ReactNode}){
- const rts=useRtsSession(),sim=useSimulation(),t=navigationText(locale);
+ const live=useIncidentLive(),rts=useRtsSession(),sim=useSimulation(),t=navigationText(locale);
  const [assignment,setAssignment]=useState<string|null>(null),[unit,setUnit]=useState<string|null>(null),[sessionId,setSessionId]=useState<string|null>(null);
  const [data,setData]=useState<NavigationView|null>(null),[historic,setHistoric]=useState<NavigationRoute|null>(null),[page,setPage]=useState(0),[before,setBefore]=useState<number|null>(null),[epoch,setEpoch]=useState(0),[fit,setFit]=useState(0);
  const [picking,setPicking]=useState(false),[candidate,setCandidate]=useState<Position|null>(null),[error,setError]=useState('');
@@ -43,9 +44,9 @@ export function IncidentNavigationProvider({account,org,incidentId,refresh:exter
   void read<NavigationView>('incident_navigation_read',{p_organization_id:org,p_incident_id:incidentId,p_assignment_id:assignment,p_unit_id:unit,p_session_id:sessionId,p_page:page,p_before_revision:before},ac.signal,account)
    .then(v=>{if(!ac.signal.aborted)setData(v);}).catch(e=>{if(!ac.signal.aborted)failure(e);});
   return()=>ac.abort();
- },[account,org,incidentId,assignment,unit,sessionId,page,before,epoch,externalRefresh,read,rts.blocked,sim?.data?.scenario?.version]);
+ },[account,org,incidentId,assignment,unit,sessionId,page,before,epoch,externalRefresh,read,rts.blocked,sim?.data?.scenario?.version,live?.lastSuccess]);
  useEffect(()=>{rts.setNavigationEditing(picking||!!proposal||!!pending);return()=>rts.setNavigationEditing(false);},[picking,!!proposal,!!pending,rts.setNavigationEditing]);
- useEffect(()=>{if(blocked){setPicking(false);setCandidate(null);setHistoric(null);setData(null);}},[blocked]);
+ useEffect(()=>{if(blocked){setPicking(false);setCandidate(null);}if(rts.blocked){setHistoric(null);setData(null);}},[blocked,rts.blocked]);
  useEffect(()=>{if(proposal)dialog.current?.showModal();return()=>dialog.current?.close();},[!!proposal]);
  function select(id:string|null){if(pending||busy||proposal)return;setAssignment(id);setPage(0);setSessionId(null);setHistoric(null);setBefore(null);setError('');setPicking(false);setCandidate(null);}
  function review(request:Request){if(blocked||busy||pending||rts.copEditing||sim?.move||sim?.proposal||rts.open||rts.agentEditing)return;setError('');setPicking(false);rts.cancelMode();setProposal(request);}

@@ -28,7 +28,35 @@ export function AutonomousSimulationPanel({locale}:{locale:Locale}){
  const runner=d?.clock.last_runner_at?Date.now()-Date.parse(d.clock.last_runner_at)<30000?'active':'unavailable':'manual';
  const time=(seconds:number)=>new Date(seconds*1000).toISOString().slice(11,19);
  function control(action:string,r:AgentRun){agents?.propose(action,{run_id:r.id,version:r.version},r.callsign+' · '+t(r.status)+' → '+t(action));}
- return <details className="workspace-section"><summary>SIM · {t('title')}</summary>
+ return <>
+ {workspace?.view==='command'&&<section className="operational-card" aria-label={t('autoTitle')}>
+ <h3>SIM · {t('autoTitle')}</h3>
+ {d?<><p><strong>{t(d.automation.enabled?'autoOn':'autoOff')}</strong> · {t(d.can_control?'autoController':'autoReadOnly')}</p>
+ <p>{st(s.status)} · {t('profile')}: {t(d.automation.profile)} · {t('scale')}: {d.clock.scale}× · {t('runner')}: {t(runner)}</p>
+ <p>{t('autoBoundary')}</p>
+ <div className="actions"><button disabled={!can||s.status==='FINISHED'} onClick={()=>agents.propose('AUTOMATION',{enabled:!d.automation.enabled,profile:d.automation.profile},t(d.automation.enabled?'autoDisableConfirm':'autoEnableConfirm'))}>{t(d.automation.enabled?'autoDisable':'autoEnable')}</button>
+ <label>{t('profile')}<select disabled={!can||s.status==='FINISHED'} value={d.automation.profile} onChange={e=>agents.propose('AUTOMATION',{enabled:d.automation.enabled,profile:e.target.value},t('profile')+' · '+t(e.target.value))}>{agentProfiles.map(p=><option key={p} value={p}>{t(p)}</option>)}</select></label></div>
+ {agents.error&&<p role="alert">{t(agents.error)}</p>}
+ <div style={{maxHeight:'18rem',overflowY:'auto'}} aria-label={t('autoJobs')}>
+ {!d.automation.jobs.length&&<p>{t('autoEmpty')}</p>}
+ {d.automation.jobs.map(job=><article className="web-row" key={job.id}>
+ <strong>{job.callsign} · {locale==='de'?job.label_de:job.label_sl}</strong><p>{job.target??'—'}</p>
+ <p>{t('auto_'+job.state)}{job.run_state?' · '+t(job.run_state):''}</p>
+ {job.navigation_state&&<p>{t('navigation')}: {nt(job.navigation_state)}</p>}
+ {job.distance_m!=null&&<p>{(job.distance_m/1000).toFixed(2)} km · {job.duration_s==null?'—':Math.ceil(job.duration_s/60)+' min'}
+ {job.remaining_s!=null?' · '+t('remaining')+': '+Math.ceil(job.remaining_s/60)+' min':''}</p>}
+ {job.error&&<p role="status">{t(job.error)}</p>}
+ {job.detail.distance_m!=null&&<p>{t('gap')}: {job.detail.distance_m.toFixed(1)} m · {t('roadOnly')}</p>}
+ <div className="actions">
+ {job.route_id&&<button onClick={()=>{nav?.select(job.assignment_id);if(job.route_id)nav?.viewRoute(job.route_id);}}>{t('show')}</button>}
+ {job.error==='SIM_ACCESS_GAP'&&job.detail.snapped_origin&&job.position_version&&<button disabled={!can} onClick={()=>{const point=job.detail.snapped_origin;if(point)sim.propose('SET_POSITION',{unit_id:job.unit_id,position_version:job.position_version,longitude:point[0],latitude:point[1],heading_degrees:0,speed_mps:0},t('access')+' · '+job.callsign+' · '+point.join(', '));}}>{t('access')}</button>}
+ {['BLOCKED','RETRY'].includes(job.state)&&<button disabled={!can||s.status!=='RUNNING'} onClick={()=>agents.propose('AUTOMATION_RETRY',{job_id:job.id,version:job.version},job.callsign+' · '+t('autoRetryConfirm'))}>{t('autoRetry')}</button>}
+ </div></article>)}
+ </div>
+ <div className="actions"><button disabled={agents.page===0} onClick={()=>agents.setPage(agents.page-1)}>{t('previous')}</button><button disabled={!d.automation.more} onClick={()=>agents.setPage(agents.page+1)}>{t('next')}</button></div>
+ </>:<p role="status">{agents.error?t(agents.error):t('autoLoading')}</p>}
+ </section>}
+ <details className="workspace-section"><summary>SIM · {t('title')}</summary>
  <p>{t('notice')}</p>{agents.error&&<p role="alert">{t(agents.error)}</p>}
  <button onClick={agents.refresh}>{t('refresh')}</button>
  {d&&<>
@@ -80,5 +108,5 @@ export function AutonomousSimulationPanel({locale}:{locale:Locale}){
  <details><summary>{t('history')}</summary>{d.events.map(e=><article key={e.sequence}><strong>{t(e.event_type)}</strong><p>{e.sim_seconds} s · {e.created_at} · {t(e.actor_origin)} {e.actor_user_id??''} · {e.run_id??''}</p><pre>{JSON.stringify(e.payload,null,2)}</pre></article>)}
  <button onClick={()=>agents.older(null)}>{t('newest')}</button><button disabled={d.events.length<50} onClick={()=>agents.older(d.events.at(-1)?.sequence??null)}>{t('older')}</button></details>
  </>}
- </details>;
+ </details></>;
 }
