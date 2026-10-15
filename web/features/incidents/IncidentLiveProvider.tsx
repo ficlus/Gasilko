@@ -24,10 +24,10 @@ export function IncidentLiveProvider({account,org,incidentId,read,onInvalidate,o
  const [status,setStatus]=useState<Status>('CONNECTING'),[lastSuccess,setLastSuccess]=useState<number|null>(null),[epoch,setEpoch]=useState(0);
  const [notifications,setNotifications]=useState<IncidentLiveNotification[]>([]),[unread,setUnread]=useState(0),[lowPriorityToasts,setLowPriorityToasts]=useState(true);
  const latest=useRef({onInvalidate,onAccessLost});latest.current={onInvalidate,onAccessLost};
- const revision=useRef<string|null>(null),cursor=useRef<string|null>(null),scope=useRef(''),successful=useRef(false);
+ const revision=useRef<string|null>(null),cursor=useRef<string|null>(null),simCursor=useRef<string|null>(null),scope=useRef(''),successful=useRef(false);
  useEffect(()=>{
   const nextScope=account+':'+org+':'+incidentId;
-  if(scope.current!==nextScope){scope.current=nextScope;revision.current=null;cursor.current=null;successful.current=false;setNotifications([]);setUnread(0);setLastSuccess(null);}
+  if(scope.current!==nextScope){scope.current=nextScope;revision.current=null;cursor.current=null;simCursor.current=null;successful.current=false;setNotifications([]);setUnread(0);setLastSuccess(null);}
   let disposed=false,denied=false,inFlight=false,backoff=8000,timer:ReturnType<typeof setTimeout>|undefined,controller:AbortController|null=null;
   const schedule=(ms:number)=>{clearTimeout(timer);if(!disposed&&!denied)timer=setTimeout(()=>void refresh(),ms);};
   async function deriveNotifications(signal:AbortSignal){
@@ -61,6 +61,17 @@ export function IncidentLiveProvider({account,org,incidentId,read,onInvalidate,o
     if(cursor.current===null)cursor.current=String(snapshot.timeline_sequence);
     if(changed)latest.current.onInvalidate();
     await deriveNotifications(signal);
+    if(snapshot.training){
+     const feed=await read<{cursor:string;events:{id:string;code:string;created_at:string;unit_id:string|null}[]}>('simulation_automation_feed',
+      {p_incident:incidentId,p_organization_id:org,p_after:simCursor.current},signal,account);
+     if(disposed||signal.aborted)return;
+     simCursor.current=feed.cursor;
+     if(feed.events.length){
+      const notes=feed.events.map(event=>({id:event.id,eventCode:event.code,createdAt:event.created_at,priority:priority(event.code),
+       entity:event.unit_id?{kind:'INCIDENT_UNIT' as const,id:event.unit_id}:undefined}));
+      setNotifications(current=>[...notes.reverse(),...current].slice(0,50));setUnread(current=>Math.min(99,current+notes.length));
+     }
+    }
     if(disposed||signal.aborted)return;
     successful.current=true;setLastSuccess(Date.now());setStatus('LIVE');backoff=8000;
    }catch(error){

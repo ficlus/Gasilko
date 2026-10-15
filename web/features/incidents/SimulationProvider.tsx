@@ -6,6 +6,7 @@ import type {TaskRead} from '../../lib/operational/tasks';
 import {simulationErrors,type SimulationAction,type SimulationView} from '../../lib/operational/simulation';
 import {simulationText} from '../../lib/operational/simulationMessages';
 import {typingTarget} from '../../lib/operational/rts';
+import {useIncidentLive} from './IncidentLiveProvider';
 import {useRtsSession} from './rtsSession';
 
 type Request={action:SimulationAction;args:{p_operation:string;p_acting_organization_id:string;p_incident_id:string;p_expected_version:string;p_action:SimulationAction;p_payload:Record<string,unknown>};summary:string};
@@ -17,7 +18,7 @@ const Context=createContext<Controller|null>(null);
 export const useSimulation=()=>useContext(Context);
 export function SimulationBanner({locale}:{locale:Locale}){return <p className="simulation-banner" role="note"><strong>SIM · {simulationText(locale)('banner')}</strong></p>;}
 export function SimulationProvider({account,org,incidentId,refresh:externalRefresh,locale,read,onInventoryChanged,children}:{account:string;org:string;incidentId:string;refresh:number;locale:Locale;read:TaskRead;onInventoryChanged:()=>void;children:ReactNode}){
- const rts=useRtsSession(),t=simulationText(locale);
+ const live=useIncidentLive(),rts=useRtsSession(),t=simulationText(locale);
  const [data,setData]=useState<SimulationView|null>(null),[error,setError]=useState(''),[epoch,setEpoch]=useState(0),[before,setBefore]=useState<string|null>(null);
  const [proposal,setProposal]=useState<Request|null>(null),[pending,setPending]=useState<Request|null>(null),[busy,setBusy]=useState(false),[rejected,setRejected]=useState(false),[move,setMove]=useState<Move|null>(null);
  const alive=useRef(true),sending=useRef(false),dialog=useRef<HTMLDialogElement>(null);
@@ -35,7 +36,7 @@ export function SimulationProvider({account,org,incidentId,refresh:externalRefre
    .catch(e=>{if(ac.signal.aborted)return;setData(null);setMove(null);const code=e instanceof Error?e.message:'SERVER';setError(t(code)==code?'SERVER':code);
     if(['NOT_AUTHORIZED','EXPIRED'].includes(code)){setProposal(null);setPending(null);rts.revoke();}})
   return()=>ac.abort();
- },[account,org,incidentId,externalRefresh,epoch,before,read]);
+ },[account,org,incidentId,externalRefresh,epoch,before,read,live?.lastSuccess]);
  useEffect(()=>{rts.setExternalEditing(!!move||!!proposal||!!pending);return()=>rts.setExternalEditing(false);},[!!move,!!proposal,!!pending,rts.setExternalEditing]);
  useEffect(()=>{if(proposal){dialog.current?.showModal();}return()=>dialog.current?.close();},[!!proposal]);
  useEffect(()=>{if(rts.locked)setMove(null);},[rts.locked]);

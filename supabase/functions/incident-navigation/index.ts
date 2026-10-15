@@ -1,4 +1,4 @@
-import {withRoadProvider} from "../_shared/roadProvider.ts";
+import {calculateIncidentRoadRoute} from "../_shared/incidentRoadRoute.ts";
 import {RoutingError,type Point} from "../plan-routes/provider.ts";
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const point=(p:unknown):p is Point=>Array.isArray(p)&&p.length===2&&p.every(v=>typeof v==="number"&&Number.isFinite(v))&&Math.abs(p[0])<=180&&Math.abs(p[1])<=90;
@@ -34,17 +34,7 @@ Deno.serve(async req=>{
   await rpc("incident_navigation_lease",{p_actor:user.id,p_operation:request.operation_id},true);
   const input=prepared.input,origin=input?.origin?.coordinate,destination=input?.destination?.geometry?.coordinates;
   if(!point(origin)||!point(destination))throw new RoutingError("ROUTE_COORDINATES");
-  const route=await withRoadProvider(signal,async provider=>{
-   const path=await provider.route([origin,destination],true);
-   if(!Number.isFinite(path.distance)||path.distance<0||!Number.isFinite(path.seconds)||path.seconds<0||
-    path.coordinates.length<2||!path.coordinates.every(point)||path.snapped.length!==2||!path.snapped.every(point))
-    throw new RoutingError("ROUTE_PROVIDER",502);
-   if(path.coordinates.length>50000)throw new RoutingError("ROUTE_LIMIT");
-   const result={provider:provider.name,profile:"car",distance_m:path.distance,duration_s:path.seconds,
-    geometry:{type:"LineString",coordinates:path.coordinates},steps:path.legs??null,snapped_origin:path.snapped[0],snapped_destination:path.snapped[1]};
-   if(new TextEncoder().encode(JSON.stringify(result)).length>3_000_000)throw new RoutingError("ROUTE_LIMIT");
-   return result;
-  });
+  const route=await calculateIncidentRoadRoute(origin,destination,signal);
   const result=await rpc("incident_navigation_commit",{p_actor:user.id,p_organization_id:body.organization,p_request:request,p_input:input,p_route:route},true);
   // Geometry is read afterward through the current caller's scoped projection.
   return reply({acknowledged:true,result});
