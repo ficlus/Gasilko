@@ -22,7 +22,7 @@ begin
  case when nr.id is not null then (to_jsonb(nr)-'navigation_steps'-'operation_id') end route,
  case when r.id is not null then jsonb_build_object('id',r.id,'route_id',r.route_id,'version',r.version::text,
   'status',r.status,'progress_m',r.progress_m,'length_m',r.length_m,
-  'remaining_s',case when r.baseline_mps>0 then greatest(0,(r.length_m-r.progress_m)/r.baseline_mps) end,
+  'remaining_s',case when r.status='SIM_IN_PROGRESS' and r.speed_mps>0 and r.baseline_mps>0 then greatest(0,(r.length_m-r.progress_m)/r.baseline_mps) end,
   'sample',r.last_sample::text) end run,
  case when j.id is not null then jsonb_build_object('id',j.id,'state',j.state,'error',j.error_code) end automation
  from public.incident_task_assignments a
