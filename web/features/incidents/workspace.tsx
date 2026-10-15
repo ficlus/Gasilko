@@ -5,6 +5,8 @@ import {parseEntityRef} from '../../lib/operational/entity';
 import {createPortal} from 'react-dom';
 import type {Locale} from '../../lib/i18n';
 import {IncidentLiveProvider} from './IncidentLiveProvider';
+import {CommandMapProvider} from './CommandMapProvider';
+import {CommandMapControls,CommandMapDetails} from './CommandMapDetails';
 import {IncidentNavigationProvider} from './IncidentNavigationProvider';
 import {IncidentNavigationPanel} from './IncidentNavigationPanel';
 import {AutonomousSimulationProvider} from './AutonomousSimulationProvider';
@@ -107,7 +109,7 @@ export function IncidentWorkspace({locale,header,operations,secondary,children,v
   else url.searchParams.delete('selected');
   window.history.replaceState(window.history.state,'',url);
  },[]);
- useEffect(()=>{if(command&&wide&&selected&&!expanded){setRight(true);setTools(false);}},[selected?.kind,selected?.id,command,wide]);
+ useEffect(()=>{if(command&&selected&&!expanded){setRight(true);setTools(false);if(!wide){setLeft(false);setHistory(false);}}},[selected?.kind,selected?.id,command,wide]);
  useEffect(()=>{if(command&&rts?.open){setExpanded(false);setRight(true);setTools(false);if(!wide){setLeft(false);setHistory(false);}}},[command,rts?.open,wide]);
  const [bottom,setBottom]=useState<HTMLElement|null>(null);
  const [operational,setOperational]=useState<HTMLElement|null>(null),[selectedPane,setSelectedPane]=useState<HTMLElement|null>(null);
@@ -126,7 +128,7 @@ export function IncidentWorkspace({locale,header,operations,secondary,children,v
     '--command-header-height':headerHeight+'px'
    } as CSSProperties:undefined}>
    <div className="workspace-heading" ref={heading}>{header}
-    <div className="workspace-view-bar" ref={switchHost}>
+    <CommandMapControls locale={locale}/><div className="workspace-view-bar" ref={switchHost}>
      <IncidentViewSwitch locale={locale} view={view} onChange={onView}/>
      {command&&<>
       <div className="actions command-panel-toggles">
@@ -153,7 +155,7 @@ export function IncidentWorkspace({locale,header,operations,secondary,children,v
      {command&&<button type="button" className="command-panel-close" onClick={()=>close('right')}>{wt('close')}</button>}
      <h3>{t('copSelected')}</h3>
      {selected?<button type="button" onClick={()=>select(null)}>{t('workspaceClear')}</button>:<p>{t('workspaceSelect')}</p>}
-     <div ref={setSelectedPane} aria-live="polite"/>
+     <CommandMapDetails locale={locale}/><div ref={setSelectedPane} aria-live="polite"/>
      {command&&<p>{wt('classicHelp')}</p>}
     </aside>
    </div>
@@ -173,6 +175,6 @@ function WorkspaceViews({operational,...props}:{operational:boolean;locale:Local
  <SimulationPanel locale={props.locale}/><IncidentNavigationPanel locale={props.locale}/><AutonomousSimulationPanel locale={props.locale}/>{props.operations}{props.children}{props.secondary}</>;
 }
 export function IncidentLayout({operational,locked,onAccessLost,simulation,...props}:{operational:boolean;locked:boolean;onAccessLost:()=>void;simulation:{account:string;org:string;incidentId:string;refresh:number;read:TaskRead;onInventoryChanged:()=>void};locale:Locale;header:ReactNode;operations:ReactNode;secondary:ReactNode;children:ReactNode}){
- const content=<SimulationProvider key={simulation.account+':'+simulation.org+':'+simulation.incidentId} {...simulation} locale={props.locale}><IncidentNavigationProvider {...simulation} locale={props.locale}><AutonomousSimulationProvider {...simulation} locale={props.locale}><WorkspaceViews operational={operational} {...props}/></AutonomousSimulationProvider></IncidentNavigationProvider></SimulationProvider>;
+ const content=<SimulationProvider key={simulation.account+':'+simulation.org+':'+simulation.incidentId} {...simulation} locale={props.locale}><IncidentNavigationProvider {...simulation} locale={props.locale}><AutonomousSimulationProvider {...simulation} locale={props.locale}><CommandMapProvider {...simulation}><WorkspaceViews operational={operational} {...props}/></CommandMapProvider></AutonomousSimulationProvider></IncidentNavigationProvider></SimulationProvider>;
  return <RtsProvider key={simulation.account+':'+simulation.org+':'+simulation.incidentId} enabled={operational} locked={locked} onAccessLost={onAccessLost}>{operational?<IncidentLiveProvider account={simulation.account} org={simulation.org} incidentId={simulation.incidentId} read={simulation.read} onInvalidate={simulation.onInventoryChanged} onAccessLost={onAccessLost}>{content}</IncidentLiveProvider>:content}</RtsProvider>;
 }

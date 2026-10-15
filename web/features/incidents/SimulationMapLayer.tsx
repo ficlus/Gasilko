@@ -27,11 +27,12 @@ export function useSimulationPositionLayer():RecipientPositionLayer|null{
 }
 export function SimulationMapLayer({map,locale}:{map:Map;locale:Locale}){
  const sim=useSimulation(),agents=useAutonomousSimulation(),rts=useRtsSession(),t=simulationText(locale),at=agentText(locale),s=sim?.data?.scenario;
- const previous=useRef<globalThis.Map<string,{coordinate:number[];version:string}>>(new globalThis.Map());
+ const sourceText=useRef('');
  const visible=!!sim?.data?.enabled&&!!s&&s.status!=='FINISHED';
  useEffect(()=>{
   if(!visible)return;
   const before=map.getStyle().layers.find(l=>l.id.startsWith('rts-')||l.id.startsWith('cop-selection'))?.id;
+  sourceText.current='';
   map.addSource('simulation-units',{type:'geojson',data:empty});
   map.addLayer({id:'simulation-units-point',source:'simulation-units',type:'circle',paint:{'circle-radius':11,'circle-color':'#fff1ca','circle-stroke-width':['case',['get','selected'],5,2],'circle-stroke-color':['case',['get','selected'],'#075f93','#74510b']}},before);
   map.addLayer({id:'simulation-units-label',source:'simulation-units',type:'symbol',layout:{'text-field':['get','label'],'text-size':12,'text-offset':[0,1.6]},paint:{'text-color':'#513805','text-halo-color':'#fff','text-halo-width':2}},before);
@@ -49,24 +50,9 @@ export function SimulationMapLayer({map,locale}:{map:Map;locale:Locale}){
     selected:rts.recipients.some(r=>r.type==='INCIDENT_UNIT'&&r.id===p.incident_unit_id),label:'SIM · '+p.callsign+' · '+at(agents?.data?.signals[p.incident_unit_id]??(!Number.isFinite(Date.parse(p.observed_at))?'unknown':Date.now()-Date.parse(p.observed_at)>30000?'stalePosition':'current'))}
   }));
   const source=map.getSource('simulation-units') as GeoJSONSource|undefined;
-  const old=previous.current,next=new globalThis.Map<string,{coordinate:number[];version:string}>();
-  for(const p of sim?.data?.positions??[])next.set(p.incident_unit_id,{coordinate:[p.longitude,p.latitude],version:p.version});
-  previous.current=next;
-  let frame=0;const start=performance.now();
-  const reduced=window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  const animate=(now:number)=>{
-   const fraction=Math.min(1,(now-start)/800);
-   source?.setData({type:'FeatureCollection',features:features.map(f=>{
-    const prior=old.get(f.id),current=next.get(f.id);
-    if(!prior||!current||prior.version===current.version||reduced||agents?.data?.signals[f.id]||document.visibilityState!=='visible')return f;
-    const delta=((current.coordinate[0]-prior.coordinate[0]+540)%360)-180;
-    const longitude=prior.coordinate[0]+delta*fraction;
-    return {...f,geometry:{...f.geometry,coordinates:[longitude-360*Math.floor((longitude+180)/360),prior.coordinate[1]+(current.coordinate[1]-prior.coordinate[1])*fraction]}};
-   })});
-   if(fraction<1&&document.visibilityState==='visible')frame=requestAnimationFrame(animate);
-  };
-  frame=requestAnimationFrame(animate);
-  return()=>cancelAnimationFrame(frame);
+  // H2 defaults to confirmed positions, without intermediate invented telemetry.
+  const data={type:'FeatureCollection' as const,features},text=JSON.stringify(data);
+  if(text!==sourceText.current){sourceText.current=text;source?.setData(data);}
  },[map,visible,s,sim?.data?.positions,rts.recipients,locale,agents?.data?.signals]);
  useEffect(()=>{
   if(!sim?.move)return;const canvas=map.getCanvas(),previous=canvas.style.cursor;canvas.style.cursor='crosshair';

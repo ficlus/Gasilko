@@ -400,3 +400,35 @@ button:disabled { opacity: .6; cursor: wait; }
 
 /* M14.5H session-local RTS control groups. */
 .rts-control-groups{margin:.5rem 0;padding:.5rem;border-block:1px solid #bac7ce}.rts-control-groups>strong{display:block}.rts-control-groups>span{font-size:.85rem}.rts-control-groups small{display:block;margin-top:.35rem}.rts-group-buttons{display:flex;gap:.3rem;overflow-x:auto;padding:.35rem 0}.rts-group{display:inline-flex;gap:.15rem;white-space:nowrap}.rts-group button{min-height:2.3rem}.rts-group button+button{min-width:2.3rem;padding-inline:.4rem}
+
+/* H2: command-only compact shell. Height remains based on the measured heading,
+   never its scrolling offset. Classic layout and the single map are retained. */
+.registry-main:has(.command-workspace)>h1{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+.command-workspace .workspace-header{gap:.25rem .65rem;padding:.3rem .55rem}
+.command-workspace .workspace-header .registry-toolbar{display:flex;align-items:center;flex-wrap:wrap;gap:.3rem .65rem;flex:1 1 100%;margin:0}
+.command-workspace .registry-toolbar label{display:flex;align-items:center;gap:.35rem;min-width:0;max-width:100%;margin:0}
+.command-workspace .registry-toolbar select{width:auto;min-width:0;max-width:min(22rem,58vw)}
+.command-workspace .workspace-header .simulation-banner{padding:.2rem .5rem;margin:0;border-width:2px;font-size:.8rem}
+.simulation-scope:has(.command-workspace .workspace-header .simulation-banner)>.simulation-banner{display:none}
+.command-workspace .workspace-view-bar{padding:.15rem 0;gap:.25rem}
+.command-workspace .workspace-view-bar .actions{margin:.1rem 0}
+.command-workspace .command-selection-summary{margin:.1rem 0;font-size:.75rem}
+.command-workspace .workspace-identity-details{flex:0 1 auto}
+.command-workspace .workspace-identity-details[open]{flex-basis:100%}
+.command-route-controls{display:flex;align-items:center;flex-wrap:wrap;gap:.3rem 1rem;font-size:.8rem;padding:.15rem .5rem}
+.command-route-controls label{display:flex;align-items:center;gap:.35rem;min-height:44px;margin:0}
+.command-route-controls input{width:auto!important}
+.command-route-controls [role=alert],.command-route-controls [role=status]{color:#704100;max-width:100%;overflow-wrap:anywhere}
+.command-route-facts{display:grid;grid-template-columns:minmax(0,1fr);gap:.2rem;font-size:.85rem}
+.command-route-facts dt{font-weight:600}
+.command-route-facts dd{margin:0 0 .4rem;overflow-wrap:anywhere}
+.command-unit-tasks h3,.command-unit-tasks h4{margin:.3rem 0}
+.command-target-inspector{position:absolute;z-index:4;left:.5rem;bottom:3rem;width:min(26rem,calc(100% - 4rem));max-height:45%;overflow:auto;background:#fff;padding:.6rem;border:1px solid #879aa7;border-radius:.5rem;box-shadow:0 4px 16px #0002}
+.command-target-inspector button{white-space:normal;overflow-wrap:anywhere;min-height:44px;max-width:100%;margin:.2rem}
+@media(max-width:40rem){
+ .command-workspace .incident-view-switch{width:auto;flex:1 1 auto}
+ .command-workspace .command-panel-toggles{display:flex;flex-wrap:wrap;width:auto;gap:.2rem}
+ .command-workspace .command-panel-toggles>[data-expand]{flex:0 1 auto}
+ .command-workspace .workspace-header h2{flex:1 1 auto}
+ .command-route-controls{gap:.15rem .5rem}
+}

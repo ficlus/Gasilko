@@ -20,6 +20,7 @@ export function IncidentNavigationProvider({account,org,incidentId,refresh:exter
  const live=useIncidentLive(),rts=useRtsSession(),sim=useSimulation(),t=navigationText(locale);
  const [assignment,setAssignment]=useState<string|null>(null),[unit,setUnit]=useState<string|null>(null),[sessionId,setSessionId]=useState<string|null>(null);
  const [data,setData]=useState<NavigationView|null>(null),[historic,setHistoric]=useState<NavigationRoute|null>(null),[page,setPage]=useState(0),[before,setBefore]=useState<number|null>(null),[epoch,setEpoch]=useState(0),[fit,setFit]=useState(0);
+ const [routeToRead,setRouteToRead]=useState<{id:string;request:number}|null>(null);
  const [picking,setPicking]=useState(false),[candidate,setCandidate]=useState<Position|null>(null),[error,setError]=useState('');
  const [proposal,setProposal]=useState<Request|null>(null),[pending,setPending]=useState<Request|null>(null),[busy,setBusy]=useState(false);
  const alive=useRef(true),sending=useRef(false),dialog=useRef<HTMLDialogElement>(null),routeRequest=useRef(0);
@@ -48,7 +49,7 @@ export function IncidentNavigationProvider({account,org,incidentId,refresh:exter
  useEffect(()=>{rts.setNavigationEditing(picking||!!proposal||!!pending);return()=>rts.setNavigationEditing(false);},[picking,!!proposal,!!pending,rts.setNavigationEditing]);
  useEffect(()=>{if(blocked){setPicking(false);setCandidate(null);}if(rts.blocked){setHistoric(null);setData(null);}},[blocked,rts.blocked]);
  useEffect(()=>{if(proposal)dialog.current?.showModal();return()=>dialog.current?.close();},[!!proposal]);
- function select(id:string|null){if(pending||busy||proposal)return;setAssignment(id);setPage(0);setSessionId(null);setHistoric(null);setBefore(null);setError('');setPicking(false);setCandidate(null);}
+ function select(id:string|null){if(pending||busy||proposal)return;setRouteToRead(null);setAssignment(id);setPage(0);setSessionId(null);setHistoric(null);setBefore(null);setError('');setPicking(false);setCandidate(null);}
  function review(request:Request){if(blocked||busy||pending||rts.copEditing||sim?.move||sim?.proposal||rts.open||rts.agentEditing)return;setError('');setPicking(false);rts.cancelMode();setProposal(request);}
  const row=data?.rows.find(a=>a.id===assignment);
  function prepare(source:'SIMULATED_POSITION'|'MANUAL_PLANNING_POINT'){
@@ -81,6 +82,16 @@ export function IncidentNavigationProvider({account,org,incidentId,refresh:exter
    }
   }finally{sending.current=false;if(alive.current)setBusy(false);}
  }
+ // Fetch after selection state has committed; select()+viewRoute() in one
+ // event must not have its response invalidated by the selection reset effect.
+ useEffect(()=>{
+  if(!routeToRead||rts.blocked)return;
+  const ac=new AbortController(),request=++routeRequest.current;
+  void read<NavigationRoute>('incident_navigation_route',{p_organization_id:org,p_incident_id:incidentId,p_route_id:routeToRead.id},ac.signal,account)
+   .then(r=>{if(!ac.signal.aborted&&alive.current&&request===routeRequest.current){setHistoric(r);setFit(v=>v+1);}})
+   .catch(e=>{if(!ac.signal.aborted&&alive.current&&request===routeRequest.current)failure(e);});
+  return()=>ac.abort();
+ },[routeToRead,account,org,incidentId,read,rts.blocked]);
  const value:ContextValue={data,route:historic??data?.session?.route??null,assignment,busy,pending:!!pending,error,page,picking,candidate,fit,history:!!historic,
  select,scopeUnit:id=>{if(pending||busy||proposal)return;setUnit(id);select(null);setPage(0);},
  refresh:()=>{setError('');setEpoch(v=>v+1);},pick:()=>{
@@ -88,10 +99,7 @@ export function IncidentNavigationProvider({account,org,incidentId,refresh:exter
   setCandidate(null);setPicking(true);rts.cancelMode();
  },point:p=>{if(picking&&!blocked)setCandidate(p);},cancelPick:()=>{setPicking(false);setCandidate(null);},prepare,command,
  show:()=>setFit(v=>v+1),older:()=>{const last=data?.history.at(-1);if(last)setBefore(last.revision);},
- viewRoute:id=>{
-  const request=++routeRequest.current;void read<NavigationRoute>('incident_navigation_route',{p_organization_id:org,p_incident_id:incidentId,p_route_id:id},undefined,account)
-   .then(r=>{if(alive.current&&request===routeRequest.current){setHistoric(r);setFit(v=>v+1);}}).catch(e=>{if(alive.current&&request===routeRequest.current)failure(e);});
- },current:()=>{routeRequest.current++;setHistoric(null);setBefore(null);},pageTo:setPage,session:id=>{setSessionId(id);setBefore(null);}};
+ viewRoute:id=>setRouteToRead({id,request:++routeRequest.current}),current:()=>{routeRequest.current++;setRouteToRead(null);setHistoric(null);setBefore(null);},pageTo:setPage,session:id=>{setSessionId(id);setBefore(null);}};
  return <Context.Provider value={value}><div onKeyDownCapture={e=>{
   if(e.key==='Escape'&&picking&&!typingTarget(e.target)&&!e.nativeEvent.isComposing){e.preventDefault();e.stopPropagation();setPicking(false);setCandidate(null);}
  }}>{children}
