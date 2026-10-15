@@ -6,12 +6,13 @@ import {agentText} from '../../lib/operational/agentMessages';
 import {taskText} from '../../lib/operational/taskMessages';
 import {navigationText} from '../../lib/operational/navigationMessages';
 import {simulationText} from '../../lib/operational/simulationMessages';
+import {useCommandMap} from './CommandMapProvider';
 import {useAutonomousSimulation} from './AutonomousSimulationProvider';
 import {useSimulation} from './SimulationProvider';
 import {useIncidentNavigation} from './IncidentNavigationProvider';
 import {useWorkspace} from './workspace';
 export function AutonomousSimulationPanel({locale}:{locale:Locale}){
- const agents=useAutonomousSimulation(),sim=useSimulation(),nav=useIncidentNavigation(),workspace=useWorkspace();
+ const commandMap=useCommandMap(),agents=useAutonomousSimulation(),sim=useSimulation(),nav=useIncidentNavigation(),workspace=useWorkspace();
  const t=agentText(locale),tt=taskText(locale),nt=navigationText(locale),st=simulationText(locale);
  const [assignment,setAssignment]=useState(''),[profile,setProfile]=useState<string>('NORMAL');
  const [ack,setAck]=useState('3'),[start,setStart]=useState('2'),[completion,setCompletion]=useState('5'),[factor,setFactor]=useState('1'),[fault,setFault]=useState('0.5'),[duration,setDuration]=useState('30');
@@ -23,6 +24,8 @@ export function AutonomousSimulationPanel({locale}:{locale:Locale}){
  const d=agents.data,s=sim.data.scenario,row=d?.assignments.find(a=>a.id===assignment);
  const can=!!d?.can_control&&!agents.busy&&!agents.pending;
  const moving=!!row&&['MOVE_TO','WITHDRAW_TO'].includes(row.behavior);
+ const automaticJob=row?(commandMap?.data?.rows.find(a=>a.id===row.id)?.automation??d?.automation.jobs.find(j=>j.assignment_id===row.id)):null;
+ const automatic=!!row&&d?.automation.enabled&&!!automaticJob&&!['UNSUPPORTED','CANCELLED'].includes(automaticJob.state);
  const ready=!!row&&(!moving||!!row.route_id&&!!row.origin_current&&(row.access_gap??Infinity)<=5);
  const stale=sim.data.positions.filter(p=>!Number.isFinite(Date.parse(p.observed_at))||Date.now()-Date.parse(p.observed_at)>30000).length;
  const runner=d?.clock.last_runner_at?Date.now()-Date.parse(d.clock.last_runner_at)<30000?'active':'unavailable':'manual';
@@ -79,6 +82,7 @@ export function AutonomousSimulationPanel({locale}:{locale:Locale}){
  <button disabled={!row.route_id} onClick={()=>{nav?.select(row.id);if(row.route_id)nav?.viewRoute(row.route_id);}}>{t('show')}</button>
  <button disabled={!can||!row.snapped_origin} onClick={()=>row.snapped_origin&&sim.propose('SET_POSITION',{unit_id:row.unit_id,position_version:row.position_version,longitude:row.snapped_origin[0],latitude:row.snapped_origin[1],heading_degrees:0,speed_mps:0},t('access')+' · '+row.callsign+' · '+row.snapped_origin.join(', '))}>{t('access')}</button></div>
  <p>{t('recalculate')}</p>{!ready&&<p role="status">{t(row.access_gap!=null&&row.access_gap>5?'SIM_ACCESS_GAP':'SIM_ROUTE_REQUIRED')}</p>}</>}
+ {automatic?<p role="status">{t('autoOn')} · {t('auto_'+automaticJob!.state)}</p>:<>
  <label>{t('profile')}<select value={profile} onChange={e=>{setProfile(e.target.value);setAck(e.target.value==='SLOW_RESPONSE'?'15':'3');setStart(e.target.value==='SLOW_RESPONSE'?'10':'2');}}>{agentProfiles.map(p=><option key={p} value={p}>{t(p)}</option>)}</select></label>
  <div className="actions">{[
  ['ack',ack,setAck,0,600],['start',start,setStart,0,600],['completion',completion,setCompletion,0,3600],
@@ -86,7 +90,7 @@ export function AutonomousSimulationPanel({locale}:{locale:Locale}){
  ].map(([label,current,set,min,max])=><label key={label as string}>{t(label as string)}<input type="number" min={min as number} max={max as number} step={label==='factor'||label==='fault'?'0.01':'1'} value={current as string} onChange={e=>(set as (v:string)=>void)(e.target.value)}/></label>)}</div>
  <button disabled={!can||!ready||s.status!=='RUNNING'} onClick={()=>agents.propose('START',{run_id:crypto.randomUUID(),assignment_id:row.id,position_version:row.position_version,session_id:moving?row.session_id:null,route_id:moving?row.route_id:null,
  profile,ack_delay:Number(ack),start_delay:Number(start),completion_delay:Number(completion),speed_factor:Number(factor),fault_progress:Number(fault),signal_duration:Number(duration)},
- row.callsign+' → '+row.target+'\n'+t(profile)+' · '+ack+' s · '+d.clock.scale+'×\n'+(row.distance_m??0)+' m / '+(row.duration_s??0)+' s'+'\n'+t('start')+': '+start+' · '+t('completion')+': '+completion+' · '+t('factor')+': '+factor+' · '+t('fault')+': '+fault+' · '+t('duration')+': '+duration)}>{t('START')}</button>
+ row.callsign+' → '+row.target+'\n'+t(profile)+' · '+ack+' s · '+d.clock.scale+'×\n'+(row.distance_m??0)+' m / '+(row.duration_s??0)+' s'+'\n'+t('start')+': '+start+' · '+t('completion')+': '+completion+' · '+t('factor')+': '+factor+' · '+t('fault')+': '+fault+' · '+t('duration')+': '+duration)}>{t('START')}</button></>}
  </section>}
  {d.runs.map(r=><article className="operational-card" key={r.id}>
  <h4>SIM · {r.callsign} · {r.target}</h4><p>{t('operational')}: {tt(r.operational_status)} · {t('navigation')}: {r.navigation_status?nt(r.navigation_status):'—'}</p>

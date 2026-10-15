@@ -179,12 +179,13 @@ export function IncidentArea({locale,account,destination,initialOrg}:{locale:Loc
   <label>{t('address')}<input maxLength={1000} value={core.address} onChange={e=>setCore({...core,address:e.target.value})}/></label>
   <button type="submit">{t('save')}</button></fieldset></form>;
  if(!sessionValid)return <p role="alert">{t('expired')}</p>;
- return <div className="registry incident-area">
-  <div className="registry-toolbar"><label>{t('organization')}<select value={org} disabled={loading||busy||!!pending} onChange={e=>router.push(url(destination,e.target.value))}>
+ const organizationActions=<div className="registry-toolbar"><label>{t('organization')}<select value={org} disabled={loading||busy||!!pending} onChange={e=>router.push(url(destination,e.target.value))}>
    <option value="">{t('select')}</option>{entry?.organizations.map(o=><option value={o.id} key={o.id}>{o.name}</option>)}</select></label>
    <Link href={url()}>{t('list')}</Link>{simulationEnvironment?.can_create&&<Link href={url('new')+'&training=1'}>{simText('new')}</Link>}{entry?.organizations.find(o=>o.id===org)?.can_create&&<Link href={url('new')}>{t('new')}</Link>}
-   <button disabled={loading||busy||!!pending} onClick={reload}>{t('refresh')}</button></div>
-  {error&&<p role="alert">{t(error)}</p>}{notice&&<p role="status">{t(notice)}</p>}{loading&&<p role="status">{t('loading')}</p>}
+   <button disabled={loading||busy||!!pending} onClick={reload}>{t('refresh')}</button></div>;
+ return <div className="registry incident-area">
+  {!detail&&organizationActions}
+  {(error||notice||loading)&&<div className="incident-feedback">{error&&<p role="alert">{t(error)}</p>}{notice&&<p role="status">{t(notice)}</p>}{loading&&<p role="status">{t('loading')}</p>}</div>}
   {pending&&<section className="admin-notice"><p>{t('pending')}</p><button disabled={busy} onClick={()=>void send(pending)}>{t('retry')}</button></section>}
   {entry?.organizations.length===0&&<p>{t('noOrg')}</p>}
   {isList&&entry&&<>
@@ -207,7 +208,7 @@ export function IncidentArea({locale,account,destination,initialOrg}:{locale:Loc
   {isNew&&entry?.organizations.find(o=>o.id===org)?.can_create&&<><p>{t('draftIdentity')}</p>{coreForm}</>}
   {isNew&&entry&&!entry.organizations.find(o=>o.id===org)?.can_create&&<p>{t('noAccess')}</p>}
   {detail&&<IncidentLayout key={`${account}/${org}/${detail.id}`} locale={locale} simulation={{account,org,incidentId:detail.id,refresh,read:rpc,onInventoryChanged:()=>setRefresh(v=>v+1)}} operational={['ACTIVE','STABILIZED'].includes(detail.status)} locked={loading||busy||!!pending||!!confirmation} onAccessLost={()=>{setDetail(null);setConfirmation(null);setPending(null);setCommandInbox([]);setError('noAccess');}}
-   header={<header className="admin-card workspace-header">{detail.training&&<SimulationBanner locale={locale}/>}<p>{detail.reference_number}</p><h2>{detail.title}</h2><span className="admin-badge">{t(detail.status)}</span>
+   header={<header className="admin-card workspace-header">{organizationActions}{detail.training&&<SimulationBanner locale={locale}/>}<p>{detail.reference_number}</p><h2>{detail.title}</h2><span className="admin-badge">{t(detail.status)}</span>
     <WorkspaceHeaderDetails locale={locale}><p>{t('priority')}: {t(detail.priority)} · {t('severity')}: {t(detail.severity)} · {detail.type.names[locale]??detail.type.code}</p>
     <p>{t('lead')}: {detail.lead_name}</p><p>{t('commander')}: {detail.commander?.name??t('noCommander')}</p></WorkspaceHeaderDetails>
     {detail.commander&&!detail.commander.valid&&['ACTIVE','STABILIZED'].includes(detail.status)&&<p role="alert">{t('invalidCommander')}</p>}

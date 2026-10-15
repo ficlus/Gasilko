@@ -5,6 +5,7 @@ import type {Locale} from '../../lib/i18n';
 import type {Geometry} from '../../lib/incidents/cop';
 import {taskText} from '../../lib/operational/taskMessages';
 import {rtsText} from '../../lib/operational/rtsMessages';
+import {useCommandMap} from './CommandMapProvider';
 import {useRts} from './rtsSession';
 
 const sources=['rts-task-target','rts-draft-target'];
@@ -13,7 +14,7 @@ const data=(id:string,geometry:Geometry|null,label:string,historical=false)=>({t
 }]:[]});
 /** Snapshots and draft intent only. No origin coordinates, trajectories or routes. */
 export function TaskIntentLayers({map,locale}:{map:Map;locale:Locale}){
- const rts=useRts(),t=rtsText(locale),tt=taskText(locale);
+ const command=useCommandMap(),rts=useRts(),t=rtsText(locale),tt=taskText(locale);
  useEffect(()=>{
   const before=map.getLayer('cop-selection-line')?'cop-selection-line':undefined;
   for(const source of sources){
@@ -30,13 +31,14 @@ export function TaskIntentLayers({map,locale}:{map:Map;locale:Locale}){
   }};
  },[map]);
  const preview=rts?.open?rts.preview:null,intent=rts?.intent;
+ const represented=!!command?.visible&&intent?.target_geometry_snapshot?.type==='Point'&&!!command.data?.rows.some(row=>row.task_id===intent.id&&row.route&&JSON.stringify(row.route.destination_snapshot.geometry)===JSON.stringify(intent.target_geometry_snapshot));
  useEffect(()=>{
   (map.getSource('rts-draft-target') as GeoJSONSource|undefined)?.setData(data('draft-task-target',preview?.geometry??null,t('draftTarget')));
  },[map,preview,locale]);
  useEffect(()=>{
-  (map.getSource('rts-task-target') as GeoJSONSource|undefined)?.setData(data(intent?.id??'',intent?.target_geometry_snapshot??null,
+  (map.getSource('rts-task-target') as GeoJSONSource|undefined)?.setData(data(intent?.id??'',represented?null:intent?.target_geometry_snapshot??null,
    intent?t(intent.status==='OPEN'?'issuedTarget':'historyTarget')+' · '+intent.label:'',intent?.status!=='OPEN'));
- },[map,intent,locale]);
+ },[map,intent,locale,represented]);
  if(!preview?.geometry&&!intent?.target_geometry_snapshot)return null;
  return <aside className="rts-intent-legend" aria-live="polite">
   {preview?.geometry&&<p><strong>{t('draftTarget')}</strong> · {preview.label}

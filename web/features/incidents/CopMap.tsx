@@ -1,6 +1,7 @@
 'use client';
 import {useEffect,useRef} from 'react';
 import {type Map,type GeoJSONSource} from 'maplibre-gl';
+import {useCommandMap} from './CommandMapProvider';
 import {IncidentNavigationLayer} from './IncidentNavigationLayer';
 import {useIncidentNavigation} from './IncidentNavigationProvider';
 import {useRts} from './rtsSession';
@@ -26,7 +27,7 @@ const ids=['cop-primary','cop-sectors','cop-markers','cop-zones','cop-hydrants',
 const features=(items:{id:string;geometry:Geometry;label:string;kind?:string;status?:string}[])=>({type:'FeatureCollection' as const,
  features:items.map(i=>({type:'Feature' as const,id:i.id,geometry:i.geometry,properties:{id:i.id,label:i.label,kind:i.kind??'',status:i.status??''}}))});
 export default function CopMap(props:Props){
- const navigation=useIncidentNavigation();
+ const navigation=useIncidentNavigation(),commandMap=useCommandMap();
  const rts=useRts(),workspace=useWorkspace(),sim=useSimulation(),positionLayer=useSimulationPositionLayer();
  const recipientLayers=positionLayer?[positionLayer]:[];
  const c=props.cop,primary:Position|null=c.incident.longitude!==null&&c.incident.latitude!==null?[c.incident.longitude,c.incident.latitude]:null;
@@ -64,7 +65,19 @@ export default function CopMap(props:Props){
    if(!rts?.externalEditing&&!rts?.locked&&positionLayer){
     const recipient=pickPositionRecipient(map,event.point,recipientLayers);
     if(recipient){workspace?.select({kind:'INCIDENT_UNIT',id:recipient.id});
-     rts?.pick(recipient,[...positionLayer.recipients.values()],{list:'simulation:'+positionLayer.id,toggle:event.originalEvent.ctrlKey||event.originalEvent.metaKey||(workspace?.view==='command'&&event.originalEvent.shiftKey)});return;}
+     const modified=event.originalEvent.ctrlKey||event.originalEvent.metaKey||(workspace?.view==='command'&&event.originalEvent.shiftKey);
+     // Inspection must not discard an existing RTS group or change a task draft.
+     if(!rts?.open&&(modified||rts?.multiTouch||(rts?.recipients.length??0)<2))rts?.pick(recipient,[...positionLayer.recipients.values()],{list:'simulation:'+positionLayer.id,toggle:event.originalEvent.ctrlKey||event.originalEvent.metaKey||(workspace?.view==='command'&&event.originalEvent.shiftKey)});return;}
+   }
+   if(commandMap?.visible&&!rts?.open&&!rts?.externalEditing){
+    const layers=['incident-command-target','incident-command-selected-target','incident-command-label','incident-command-road','incident-command-selected'].filter(id=>map.getLayer(id));
+    const hit=layers.length?map.queryRenderedFeatures(event.point,{layers}).find(f=>typeof f.properties?.assignments==='string'):null;
+    const pointLayers=map.getStyle().layers.filter(l=>/^(cop-markers|cop-hydrants|context-hydrants)-/.test(l.id)).map(l=>l.id);
+    const pointHit=pointLayers.length&&map.queryRenderedFeatures(event.point,{layers:pointLayers}).length>0;
+    const roadHit=hit&&['incident-command-road','incident-command-selected'].includes(hit.layer.id);
+    if(hit&&!(roadHit&&pointHit)){try{const ids=JSON.parse(hit.properties!.assignments) as string[];
+     commandMap.inspectTargets(ids);return;
+    }catch{}}
    }
    const taskLayers=map.getStyle().layers.filter(l=>l.id.startsWith('rts-task-target-')).map(l=>l.id);
    const task=taskLayers.length?map.queryRenderedFeatures(event.point,{layers:taskLayers}).find(f=>f.properties?.id===rts?.intent?.id):null;
@@ -72,7 +85,11 @@ export default function CopMap(props:Props){
    const clickable=map.getStyle().layers.filter(l=>(l.id.startsWith('cop-')||l.id.startsWith('context-'))&&!l.id.startsWith('cop-draft')).map(l=>l.id);
    const id=map.queryRenderedFeatures(event.point,{layers:clickable}).find(f=>typeof f.properties?.id==='string')?.properties?.id;
    if(typeof id==='string')props.onSelect(id);
-  }}>{map=><><CopRendering map={map} props={props}/><TaskIntentLayers map={map} locale={props.locale}/><SimulationMapLayer map={map} locale={props.locale}/><IncidentNavigationLayer map={map} locale={props.locale}/><RtsMapInteraction map={map} locale={props.locale} layers={recipientLayers}/>{workspace?.view==='command'&&<RtsContextMenu onCreateObject={props.onCreateObject} onEditObject={props.onEditObject} onDeactivateObject={props.onDeactivateObject} busy={props.busy||!!props.drawing||!!navigation?.picking||!!sim?.move} map={map} locale={props.locale} cop={props.cop} hydrants={props.contextHydrants} layers={recipientLayers}/>}</>}</OperationalMapCanvas>;
+  }}>{map=><><CopRendering map={map} props={props}/><TaskIntentLayers map={map} locale={props.locale}/><SimulationMapLayer map={map} locale={props.locale}/><IncidentNavigationLayer map={map} locale={props.locale} representedTargets={new globalThis.Map<string,readonly number[]>([
+    ...(props.layers.markers?c.objects.filter(o=>o.geometry.type==='Point').map(o=>['INCIDENT_MAP_OBJECT:'+o.id,o.geometry.type==='Point'?o.geometry.coordinates:[]] as const):[]),
+    ...(props.layers.hydrants?c.links.flatMap(l=>l.hydrant?.longitude!=null&&l.hydrant.latitude!=null?[['HYDRANT:'+l.hydrant.id,[l.hydrant.longitude,l.hydrant.latitude]] as const]:[]):[]),
+    ...props.contextHydrants.map(h=>['HYDRANT:'+h.id,[h.longitude,h.latitude]] as const)
+   ])}/><RtsMapInteraction map={map} locale={props.locale} layers={recipientLayers}/>{workspace?.view==='command'&&<RtsContextMenu onCreateObject={props.onCreateObject} onEditObject={props.onEditObject} onDeactivateObject={props.onDeactivateObject} busy={props.busy||!!props.drawing||!!navigation?.picking||!!sim?.move} map={map} locale={props.locale} cop={props.cop} hydrants={props.contextHydrants} layers={recipientLayers}/>}</>}</OperationalMapCanvas>;
 }
 function CopRendering({map,props}:{map:Map;props:Props}){
  const fitted=useRef(''),previewed=useRef(0),focused=useRef(0),sourceBytes=useRef(new globalThis.Map<string,string>());
