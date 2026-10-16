@@ -5,6 +5,8 @@ import type {Locale} from '../../lib/i18n';
 import type {IncidentType} from '../../lib/incidents/model';
 import {blankDefinition,placementMissing,templateCategories,type Definition,type Template,type TemplateRead,type TemplateRow} from '../../lib/operational/templates';
 import {templateError,templateText} from '../../lib/operational/templateMessages';
+import {emptyEventPlan,type EventPlan} from '../../lib/operational/scenarioEvents';
+import {EventPlanEditor} from './EventPlanEditor';
 import {TemplateEditor} from './TemplateEditor';
 import {useTemplateMutation} from './useTemplateMutation';
 import './templates.css';
@@ -12,6 +14,7 @@ type Action='CREATE'|'COPY'|'REVISE'|'SAVE'|'PUBLISH'|'ARCHIVE'|'START';
 export function TemplateLibrary({locale,account,org,organizationName,types,read}:{locale:Locale;account:string;org:string;organizationName:string;types:IncidentType[];read:TemplateRead}){
  const t=templateText(locale),router=useRouter(),alive=useRef(true);
  const [rows,setRows]=useState<TemplateRow[]>([]),[value,setValue]=useState<Template|null>(null),[draft,setDraft]=useState<Definition|null>(null);
+ const [eventPlan,setEventPlan]=useState<EventPlan>(emptyEventPlan);
  const [query,setQuery]=useState(''),[category,setCategory]=useState(''),[status,setStatus]=useState(''),[after,setAfter]=useState<string|null>(null);
  const [loading,setLoading]=useState(false),[error,setError]=useState(''),[epoch,setEpoch]=useState(0),[confirm,setConfirm]=useState<Action|null>(null);
  const [type,setType]=useState(types[0]?.id??''),[blocked,setBlocked]=useState(false);
@@ -22,9 +25,9 @@ export function TemplateLibrary({locale,account,org,organizationName,types,read}
   if(data&&typeof data==='object'&&'incident_id' in data){
    router.push('/'+locale+'/incidents/'+String(data.incident_id)+'?org='+encodeURIComponent(org));return;
   }
-  const updated=data as Template;setValue(updated);setDraft(updated.definition);setEpoch(v=>v+1);
+  const updated=data as Template;setValue(updated);setDraft(updated.definition);setEventPlan(updated.event_plan??emptyEventPlan());setEpoch(v=>v+1);
  });
- const dirty=!!value&&!!draft&&JSON.stringify(value.definition)!==JSON.stringify(draft);
+ const dirty=!!value&&!!draft&&(JSON.stringify(value.definition)!==JSON.stringify(draft)||JSON.stringify(value.event_plan??emptyEventPlan())!==JSON.stringify(eventPlan));
  const busy=loading||mutation.busy||!!mutation.pending;
  useEffect(()=>{alive.current=true;return()=>{alive.current=false;loader.current?.abort();};},[]);
  useEffect(()=>{
@@ -39,7 +42,7 @@ export function TemplateLibrary({locale,account,org,organizationName,types,read}
   const timer=setTimeout(()=>{
    read<TemplateRow[]>('simulation_template_list',{p_organization_id:org,p_query:query,p_category:category,p_status:status,p_after:after},ac.signal,account)
     .then(data=>{if(!ac.signal.aborted){setRows(data);setBlocked(false);}})
-    .catch(e=>{if(!ac.signal.aborted){const code=templateError(e instanceof Error?e.message:'SERVER');setError(code);if(code==='denied'){setBlocked(true);setValue(null);setDraft(null);}}})
+    .catch(e=>{if(!ac.signal.aborted){const code=templateError(e instanceof Error?e.message:'SERVER');setError(code);if(code==='denied'){setBlocked(true);setValue(null);setDraft(null);setEventPlan(emptyEventPlan());}}})
     .finally(()=>{if(!ac.signal.aborted)setLoading(false);});
   },200);
   return()=>{clearTimeout(timer);ac.abort();};
@@ -53,8 +56,8 @@ export function TemplateLibrary({locale,account,org,organizationName,types,read}
   loader.current?.abort();const ac=new AbortController();loader.current=ac;setLoading(true);setError('');
   try{
    const item=await read<Template>('simulation_template_read',{p_organization_id:org,p_template_id:id},ac.signal,account);
-   if(ac.signal.aborted)return;setValue(item);setDraft(item.definition);mutation.setError('');setBlocked(false);
-  }catch(e){if(!ac.signal.aborted){setValue(null);setDraft(null);setError(templateError(e instanceof Error?e.message:'SERVER'));}}
+   if(ac.signal.aborted)return;setValue(item);setDraft(item.definition);setEventPlan(item.event_plan??emptyEventPlan());mutation.setError('');setBlocked(false);
+  }catch(e){if(!ac.signal.aborted){setValue(null);setDraft(null);setEventPlan(emptyEventPlan());setError(templateError(e instanceof Error?e.message:'SERVER'));}}
   finally{if(!ac.signal.aborted)setLoading(false);}
  }
  function command(action:Action){
@@ -62,7 +65,7 @@ export function TemplateLibrary({locale,account,org,organizationName,types,read}
   let payload:Record<string,unknown>={};
   if(action==='CREATE')payload={definition:blankDefinition(t('blank'))};
   else if(!value||!draft)return;
-  else if(action==='SAVE')payload={version_id:value.version_id,definition:{...draft,metadata:{...draft.metadata,objectives:draft.metadata.objectives.filter(x=>x.trim())}}};
+  else if(action==='SAVE')payload={version_id:value.version_id,event_plan:eventPlan,definition:{...draft,metadata:{...draft.metadata,objectives:draft.metadata.objectives.filter(x=>x.trim())}}};
   else if(action==='COPY')payload={version_id:value.version_id};
   else if(action==='START')payload={version_id:value.version_id,incident_type_id:type};
   mutation.mutate('simulation_template_command',{p_action:action,p_template_id:action==='CREATE'?null:value!.id,p_expected_version:action==='CREATE'?'0':value!.revision,p_payload:payload});
@@ -101,6 +104,7 @@ export function TemplateLibrary({locale,account,org,organizationName,types,read}
     </>}
    </div>
    <TemplateEditor key={value.id+':'+value.version_id} locale={locale} value={value} draft={draft} onChange={setDraft} disabled={busy||!!confirm}/>
+   <EventPlanEditor key={'events:'+value.id+':'+value.version_id} locale={locale} definition={draft} plan={eventPlan} onChange={setEventPlan} disabled={busy||!!confirm||value.builtin||value.archived||value.state==='PUBLISHED'}/>
    {confirm&&<TemplateConfirmation locale={locale} busy={busy} onCancel={()=>setConfirm(null)} onConfirm={()=>command(confirm)}>
     <h3>{draft.metadata.title}</h3><p>{t(value.state)} · {t('version')} {value.version}</p><p>{t('scope')}: {organizationName}</p><p>{t(confirm==='START'?'reviewStart':confirm==='PUBLISH'?'reviewPublish':'reviewArchive')}</p>
     <p>{t('objects')}: {draft.initial_objects.length} · {t('units')}: {draft.virtual_units.length}</p>

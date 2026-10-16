@@ -1,3 +1,4 @@
+import type {EventPlan} from './scenarioEvents';
 import type {Geometry,Position,MapKind} from '../incidents/cop';
 export const templateCategories=['STRUCTURE_FIRE','WILDFIRE','TRAFFIC_ACCIDENT','SANDBOX'] as const;
 export const templateProfiles=['NORMAL','SLOW_RESPONSE','NO_RESPONSE','BREAKDOWN','COMMUNICATION_LOSS','ROUTE_BLOCKED'] as const;
@@ -10,8 +11,8 @@ export type Definition={
  briefings:{commander:string;instructor:string};
  simulation_defaults:{clock_scale:1|5|10;automatic_execution:false;response_profile:typeof templateProfiles[number]};
 };
-export type Template={id:string;revision:string;builtin:boolean;archived:boolean;version_id:string;version:number;state:'DRAFT'|'PUBLISHED';definition:Definition};
-export type TemplateRow=Omit<Template,'definition'>&{title:string;description:string;category:string};
+export type Template={id:string;revision:string;builtin:boolean;archived:boolean;version_id:string;version:number;state:'DRAFT'|'PUBLISHED';definition:Definition;event_plan:EventPlan};
+export type TemplateRow=Omit<Template,'definition'|'event_plan'>&{title:string;description:string;category:string};
 export type Initialization={state:'WAITING_COMMAND'|'READY';scenario_version:string;incident_version:string;objects:number;units:number;clock_scale:number|null;response_profile:string|null;can_initialize:boolean};
 export type TemplateRead=<T>(name:string,args:Record<string,unknown>,signal?:AbortSignal,account?:string)=>Promise<T>;
 export const templateRpcs=['simulation_template_list','simulation_template_read','simulation_template_command','simulation_template_initialization','simulation_template_initialize'] as const;
