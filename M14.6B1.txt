@@ -1,0 +1,836 @@
+# CODEX IMPLEMENTATION PROMPT — M14.6B1
+## RTS Command Map UX, Smooth SIM Movement, Overlapping Unit Selection & Multi-Unit Performance
+
+Repository: https://github.com/ficlus/Gasilko
+
+Implement **M14.6B1 — Command Map UX, Fast SIM Updates, Stable Multi-Route Rendering & RTS Interaction Polish**.
+
+Create one focused implementation PR against the latest merged `main`. Do not merge it.
+
+**Prerequisite: M14.6B / PR #75 must first be corrected, made mergeable, merged, and its schema/runner deployment coordinated.**
+
+Preserve all manual JSX fixes and the latest merged F3/F4/G/H/H1/H2/M14.6A/B implementations.
+
+This milestone addresses problems observed by the user during real local testing of the existing SIM Command Map.
+
+Do not implement M14.6C fire propagation in this PR.
+
+## 1. Main problems to solve
+
+The user has experienced:
+
+1. Moving SIM vehicles appear to jump every 5–8 seconds despite a faster runner schedule.
+2. A command to 20 units over a long distance can take an excessive amount of time.
+3. Navigation routes appear one by one, sometimes disappear, and sometimes reappear.
+4. The manual Refresh button restores routes more reliably than background F4 refresh.
+5. A second command to another group sometimes causes the first group's routes to disappear.
+6. Some routes appear incomplete, stop before the displayed destination, or fail to start their SIM agents without an obvious explanation.
+7. Overlapping vehicles at staging points hide each other and cannot be selected easily.
+8. The Navigation section is too large, cannot be collapsed like neighboring sections and crowds out map space.
+9. The left/right panel collapse controls appear as blank white buttons.
+10. Repeated oversized cards, excessive padding and redundant action buttons make the Command Map harder to use.
+11. The map's "Dejanja" floating button overlaps status and confirmation messages.
+12. Right-button dragging/panning/rotating the map incorrectly opens the RTS context menu when the button is released.
+13. Inspecting a selected unit, its current task, route and destination is not sufficiently immediate.
+
+**Treat these as actual reported defects, not speculative future enhancements.**
+
+The primary goal is a reliable, smooth, map-first RTS experience.
+
+## 2. Inspect the existing call chains first
+
+Inspect current merged source, including:
+
+### Live refresh and SIM state
+- `IncidentLiveProvider.tsx`
+- `IncidentLiveStatus.tsx`
+- `SimulationProvider.tsx`
+- `AutonomousSimulationProvider.tsx`
+- `AutonomousSimulationPanel.tsx`
+- `IncidentNavigationProvider.tsx`
+- `CommandMapProvider.tsx`
+- Current F4 success-generation/invalidation contracts.
+- Background tab behavior and visibility/offline handling.
+
+### Map and rendering
+- `CopMap.tsx`
+- `SimulationMapLayer.tsx`
+- `IncidentNavigationLayer.tsx`
+- `TaskIntentLayers.tsx`
+- `RtsMapInteraction.tsx`
+- `RtsContextMenu.tsx`
+- `RtsSelectionToolbar.tsx`
+- `workspace.tsx`
+- MapLibre layer/source ordering and hit-testing.
+- Existing shared-route geometry clipping and immutable route cache.
+
+### Panels and layout
+- `IncidentArea.tsx`
+- `IncidentCop.tsx`
+- `IncidentTasks.tsx`
+- `IncidentResources.tsx`
+- `CommandMapDetails.tsx`
+- Existing left/right command drawer components.
+- `web/app/globals.css`
+- SI/DE translation files.
+
+### Backend performance and authorization
+- `20261015100000_sim_automatic_execution.sql`
+- `20261015120000_incident_command_map_read.sql`
+- `incident-simulation-runner`
+- Shared road provider and `incident-navigation`.
+- Current H1 automation jobs, navigation sessions and active SIM agent states.
+- The current M14.6B runner changes.
+
+Document the actual current data flows before modifying them.
+
+Do not invent new polling mechanisms or replace the established task engine without evidence.
+
+## 3. Fast SIM-position refresh
+
+The user wants vehicle movement to feel responsive.
+
+Currently the backend runner may advance positions more often than the browser fetches them.
+
+Introduce a lightweight, bounded active-SIM-position refresh path targeting approximately **1-second updates while the SIM Command Map is visible and active**.
+
+Requirements:
+
+- Fetch the minimum authorized SIM position/progress data needed for active displayed units.
+- Reuse existing incident-scoped authorized reads where efficient.
+- Avoid refetching the full incident context, all task history, hydrants or entire route geometry every second.
+- Keep the slower F4 operational reconciliation for tasks, sectors, roles, notifications and command state.
+- Coordinate fast refresh with the existing F4 provider rather than introducing a competing uncontrolled polling manager.
+- Support AbortController, latest-generation fencing, in-flight request coalescing and bounded backoff.
+- Pause or reduce refresh when hidden/offline.
+- Stop immediately on incident/account/organization change or access revocation.
+- Enforce one bounded fast request per scoped refresh cycle, not one request per unit.
+- Do not create one Realtime subscription per vehicle.
+- Avoid duplicate requests when an existing agent read already supplies a fresh matching snapshot.
+
+Important: A 1-second frontend refresh target is not a guarantee of one new server position per second.
+
+**Do not increase the existing Supabase Cron frequency. The current operational baseline is 5 seconds.**
+
+The UI must accurately disclose the age of the last server-confirmed position.
+
+## 4. Smooth SIM marker movement
+
+Support optional, bounded visual interpolation for presentation between confirmed SIM samples.
+
+Requirements:
+
+- Display an authoritative SIM position as the real known value.
+- Cosmetic interpolation must never become a database write or telemetry claim.
+- Never extrapolate a marker indefinitely when no new server observation arrives.
+- Do not interpolate a real GPS unit using the SIM model.
+- Do not move on command issue alone.
+- Avoid interpolation across route revisions, teleports, manual repositioning, pause/resume discontinuities or invalidated runs.
+- Do not visually overshoot the latest confirmed position.
+- When samples are stale, hold at the last confirmed location and indicate staleness.
+- Use route-bound progress when available; do not guess movement along a straight line.
+- Keep animation frame work bounded and disable animation under reduced-motion preferences.
+
+Choose a clear separation between:
+
+- Confirmed SIM progress.
+- Cosmetic display position.
+- Original navigation execution plan.
+
+Do not invent human ACK or real GPS data.
+
+## 5. Route synchronization must be as reliable as manual Refresh
+
+This is a critical acceptance requirement.
+
+Trace the exact difference between:
+
+- Manual "Osveži".
+- F4 automatic refresh.
+- H2 CommandMapProvider route collection reads.
+- Navigation-provider updates.
+- SIM agent progress updates.
+
+Identify why manual refresh sometimes reveals paths that automatic refresh has missed.
+
+Investigate:
+
+- Race conditions.
+- Stale closures.
+- Older responses overwriting newer responses.
+- Aborted or overlapping page sequences.
+- Invalid cache keys.
+- Missing invalidation after newly created navigation.
+- Lost update generations.
+- Incorrect cursor/pagination.
+- Partial collection replacement.
+- Identical-GeoJSON detection.
+- Route validity filtering.
+
+### Required behavior
+
+When a newly accepted task produces a valid navigation session, its route must appear automatically.
+
+No manual Refresh should be required.
+
+Refresh failures must not masquerade as an empty successful collection.
+
+Distinguish:
+
+- Loading.
+- Complete authoritative snapshot.
+- Incomplete paginated snapshot.
+- Transient error.
+- Disconnected/stale data.
+- Access revoked.
+
+On transient error, retain the last authorized valid route data with an explicit stale indicator and no unsupported progress claims.
+
+On authoritative revocation, clear protected data immediately.
+
+Do not hide a route merely because a newer request has started.
+
+## 6. Multiple separate group commands must preserve their routes
+
+Reported case:
+
+1. Select 10 units and issue Ptuj → Ljubljana.
+2. Select another 10 units and issue Maribor → Celje.
+3. Routes from the first group sometimes disappear.
+
+Correct this.
+
+A new command to group B must not invalidate group A's current valid navigation sessions.
+
+Key route identity by authoritative:
+
+- Incident.
+- Unit.
+- Task assignment.
+- Navigation session.
+- Route ID/revision.
+
+Do not use the current RTS selection or recently issued command as the key for the complete incident route collection.
+
+Selected-unit highlighting may change independently of route collection membership.
+
+Explicitly distinguish route removal due to:
+
+- Completed navigation.
+- Cancelled assignment.
+- Superseded navigation.
+- Invalid route.
+- Revoked visibility.
+
+Never infer termination from absence in a partial page or failed refresh.
+
+## 7. Efficient rendering of 20+ long routes
+
+The user tested multi-unit commands across large parts of Slovenia and observed route flickering, delayed rendering and map stalls.
+
+Goals:
+
+- Stable presentation of 20–30 simultaneous long navigation routes.
+- No unnecessary MapLibre source deletion/recreation.
+- No map remount or camera reset.
+- No repeated base-route geometry processing for unchanged route IDs.
+- No repeated hydrant/COP layer reconstruction due only to SIM progress.
+- No OSRM calls during visual route clipping.
+- No huge synchronous JSON serialization on every React render.
+
+Use stable immutable geometry caching with strict identity/version keys.
+
+Separate these concerns:
+
+1. Authoritative route collection.
+2. Original immutable route geometry.
+3. Unit progress.
+4. Remaining segment geometry.
+5. Selection emphasis.
+6. Route visibility preference.
+
+Update only the layer/source data that has actually changed.
+
+Batch/coalesce render updates appropriately.
+
+Retain the previous valid layer while a new collection is being resolved; atomically publish reconciled results after scope and completeness checks.
+
+Do not progressively blank previously rendered routes merely because a new pagination cycle has begun.
+
+Respect existing 25-assignment page and collection-size limits; show incomplete-state warnings honestly.
+
+## 8. Diagnose slow 20-unit command preparation
+
+The user has observed approximately 20 units sent over long distances, with some jobs STARTED, some BLOCKED by road-access issues and others still waiting during preparation.
+
+Investigate the current H1 performance chain:
+
+- Task submission.
+- Assignment enrollment.
+- Job queue.
+- Runner claim.
+- Road-provider request.
+- Navigation commit.
+- Agent START.
+- Authoritative progress publication.
+- Frontend collection fetch.
+- MapLibre rendering.
+
+Instrument bounded, privacy-safe phase durations and counts at appropriate server/client boundaries.
+
+Do not log private credentials, complete sensitive route coordinates or unrestricted user data.
+
+### Explicitly inspect bottlenecks
+
+The current runner has historically processed one H1 route-planning job per invocation.
+
+Assess whether bounded concurrent planning (for example, 2–4 independent assignments) is safe under:
+
+- Scenario/assignment locking.
+- Current leases.
+- Shared PostgreSQL resource constraints.
+- Provider rate limits.
+- Edge Function timeouts.
+- Existing SIM movement ticks.
+- M14.6B event scheduling.
+
+Do not simply increase concurrency without checking whether the SQL lock model permits true parallel progress.
+
+### Safe improvements
+
+Where justified:
+
+- Improve fair work scheduling.
+- Avoid redundant road-provider calls.
+- Reuse identical route calculations within a narrowly validated origin/destination/provider/profile snapshot when safe.
+- Keep separate per-unit navigation sessions, assignment identity and progress.
+- Add bounded backpressure and retry behavior.
+- Ensure slow OSRM/GraphHopper does not stall unrelated active movement or scheduled scenario events.
+
+A shared route calculation must never cause one unit to inherit another unit's position, navigation identity or progress.
+
+If significant worker/SQL redesign is necessary, keep B1 frontend corrections independently mergeable and document a small backend optimization follow-up rather than introducing an unsafe redesign.
+
+Do not fabricate a route to make the UI look fast.
+
+## 9. Route completeness and failed starts
+
+A reported case shows:
+
+- A route visually stopping before the clicked destination.
+- A SIM vehicle failing to start movement.
+- No obvious reason displayed on the map.
+
+Investigate the separate possibilities:
+
+- Legitimate road-network snapping.
+- Target off the routable road network.
+- Starting position outside the allowed road-access tolerance.
+- Invalid position version.
+- Route commit or agent START failure.
+- Actual route geometry being incorrectly clipped.
+- Missing geometry pages.
+- Stale provider state.
+
+Display separately:
+
+- Exact commanded destination.
+- Reachable road-route endpoint.
+- Current SIM vehicle location.
+- Original route origin.
+- Authoritative agent/automation state.
+- Actual error code with localized explanation.
+
+Do not claim the vehicle will reach the exact clicked coordinate when routing legitimately ends at a road access point.
+
+Preserve the existing 5 m road-access validation.
+
+Do not teleport vehicles or silently snap their SIM positions to a road.
+
+If the automatic job is blocked, show the real reason and an existing authorized correction/retry action.
+
+Avoid raw, long coordinate tuples as primary labels. Use concise localized destination names when available; preserve exact coordinates in details.
+
+## 10. Overlapping units and tactical objects
+
+Introduce **RTS-style overlap stacks** based on screen-space geometry at the current map zoom.
+
+The user commonly has multiple SIM units at exactly the same staging location and cannot see or select each one.
+
+### Closed state
+
+- Show a compact composite marker.
+- Include a visible count badge.
+- Indicate whether selected units are among the stacked recipients.
+- Distinguish mixed stacks containing units, hydrants and tactical objects.
+- Do not obscure the actual underlying location.
+- Cluster only markers that visually overlap; do not combine geographically unrelated features.
+
+### Hover preview — desktop
+
+On pointer hover:
+
+- Display a small non-interactive or safely passive preview of the unit/object identities.
+- Show short callsigns/types and meaningful authoritative state.
+- Do not change selection.
+- Do not issue commands.
+- Do not automatically pan.
+- Do not trigger constant fan-out while merely crossing the map.
+
+### Click/tap — interactive stack chooser
+
+Left-click or tap on a stack opens a compact persistent in-map selection popup.
+
+The popup must list exact authorized entities at that position.
+
+Interactions:
+
+- Plain click on one unit: select that exact unit.
+- Ctrl/Shift click: add/remove that unit from the existing RTS multi-selection.
+- "Izberi vse enote": add all currently authorized selectable units in the stack while preserving RTS recipient limits.
+- "Počisti izbor": clear the relevant selection through the existing RTS API.
+- Click on hydrant/sector/tactical object: inspect that object or activate existing explicit target inspection; never treat it as a task recipient.
+- Esc or outside click closes the popup.
+- Keyboard-accessible items and buttons.
+- Mobile touch support without hover.
+- Never expose inaccessible entities.
+
+Do not create a second RTS selection state/store.
+
+### Optional spiderfy / fan-out
+
+Offer an explicit "Razpri" action.
+
+Temporarily fan out stacked symbols in a radial arrangement around the common anchor.
+
+- Visible leader lines point to the actual geographic anchor.
+- Offset is strictly visual.
+- Original geographic coordinates remain unchanged.
+- Fan-out placement should avoid screen edges when possible.
+- Each expanded symbol remains individually selectable.
+- The stack can be closed without changing selection.
+
+Do not permanently offset GPS positions.
+
+Do not infer sector authority from geographic containment.
+
+### Existing selection semantics
+
+Preserve:
+
+- Single click.
+- Ctrl/Shift.
+- Box/lasso.
+- Control groups 1–9.
+- Context commands.
+- Current selected-unit route emphasis.
+
+Rectangle/lasso selection must still select all eligible underlying units, even if their markers visually overlap.
+
+Do not let a cluster's visual badge overwrite unit identity.
+
+## 11. Right-button drag must not open command menu
+
+The user can pan/rotate the map while holding the right mouse button.
+
+Current defect: releasing the button after dragging opens the RTS context-command menu.
+
+Required behavior:
+
+- Stationary right click: opens context menu.
+- Right-button drag: keeps normal MapLibre interaction.
+- Release after dragging: does NOT open a menu.
+- Fresh stationary right click afterwards: works normally.
+- Long-press touch without significant movement: opens menu.
+- Touch pan or multi-touch: does NOT open menu.
+
+Implement robust pointer gesture classification.
+
+Suggested:
+
+- Record pointer ID, button and initial screen coordinates on pointerdown.
+- Track total displacement, not just the final difference.
+- Mark the gesture as drag beyond a small movement threshold (e.g. 6–8 screen pixels).
+- Suppress the corresponding contextmenu even if the browser sends it after pointerup.
+- Correctly reset on pointercancel, lost focus, unmount and map interaction changes.
+- Do not block normal MapLibre right-button map movement.
+- Preserve event-capture behavior and existing RTS interactions.
+
+Avoid crude permanent contextmenu suppression or timers that unintentionally suppress the next legitimate right click.
+
+## 12. Navigation must be collapsible
+
+The left Command Map column has collapsible sections for:
+
+- Command structure.
+- Participating organizations.
+- Summary.
+- Status.
+
+But Navigation currently appears as a large always-open card.
+
+Make Navigation a matching collapsible section.
+
+Requirements:
+
+- Same disclosure styling and keyboard behavior as other left sections.
+- Default collapsed.
+- Compact heading with useful count/status.
+- Expanding shows the existing authorized navigation information.
+- Collapsing does not cancel navigation or clear route data.
+- F4 refresh must not reopen a collapsed section.
+- Selecting a unit must not force the entire Navigation list open.
+- Current task/route inspection remains available in selected-unit details.
+
+Prefer reusing the existing disclosure component/pattern.
+
+## 13. Fix blank left/right panel buttons
+
+The user showed a blank white rectangular button in the top-left Command Map sidebar, used to collapse the panel.
+
+Replace these controls with clear visible labels/icons.
+
+Examples:
+
+- "Skrij levi panel"
+- "Prikaži levi panel"
+- "Skrij desni panel"
+- "Prikaži desni panel"
+
+Use appropriate panel-arrow iconography and clear hover/focus indicators.
+
+On narrow screens, icon-only controls are acceptable only with visible/accessible tooltip labeling and a valid aria-label.
+
+Ensure a closed sidebar can always be reopened.
+
+Do not accidentally leave users with an inaccessible map or no visible control.
+
+## 14. Compact the entire Command Map workspace
+
+The user finds cards across the workspace excessively large.
+
+Redesign for information density appropriate to an RTS command center.
+
+Goals:
+
+- Less padding and repeated metadata.
+- Smaller but readable action/status rows.
+- Clear active-state hierarchy.
+- Fewer redundant per-item buttons.
+- Compact sidebar headings.
+- Scrollable lists that do not grow the whole page.
+- More room for MapLibre.
+- Full information available on explicit inspection.
+- Accessible keyboard and touch target sizes.
+
+### Navigation lists
+
+Replace repeated tall cards with compact rows:
+
+`Unit · destination · current state · progress`
+
+Clicking a row should select the unit, highlight its route and open details.
+
+Avoid repeating huge "Odpri navigacijo" buttons for every unit.
+
+### Other cards
+
+Apply the same design principles to Command Map drawers, task states, notifications and selected-unit panels where appropriate.
+
+Do not redesign unrelated administration pages.
+
+Preserve important SIM-vs-real warnings and human-vs-virtual ACK distinctions.
+
+## 15. Fix "Dejanja" overlapping status messages
+
+The existing floating "Dejanja (N)" button sits over the map's status/confirmation message region.
+
+Do not solve this with a z-index battle.
+
+Create dedicated layout zones:
+
+- Stable small RTS action toolbar.
+- Separate status/notification region.
+- Main map viewport.
+
+Requirements:
+
+- No overlapping controls/messages.
+- No layout shifts in MapLibre during ordinary message appearance.
+- Preserve keyboard focus.
+- Preserve right-click context actions.
+- Preserve touch operation.
+- Responsive layout.
+- No duplicated action toolbar.
+- No automatic camera movement.
+- No full map remount.
+
+Use overlays only in bounded safe areas where their spatial interaction is deliberate.
+
+## 16. Selected-unit task inspection
+
+Clicking a unit must immediately show its current actual assignment state.
+
+Show:
+
+- Callsign.
+- SIM vs LIVE provenance.
+- Current active task(s).
+- Task/assignment identifiers where useful.
+- Destination.
+- Original route origin and observed timestamp.
+- Active navigation session.
+- Route progress.
+- Job/run state.
+- Blocked reason.
+- Explicit focus/details controls.
+
+Do not infer current task from geographic position.
+
+Do not show stale historical navigation as the current route.
+
+When a unit belongs to a stack, selection via the popup must work identically to direct marker selection.
+
+Preserve existing RTS multi-selection, pending drafts and camera.
+
+## 17. Data flow and performance instrumentation
+
+Add concise diagnostic instrumentation that can distinguish:
+
+1. Task submit latency.
+2. Server task acceptance.
+3. Job wait/claim latency.
+4. Road-provider calculation latency.
+5. Navigation commit and agent start.
+6. Position publication.
+7. Frontend scoped route fetch.
+8. GeoJSON preparation.
+9. MapLibre source update.
+10. Visual frame responsiveness.
+
+Use lightweight development diagnostics or authorized operational metrics.
+
+Do not introduce noisy logs, secrets or route-coordinate leakage.
+
+Provide a clear explanation of which phase actually caused the reported bottleneck after source inspection.
+
+Do not claim a performance improvement was measured if tests/runtime checks were not performed.
+
+## 18. Security and consistency
+
+Mandatory invariants:
+
+**COMMAND INTENT != EXECUTION PLAN != OBSERVED TELEMETRY**
+
+**SIM POSITION != REAL GPS**
+
+**VIRTUAL ACK != HUMAN ACK**
+
+**MAP SELECTION != COMMAND AUTHORITY**
+
+**VISIBLE STACK != SHARED IDENTITY**
+
+Requirements:
+
+- No simulated position presented as real GPS.
+- No task issued automatically from overlap selection.
+- No unsafe new mutation pathway.
+- No RLS bypass.
+- No unauthorized route/stack disclosure.
+- No client access to private H1/M14.6B processing tables.
+- No fabricated movement.
+- No active-command identity regeneration on ambiguous retry.
+- No direct browser manipulation of underlying simulation state.
+
+Shared Supabase project contains both real and SIM incidents.
+
+Keep backend protections strict.
+
+## 19. Existing system compatibility
+
+Preserve:
+
+- F1 stable Command Map layout.
+- F2 context commands.
+- F3 tactical objects.
+- F4 live refresh.
+- G command hierarchy and sectors.
+- H RTS control groups.
+- H1 automatic SIM execution.
+- H2 multi-route/remaining-route projection.
+- M14.6A scenario designer.
+- M14.6B events and hazards.
+- Existing OSRM/GraphHopper selection and road-access guards.
+- Existing 5-second Cron.
+- Existing navigation history and idempotency.
+
+No fire/spread/resource-effect engine in this milestone.
+
+## 20. SQL / Edge Function scope
+
+Prefer UI and authorized read-path optimizations where possible.
+
+A new forward-only migration is allowed only if a specific backend read or safely bounded queue improvement is truly required.
+
+Do not edit historical migrations.
+
+Do not introduce a second scheduler, route provider, task engine or telemetry model.
+
+If backend work is necessary:
+
+- Keep it minimal and auditable.
+- Preserve worker authentication and secrets.
+- Document exact deployment order.
+- Explain how it interacts with M14.6B event processing.
+- Never let extra route preparation starve existing agent ticks or scheduled scenario events.
+
+Do not silently deploy anything.
+
+## 21. Acceptance scenarios
+
+### A. Twenty-unit long-distance dispatch
+
+- Issue a task to 20 authorized SIM units over a long route, such as Ptuj → Ljubljana.
+- Distinguish task acceptance, queued route planning, successful route creation and actual agent start.
+- Already ready routes stay on the map while others continue loading.
+- No route flicker or disappearing complete collections.
+- No uncontrolled request fan-out.
+- Individual failures show exact causes.
+
+### B. Two separate group commands
+
+- Issue a command for 10 units Ptuj → Ljubljana.
+- Issue another command for 10 different units Maribor → Celje.
+- All currently valid routes from both groups remain visible.
+- Selected unit route stays emphasized.
+- Unselected routes remain translucent.
+- Ordinary refresh does not erase earlier valid routes.
+
+### C. Missing route and failed start
+
+- Use an off-road destination and a SIM unit with a road-access discrepancy.
+- Show the actual road endpoint, destination and blocked reason.
+- Do not invent movement.
+- Support explicit authorized correction.
+
+### D. Overlap stacks
+
+- Place three SIM units at the same staging location.
+- Show a visible stack count.
+- Hover to preview identities.
+- Click to open chooser.
+- Select one.
+- Ctrl/Shift to select several.
+- Select all units.
+- Fan out and inspect individual symbols.
+- Include a hydrant/tactical object at the same location without treating it as a recipient.
+
+### E. Right-button drag
+
+- Pan/rotate using the right mouse button.
+- Release.
+- The context menu must remain closed.
+- A subsequent stationary right click must open it.
+- Normal touch pan must not open it.
+
+### F. UI and refresh
+
+- Collapse Navigation.
+- Hide/reopen each sidebar with correctly labeled controls.
+- Verify status notices never overlap "Dejanja".
+- Verify compact rows and responsive drawer behavior.
+- Keep map camera and RTS selection stable through F4 refresh.
+- Confirm automatic updates match manual Refresh without requiring user intervention.
+
+### G. Smooth simulation
+
+- Compare backend position freshness with browser update freshness.
+- Check movement at normal and accelerated scenario clock speeds.
+- Handle pause, failure, network interruption, stale samples and resume without fake movement.
+- Confirm route shortening uses real authoritative progress.
+
+## 22. Development restrictions
+
+Do NOT run:
+
+- Tests.
+- Builds.
+- Lint.
+- Typechecks.
+- CI.
+- Browser/runtime checks.
+- SQL migrations.
+- Supabase deployments.
+- Android/Gradle tasks.
+
+Do not merge.
+
+Do not modify Supabase Cron schedule or production configuration.
+
+Do not use destructive Git commands or remove local changes.
+
+Preserve custom files:
+
+- `android/app/build.gradle.kts`
+- `android/build.gradle.kts`
+- `android/gradle.properties`
+- `android/app/schemas/`
+- `pnpm-lock.yaml`
+- `web/next-env.d.ts`
+
+Avoid dependency and lockfile changes.
+
+Do not add this prompt as a root-level `.txt` file.
+
+### Mandatory source-only syntax review
+
+Previous milestones repeatedly contained broken JSX even after review.
+
+Inspect all changed TSX/JSX for:
+
+- Missing closing conditional braces.
+- Extra event-handler braces.
+- Unclosed JSX fragments.
+- Invalid nesting.
+- Incorrect type narrowing and callback signatures.
+
+If SQL changes are needed, inspect:
+
+- Dollar-quoted function delimiters.
+- Existing function signatures.
+- Foreign keys.
+- Transaction boundaries.
+- RLS and grants.
+- Migration timestamp/dependencies.
+
+Do not claim successful compilation or runtime verification.
+
+## 23. Deliverables
+
+Produce one focused PR with:
+
+1. Stable route collection and reliable automatic refresh.
+2. Improved performance with 20+ long routes.
+3. Fast, bounded SIM-position refresh.
+4. Conservative smooth SIM visualization.
+5. Correct remaining-route clipping.
+6. Accurate route endpoint and failed-start diagnostics.
+7. Mixed unit/object overlap stacks.
+8. Hover preview, click selection and optional radial fan-out.
+9. Right-button drag/context-menu fix.
+10. Collapsible Navigation.
+11. Visible left/right panel toggle labels.
+12. Compact Command Map panels and route lists.
+13. Dedicated RTS action/status regions without overlap.
+14. Consistent selected-unit task inspection.
+15. SI/DE translations and mobile accessibility.
+16. Explanation of actual identified refresh/rendering bottlenecks.
+17. Detailed notes on reuse of F4/H1/H2 infrastructure.
+18. New SQL migration/Edge changes only if essential.
+19. Exact deployment instructions if backend changes were made.
+20. Manual verification checklist for all scenarios above.
+21. Explicit statement that automated checks and runtime benchmarks were not executed.
+
+**Final goal:** The Gasilko Command Map behaves like a responsive RTS control surface. Units can be selected even when colocated, navigation stays visible through new commands and background refresh, SIM movement looks smoother without fabricated telemetry, large multi-unit exercises remain usable, and the map's panels and controls are compact and predictable.
+
+**Following main milestone: M14.6C — Fire, Smoke & Hazard Simulation.**
