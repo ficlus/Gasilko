@@ -65,7 +65,7 @@ export function TemplateEditor({locale,value,draft:d,onChange,disabled}:Props){
     <div className="actions"><button type="button" onClick={()=>choose('center')}>{t('center')}</button><button type="button" onClick={()=>choose('incident')}>{t('incident')}</button>
      <button type="button" disabled={!canEdit||object?.kind==='PERIMETER'||(!!object?.geometry&&object.geometry.type!=='Point')} aria-pressed={placing&&!drawing}
       onClick={()=>{setPlacing(!placing);setDrawing(false);setVertices([]);}}>{t('place')}</button>
-     {(drawing||placing)&&<button type="button" onClick={()=>{setDrawing(false);setPlacing(false);setVertices([]);}}>{t('cancel')}</button>
+     {(drawing||placing)&&<button type="button" onClick={()=>{setDrawing(false);setPlacing(false);setVertices([]);}}>{t('cancel')}</button>}
     </div>
     <p role="status">{t('placeHelp')}</p>
     {drawing&&<div className="actions"><CoordinateEditor locale={locale} value={null} disabled={!canEdit||vertices.length>=32} onApply={p=>{if(vertices.length<32)setVertices(v=>[...v,p]);}}/><span>{vertices.length}/32</span><button type="button" disabled={vertices.length<3} onClick={finish}>{t('finish')}</button><button type="button" disabled={!vertices.length} onClick={()=>setVertices(v=>v.slice(0,-1))}>{t('undo')}</button></div>}
