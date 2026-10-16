@@ -248,7 +248,7 @@ export function IncidentArea({locale,account,destination,initialOrg}:{locale:Loc
    <IncidentResources crewOutcomes={crewOutcomes} key={`resources/${account}/${org}/${detail.id}`} locale={locale} account={account} org={org} incidentId={detail.id} refresh={refresh} feedback={resourceFeedback} disabled={loading||busy||!!pending} read={rpc} onAction={ask}/>
   </IncidentLayout>}
   {confirmation&&<ConfirmationDialog title={t(confirmation.action)} text={t('confirmation')} busy={busy||!!pending} onDismiss={()=>setConfirmation(null)}>
-    {confirmation.action==='issue_task'&&<p role="status">{contextText(locale)(busy?'sending':pending?'pending':error?'rejected':'draft')}</p>
+    {confirmation.action==='issue_task'&&<p role="status">{contextText(locale)(busy?'sending':pending?'pending':error?'rejected':'draft')}</p>}
    {confirmation.training&&<SimulationBanner locale={locale}/>}
    {commandDraftStale&&!pending&&<p role="alert">{t('stale')}</p>}
    {confirmation.description&&<p className="incident-prose">{confirmation.description}</p>}
