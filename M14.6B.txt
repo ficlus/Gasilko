@@ -1,0 +1,823 @@
+# CODEX IMPLEMENTATION PROMPT — M14.6B
+## Dynamic Incident Events, Scenario Timeline & Instructor Event Scheduling
+
+**Repository:** https://github.com/ficlus/Gasilko
+
+Implement **M14.6B — Dynamic Incident Events & Scenario Timeline**.
+
+Create one focused PR targeting the latest merged `main`. Do not merge.
+
+**Prerequisite:** M14.6A / PR #74 must be merged. Inspect its actual SQL migration and template-definition schema before beginning.
+
+## 1. Goal
+
+Extend the Gasilko training simulator so that an incident evolves over time.
+
+An authorized instructor should be able to:
+
+- Define events while preparing an exercise.
+- Schedule events relative to simulation time.
+- Trigger events manually during a running exercise.
+- Reveal new incident information to the commander.
+- Add or reveal simulated hazards on the map.
+- Change selected tactical conditions through explicitly supported operations.
+- Review past, upcoming and triggered events.
+- Pause and resume the scenario without losing scheduling accuracy.
+- Replay the same template with the same event definitions in independent sessions.
+
+The commander should experience an evolving operational incident, not a passive map containing static vehicles.
+
+**This milestone is an event orchestration system, not a physical fire-propagation engine.**
+
+Do not implement automatic fire spread, water consumption or resource-effect simulation yet. Those belong to M14.6C and M14.6D.
+
+---
+
+## 2. Inspect existing implementation
+
+Inspect:
+
+- M14.6A scenario templates and versioning.
+- `20261015140000_simulation_templates.sql`.
+- Current template definition schema and validators.
+- TemplateLibrary, TemplateEditor and TemplateMap.
+- Existing simulation scenario lifecycle and clock.
+- Existing simulation events and event sequence.
+- `incident-simulation-runner`.
+- M14.5H1 automatic command orchestration.
+- M14.5H2 command-map route collection.
+- F4 live update and notification coordinator.
+- Existing incident timeline and audit.
+- F3 tactical map objects.
+- Existing road navigation validity rules.
+- Current command hierarchy and incident permissions.
+- Existing scenario-controller and training-operator authorization.
+- SI/DE localization.
+
+Document actual available commands, clock semantics and event APIs before implementing new ones.
+
+Reuse existing infrastructure wherever feasible.
+
+---
+
+## 3. Event categories
+
+Introduce an explicit, server-validated event catalog.
+
+For MVP, implement the following categories.
+
+### INCIDENT_REPORT
+
+A new piece of information arrives.
+
+Examples:
+
+- Smoke visible from the second floor.
+- Additional callers report trapped persons.
+- New witnesses provide information.
+- More vehicles may be involved.
+
+Effect:
+
+- Record a simulated incident report.
+- Notify authorized commanders.
+- Add a timestamped timeline entry.
+
+Do not automatically change physical conditions unless another supported effect is explicitly configured.
+
+### HAZARD_REVEAL
+
+Reveal a previously hidden simulated danger.
+
+Examples:
+
+- Hazardous material discovered.
+- Roof-collapse danger identified.
+- Electrical hazard reported.
+- Dangerous zone identified.
+
+Effect:
+
+- Display an authorized scenario hazard marker or polygon.
+- Notify the commander.
+- Preserve the distinction between a simulated hazard and a real-world observation.
+
+Use existing tactical geometry validation and bounded object models.
+
+### HAZARD_UPDATE
+
+Modify the state or geometry of a previously revealed simulated hazard where the existing model permits it.
+
+Requirements:
+
+- Version guards.
+- Valid geometry.
+- Immutable event history.
+- No silent overwrite of unrelated tactical objects.
+
+### ACCESS_RESTRICTION
+
+Introduce a simulated access restriction.
+
+Examples:
+
+- Road access unavailable.
+- Main entrance blocked.
+- Bridge reported unsafe.
+- A particular approach becomes prohibited.
+
+MVP behavior:
+
+- Display the restriction on the map.
+- Notify the commander.
+- Clearly mark it as simulated.
+
+Do not pretend that OSRM knows about a temporary road closure.
+
+Do not automatically modify road-provider geography or silently invalidate unrelated routes.
+
+Only enforce a routing restriction if the existing navigation domain genuinely supports that restriction through validated server logic. Otherwise keep it advisory and document the limitation.
+
+### RESOURCE_REQUEST
+
+Produce a simulated request for additional support.
+
+Examples:
+
+- Additional firefighting units requested.
+- Water supply assistance needed.
+- Technical rescue resources required.
+- Medical support requested.
+
+Effect:
+
+- Create a simulated request/notification.
+
+Do not automatically dispatch real resources or create an authorized operational task.
+
+### COMMUNICATION_EVENT
+
+Simulate a communication event:
+
+- Radio message.
+- Delayed report.
+- Communication failure notification.
+- Restoration of communication.
+- Unit reporting an obstacle.
+
+These must remain clearly labeled as simulated.
+
+Do not impersonate human users or fabricate real personnel acknowledgments.
+
+### PHASE_CHANGE
+
+Allow the instructor to mark:
+
+- Situation escalated.
+- Situation stabilized.
+- New operational phase.
+- Additional incident information released.
+
+Do not automatically alter authoritative real-incident lifecycle states.
+
+---
+
+## 4. Event definition schema
+
+Introduce versioned, declarative event definitions.
+
+A conceptual event:
+
+```json
+{
+  "id": "event-01",
+  "type": "HAZARD_REVEAL",
+  "title": "Hazardous material discovered",
+  "description": "A chemical container has been identified.",
+  "trigger": {
+    "mode": "SIMULATION_TIME",
+    "offset_seconds": 360
+  },
+  "visibility": "COMMANDER",
+  "effects": [
+    {
+      "type": "REVEAL_HAZARD",
+      "object_local_id": "hazard-01"
+    }
+  ]
+}
+```
+
+This is illustrative. Adapt the schema to the actual M14.6A template model.
+
+Required:
+
+- Stable definition-local event ID.
+- Explicit supported event type.
+- Validated trigger.
+- Validated effects.
+- Optional map geometry/object references.
+- Clear visibility.
+- Bounded descriptions.
+- Bounded event count.
+- Deterministic ordering.
+- Schema versioning.
+- No executable user-supplied scripts.
+- No arbitrary SQL, RPC or Edge Function names.
+- No unrestricted JSON command payloads.
+
+### Compatibility with M14.6A
+
+The existing template schema is strict and versioned.
+
+Do not silently add new keys to its schema-v1 definition.
+
+Either introduce an explicitly validated schema-v2 definition or a separate immutable, version-associated event-plan model.
+
+Choose the smallest compatible design.
+
+Existing v1 templates and running scenarios must remain valid.
+
+Published event plans must be immutable.
+
+Starting a training session must capture the exact event-plan version used.
+
+---
+
+## 5. Event triggers
+
+Support three modes.
+
+### A. Simulation time
+
+Example:
+
+"After 5 minutes of simulated incident time, reveal a hazard."
+
+Time must come from the existing authoritative simulation clock.
+
+Do not calculate event eligibility from a browser timer.
+
+### B. Manual instructor action
+
+The instructor explicitly presses:
+
+**Sproži dogodek / Ereignis auslösen**
+
+Require authorized scope and user confirmation for impactful events.
+
+### C. Simple authoritative conditions
+
+Support only conditions that can be evaluated against existing trusted state.
+
+Examples:
+
+- A specific explicitly referenced SIM unit has reached a confirmed arrival state.
+- A specific simulation task assignment has completed.
+- A prior scenario event has executed.
+
+Do not infer event conditions from geographic proximity, visual marker position, simulated ETA or guessed task completion.
+
+If reliable condition evaluation requires unsupported infrastructure, defer that condition rather than fabricate it.
+
+---
+
+## 6. Timeline in the Scenario Designer
+
+Extend M14.6A's editor with a dedicated:
+
+**Časovnica dogodkov**
+
+Example:
+
+```text
+SIM · Časovnica vaje
+
+00:00   Začetek intervencije
+03:00   Prva dodatna prijava
+06:00   Odkrita nevarna snov
+10:00   Dostopna cesta zaprta
+15:00   Zahteva za dodatne enote
+
+[+ Dodaj dogodek]
+```
+
+The instructor must be able to:
+
+- Add events.
+- Edit event text and configuration.
+- Choose event type.
+- Configure trigger time.
+- Select existing scenario objects as targets.
+- Create a hazard geometry in the template map when appropriate.
+- Reorder events through accessible controls.
+- Preview scheduled timing.
+- Delete draft events before publication.
+- Save and publish a new immutable template version.
+
+Do not mutate previous published template versions or active exercises.
+
+Support touch and keyboard users.
+
+---
+
+## 7. Instructor control during a running exercise
+
+Add an authorized instructor view or section.
+
+### Required controls
+
+- View upcoming events.
+- View triggered events.
+- Trigger manual events.
+- Pause/resume through existing simulation controls.
+- Inspect event details.
+- Inspect actual execution outcomes.
+- View failed or blocked events.
+- Explicitly retry supported failed events.
+
+Do not grant instructor capabilities to ordinary commanders merely because they can manage incident tasks.
+
+Use existing training-controller authorization and additional existing capability checks where necessary.
+
+Keep this compatible with the future M14.6F dedicated Scenario Director interface.
+
+---
+
+## 8. Commander view
+
+The commander must not see future hidden events.
+
+When an event is triggered and revealed:
+
+- Show a localized notification.
+- Add an incident-scoped timeline entry.
+- Update the relevant map layer if applicable.
+- Preserve the Command Map camera.
+- Preserve current RTS selection.
+- Preserve open task drafts.
+- Show exactly what was actually revealed.
+- Allow inspection of the report or hazard.
+
+Do not expose upcoming hidden events in ordinary incident DTOs, SSR payloads, client state, DOM, or network responses.
+
+Avoid giving users a list of unrevealed event IDs or undisclosed content.
+
+The visibility boundary must be enforced server-side.
+
+---
+
+## 9. Server-side event lifecycle
+
+Define an authoritative event execution lifecycle.
+
+Suggested states:
+
+```text
+PLANNED
+   |
+   v
+ELIGIBLE
+   |
+   v
+CLAIMED
+   |
+   +---- BLOCKED
+   |
+   +---- RETRYABLE_FAILURE
+   |
+   v
+EXECUTED
+```
+
+Support explicit cancellation or skipping before execution where authorized.
+
+Requirements:
+
+- One logical event executes at most once.
+- Unique scenario/event identity.
+- Immutable event execution history.
+- Stable operation IDs.
+- Concurrency-safe claiming.
+- Worker leases where appropriate.
+- Bound retry policy.
+- No automatic replay after ambiguous responses.
+- No second execution after browser reload.
+- No cross-scenario event execution.
+- No old results overwriting newer revisions.
+
+The execution record must contain the actual effect result, not just a success flag.
+
+---
+
+## 10. Scheduling through existing runner
+
+Reuse the current Supabase scheduling infrastructure.
+
+The project already has:
+
+- `incident-simulation-runner`
+- Secret-authenticated execution.
+- `gasilko-sim-runner-5s` Cron.
+- H1 automatic SIM preparation.
+- Existing virtual agent movement ticks.
+
+Do not add a browser scheduler.
+
+Do not create a separate uncontrolled five-second Cron loop.
+
+### Worker behavior
+
+Preserve existing simulation movement ticks and H1 route preparation.
+
+Add bounded event work in a way that does not starve movement ticks or H1 jobs.
+
+Use fair scheduling and bounded processing time.
+
+Events should trigger according to simulation time, within realistic scheduler tolerance.
+
+Do not assume Cron executes at an exact millisecond.
+
+Overlapping invocations must remain safe.
+
+### Paused scenarios
+
+Scheduled simulation-time events must not progress while a scenario is paused.
+
+After resume, continue relative to the authoritative simulation clock.
+
+Finishing the scenario prevents new events from executing.
+
+Do not use wall-clock time as a substitute for simulation time.
+
+### Cron unavailable
+
+When the worker is unavailable, events remain pending.
+
+Show an honest worker-freshness warning.
+
+Do not silently execute pending events through browser refresh.
+
+---
+
+## 11. Safe event effects
+
+Effects must use a narrowly supported server-side policy registry.
+
+Do not introduce an unrestricted general-purpose executor.
+
+Each supported effect should explicitly define:
+
+- Input schema.
+- Authorization.
+- Allowed target.
+- Incident/scenario scope.
+- Validation.
+- Idempotency.
+- Audit.
+- Visibility.
+- Cancellation/retry behavior.
+
+### Map effects
+
+Prefer creating/revealing scenario-owned training annotations through the established COP object model or a dedicated read-only simulated hazard projection.
+
+A background worker must not impersonate a human commander to call user-facing operational RPCs.
+
+Where scenario annotations are created automatically, use a narrow protected training-only execution path with proper history.
+
+Do not let scenario events arbitrarily edit genuine operational COP objects.
+
+### Notification effects
+
+Use existing F4 event/notification infrastructure.
+
+Do not create a separate notification transport.
+
+### Resource effects
+
+For this milestone, resource-request events are informational only unless an established explicitly authorized training-only resource workflow already exists.
+
+Do not automatically issue operational tasks or change resource ownership.
+
+---
+
+## 12. Data model and migration
+
+A new forward-only SQL migration is expected.
+
+Inspect the existing schema before choosing exact tables.
+
+Suggested logical structures:
+
+### `simulation_event_definitions`
+
+An immutable plan associated with a template version or specific scenario setup.
+
+### `simulation_event_instances`
+
+Scenario-specific scheduled event identity and current execution state.
+
+### `simulation_event_execution_history`
+
+Immutable audit of actual triggering and effect results.
+
+Prefer reusing existing `simulation_events` for public lifecycle reporting where suitable.
+
+Do not overload existing event enums with incompatible meanings.
+
+### Required constraints
+
+- Scenario and organization identity.
+- Source template version where applicable.
+- Event type and trigger validation.
+- Unique event identity within scenario.
+- Bounded JSON size.
+- Valid event state transitions.
+- Idempotency.
+- Atomic claim.
+- No direct browser mutation.
+- Protected hidden event definitions.
+- Safe authorized read projections.
+- Appropriate indexes for due event lookup.
+- Bounded history pagination.
+
+Published template definitions remain immutable.
+
+Existing running scenarios must not be silently changed when a template is edited.
+
+---
+
+## 13. Integration with H1 and H2
+
+Preserve automatic SIM command execution.
+
+Scenario events may affect what information the commander sees, but they must not automatically turn a reported hazard into a MOVE_TO command.
+
+H1 remains responsible for authorized task preparation and simulated agent execution.
+
+H2 remains responsible for route and task visualization.
+
+Required:
+
+- No fabricated movement.
+- No route recomputation solely because a message appeared.
+- No agent restart from a duplicate event.
+- No MapLibre remount.
+- No unexpected camera movement.
+- No hidden future hazard leakage.
+- No interruption of active RTS groups.
+- No unexpected clearing of draft commands.
+
+---
+
+## 14. Event map visualization
+
+When an event reveals a geographic feature:
+
+- Render the feature through existing map infrastructure.
+- Distinguish training hazards from ordinary operational objects.
+- Support points and validated bounded polygons.
+- Show title, type and revealed time.
+- Allow selection and inspection.
+- Preserve existing hydrants, sectors, routes, units and tactical-object interactions.
+- Avoid rebuilding unrelated GeoJSON sources.
+- Do not automatically pan to an event location.
+
+Provide a user-controlled **Focus event** action.
+
+Do not draw unrevealed future hazard geometry for commanders.
+
+---
+
+## 15. Event ordering and deterministic behavior
+
+One template may be run multiple times.
+
+For an identical published definition:
+
+- Scheduled event order must be deterministic.
+- Stable identity must be preserved within each scenario.
+- Simultaneous events must use a defined tie-break order.
+- Clock speed must not cause missed events.
+- Pause/resume must not double-trigger events.
+- Retried effects must not create duplicate map objects.
+- Instructor intervention must be recorded.
+- Template edits after a scenario starts must have no effect on that scenario.
+
+Prepare clean event records for future M14.7 replay.
+
+Do not implement replay itself in this milestone.
+
+---
+
+## 16. UI and localization
+
+Add:
+
+- Scenario-editor timeline.
+- Event configuration form.
+- Manual trigger controls.
+- Upcoming and executed event lists for instructors.
+- Commander-facing report/event cards.
+- Event map markers and details.
+- Clear pending/failed/blocked states.
+
+Slovenian and German translations are mandatory.
+
+Keep a compact, responsive design.
+
+Use existing design tokens and components.
+
+Avoid additional libraries unless clearly justified.
+
+---
+
+## 17. Security invariants
+
+Mandatory:
+
+**SCENARIO DEFINITION != SCENARIO EXECUTION**
+
+**INSTRUCTOR KNOWLEDGE != COMMANDER KNOWLEDGE**
+
+**SIMULATION EVENT != REAL OBSERVATION**
+
+**COMMAND INTENT != EXECUTION PLAN != TELEMETRY**
+
+Requirements:
+
+- TRAINING-only operation.
+- No real incidents modified by automatic scenario events.
+- No human impersonation.
+- No fake real GPS.
+- No fake human ACK.
+- No hidden-event leakage.
+- No unauthorized organization access.
+- No arbitrary service-role operations.
+- No browser access to private event queues.
+- No client-created authoritative event timestamps.
+- No automatic dispatch of real resources.
+- No changes to the existing runner bearer-secret contract.
+
+The same Supabase project contains both operational and training data; enforce isolation in SQL and server code.
+
+---
+
+## 18. Failure handling
+
+Handle:
+
+- Duplicate event execution.
+- Network timeout.
+- Worker crash.
+- Lease expiry.
+- Paused scenario.
+- Finished scenario.
+- Scenario deletion/archiving restrictions.
+- Instructor authority revoked.
+- Event target no longer valid.
+- Event geometry invalid.
+- Simultaneous events.
+- Dependency event not completed.
+- Stale expected version.
+- Ambiguous mutation result.
+- Supabase Cron disabled.
+- Hidden event accidentally requested by unauthorized actor.
+
+Use clear, localized error messages.
+
+Permanent failures require explicit intervention rather than infinite retries.
+
+---
+
+## 19. Implementation steps
+
+Implement in this order:
+
+1. Inspect existing simulation clock and runner contract.
+2. Define a versioned event schema compatible with M14.6A.
+3. Implement server-side validation.
+4. Implement immutable event plans.
+5. Implement scenario-specific event instances.
+6. Implement safe instructor event commands.
+7. Implement idempotent event scheduling.
+8. Integrate bounded processing into the runner.
+9. Implement permitted event effects.
+10. Implement instructor timeline UI.
+11. Implement commander-facing event reveal/notifications.
+12. Add map visualization.
+13. Integrate F4 refresh and H2 map layers.
+14. Add SI/DE and responsive styling.
+15. Document manual migration/deployment sequence.
+
+---
+
+## 20. Acceptance criteria
+
+- [ ] Starts from merged M14.6A.
+- [ ] Existing template versions remain valid.
+- [ ] Instructor can add/edit timed events in a draft.
+- [ ] Published event definitions are immutable.
+- [ ] A new session receives its own event instances.
+- [ ] Existing sessions are unaffected by later template edits.
+- [ ] Scheduled events fire based on authoritative simulation time.
+- [ ] Pause/resume preserves schedule.
+- [ ] Manual event triggering requires authorization.
+- [ ] Supported authoritative conditions are handled safely.
+- [ ] Event execution is idempotent.
+- [ ] Overlapping workers cannot duplicate effects.
+- [ ] Cron/browser separation remains intact.
+- [ ] Hidden events are not visible to commanders.
+- [ ] Revealed reports appear in the operational timeline.
+- [ ] Revealed geographic hazards appear on the map.
+- [ ] Map interaction and H2 routes remain stable.
+- [ ] Existing H1 agents continue correctly.
+- [ ] No real incident receives SIM events.
+- [ ] No fabricated GPS, ACK or operational task intent.
+- [ ] Complete SI/DE localization.
+- [ ] Forward-only SQL migration.
+- [ ] Minimal necessary Edge Function changes.
+- [ ] Precise manual deployment order documented.
+
+---
+
+## 21. Development restrictions
+
+Do NOT run:
+
+- Tests.
+- Builds.
+- Lint.
+- Typechecks.
+- CI.
+- Browser/runtime checks.
+- SQL migrations.
+- Supabase deployments.
+- Android/Gradle tasks.
+
+Do not merge the PR.
+
+Do not modify production infrastructure or Cron configuration.
+
+Do not use destructive Git operations.
+
+Preserve local customizations:
+
+- `android/app/build.gradle.kts`
+- `android/build.gradle.kts`
+- `android/gradle.properties`
+- `android/app/schemas/`
+- `pnpm-lock.yaml`
+- `web/next-env.d.ts`
+
+Avoid unnecessary dependencies and lockfile modifications.
+
+Do not create a root-level prompt `.txt` file.
+
+### Mandatory source-only review
+
+Before opening the PR, inspect changed SQL/TSX source for:
+
+- Invalid JSX nesting and missing braces.
+- Duplicate or incorrect React keys.
+- Mismatched SQL dollar delimiters.
+- Incorrect SQL function signatures.
+- Invalid enum/check constraints.
+- Trigger ordering problems.
+- Hidden information leaking through DTOs.
+- Missing authorization checks.
+- Incorrect task/event idempotency.
+- Worker compatibility.
+- Incompatible M14.6A schema versions.
+
+Do not claim successful compilation or migration without actually executing them.
+
+---
+
+## 22. Deliverables
+
+Create one focused PR containing:
+
+1. Versioned event definitions and schema.
+2. Scenario event-plan editing.
+3. Timeline UI in Scenario Designer.
+4. Protected event instantiation.
+5. Simulation-clock-based scheduling.
+6. Authorized manual event triggering.
+7. Supported dynamic event effects.
+8. Idempotent worker integration.
+9. Commander-facing reports.
+10. Dynamic map hazard visualization.
+11. Instructor-only upcoming event visibility.
+12. F4/H1/H2 integration.
+13. SI/DE localization.
+14. Forward-only migration.
+15. Changed-file summary.
+16. Exact manual SQL and Edge Function deployment instructions.
+17. Manual acceptance checklist for timed, manual, conditional, paused, duplicated, failed, cross-organization and real-versus-SIM cases.
+18. Explicit acknowledgment that tests/build/runtime checks were not executed.
+
+**Final goal:** The instructor can design a training incident with a timeline of changing situations. Events activate automatically according to the authoritative simulation clock or by authorized manual action. The commander receives new information and sees relevant changes on the map, then responds by issuing actual training commands through the existing RTS system.
+
+**Following milestone: M14.6C — Fire, Smoke & Hazard Simulation.**
