@@ -11,7 +11,7 @@ export function TemplateInitialization({locale,account,org,incident,refresh,read
  useEffect(()=>{
   const ac=new AbortController();setLoading(true);setValue(null);setError('');
   read<Initialization|null>('simulation_template_initialization',{p_organization_id:org,p_incident_id:incident},ac.signal,account)
-   .then(data=>{if(!ac.signal.aborted)setValue(data);})
+   .then(data=>{if(!ac.signal.aborted){setValue(data);mutation.setError('');}})
    .catch(e=>{if(!ac.signal.aborted)setError(templateError(e instanceof Error?e.message:'SERVER'));})
    .finally(()=>{if(!ac.signal.aborted)setLoading(false);});
   return()=>ac.abort();

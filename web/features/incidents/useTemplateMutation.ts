@@ -25,7 +25,7 @@ export function useTemplateMutation(account:string,org:string,surface:string,rea
    if(sessionStorage.getItem(key)!==encoded)throw new Error('storage');
   }catch{
    // Do not send an operation whose identity cannot survive an ambiguous response.
-   locked.current=false;setBusy(false);setPending(null);setError('storage');return;
+   locked.current=false;setBusy(false);setError('storage');return;
   }
   try{
    const data=await read<unknown>(request.name,request.args,undefined,account);
@@ -34,8 +34,9 @@ export function useTemplateMutation(account:string,org:string,surface:string,rea
   }catch(e){
    if(!alive.current)return;
    const code=e instanceof Error?e.message:'SERVER';setError(templateError(code));
-   // Network/unknown failures retain the exact intent. Known rejection cannot have committed.
-   if(!['SERVER','Failed to fetch','NetworkError'].includes(code)&&
+   // Keep identity through transport/storage/auth loss: an earlier ambiguous attempt may have committed.
+   // Only a definitive domain rejection clears the request.
+   if(!['SERVER','Failed to fetch','NetworkError','NOT_AUTHORIZED','EXPIRED','SIMULATION_DISABLED'].includes(code)&&
     [...copErrors,...simulationErrors,...resourceErrors,'NOT_AUTHORIZED','EXPIRED','SIMULATION_DISABLED','STALE_VERSION','VALIDATION_FAILED','INVALID_TRANSITION','OPERATION_REUSED',
      'INVALID_GEOMETRY','UNSUPPORTED_GEOMETRY','GEOMETRY_TOO_LARGE','INVALID_SIMULATION_STATE','INVALID_SIMULATION_UNIT','TEMPLATE_SETUP_REQUIRED'].includes(code)){
     setPending(null);try{sessionStorage.removeItem(key);}catch{}
