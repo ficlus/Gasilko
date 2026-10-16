@@ -75,7 +75,17 @@ export function TemplateLibrary({locale,account,org,organizationName,types,read}
   {!denied&&mutation.pending&&<section className="admin-notice"><p>{t('pending')}</p><button disabled={mutation.busy||loading} onClick={mutation.retry}>{t('retry')}</button></section>}
   {denied?<button onClick={()=>{mutation.setError('');setEpoch(v=>v+1);}}>{t('refresh')}</button>:value&&draft?<>
    <div className="actions">
-    <button disabled={busy} onClick={()=>{if(!dirty||window.confirm(t('discard'))){setValue(null);setDraft(null);}}>{t('back')}</button>
+    <button
+  disabled={busy}
+  onClick={() => {
+    if (!dirty || window.confirm(t('discard'))) {
+      setValue(null);
+      setDraft(null);
+    }
+  }}
+>
+  {t('back')}
+</button>
     <span className="admin-badge">{t(value.archived?'ARCHIVED':value.state)} · {t('version')} {value.version}</span>
     <span role="status">{t(dirty?'unsaved':'saved')}</span>
     <button disabled={busy||dirty} onClick={()=>void open(value.id)}>{t('refresh')}</button>
