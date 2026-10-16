@@ -18,9 +18,9 @@ Deno.serve(async(request:Request)=>{
  if(bearer.length>1024||!await sameSecret(bearer,'Bearer '+secret))return response({error:'NOT_AUTHORIZED'},403);
  if(Number(request.headers.get('content-length')??0)>2)return response({error:'INVALID_REQUEST'},400);
  const abort=new AbortController(),timeout=setTimeout(()=>abort.abort(),55000);
- async function rpc(name:string,args:unknown){
+ async function rpc(name:string,args:unknown,signal:AbortSignal=abort.signal){
   const result=await fetch(url+'/rest/v1/rpc/'+name,{method:'POST',headers:{apikey:key,Authorization:'Bearer '+key,'Content-Type':'application/json'},
-   body:JSON.stringify(args),signal:abort.signal});
+   body:JSON.stringify(args),signal});
   if(!result.ok)throw new Error('RUNNER_RPC');
   return await result.json();
  }
@@ -31,6 +31,9 @@ Deno.serve(async(request:Request)=>{
    const result=await rpc('simulation_runner_tick',{p_scenario:row.scenario,p_tick:row.tick,p_operation:row.operation});
    if(result.error)failed++;else completed++;
   }
+  // Bounded transactional event work; failure must not starve H1 preparation.
+  let events:unknown={error:'EVENT_BATCH_UNAVAILABLE'};
+  try{events=await rpc('simulation_scenario_event_batch',{},AbortSignal.any([abort.signal,AbortSignal.timeout(3500)]));}catch{/* Retry only on a later runner invocation; no effect replay here. */}
   // Movement is processed first on every invocation. One leased route at most;
   // overlapping Cron requests can continue ticking while this request waits for the provider.
   let automation='IDLE';
@@ -43,7 +46,7 @@ Deno.serve(async(request:Request)=>{
    const result=await rpc('simulation_automation_finish',{p_job:job.id,p_lease:job.lease,p_route:route,p_error:error});
    automation=result.state;
   }else if(job?.started)automation='STARTED';
-  return response({completed,failed,automation});
+  return response({completed,failed,automation,events});
  }catch{return response({error:'RUNNER_UNAVAILABLE'},503);}
  finally{clearTimeout(timeout);}
 });

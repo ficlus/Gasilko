@@ -1,6 +1,8 @@
 'use client';
 import {useEffect,useRef} from 'react';
 import {type Map,type GeoJSONSource} from 'maplibre-gl';
+import {useScenarioEvents} from './ScenarioEvents';
+import {ScenarioEventMapLayer,scenarioEventLayers} from './ScenarioEventMapLayer';
 import {useCommandMap} from './CommandMapProvider';
 import {IncidentNavigationLayer} from './IncidentNavigationLayer';
 import {useIncidentNavigation} from './IncidentNavigationProvider';
@@ -27,6 +29,7 @@ const ids=['cop-primary','cop-sectors','cop-markers','cop-zones','cop-hydrants',
 const features=(items:{id:string;geometry:Geometry;label:string;kind?:string;status?:string}[])=>({type:'FeatureCollection' as const,
  features:items.map(i=>({type:'Feature' as const,id:i.id,geometry:i.geometry,properties:{id:i.id,label:i.label,kind:i.kind??'',status:i.status??''}}))});
 export default function CopMap(props:Props){
+ const scenarioEvents=useScenarioEvents();
  const navigation=useIncidentNavigation(),commandMap=useCommandMap();
  const rts=useRts(),workspace=useWorkspace(),sim=useSimulation(),positionLayer=useSimulationPositionLayer();
  const recipientLayers=positionLayer?[positionLayer]:[];
@@ -82,10 +85,19 @@ export default function CopMap(props:Props){
    const taskLayers=map.getStyle().layers.filter(l=>l.id.startsWith('rts-task-target-')).map(l=>l.id);
    const task=taskLayers.length?map.queryRenderedFeatures(event.point,{layers:taskLayers}).find(f=>f.properties?.id===rts?.intent?.id):null;
    if(task&&rts?.intent){workspace?.select({kind:'TASK',id:rts.intent.id});return;}
+   if(!rts?.open&&!rts?.externalEditing&&!rts?.locked){
+    const layers=scenarioEventLayers.filter(id=>map.getLayer(id));
+    const hit=layers.length?map.queryRenderedFeatures(event.point,{layers}).find(f=>typeof f.properties?.id==='string'):null;
+    const ordinaryPoints=map.getStyle().layers.filter(l=>/^(cop-markers|cop-hydrants|context-hydrants)-/.test(l.id)).map(l=>l.id);
+    const pointHit=ordinaryPoints.length>0&&map.queryRenderedFeatures(event.point,{layers:ordinaryPoints}).length>0;
+    if(hit&&!(hit.layer.id==='scenario-events-fill'&&pointHit)&&scenarioEvents?.data?.annotations.some(a=>a.id===hit.properties?.id)){
+     scenarioEvents.select('annotation:'+String(hit.properties!.id));workspace?.showDetails();return;
+    }
+   }
    const clickable=map.getStyle().layers.filter(l=>(l.id.startsWith('cop-')||l.id.startsWith('context-'))&&!l.id.startsWith('cop-draft')).map(l=>l.id);
    const id=map.queryRenderedFeatures(event.point,{layers:clickable}).find(f=>typeof f.properties?.id==='string')?.properties?.id;
    if(typeof id==='string')props.onSelect(id);
-  }}>{map=><><CopRendering map={map} props={props}/><TaskIntentLayers map={map} locale={props.locale}/><SimulationMapLayer map={map} locale={props.locale}/><IncidentNavigationLayer map={map} locale={props.locale} representedTargets={new globalThis.Map<string,readonly number[]>([
+  }}>{map=><><CopRendering map={map} props={props}/><ScenarioEventMapLayer map={map}/><TaskIntentLayers map={map} locale={props.locale}/><SimulationMapLayer map={map} locale={props.locale}/><IncidentNavigationLayer map={map} locale={props.locale} representedTargets={new globalThis.Map<string,readonly number[]>([
     ...(props.layers.markers?c.objects.filter(o=>o.geometry.type==='Point').map(o=>['INCIDENT_MAP_OBJECT:'+o.id,o.geometry.type==='Point'?o.geometry.coordinates:[]] as const):[]),
     ...(props.layers.hydrants?c.links.flatMap(l=>l.hydrant?.longitude!=null&&l.hydrant.latitude!=null?[['HYDRANT:'+l.hydrant.id,[l.hydrant.longitude,l.hydrant.latitude]] as const]:[]):[]),
     ...props.contextHydrants.map(h=>['HYDRANT:'+h.id,[h.longitude,h.latitude]] as const)

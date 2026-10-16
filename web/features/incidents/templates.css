@@ -25,3 +25,12 @@
  .template-editor details { max-height:55svh;overflow:auto; }
  .template-editor .web-map { height:55svh;min-height:300px; }
 }
+
+.scenario-event-editor,.scenario-events,.scenario-event-details { min-width:0;overflow-wrap:anywhere; }
+.scenario-event-editor fieldset { min-width:0;border:0;padding:0; }
+.scenario-event-editor .web-map { height:clamp(280px,48svh,560px); }
+.scenario-event-editor .template-items,.scenario-events .template-items { display:grid;grid-template-columns:minmax(0,1fr); }
+.scenario-event-editor button,.scenario-events button,.scenario-event-details button { min-height:44px;white-space:normal; }
+.scenario-event-editor .actions,.scenario-events .actions,.scenario-event-details .actions { flex-wrap:wrap; }
+.scenario-events summary { cursor:pointer;padding-block:.5rem; }
+.scenario-events li { min-width:0; }

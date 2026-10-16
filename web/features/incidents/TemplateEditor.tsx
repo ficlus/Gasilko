@@ -103,7 +103,7 @@ export function TemplateEditor({locale,value,draft:d,onChange,disabled}:Props){
   </div>
  </section>;
 }
-function CoordinateEditor({locale,value,disabled,onApply}:{locale:Locale;value:Position|null;disabled:boolean;onApply:(v:Position)=>void}){
+export function CoordinateEditor({locale,value,disabled,onApply}:{locale:Locale;value:Position|null;disabled:boolean;onApply:(v:Position)=>void}){
  const t=templateText(locale),[x,setX]=useState(value?.[0].toString()??''),[y,setY]=useState(value?.[1].toString()??'');
  useEffect(()=>{setX(value?.[0].toString()??'');setY(value?.[1].toString()??'');},[value?.[0],value?.[1]]);
  const valid=x.trim()!==''&&y.trim()!==''&&Number.isFinite(Number(x))&&Number.isFinite(Number(y))&&Math.abs(Number(x))<=180&&Math.abs(Number(y))<=90;

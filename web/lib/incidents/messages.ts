@@ -2,6 +2,7 @@ import {taskText} from '../operational/taskMessages';
 import {operationalText} from '../operational/messages';
 import type {Locale} from '../i18n';
 const sl = {
+ SIM_SCENARIO_EVENT:'SIM · Nov dogodek vaje',
  simPositionKnown:'SIM: položaj iz potrjenega simulacijskega vzorca, ne dejanski GPS.',
  selectedUnitStates:'Stanje izbranih enot',knownUnitStates:'Potrjeno operativno stanje; izbira ne pomeni prostosti za novo nalogo.',
  explicitSectorRelations:'Izrecne dodelitve sektorju. Viri so povezani prek dodeljene enote.',
@@ -205,6 +206,7 @@ const sl = {
  INCIDENT_REACTIVATED:'Intervencija ponovno aktivirana',INCIDENT_CLOSED:'Intervencija zaključena',INCIDENT_CANCELLED:'Osnutek preklican',
 };
 const de:Record<keyof typeof sl,string> = {
+ SIM_SCENARIO_EVENT:'SIM · Neues Übungsereignis',
  simPositionKnown:'SIM: Position aus bestätigter Simulationsprobe, kein tatsächliches GPS.',
  selectedUnitStates:'Status ausgewählter Einheiten',knownUnitStates:'Bestätigter Einsatzstatus; Auswahl bedeutet keine Verfügbarkeit für neue Aufgaben.',
  explicitSectorRelations:'Ausdrückliche Abschnittszuordnungen. Ressourcen sind über die zugeordnete Einheit verbunden.',
