@@ -1,0 +1,1129 @@
+# CODEX IMPLEMENTATION PROMPT — M14.6C
+## Dynamic Fire, Smoke & Hazard Simulation Engine
+
+**Repository:** https://github.com/ficlus/Gasilko
+
+Implement **M14.6C — Dynamic Fire, Smoke & Hazard Simulation Engine**.
+
+Create one focused pull request against the latest merged `main`.
+
+Do not merge the PR.
+
+This is the next major milestone after:
+
+- M14.6A — Scenario Designer & Reusable Training Templates.
+- M14.6B — Dynamic Incident Events & Scenario Timeline.
+- M14.6B1 — RTS Command Map UX, Smooth SIM Movement & Performance.
+
+### Important prerequisites
+
+Before implementation:
+
+1. Inspect current `main` and confirm PR #76 has been merged.
+2. Review actual M14.6A/B/B1 migrations, APIs, event definitions and runner code.
+3. Preserve the current five-second Supabase Cron and secret authentication.
+4. Do not accidentally revert manually corrected JSX syntax.
+5. Do not assume B1's new fast-sample RPC or migration is deployed merely because its PR is merged.
+6. Preserve existing H1 automatic simulation, H2 route visualization and B1 map-selection behavior.
+
+This milestone introduces a **server-authoritative, deterministic, bounded training hazard simulation**, not a certified physical wildfire or structural fire prediction system.
+
+---
+
+## 1. Main objective
+
+Make the training incident environment evolve automatically.
+
+An instructor should be able to configure a simulation containing:
+
+- One or more simulated fire origins.
+- Fire intensity and development.
+- Simulated smoke.
+- Wind direction and wind speed.
+- Configured fuel or fire-spread characteristics.
+- Fire growth or reduction through explicitly supported scenario conditions.
+- Heat and other simulated danger zones.
+- Different fire behavior for structures and vegetation.
+- Scenario-specific fire and smoke visibility.
+- Simulation speed, pause and resume.
+- Manual instructor controls.
+
+The commander should see the resulting authorized simulated conditions on the existing **Poveljniška karta**.
+
+The map should visually represent:
+
+1. Fire origins.
+2. Currently burning areas.
+3. Relative fire intensity.
+4. Simulated smoke coverage.
+5. Hazardous areas.
+6. Time-based changes.
+7. Clearly labeled SIM provenance.
+
+The display must remain practical for issuing commands to units, selecting hydrants, managing sectors and following navigation routes.
+
+**Do not allow visual fire/smoke layers to make the existing RTS map unusable.**
+
+---
+
+## 2. Inspect existing architecture
+
+Inspect all relevant current code, including:
+
+### Scenario and templates
+
+- M14.6A template/version schema.
+- TemplateEditor.
+- TemplateMap.
+- TemplateLibrary.
+- TemplateInitialization.
+- Current scenario definition validation.
+- Protected simulation scenario bootstrap.
+- Instructor-versus-commander visibility.
+
+### Events
+
+- M14.6B event-plan schema.
+- EventPlanEditor.
+- ScenarioEvents.
+- ScenarioEventMapLayer.
+- Scheduled/manual event execution.
+- Authoritative event history.
+- Hidden and revealed event authorization.
+
+### Simulation execution
+
+- `incident-simulation-runner`.
+- Existing simulation clock.
+- Simulation scenario lifecycle.
+- H1 automatic execution jobs.
+- Virtual agent movement.
+- Existing simulation position and progress updates.
+- Runner concurrency and locking.
+- Existing task/assignment audit.
+
+### Command Map
+
+- CopMap.
+- F4 IncidentLiveProvider.
+- CommandMapProvider.
+- SimulationMapLayer.
+- IncidentNavigationLayer.
+- B1 fast SIM refresh.
+- B1 map overlap stacks.
+- B1 route reconciliation.
+- Existing layer controls.
+- Existing MapLibre source/layer ordering.
+- SI/DE translations.
+
+Review the exact SQL schema and RPC signatures before writing new migrations.
+
+Do not duplicate an existing capability.
+
+---
+
+## 3. Supported fire models
+
+Implement a clear model registry with at least two distinct training models.
+
+### A. STRUCTURE_FIRE
+
+A simulated building or structure fire.
+
+For MVP:
+
+- One or more building-fire origins.
+- Configurable intensity.
+- Growth over simulation time.
+- Configurable fire-development phases.
+- Smoke production.
+- Heat/danger radius.
+- Possible escalation or stabilization under scenario settings.
+
+Use a localized, abstract structural fire model.
+
+**Do not claim to calculate actual room-to-room combustion, flashover or structural collapse from real building physics.**
+
+Without detailed building geometry and verified physical inputs, structure-fire growth must remain a configurable training abstraction.
+
+Example states:
+
+- INITIAL.
+- DEVELOPING.
+- INTENSE.
+- DECLINING.
+- EXTINGUISHED.
+
+Define precise server-side numeric thresholds and transitions.
+
+These names are illustrative; use validated project conventions where appropriate.
+
+### B. WILDFIRE
+
+A simulated vegetation-fire scenario.
+
+For MVP:
+
+- Geographically bounded fire field.
+- One or more ignition points.
+- Configurable combustible fuel coverage.
+- Directional spread.
+- Wind influence.
+- Fuel/moisture influence.
+- Burned areas.
+- Active fire front.
+- Smoke drifting with simulated wind.
+- Explicitly non-combustible or blocked cells.
+
+Use a deterministic, bounded, cell-based simulation.
+
+Do not spread fire across unlimited geographic space.
+
+### Other exercise types
+
+Traffic accidents and sandbox exercises may contain localized smoke or hazard sources, but must not automatically become vegetation fires.
+
+Choose the appropriate behavior explicitly in the scenario definition.
+
+---
+
+## 4. Deterministic fire-spread algorithm
+
+For wildfire simulations, implement a bounded geographic grid.
+
+Suggested MVP:
+
+- Local metric simulation grid centered on a configured exercise origin.
+- Configurable cell width, with a sensible default around 25–50 meters.
+- Bounded simulation radius.
+- Maximum permitted cell count.
+- Eight-neighbor or another explicitly documented neighborhood model.
+- Deterministic simulation step.
+- Explicit versioned model parameters.
+
+Convert between geographic coordinates and local metric coordinates using an appropriate existing geospatial method or a validated local projection.
+
+Do not treat longitude/latitude degrees as uniform meters.
+
+### Example cell data
+
+```text
+cell_x
+cell_y
+fuel_factor
+moisture_factor
+burn_state
+intensity
+burned_fraction
+ignition_step
+last_updated_step
+```
+
+Recommended burn states:
+
+```text
+UNBURNED
+HEATING
+BURNING
+BURNED
+NON_COMBUSTIBLE
+```
+
+Implement and document the actual supported transitions.
+
+### Spread calculation
+
+The ignition tendency for an adjacent cell may depend on:
+
+- Neighboring burning intensity.
+- Neighbor direction.
+- Configured wind direction.
+- Configured wind speed.
+- Fuel factor.
+- Moisture factor.
+- Cell dimensions.
+- Simulation time step.
+
+Example conceptual relationship:
+
+```text
+spread_tendency =
+    base_spread
+    × fuel_factor
+    × moisture_modifier
+    × wind_direction_modifier
+    × neighboring_fire_influence
+```
+
+This is a conceptual policy, not a prescribed physical equation.
+
+Design a bounded, deterministic educational model.
+
+If variability is required, use seeded deterministic values derived from scenario identity, model version, cell and simulation step.
+
+**Never use uncontrolled random values that make identical scenario inputs behave differently after retry or worker restart.**
+
+### Model requirements
+
+- Identical initial state + identical parameters + identical elapsed simulation steps produce identical results.
+- No double advancement after retry.
+- No missing advancement due to a temporary worker delay.
+- No fire growth while paused.
+- No invalid negative intensity or fuel.
+- No propagation outside configured bounds.
+- No unlimited memory growth.
+- No fabricated terrain or weather measurements.
+- Explicit handling of multiple simultaneous ignition points.
+
+---
+
+## 5. Simulation clock integration
+
+Use the existing authoritative simulation clock.
+
+Fire evolution must be based on simulated time, not browser time.
+
+Choose a fixed simulation step such as 5 or 10 simulated seconds and document it.
+
+### Example
+
+At 10× time speed:
+
+- One real second represents ten simulated seconds.
+- Fire simulation advances according to the authoritative simulated timeline.
+- Browser refresh frequency does not change the simulation result.
+
+### Mandatory behavior
+
+- PAUSE freezes fire, smoke and hazard progression.
+- RESUME continues from the correct simulated state.
+- Scenario finish stops further advancement.
+- Scenario reset follows an explicit existing-compatible lifecycle.
+- Repeated Cron invocations do not advance the same step twice.
+- Overlapping worker invocations cannot corrupt the fire field.
+- Slower worker execution does not invent future steps or silently skip required evolution.
+
+Track the last committed simulation step durably.
+
+### Backlog control
+
+At accelerated clock speeds, the system may accumulate more pending simulated steps than can be processed in one worker call.
+
+Implement bounded processing per invocation.
+
+Do not block other simulator subsystems for an unbounded time.
+
+Report simulation lag explicitly.
+
+Do not silently jump the fire field ahead without processing intermediate state transitions.
+
+---
+
+## 6. Smoke simulation
+
+Implement an intentionally simplified smoke model.
+
+Required properties:
+
+- Smoke originates from active configured fire sources.
+- Smoke intensity depends on simulated fire intensity.
+- Smoke can drift according to configured wind direction and strength.
+- Smoke spreads/dilutes over simulated time.
+- Smoke gradually dissipates when the source weakens.
+- Smoke cannot grow indefinitely without bounds.
+
+### Visualization
+
+Use lightweight semi-transparent coverage or polygons.
+
+Avoid expensive particle systems as the authoritative model.
+
+Do not create one permanent database row per smoke particle.
+
+The map should show:
+
+- Smoke source.
+- Approximate plume area.
+- Relative smoke concentration.
+- Direction of drift where appropriate.
+
+The visualization must be clearly labeled:
+
+**SIM — modeliran dim**
+
+Do not claim the polygon represents an actual measured toxic concentration.
+
+No fabricated real sensor measurements.
+
+---
+
+## 7. Heat and hazard zones
+
+Add configurable simulated hazard fields.
+
+For MVP:
+
+### HEAT_ZONE
+
+Represent a dangerous area related to modeled fire intensity.
+
+### SMOKE_ZONE
+
+Represent reduced visibility or smoke-exposure training conditions.
+
+### COLLAPSE_RISK
+
+Instructor-configured structural danger area.
+
+### HAZARDOUS_MATERIAL
+
+Instructor-configured dangerous-material zone.
+
+### ACCESS_HAZARD
+
+A simulated hazardous access area.
+
+Distinguish:
+
+- Dynamic model-derived zones.
+- Manually configured instructor zones.
+- M14.6B event-revealed zones.
+- Existing operational tactical COP objects.
+
+Do not overwrite F3 tactical objects.
+
+Do not mistake a model-derived danger zone for an operational command sector.
+
+Do not automatically modify OSRM road restrictions unless the backend actually supports such a restriction.
+
+---
+
+## 8. Integration with M14.6B events
+
+M14.6B can reveal hazards and trigger training events.
+
+M14.6C must integrate with that framework.
+
+Supported examples:
+
+- An instructor event ignites a new simulated fire.
+- An event increases fire intensity.
+- An event changes configured wind conditions.
+- An event reveals smoke or danger information.
+- An event introduces an additional hazardous source.
+- An instructor manually stops or suppresses a model source through an explicit supported training action.
+
+### Event execution requirements
+
+- Only explicit allowlisted fire-model effects.
+- No arbitrary simulation code execution.
+- Stable event identity.
+- Exactly-once logical effect application.
+- Idempotent retries.
+- Server-side validation.
+- Actual scenario/version checks.
+- Immutable event history.
+- No hidden-event information leaked to commanders.
+
+The same event cannot ignite the same fire twice merely because Cron retried a call.
+
+If model state changes through an event, record the model revision/step and actual applied effect.
+
+---
+
+## 9. Scenario Designer integration
+
+Extend M14.6A with a dedicated configuration section:
+
+**SIM · Požar in nevarnosti**
+
+The instructor should be able to:
+
+1. Enable/disable a supported fire model.
+2. Choose structure fire or wildfire behavior.
+3. Place ignition points on the editor map.
+4. Configure initial intensity.
+5. Define simulation boundaries.
+6. Set wind direction.
+7. Set wind speed.
+8. Configure vegetation/fuel properties where applicable.
+9. Configure moisture/spread difficulty.
+10. Add manual hazard zones.
+11. Preview the initial model state.
+12. Save the configuration into the exercise definition.
+13. Publish a new immutable template version.
+14. Start a protected training session using that version.
+
+### Schema compatibility
+
+M14.6A uses a strict versioned template-definition schema.
+
+M14.6B extends it through an associated event-plan model.
+
+Do not inject unvalidated fields into existing schema-v1 definitions.
+
+Use a versioned model definition linked to the immutable template version or a new explicitly validated schema version.
+
+Preserve existing published templates.
+
+Old exercises without fire models must continue working unchanged.
+
+---
+
+## 10. Instructor controls during live training
+
+Provide a compact instructor-authorized fire-control section.
+
+Suggested controls:
+
+- Fire model ON/OFF where appropriate.
+- Start configured ignition.
+- Pause/resume through existing scenario clock.
+- View active model state.
+- Adjust wind conditions.
+- Adjust training spread intensity.
+- Trigger a configured ignition event.
+- Inspect modeled fire and smoke extents.
+- Reset an explicitly supported model state through an audited lifecycle operation.
+
+### Critical rules
+
+- Only an authorized training controller may change model parameters.
+- Changes require server confirmation.
+- Version guards and idempotency apply.
+- Updates are audited.
+- Parameter changes affect future simulation steps, not silently rewrite past history.
+- Already recorded history remains immutable.
+- Do not grant these controls to ordinary commanders merely because they can issue incident tasks.
+
+Reuse the existing instructor/event interface where suitable.
+
+Do not implement the entire future M14.6F Scenario Director in this PR.
+
+---
+
+## 11. Commander visibility and hidden information
+
+The instructor may know the actual simulation model state.
+
+The commander must only receive information currently authorized and revealed by the training scenario.
+
+Distinguish:
+
+### Instructor state
+
+- Full modeled fire perimeter.
+- Full simulated smoke coverage.
+- Future planned ignitions.
+- Hidden hazard definitions.
+- All configured model parameters.
+- Current simulation diagnostics.
+
+### Commander-facing state
+
+- Revealed fire/hazard conditions.
+- Reported conditions from M14.6B events.
+- Authorized visible fire and smoke layers.
+- Operationally relevant changes that have actually been disclosed.
+
+Do not automatically expose all hidden hazards merely because they exist in a model.
+
+### Information disclosure policy
+
+Provide explicit model visibility rules:
+
+- Always visible to instructor.
+- Visible to commander from scenario start.
+- Visible only after a named event reveals it.
+- Visible after a specifically supported authoritative observation condition.
+
+For MVP, do not fabricate firefighter observations based solely on GPS proximity.
+
+If reliable observation modeling is not yet available, require explicit event/instructor reveal.
+
+**No hidden information in ordinary browser DTOs, DOM or network payloads.**
+
+Enforce visibility in the database and read APIs.
+
+---
+
+## 12. Command Map visualization
+
+Add dynamic fire/smoke/hazard layers to the existing MapLibre map.
+
+### Visual elements
+
+- Active fire perimeter.
+- Fire intensity representation.
+- Burned region.
+- Smoke extent.
+- Heat/danger zones.
+- Optional wind direction indicator.
+- Selected hazard details.
+
+Use clearly distinguishable styles.
+
+### Map interaction
+
+- Existing vehicle selection remains usable.
+- Hydrant selection remains usable.
+- RTS right-click actions remain usable.
+- B1 overlap stacks remain usable.
+- Navigation routes remain visible.
+- Tactical objects and command sectors remain visible.
+- Fire overlays must not capture clicks intended for underlying operational features unless explicit inspection mode is active.
+
+### Layer settings
+
+Add independent controls:
+
+- Prikaži požar.
+- Prikaži dim.
+- Prikaži nevarna območja.
+
+Recommended defaults for applicable active SIM scenarios: ON.
+
+Hiding a layer must affect only visibility, not server simulation execution.
+
+### Performance
+
+- Shared GeoJSON/vector-compatible data sources.
+- Bounded and simplified display geometry.
+- Do not render every internal simulation cell as a separate React component.
+- Do not recreate the MapLibre instance.
+- Do not rebuild hydrants and routes whenever fire state changes.
+- Update only changed hazard sources.
+- Coalesce rendering work.
+- Avoid large JSON serialization every second.
+- Do not overload the new B1 fast-position refresh lane with full fire-field payloads.
+
+---
+
+## 13. Simulation data model
+
+A new forward-only SQL migration is expected.
+
+Suggested conceptual entities:
+
+### `simulation_hazard_models`
+
+- `id uuid`
+- `scenario_id uuid`
+- `incident_id uuid`
+- `model_type text`
+- `model_version integer`
+- `configuration jsonb`
+- `seed bigint`
+- `status text`
+- `last_simulated_step bigint`
+- `last_simulated_at timestamptz`
+- `state_version bigint`
+- `created_at timestamptz`
+- `updated_at timestamptz`
+
+### `simulation_fire_cells`
+
+For bounded wildfire grids:
+
+- Model reference.
+- Grid coordinates.
+- Fuel/moisture properties.
+- Burn state.
+- Intensity.
+- Last modified simulation step.
+
+### `simulation_hazard_snapshots`
+
+Bounded, versioned presentation/history snapshots:
+
+- Model ID.
+- Simulation step.
+- State version.
+- Geometry or bounded state summary.
+- Fire intensity summary.
+- Smoke geometry.
+- Hazard geometry.
+- Creation timestamp.
+
+### `simulation_hazard_events`
+
+Immutable applied changes:
+
+- Event/operation ID.
+- Model ID.
+- Simulated step.
+- Effect type.
+- Applied parameters.
+- Previous/next model version.
+- Actor or SIMULATION_ENGINE provenance.
+
+These names are suggestions, not instructions to duplicate existing tables.
+
+Inspect the current schema and choose the smallest suitable persistent model.
+
+### Storage requirements
+
+- Do not write complete unchanged grid state every five seconds.
+- Use bounded updates and periodic snapshots.
+- Preserve replay-relevant history.
+- Index by scenario/model/step.
+- Prevent unbounded event/snapshot growth.
+- Avoid giant JSON responses for ordinary commander views.
+- Enforce protected training isolation.
+
+---
+
+## 14. Runner integration
+
+Reuse:
+
+`supabase/functions/incident-simulation-runner/index.ts`
+
+Preserve the existing `gasilko-sim-runner-5s` Cron configuration.
+
+The runner already handles:
+
+- Autonomous SIM movement.
+- H1 task preparation.
+- M14.6B scheduled events.
+
+Add hazard-model processing without starving these existing responsibilities.
+
+### Execution priorities
+
+Preserve existing bounded movement and event processing.
+
+Introduce bounded fire/hazard work with fair scheduling.
+
+Requirements:
+
+- Idempotent model-step claiming.
+- Safe overlapping invocations.
+- Protected scenario and model locks.
+- No work for real incidents.
+- No advancement while paused.
+- No advancement after scenario finish.
+- No duplicate simulation steps.
+- No arbitrary unbounded loops.
+- No excessively large per-invocation database transactions.
+- Worker latency and error diagnostics.
+- Durable recovery from crash or timeout.
+
+If the hazard engine needs multiple invocations to catch up, expose lag honestly.
+
+Do not create a new five-second Cron without explicit justification.
+
+Do not change the existing runner secret or JWT verification policy.
+
+Existing runner deployment continues to require `--no-verify-jwt`.
+
+---
+
+## 15. Performance budgets and complexity limits
+
+M14.6B1 focuses on improving map performance and multi-unit navigation.
+
+This milestone must not undo those improvements.
+
+Introduce explicit configurable bounds for:
+
+- Simulation radius.
+- Grid resolution.
+- Maximum modeled cells.
+- Maximum active fire sources.
+- Maximum simultaneous hazard models.
+- Maximum visible geometry vertices.
+- Maximum processing steps per runner invocation.
+- Maximum processing time per worker.
+- Snapshot frequency.
+- Database reads and writes per advancement.
+- Total response size.
+
+Choose conservative defaults and document them.
+
+### Example MVP limits
+
+Proposed starting limits to evaluate against existing infrastructure:
+
+- One active wildfire model per scenario.
+- Up to several manually configured localized hazard sources.
+- 25–50 meter wildfire grid cells.
+- A bounded exercise area chosen by the instructor.
+- Maximum several thousand grid cells.
+- No simulation of an entire country.
+- Bounded model steps per worker call.
+
+Do not present these approximate figures as proven capacity benchmarks.
+
+Do not add expensive per-cell queries or invoke remote routing providers for fire propagation.
+
+### Monitoring
+
+Expose:
+
+- Last completed model step.
+- Current simulated time.
+- Pending model steps.
+- Model processing duration.
+- Number of active burning cells.
+- Generated display geometry size.
+- Last error.
+- Worker freshness.
+
+No private coordinates or secrets in general logs.
+
+---
+
+## 16. Fire model versus operational actions
+
+This milestone provides fire and hazard evolution.
+
+**Do not implement the full firefighting-effect engine yet.**
+
+The next milestone, M14.6D, will introduce:
+
+- Water supply and availability.
+- Firefighting action effectiveness.
+- Hose/attack resource requirements.
+- Unit/equipment capabilities.
+- Resource consumption.
+- Suppression effects.
+- Rescue/search outcomes.
+- Simulated operational progress.
+
+For M14.6C, prepare a controlled future interface for applying external suppression effects.
+
+Example logical command:
+
+```text
+APPLY_SIMULATION_EFFECT
+    model_id
+    source_assignment_id
+    effect_type
+    target_geometry
+    validated_effect_parameters
+    operation_id
+```
+
+This is a future conceptual contract, not permission to add an unrestricted mutation API.
+
+Document how M14.6D could safely submit approved effects.
+
+Do not assume `MOVE_TO` reduces fire intensity.
+
+Do not automatically suppress a fire merely because a vehicle is near it.
+
+---
+
+## 17. Deterministic history and future replay
+
+M14.7 will support incident replay.
+
+Design M14.6C data to support replay without reconstructing historical states from current geometry.
+
+Required:
+
+- Exact model version.
+- Initial seed/configuration.
+- Immutable parameter-change events.
+- Applied event identities.
+- Simulation-step progression.
+- Periodic immutable state snapshots.
+- Actual modeled state transitions.
+- Scenario lifecycle transitions.
+- Clear provenance of instructor inputs versus simulation-engine changes.
+
+Do not implement the M14.7 player now.
+
+A finished scenario must retain sufficient immutable history for later review.
+
+---
+
+## 18. Security invariants
+
+Mandatory:
+
+**TRAINING MODEL != REAL WORLD HAZARD OBSERVATION**
+
+**FIRE MODEL != OPERATIONAL COMMAND AUTHORITY**
+
+**COMMAND INTENT != EXECUTION PLAN != TELEMETRY**
+
+**INSTRUCTOR KNOWLEDGE != COMMANDER KNOWLEDGE**
+
+Requirements:
+
+- Protected TRAINING mode only.
+- No model attached to a real incident.
+- No fake real GPS/telemetry.
+- No fabricated human ACK.
+- No hidden instructor data leakage.
+- No browser service-role credentials.
+- No direct client writes to private grid/state tables.
+- No unrestricted service-role model execution.
+- No arbitrary JSON-to-RPC dispatch.
+- No automatic creation of real incident tasks.
+- No real fire prediction claims.
+- No change to operational organization/RLS permissions.
+
+The project contains real and simulated incidents in the same Supabase instance.
+
+Enforce boundaries server-side.
+
+---
+
+## 19. Failure handling
+
+Handle:
+
+- Invalid model configuration.
+- Missing scenario reference.
+- Unsupported template version.
+- Missing initial fire source.
+- Invalid or out-of-bounds geometry.
+- Excessive grid size.
+- Worker overlap.
+- Duplicate step processing.
+- Worker crash.
+- Scenario paused while model work is pending.
+- Scenario finished during advancement.
+- Instructor parameter change during advancement.
+- Hidden hazard disclosure attempt.
+- Missing or incomplete snapshot.
+- Database serialization/version conflict.
+- Extremely accelerated simulation clock.
+- Unexpected retry after network timeout.
+- Existing B1 map refresh failure.
+- Revoked training-controller authority.
+
+Errors must be visible to authorized instructors.
+
+An invalid model state must never cause the runner to continue generating uncontrolled work.
+
+Failures in hazard processing must not silently stop unrelated movement or H1 automation.
+
+---
+
+## 20. UI and localization
+
+Provide Slovenian and German translations for:
+
+- Fire model configuration.
+- Fire origin placement.
+- Intensity.
+- Spread rate.
+- Wind direction.
+- Wind speed.
+- Smoke.
+- Heat zones.
+- Hazard areas.
+- Model paused/running.
+- Simulation lag.
+- Instructor controls.
+- Commander-facing SIM hazard labels.
+- Visibility controls.
+- Validation errors.
+
+Keep the interface compact and responsive.
+
+Use existing M14.6A editor and M14.6B event patterns.
+
+No new frontend framework.
+
+No unnecessary third-party dependencies.
+
+Avoid giant full-screen forms that make the map unusable.
+
+---
+
+## 21. Implementation sequence
+
+Follow this order:
+
+1. Inspect latest merged scenario, event and runner schemas.
+2. Specify supported fire/smoke models and actual numeric rules.
+3. Define bounded versioned configurations.
+4. Integrate configuration with immutable scenario templates.
+5. Implement protected model initialization.
+6. Implement deterministic simulation advancement.
+7. Implement safe database persistence, locking and history.
+8. Integrate bounded model work into the existing runner.
+9. Implement instructor parameter-change controls.
+10. Implement authorized commander/instructor read projections.
+11. Add fire/smoke/hazard map layers.
+12. Integrate with M14.6B reveal/event policies.
+13. Reuse F4/B1 refresh and map infrastructure.
+14. Add SI/DE and responsive styling.
+15. Document migration/deployment and manual verification.
+
+Do not create disconnected UI panels without an authoritative backend model.
+
+---
+
+## 22. Acceptance criteria
+
+- [ ] Based on merged M14.6B1 main.
+- [ ] Existing M14.6A templates remain compatible.
+- [ ] Existing M14.6B events remain compatible.
+- [ ] Instructor can configure a structure-fire scenario.
+- [ ] Instructor can configure a bounded wildfire scenario.
+- [ ] Instructor can position initial ignition points.
+- [ ] Fire growth uses deterministic simulation steps.
+- [ ] Wind influences supported fire and smoke behavior.
+- [ ] Smoke moves/dissipates through the training model.
+- [ ] Heat/hazard zones update as configured.
+- [ ] Scenario pause freezes progression.
+- [ ] Resume continues correctly.
+- [ ] Simulation speed changes do not duplicate or skip logical steps.
+- [ ] Overlapping Cron calls cannot double-process model state.
+- [ ] Browser can close while simulation continues server-side.
+- [ ] Instructor can explicitly modify supported model parameters.
+- [ ] Parameter changes are versioned and audited.
+- [ ] Hidden model information remains hidden from commanders.
+- [ ] Revealed fire/smoke/hazard data appears on the Command Map.
+- [ ] Fire/smoke layers can be toggled independently.
+- [ ] Existing routes and vehicle selection stay functional.
+- [ ] B1 overlap stacks and map interaction remain functional.
+- [ ] Existing SIM agents and H1 tasks keep advancing.
+- [ ] Existing M14.6B event scheduling remains functional.
+- [ ] No full MapLibre remount or camera jumps.
+- [ ] No new polling coordinator or Cron schedule.
+- [ ] Processing remains bounded.
+- [ ] Simulation history is suitable for future replay.
+- [ ] No real incident receives simulation hazard state.
+- [ ] No fabricated GPS or human acknowledgments.
+- [ ] No claim of certified fire or smoke prediction.
+- [ ] Complete SI/DE localization.
+- [ ] Forward-only migration delivered.
+- [ ] Exact manual deployment instructions documented.
+
+---
+
+## 23. Development restrictions
+
+Do NOT run:
+
+- Tests.
+- Builds.
+- Lint.
+- Typechecks.
+- CI.
+- Browser/runtime checks.
+- SQL migrations.
+- Supabase deployments.
+- Android/Gradle tasks.
+
+Do not merge.
+
+Do not modify production infrastructure.
+
+Do not alter the existing Cron schedule.
+
+Do not rotate existing secrets.
+
+Do not use destructive Git operations.
+
+Preserve the user's local customizations:
+
+- `android/app/build.gradle.kts`
+- `android/build.gradle.kts`
+- `android/gradle.properties`
+- `android/app/schemas/`
+- `pnpm-lock.yaml`
+- `web/next-env.d.ts`
+
+Avoid unnecessary dependency or lockfile changes.
+
+Do not add the prompt as a root-level `.txt` file.
+
+### Mandatory source-only review
+
+Before opening the PR, inspect all changed TSX/SQL for:
+
+- Missing or extra JSX braces.
+- Broken event handlers.
+- Invalid React nesting.
+- Duplicate or incorrect key usage.
+- SQL delimiter mismatch.
+- Incorrect function signatures.
+- Incorrect column/table assumptions.
+- Migration dependency order.
+- Trigger conflicts.
+- SECURITY DEFINER search paths.
+- Unauthorized grants.
+- Hidden-data leaks.
+- Simulation replay/idempotency errors.
+- Unbounded worker loops.
+- Existing B1 rendering compatibility.
+
+Do not claim successful compilation, migration or runtime verification without execution.
+
+---
+
+## 24. Deliverables
+
+Produce one focused PR containing:
+
+1. Deterministic structure-fire training model.
+2. Bounded wildfire spread model.
+3. Smoke generation/drift/dissipation model.
+4. Dynamic simulated heat/hazard zones.
+5. Versioned fire-model definitions.
+6. Scenario Designer configuration and map placement.
+7. Secure instance initialization.
+8. Existing runner integration.
+9. Protected instructor controls.
+10. Authorized fire/smoke/hazard reads.
+11. MapLibre visualization.
+12. Separate map layer visibility controls.
+13. M14.6B event integration.
+14. Replay-ready state history and snapshots.
+15. SI/DE localization.
+16. Forward-only SQL migration.
+17. Minimal necessary Edge Function modifications.
+18. All changed files and architecture explanation.
+19. Documented deterministic algorithms, grid limits and performance boundaries.
+20. Exact migration/deployment order.
+21. Manual acceptance checklist.
+22. Explicit declaration that tests, builds, migrations and runtime checks were not executed.
+
+### Required manual acceptance scenarios
+
+Document how to verify:
+
+- Residential structure fire.
+- Industrial warehouse fire.
+- Bounded vegetation wildfire.
+- Multiple ignition points.
+- Strong versus weak wind.
+- Different simulated fuel/moisture configurations.
+- Smoke drift and dissipation.
+- Paused/resumed scenario.
+- 1× and accelerated simulation clock.
+- Repeated/overlapping Cron invocations.
+- Instructor parameter change.
+- New ignition through M14.6B event.
+- Hidden hazard until reveal.
+- Event retry without duplicate ignition.
+- Real versus SIM isolation.
+- Existing moving vehicles and routes while fire layers update.
+- Twenty SIM units and multiple routes with hazard overlays.
+- Worker restart/recovery.
+- Browser closed during ongoing fire evolution.
+- Scenario finish and immutable historical state.
+
+Do not report these scenarios as passed unless they were actually executed.
+
+---
+
+## Final goal
+
+Gasilko supports a dynamic, server-authoritative simulated incident environment.
+
+The instructor can prepare a fire scenario, configure ignition and environmental conditions, and let the incident evolve through simulation time.
+
+The commander sees only authorized simulated observations on the Command Map and continues issuing real training commands through the existing RTS task system.
+
+Fire, smoke and hazards evolve deterministically without browser dependence, without compromising real incidents, and without degrading existing unit navigation or map performance.
+
+**Next milestone: M14.6D — Operational Action Effects, Water Supply & Resource Consumption.**
