@@ -35,9 +35,16 @@ export function HazardPlanEditor({locale,definition,events,plan,onChange,disable
   else patch({zones:m.zones.map(z=>z.id===placing?{...z,position}:z)});
   setPlacing('');
  }
+ function cellRing(position:Position):Position[]{
+  if(!m)return [];
+  const rad=Math.PI/180,scale=6371008.8*rad;
+  const x=Math.round((position[0]-m.center[0])*scale*Math.cos(m.center[1]*rad)/m.cell_m)*m.cell_m;
+  const y=Math.round((position[1]-m.center[1])*scale/m.cell_m)*m.cell_m;
+  return [[-1,-1],[1,-1],[1,1],[-1,1],[-1,-1]].map<Position>(([dx,dy])=>[m.center[0]+(x+dx*m.cell_m/2)/scale/Math.cos(m.center[1]*rad),m.center[1]+(y+dy*m.cell_m/2)/scale]);
+ }
  const preview:Definition=m?{...definition,world:{...definition.world,center:m.center,radius_m:m.radius_m},virtual_units:[],initial_objects:[
   ...m.origins.map((o,i)=>({id:o.id,kind:'HAZARD' as const,label:t('origins')+' '+(i+1),description:'',geometry:{type:'Point' as const,coordinates:o.position}})),
-  ...m.origins.filter(o=>o.initial).map(o=>({id:'extent:'+o.id,kind:'HAZARD' as const,label:t('preview'),description:'',geometry:{type:'Polygon' as const,coordinates:[Array.from({length:17},(_,i)=>offsetPosition(o.position,5+15*o.intensity,i*360/16))]}})),
+  ...m.origins.filter(o=>o.initial).map(o=>({id:'extent:'+o.id,kind:'HAZARD' as const,label:t('preview'),description:'',geometry:{type:'Polygon' as const,coordinates:[m.type==='WILDFIRE'?cellRing(o.position):Array.from({length:17},(_,i)=>offsetPosition(o.position,5+15*o.intensity,i*360/16))]}})),
   ...m.zones.map(z=>({id:z.id,kind:'HAZARD' as const,label:t(z.kind),description:'',geometry:{type:'Polygon' as const,coordinates:[Array.from({length:17},(_,i)=>offsetPosition(z.position,z.radius_m,i*360/16))]}})),
   ...m.blocked.map(b=>{const r=Math.PI/180,center:Position=[m.center[0]+b[0]*m.cell_m/6371008.8/Math.cos(m.center[1]*r)/r,m.center[1]+b[1]*m.cell_m/6371008.8/r];return {id:'blocked:'+b.join(':'),kind:'NOTE' as const,label:t('blocked'),description:'',geometry:{type:'Point' as const,coordinates:center}};})
  ]}:definition;

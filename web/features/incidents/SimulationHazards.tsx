@@ -45,9 +45,9 @@ export function SimulationHazardsPanel({locale}:{locale:Locale}){
   {!data.models.length&&<p>{t('empty')}</p>}
   <div className="template-items">{data.models.map(m=><button type="button" key={m.id} aria-pressed={row?.id===m.id} onClick={()=>ctx.select(m.id)}>{m.title} · {t(m.type)} · {t('burning')}: {m.burning}</button>)}</div>
   {row&&<section aria-label={t('selected')}><h4>{row.title}</h4>
-   <dl className="command-route-facts"><dt>{t('step')}</dt><dd>{row.step}</dd><dt>{t('elapsed')}</dt><dd>{row.step*5}</dd><dt>{t('lag')}</dt><dd>{row.lag_steps}</dd><dt>{t('freshness')}</dt><dd>{row.last_scan_at?new Date(row.last_scan_at).toLocaleString(locale):'—'}</dd>
+   <dl className="command-route-facts"><dt>{t('step')}</dt><dd>{row.step}</dd><dt>{t('intensity')}</dt><dd>{Math.max(0,...row.features.filter(f=>f.properties?.kind==='FIRE').map(f=>Number(f.properties?.intensity))).toFixed(2)}</dd><dt>{t('elapsed')}</dt><dd>{row.step*5}</dd><dt>{t('lag')}</dt><dd>{row.lag_steps}</dd><dt>{t('freshness')}</dt><dd>{row.last_scan_at?new Date(row.last_scan_at).toLocaleString(locale):'—'}</dd>
     <dt>{t('enabled')}</dt><dd>{row.enabled?'✓':'—'}</dd><dt>{t('wind_direction')}</dt><dd>{row.wind_direction}°</dd><dt>{t('wind_speed')}</dt><dd>{row.wind_speed} m/s</dd>
-    {ctx.instructor&&<><dt>{t('pending')}</dt><dd>{row.pending_effects}</dd><dt>{t('processing')}</dt><dd>{row.processing_ms??'—'}</dd><dt>{t('visibility')}</dt><dd>{t(row.revealed?'revealed':'hidden')}</dd></>}
+    {ctx.instructor&&<><dt>{t('geometrySize')}</dt><dd>{row.features.reduce((n,f)=>n+(f.geometry.type==='Polygon'?f.geometry.coordinates.reduce((sum,ring)=>sum+ring.length,0):1),0)}</dd><dt>{t('pending')}</dt><dd>{row.pending_effects}</dd><dt>{t('processing')}</dt><dd>{row.processing_ms??'—'}</dd><dt>{t('visibility')}</dt><dd>{t(row.revealed?'revealed':'hidden')}</dd></>}
    </dl>
    <p>{t('phase')}: {[...new Set(row.features.filter(f=>f.properties?.kind==='FIRE').map(f=>String(f.properties?.phase)))].map(t).join(', ')||t('EXTINGUISHED')}</p>
    <ul>{row.features.filter(f=>f.properties?.phase==='INSTRUCTOR').map(f=><li key={f.id}>{t(String(f.properties?.kind))}</li>)}</ul>

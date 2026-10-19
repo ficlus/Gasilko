@@ -174,9 +174,9 @@ language sql immutable set search_path='' as $$
  ), cfg as(select (m->>'spread')::numeric spread,(m->>'moisture')::numeric moisture,(m->>'cell_m')::numeric cell,
  (m->>'wind_speed')::numeric wind,(m->>'wind_direction')::float8*pi()/180 direction,(m->>'radius_m')::numeric radius),
  influence as(
- select c.id,coalesce(sum(n.intensity*greatest(0.2,1+cfg.wind/10*
- (sin(cfg.direction)*(c.x-n.x)::float8+cos(cfg.direction)*(c.y-n.y)::float8)/sqrt(((c.x-n.x)^2+(c.y-n.y)^2)::float8))/8),0)::numeric fire,
- coalesce(sum(n.smoke*greatest(0.05,1+0.8*least(1,cfg.wind/10)*(sin(cfg.direction)*(c.x-n.x)::float8+cos(cfg.direction)*(c.y-n.y)::float8)/sqrt(((c.x-n.x)^2+(c.y-n.y)^2)::float8))/8),0)::numeric smoke_in
+ select c.id,coalesce(sum(round((n.intensity*greatest(0.2,1+cfg.wind/10*
+ (sin(cfg.direction)*(c.x-n.x)::float8+cos(cfg.direction)*(c.y-n.y)::float8)/sqrt(((c.x-n.x)^2+(c.y-n.y)^2)::float8))/8)::numeric,12)),0) fire,
+ coalesce(sum(round((n.smoke*greatest(0.05,1+0.8*least(1,cfg.wind/10)*(sin(cfg.direction)*(c.x-n.x)::float8+cos(cfg.direction)*(c.y-n.y)::float8)/sqrt(((c.x-n.x)^2+(c.y-n.y)^2)::float8))/8)::numeric,12)),0) smoke_in
  from cells c cross join cfg left join cells n on n.x between c.x-1 and c.x+1 and n.y between c.y-1 and c.y+1 and n.id<>c.id and m->>'type'='WILDFIRE'
  group by c.id
  ), heat as(
