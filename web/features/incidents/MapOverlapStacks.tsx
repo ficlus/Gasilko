@@ -28,7 +28,7 @@ export function MapOverlapStacks(props:Props){
    const {cop,hydrants,layers,locale}=latest.current,it=incidentText(locale),ot=operationalText(locale);
    const ids=[...layers.map(l=>l.id),'cop-hydrants-point','context-hydrants-point','cop-markers-point','cop-zones-point'].filter(id=>map.getLayer(id));
    const items=new globalThis.Map<string,Item>();
-   for(const f of ids.length?map.queryRenderedFeatures(undefined,{layers:ids}):[]){
+   for(const f of ids.length?map.queryRenderedFeatures([[0,0],[map.getCanvas().clientWidth,map.getCanvas().clientHeight]],{layers:ids}):[]){
     if(f.geometry.type!=='Point')continue;
     const unit=recipientFeature(f,layers),id=f.properties?.id;
     const object=['cop-markers','cop-zones'].includes(f.source)?cop.objects.find(o=>o.id===id):null;
@@ -57,6 +57,7 @@ export function MapOverlapStacks(props:Props){
   return()=>{disposed=true;cancelAnimationFrame(frame);map.off('move',schedule);map.off('resize',schedule);map.off('sourcedata',schedule);};
  },[map,props.cop,props.hydrants,props.layers,locale,disabled]);
  const stack=stacks.find(g=>g.key===open),preview=stacks.find(g=>g.key===hover);
+ useEffect(()=>{if(open&&!stack)setOpen(null);},[open,!!stack]);
  useEffect(()=>{
   setFan(false);if(!open)return;
   const frame=requestAnimationFrame(()=>panel.current?.focus());

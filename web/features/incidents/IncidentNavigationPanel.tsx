@@ -4,11 +4,12 @@ import type {Locale} from '../../lib/i18n';
 import {navigationText} from '../../lib/operational/navigationMessages';
 import {taskText} from '../../lib/operational/taskMessages';
 import {accessDistance} from '../../lib/operational/navigation';
+import {useCommandMap} from './CommandMapProvider';
 import {useIncidentNavigation} from './IncidentNavigationProvider';
 import {useSimulation} from './SimulationProvider';
 import {WorkspaceSlot,useWorkspace} from './workspace';
 export function IncidentNavigationPanel({locale}:{locale:Locale}){
- const nav=useIncidentNavigation(),workspace=useWorkspace(),sim=useSimulation(),t=navigationText(locale),tt=taskText(locale);
+ const commandMap=useCommandMap(),nav=useIncidentNavigation(),workspace=useWorkspace(),sim=useSimulation(),t=navigationText(locale),tt=taskText(locale);
  const [replacement,setReplacement]=useState('');
  useEffect(()=>{nav?.scopeUnit(workspace?.selected?.kind==='INCIDENT_UNIT'?workspace.selected.id:null);setReplacement('');},[workspace?.selected?.kind,workspace?.selected?.id]);
  if(!nav)return null;
@@ -24,10 +25,14 @@ export function IncidentNavigationPanel({locale}:{locale:Locale}){
   <button disabled={locked} onClick={nav.refresh}>{t('refresh')}</button>
   {nav.error&&<p role="alert">{t(nav.error)}</p>}
   {!nav.data?<p>{t('loading')}</p>:<>
-   {!nav.assignment&&<><div className="navigation-assignment-list">{nav.data.rows.map(a=><article key={a.id} className="web-row">
-    <strong>{a.callsign}</strong><p>{locale==='de'?a.label_de:a.label_sl} → {a.target}</p><p>{tt(a.status)}</p>
-    <button disabled={locked} onClick={()=>{nav.select(a.id);workspace?.select({kind:'INCIDENT_UNIT',id:a.unit_id});}}>{t('open')} · {a.callsign}</button>
-   </article>)}</div>{!nav.data.rows.length&&<p>{t('empty')}</p>}
+   {!nav.assignment&&<><div className="navigation-assignment-list">{nav.data.rows.map(a=>{
+    const run=commandMap?.data?.rows.find(row=>row.id===a.id)?.run;
+    return <button key={a.id} type="button" className="navigation-stop-row" disabled={locked}
+     onClick={()=>{if(workspace?.view==='command'){workspace.select({kind:'INCIDENT_UNIT',id:a.unit_id});workspace.showDetails();}else nav.select(a.id);}}>
+     <strong>{a.callsign}</strong><span>{locale==='de'?a.label_de:a.label_sl} → {a.target}</span>
+     <small>{tt(a.status)}{run&&run.confirmed!==false?' · SIM '+(run.progress_m/1000).toFixed(1)+' / '+(run.length_m/1000).toFixed(1)+' km':''}</small>
+    </button>;
+   })}</div>{!nav.data.rows.length&&<p>{t('empty')}</p>}
    <div className="actions"><button disabled={locked||nav.page===0} onClick={()=>nav.pageTo(nav.page-1)}>{t('previous')}</button><button disabled={locked||!nav.data.more} onClick={()=>nav.pageTo(nav.page+1)}>{t('next')}</button></div></>}
    {row&&<><h4>{row.callsign}</h4><p>{locale==='de'?row.label_de:row.label_sl} → {row.target}</p><p>{tt(row.status)}</p>
     <button disabled={locked} onClick={()=>nav.select(null)}>{t('previous')}</button>

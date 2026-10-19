@@ -23,4 +23,4 @@ export function simulationInitialPosition(seed:number,template:SimulationTemplat
  return [nextLon-360*Math.floor((nextLon+180)/360),nextLat*180/Math.PI];
 }
 
-export type SimulationSample={scenario_id:string;scenario_version:string;status:string;observed_at:string;positions:SimulationPosition[];runs:(import('./commandMap').MapRun&{unit_id:string;position_version:string;assignment_id:string})[]};
+export type SimulationSample={motion_epoch:string|null;scenario_id:string;scenario_version:string;status:string;observed_at:string;positions:SimulationPosition[];runs:(import('./commandMap').MapRun&{unit_id:string;position_version:string;assignment_id:string})[]};

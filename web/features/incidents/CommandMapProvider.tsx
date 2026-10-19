@@ -8,7 +8,7 @@ import {mapMetric} from '../../lib/operational/mapDiagnostics';
 import {useSimulation} from './SimulationProvider';
 import {useIncidentLive} from './IncidentLiveProvider';
 import {useRtsSession} from './rtsSession';
-type Snapshot={rows:CommandMapRow[];paths:Map<string,RoutePath>;simulation:boolean;automation:boolean|null;limited:boolean;observedAt:string};
+type Snapshot={removals:MapPage['removals'];rows:CommandMapRow[];paths:Map<string,RoutePath>;simulation:boolean;automation:boolean|null;limited:boolean;observedAt:string};
 type Value={state:'loading'|'complete'|'incomplete'|'error'|'stale'|'revoked';data:Snapshot|null;error:boolean;visible:boolean;setVisible:(v:boolean)=>void;focus:{point:Position;sequence:number}|null;focusPoint:(p:Position)=>void;targets:string[];inspectTargets:(ids:string[])=>void};
 const Context=createContext<Value|null>(null);
 export const useCommandMap=()=>useContext(Context);
@@ -78,10 +78,11 @@ export function CommandMapProvider({account,org,incidentId,refresh,read,children
     if(limited){setState('incomplete');setError(false);return;}
     const check=await read<MapPage>('incident_command_map_read',{p_organization_id:org,p_incident_id:incidentId,p_after:cursor,p_known_routes:[...nextCache.keys()]},ac.signal,account);
     if(ac.signal.aborted)return;if(check.revision!==revision)throw Error('STALE_VERSION');
+    const removals=last.removals.filter(r=>cache.current.has(r.route_id)&&!nextCache.has(r.route_id));
     cache.current=nextCache;progress.current=nextProgress;setState('complete');
     mapMetric('collection',performance.now()-started,rows.length);
 
-    setData({rows,paths,simulation:last.simulation,automation:last.automation,limited,observedAt:last.observed_at});setError(false);
+    setData({removals,rows,paths,simulation:last.simulation,automation:last.automation,limited,observedAt:last.observed_at});setError(false);
    }catch(e){
     if(disposed||ac.signal.aborted)return;setState('error');setError(true);
     if(e instanceof Error&&['NOT_AUTHORIZED','EXPIRED','SIMULATION_DISABLED'].includes(e.message)){revoked=true;setData(null);setState('revoked');cache.current.clear();progress.current.clear();inspectTargets([]);if(e.message!=='SIMULATION_DISABLED')rts.revoke();}

@@ -1,5 +1,7 @@
 import type {Locale} from '../i18n';
 const sl:Record<string,string>={
+ removed_COMPLETED:'Zaključene poti',removed_CANCELLED:'Preklicane dodelitve',removed_SUPERSEDED:'Nadomeščene poti',removed_INVALIDATED:'Poti niso več veljavne',removed_VISIBILITY_CHANGED:'Spremenjena vidnost poti',
+
  sampleAge:'Najstarejši potrjeni položaj',smooth:'Zgladi prikaz SIM (samo vizualno)',roadEndpoint:'Dosegljivi cestni konec',snapNotice:'Cestna pot se lahko konča pred natančno izbranim ciljem.',currentPosition:'Potrjeni trenutni položaj SIM',
  incomplete:'Branje poti ni popolno; prejšnji potrjeni posnetek je ohranjen.',revoked:'Dostop preklican — podatki so odstranjeni.',
  stack:'Prekrivajoče se oznake',selectAll:'Izberi vse enote',clearSelection:'Počisti izbor',fan:'Razpri / strni',
@@ -20,6 +22,8 @@ const sl:Record<string,string>={
  progress:'Potrjeni napredek SIM',noTelemetry:'Ni potrjenega napredka GPS; prikazana je celotna načrtovana pot.',
 };
 const de:Record<string,string>={
+ removed_COMPLETED:'Abgeschlossene Routen',removed_CANCELLED:'Abgebrochene Zuweisungen',removed_SUPERSEDED:'Ersetzte Routen',removed_INVALIDATED:'Nicht mehr gültige Routen',removed_VISIBILITY_CHANGED:'Geänderte Routensichtbarkeit',
+
  sampleAge:'Älteste bestätigte Position',smooth:'SIM-Anzeige glätten (nur visuell)',roadEndpoint:'Erreichbares Straßenende',snapNotice:'Die Straßenroute kann vor dem genau gewählten Ziel enden.',currentPosition:'Bestätigte aktuelle SIM-Position',
  incomplete:'Routenabruf unvollständig; der vorherige bestätigte Stand bleibt erhalten.',revoked:'Zugriff entzogen — Daten entfernt.',
  stack:'Überlagerte Markierungen',selectAll:'Alle Einheiten auswählen',clearSelection:'Auswahl löschen',fan:'Auffächern / schließen',

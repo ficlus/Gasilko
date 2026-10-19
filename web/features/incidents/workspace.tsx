@@ -130,7 +130,7 @@ export function IncidentWorkspace({locale,header,operations,secondary,children,v
  },[wide,ids]);
  const showTools=useCallback(()=>{setExpanded(false);setTools(true);setRight(false);if(!wide){setLeft(false);setHistory(false);}},[wide]);
  const showOperations=useCallback(()=>{setExpanded(false);setLeft(true);if(!wide){setRight(false);setTools(false);setHistory(false);}},[wide]);
- const context=useMemo(()=>({setMapActions,setMapStatus,mapActions,mapStatus,view,selected,select,showTools,showDetails,showOperations,operational,selectedPane,bottom}),[mapActions,mapStatus,view,selected,select,showDetails,showOperations,operational,selectedPane,bottom]);
+ const context=useMemo(()=>({setMapActions,setMapStatus,mapActions,mapStatus,view,selected,select,showTools,showDetails,showOperations,operational,selectedPane,bottom}),[mapActions,mapStatus,view,selected,select,showTools,showDetails,showOperations,operational,selectedPane,bottom]);
  return <Context.Provider value={context}>
   <section ref={root} className={'incident-workspace'+(command?' command-workspace':'')+(expanded?' command-expanded':'')}
    data-wide={wide} data-left={leftOpen} data-right={rightOpen||toolsOpen}

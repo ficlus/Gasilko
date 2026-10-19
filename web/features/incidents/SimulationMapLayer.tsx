@@ -62,7 +62,7 @@ export function SimulationMapLayer({map,locale}:{map:Map;locale:Locale}){
    const p=positions?.find(p=>p.incident_unit_id===run.unit_id),row=command?.data?.rows.find(row=>row.id===run.assignment_id&&row.run?.id===run.id&&row.route?.id===run.route_id);
    const path=run.route_id?command?.data?.paths.get(run.route_id):null,old=confirmed.current.get(run.unit_id);
    if(!p||!path||!row||run.position_version!==p.version||run.confirmed===false)continue;
-   const identity=s.id+':'+s.version+':'+sim?.sample?.scenario_version;
+   const identity=s.id+':'+s.version+':'+sim?.sample?.scenario_version+':'+sim?.sample?.motion_epoch;
    nextConfirmed.set(run.unit_id,{run:run.id,route:run.route_id!,scenario:identity,status:run.status,progress:run.progress_m,sample:p.observed_at});
    if(smooth&&!stale&&s.status==='RUNNING'&&sim?.sample?.status==='RUNNING'&&run.status==='SIM_IN_PROGRESS'&&old?.status==='SIM_IN_PROGRESS'&&
     old.scenario===identity&&old.run===run.id&&old.route===run.route_id&&old.sample!==p.observed_at&&run.progress_m>=old.progress&&
@@ -71,10 +71,10 @@ export function SimulationMapLayer({map,locale}:{map:Map;locale:Locale}){
    }
   }
   confirmed.current=nextConfirmed;
-  const features=(positions??[]).filter(p=>p.scenario_id===s.id&&p.incident_id===s.incident_id&&validPosition([p.longitude,p.latitude])).map(p=>({
+  const features=(positions??[]).filter(p=>p.source==='SIMULATED'&&p.scenario_id===s.id&&p.incident_id===s.incident_id&&validPosition([p.longitude,p.latitude])).map(p=>({
    type:'Feature' as const,id:p.incident_unit_id,geometry:{type:'Point' as const,coordinates:[p.longitude,p.latitude]},
    properties:{id:p.incident_unit_id,recipient_id:p.incident_unit_id,recipient_type:'INCIDENT_UNIT',position_origin:'SIMULATED',scenario_id:s.id,incident_id:s.incident_id,
-    selected:rts.recipients.some(r=>r.type==='INCIDENT_UNIT'&&r.id===p.incident_unit_id),label:'SIM · '+p.callsign+' · '+at(agents?.data?.signals[p.incident_unit_id]??(!Number.isFinite(Date.parse(p.observed_at))?'unknown':Date.now()-Date.parse(p.observed_at)>30000?'stalePosition':'current'))}
+    selected:rts.recipients.some(r=>r.type==='INCIDENT_UNIT'&&r.id===p.incident_unit_id),label:'SIM · '+p.callsign+' · '+at((sim?.sample?(sim.sample.runs.find(r=>r.unit_id===p.incident_unit_id)?.status==='SIM_SIGNAL_LOST'?'SIM_SIGNAL_LOST':undefined):agents?.data?.signals[p.incident_unit_id])??(!Number.isFinite(Date.parse(p.observed_at))?'unknown':Date.now()-Date.parse(p.observed_at)>30000?'stalePosition':'current'))}
   }));
   const source=map.getSource('simulation-units') as GeoJSONSource|undefined;
   // 750 ms maximum, two confirmed route samples only. No extrapolation.
@@ -93,7 +93,7 @@ export function SimulationMapLayer({map,locale}:{map:Map;locale:Locale}){
   };
   paint(animations.size?started:started+750);
   return()=>cancelAnimationFrame(frame);
- },[map,visible,s,positions,sim?.sample?.runs,sim?.sample?.status,sim?.sample?.scenario_version,stale,smooth,rts.recipients,locale,agents?.data?.signals,command?.data?.paths]);
+ },[map,visible,s,positions,sim?.sample?.runs,sim?.sample?.status,sim?.sample?.scenario_version,sim?.sample?.motion_epoch,stale,smooth,rts.recipients,locale,agents?.data?.signals,command?.data?.paths]);
  useEffect(()=>{
   if(!sim?.move)return;const canvas=map.getCanvas(),previous=canvas.style.cursor;canvas.style.cursor='crosshair';
   return()=>{canvas.style.cursor=previous;};

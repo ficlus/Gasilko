@@ -18,7 +18,8 @@ export function CommandMapControls({locale}:{locale:Locale}){
  {map.data?.simulation&&<strong>SIM · {t('automation')}: {t(map.data.automation?'on':'off')}{sim?.data?.scenario?' · '+simulationText(locale)(sim.data.scenario.status):''}</strong>}
  {map.error&&<span role="alert">{t('unavailable')}</span>}
  {!map.error&&!map.data&&map.state==='loading'&&<span role="status">{t('loading')}</span>}
- {map.data&&live&&['OFFLINE','STALE','CONNECTING'].includes(live.status)&&<span role="status">{t('stale')}</span>}
+ {map.data&&(map.state==='stale'||live&&['OFFLINE','STALE','CONNECTING'].includes(live.status))&&<span role="status">{t('stale')}</span>}
+ {map.data?.removals.length? <small>{[...new Set(map.data.removals.map(r=>r.reason))].map(reason=>t('removed_'+reason)+' ('+map.data!.removals.filter(r=>r.reason===reason).length+')').join(' · ')}</small>:null}
  {map.state==='incomplete'&&<span role="status">{t('incomplete')}</span>}
  {map.state==='revoked'&&<span role="alert">{t('revoked')}</span>}
  {map.data?.limited&&<span role="status">{t('limited')}</span>}
@@ -35,7 +36,7 @@ export function CommandMapDetails({locale}:{locale:Locale}){
  {map.state!=='complete'&&<p role="status">{t(map.state==='incomplete'?'incomplete':'stale')}</p>}
  {!data?<p role="status">{t(map.error?'unavailable':'loading')}</p>:<>
  {data.limited&&<p role="status">{t('limited')}</p>}
- {!rows.length&&!data.limited&&<p>{t('empty')}</p>}
+ {!rows.length&&!data.limited&&map.state==='complete'&&<p>{t('empty')}</p>}
  {rows.map(row=><article className="operational-card" key={row.id}>
  <h4>{row.callsign} · {locale==='de'?row.label_de:row.label_sl}</h4>
  <p>{row.title} · {tt(row.status)}</p><p>{row.target??'—'}</p>
