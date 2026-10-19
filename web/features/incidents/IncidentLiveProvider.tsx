@@ -1,12 +1,13 @@
 'use client';
-import {createContext,useContext,useEffect,useRef,useState,type ReactNode} from 'react';
+import {createContext,useCallback,useContext,useEffect,useRef,useState,type ReactNode} from 'react';
 import type {Incident,Timeline} from '../../lib/incidents/model';
 import type {TaskRead} from '../../lib/operational/tasks';
 
 export type IncidentLiveDomain='INCIDENT'|'COP'|'TASKS'|'RESOURCES'|'NAVIGATION'|'SIMULATION'|'AGENTS'|'TIMELINE';
 export type IncidentLiveNotification={id:string;eventCode:string;priority:'INFO'|'WARNING'|'CRITICAL';createdAt:string;entity?:{kind:'MAP_OBJECT'|'TASK'|'INCIDENT_UNIT';id:string};};
 type Status='CONNECTING'|'LIVE'|'REFRESHING'|'OFFLINE'|'STALE'|'ACCESS_LOST';
-type Live={status:Status;lastSuccess:number|null;notifications:IncidentLiveNotification[];unread:number;lowPriorityToasts:boolean;requestRefresh:()=>void;markSeen:()=>void;dismiss:(id:string)=>void;setLowPriorityToasts:(value:boolean)=>void;};
+type FastRefresh=(signal:AbortSignal)=>Promise<void>;
+type Live={bindFastRefresh:(refresh:FastRefresh)=>()=>void;status:Status;lastSuccess:number|null;notifications:IncidentLiveNotification[];unread:number;lowPriorityToasts:boolean;requestRefresh:()=>void;markSeen:()=>void;dismiss:(id:string)=>void;setLowPriorityToasts:(value:boolean)=>void;};
 const Context=createContext<Live|null>(null);
 export const useIncidentLive=()=>useContext(Context);
 function priority(code:string):IncidentLiveNotification['priority']{
@@ -23,11 +24,43 @@ function entity(event:Timeline['events'][number]):IncidentLiveNotification['enti
 export function IncidentLiveProvider({account,org,incidentId,read,onInvalidate,onAccessLost,children}:{account:string;org:string;incidentId:string;read:TaskRead;onInvalidate:()=>void;onAccessLost:()=>void;children:ReactNode}){
  const [status,setStatus]=useState<Status>('CONNECTING'),[lastSuccess,setLastSuccess]=useState<number|null>(null),[epoch,setEpoch]=useState(0);
  const [notifications,setNotifications]=useState<IncidentLiveNotification[]>([]),[unread,setUnread]=useState(0),[lowPriorityToasts,setLowPriorityToasts]=useState(true);
+ const deniedScope=useRef(false),fast=useRef<FastRefresh|null>(null),[fastEpoch,setFastEpoch]=useState(0);
+ const bindFastRefresh=useCallback((callback:FastRefresh)=>{
+  fast.current=callback;setFastEpoch(v=>v+1);
+  return()=>{if(fast.current===callback){fast.current=null;setFastEpoch(v=>v+1);}};
+ },[]);
+ // Both lanes belong to F4; one scoped batch, never one poller per unit.
+ useEffect(()=>{
+  if(!fast.current||status==='ACCESS_LOST')return;
+  let disposed=false,inFlight=false,backoff=1000,timer:ReturnType<typeof setTimeout>|undefined;
+  let controller:AbortController|null=null;
+  const stop=()=>{clearTimeout(timer);controller?.abort();};
+  async function tick(){
+   clearTimeout(timer);
+   if(disposed||deniedScope.current||inFlight||!fast.current||document.visibilityState!=='visible'||!navigator.onLine)return;
+   inFlight=true;const ac=new AbortController();controller=ac;
+   const timeout=setTimeout(()=>ac.abort(new DOMException('Position refresh timed out','TimeoutError')),5000);
+   try{await fast.current(ac.signal);if(!ac.signal.aborted)backoff=1000;}
+   catch(error){
+    if(disposed)return;
+    if(error instanceof Error&&['NOT_AUTHORIZED','EXPIRED','SIMULATION_DISABLED'].includes(error.message)){
+     deniedScope.current=true;disposed=true;stop();setStatus('ACCESS_LOST');latest.current.onAccessLost();return;
+    }
+    backoff=Math.min(15000,backoff*2);
+   }finally{
+    clearTimeout(timeout);inFlight=false;
+    if(!disposed&&!deniedScope.current&&document.visibilityState==='visible'&&navigator.onLine)timer=setTimeout(()=>void tick(),backoff);
+   }
+  }
+  const resume=()=>{stop();if(document.visibilityState==='visible'&&navigator.onLine)void tick();};
+  void tick();document.addEventListener('visibilitychange',resume);window.addEventListener('online',resume);window.addEventListener('offline',stop);
+  return()=>{disposed=true;stop();document.removeEventListener('visibilitychange',resume);window.removeEventListener('online',resume);window.removeEventListener('offline',stop);};
+ },[account,org,incidentId,fastEpoch,status==='ACCESS_LOST']);
  const latest=useRef({onInvalidate,onAccessLost});latest.current={onInvalidate,onAccessLost};
  const revision=useRef<string|null>(null),cursor=useRef<string|null>(null),simCursor=useRef<string|null>(null),scope=useRef(''),successful=useRef(false);
  useEffect(()=>{
   const nextScope=account+':'+org+':'+incidentId;
-  if(scope.current!==nextScope){scope.current=nextScope;revision.current=null;cursor.current=null;simCursor.current=null;successful.current=false;setNotifications([]);setUnread(0);setLastSuccess(null);}
+  if(scope.current!==nextScope){deniedScope.current=false;scope.current=nextScope;revision.current=null;cursor.current=null;simCursor.current=null;successful.current=false;setNotifications([]);setUnread(0);setLastSuccess(null);}
   let disposed=false,denied=false,inFlight=false,backoff=8000,timer:ReturnType<typeof setTimeout>|undefined,controller:AbortController|null=null;
   const schedule=(ms:number)=>{clearTimeout(timer);if(!disposed&&!denied)timer=setTimeout(()=>void refresh(),ms);};
   async function deriveNotifications(signal:AbortSignal){
@@ -35,7 +68,7 @@ export function IncidentLiveProvider({account,org,incidentId,read,onInvalidate,o
    // The cursor survives reconnection and dismissal; no historical replay or growing ID cache.
    for(let page=0;page<4&&!signal.aborted;page++){
     const timeline=await read<Timeline|null>('incident_timeline_page',{p_acting_organization_id:org,p_incident_id:incidentId,p_after_sequence:cursor.current,p_limit:30},signal,account);
-    if(disposed||signal.aborted)return;
+    if(disposed||deniedScope.current||signal.aborted)return;
     if(!timeline)throw new Error('NOT_AUTHORIZED');
     const events=timeline.events.filter(event=>BigInt(event.sequence)>BigInt(cursor.current??'0'));
     if(!events.length)return;
@@ -47,24 +80,25 @@ export function IncidentLiveProvider({account,org,incidentId,read,onInvalidate,o
   }
   async function refresh(){
    clearTimeout(timer);
-   if(disposed||denied||inFlight||document.visibilityState!=='visible')return;
+   if(disposed||deniedScope.current||denied||inFlight||document.visibilityState!=='visible')return;
    if(!navigator.onLine){setStatus('OFFLINE');return;}
    inFlight=true;controller=new AbortController();const signal=controller.signal;
    const timeout=setTimeout(()=>controller?.abort(),15000);
    setStatus(successful.current?'REFRESHING':'CONNECTING');
    try{
     const snapshot=await read<Incident|null>('incident_context',{p_acting_organization_id:org,p_incident_id:incidentId},signal,account);
-    if(disposed||signal.aborted)return;
+    if(disposed||deniedScope.current||signal.aborted)return;
     if(!snapshot)throw new Error('NOT_AUTHORIZED');
     const next=[snapshot.version,snapshot.revision,snapshot.timeline_sequence].join(':');
     const changed=revision.current!==null&&revision.current!==next;revision.current=next;
     if(cursor.current===null)cursor.current=String(snapshot.timeline_sequence);
     if(changed)latest.current.onInvalidate();
+    setLastSuccess(Date.now()); // Context success must not depend on optional notification feeds.
     await deriveNotifications(signal);
     if(snapshot.training){
      const feed=await read<{cursor:string;events:{id:string;code:string;created_at:string;unit_id:string|null}[]}>('simulation_automation_feed',
       {p_incident:incidentId,p_organization_id:org,p_after:simCursor.current},signal,account);
-     if(disposed||signal.aborted)return;
+     if(disposed||deniedScope.current||signal.aborted)return;
      simCursor.current=feed.cursor;
      if(feed.events.length){
       const notes=feed.events.map(event=>({id:event.id,eventCode:event.code,createdAt:event.created_at,priority:priority(event.code),
@@ -72,24 +106,24 @@ export function IncidentLiveProvider({account,org,incidentId,read,onInvalidate,o
       setNotifications(current=>[...notes.reverse(),...current].slice(0,50));setUnread(current=>Math.min(99,current+notes.length));
      }
     }
-    if(disposed||signal.aborted)return;
-    successful.current=true;setLastSuccess(Date.now());setStatus('LIVE');backoff=8000;
+    if(disposed||deniedScope.current||signal.aborted)return;
+    successful.current=true;setStatus('LIVE');backoff=8000;
    }catch(error){
-    if(disposed)return;
+    if(disposed||deniedScope.current)return;
     const code=error instanceof Error?error.message:'SERVER';
-    if(code==='NOT_AUTHORIZED'||code==='EXPIRED'){denied=true;setStatus('ACCESS_LOST');setNotifications([]);setUnread(0);latest.current.onAccessLost();return;}
+    if(code==='NOT_AUTHORIZED'||code==='EXPIRED'){deniedScope.current=true;denied=true;setStatus('ACCESS_LOST');setNotifications([]);setUnread(0);latest.current.onAccessLost();return;}
     setStatus(navigator.onLine?'STALE':'OFFLINE');backoff=Math.min(30000,backoff*2);
    }finally{
     clearTimeout(timeout);inFlight=false;
-    if(!disposed&&!denied){if(signal.aborted)setStatus(navigator.onLine?'STALE':'OFFLINE');if(document.visibilityState==='visible'&&navigator.onLine)schedule(backoff);}
+    if(!disposed&&!deniedScope.current&&!denied){if(signal.aborted)setStatus(navigator.onLine?'STALE':'OFFLINE');if(document.visibilityState==='visible'&&navigator.onLine)schedule(backoff);}
    }
   }
-  const visible=()=>{if(document.visibilityState==='visible'){backoff=8000;void refresh();}else{clearTimeout(timer);controller?.abort();setStatus('STALE');}};
+  const visible=()=>{if(deniedScope.current)return;if(document.visibilityState==='visible'){backoff=8000;void refresh();}else{clearTimeout(timer);controller?.abort();setStatus('STALE');}};
   const online=()=>{backoff=8000;void refresh();};
-  const offline=()=>{clearTimeout(timer);controller?.abort();setStatus('OFFLINE');};
+  const offline=()=>{if(deniedScope.current)return;clearTimeout(timer);controller?.abort();setStatus('OFFLINE');};
   void refresh();document.addEventListener('visibilitychange',visible);window.addEventListener('online',online);window.addEventListener('offline',offline);
   return()=>{disposed=true;clearTimeout(timer);controller?.abort();document.removeEventListener('visibilitychange',visible);window.removeEventListener('online',online);window.removeEventListener('offline',offline);};
  },[account,org,incidentId,read,epoch]);
- const value:Live={status,lastSuccess,notifications,unread,lowPriorityToasts,requestRefresh:()=>setEpoch(value=>value+1),markSeen:()=>setUnread(0),dismiss:id=>setNotifications(current=>current.filter(note=>note.id!==id)),setLowPriorityToasts};
+ const value:Live={bindFastRefresh,status,lastSuccess,notifications,unread,lowPriorityToasts,requestRefresh:()=>setEpoch(value=>value+1),markSeen:()=>setUnread(0),dismiss:id=>setNotifications(current=>current.filter(note=>note.id!==id)),setLowPriorityToasts};
  return <Context.Provider value={value}>{children}</Context.Provider>;
 }

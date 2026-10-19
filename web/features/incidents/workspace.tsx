@@ -29,11 +29,21 @@ export function ContextActions({actions}:{actions:ContextAction[]}){
  return <div className="actions">{actions.map(a=><div key={a.id}><button type="button" disabled={!a.enabled} title={!a.enabled?a.disabledReason:undefined}
   onClick={a.execute}>{a.label}</button>{!a.enabled&&a.disabledReason&&<small>{a.disabledReason}</small>}</div>)}</div>;
 }
-type Workspace={view:IncidentView;selected:SelectedEntity|null;showDetails:()=>void;showOperations:()=>void;select:(entity:SelectedEntity|null)=>void;operational:HTMLElement|null;selectedPane:HTMLElement|null;bottom:HTMLElement|null};
+type Workspace={setMapActions:(node:HTMLElement|null)=>void;setMapStatus:(node:HTMLElement|null)=>void;mapActions:HTMLElement|null;mapStatus:HTMLElement|null;view:IncidentView;selected:SelectedEntity|null;showTools:()=>void;showDetails:()=>void;showOperations:()=>void;select:(entity:SelectedEntity|null)=>void;operational:HTMLElement|null;selectedPane:HTMLElement|null;bottom:HTMLElement|null};
 const Context=createContext<Workspace|null>(null);
 export const useWorkspace=()=>useContext(Context);
 export function WorkspaceSlot({name,children}:{name:'operational'|'selectedPane'|'bottom';children:ReactNode}){
  const workspace=useWorkspace();if(!workspace)return <>{children}</>;
+ return workspace[name]?createPortal(children,workspace[name]):null;
+}
+export function MapOverlayHosts(){
+ const workspace=useWorkspace();
+ if(workspace?.view!=='command')return null;
+ return <div className="command-map-chrome"><div className="command-map-action-zone" ref={workspace.setMapActions}/><div className="command-map-status-zone" ref={workspace.setMapStatus}/></div>;
+}
+export function MapOverlaySlot({name,children}:{name:'mapActions'|'mapStatus';children:ReactNode}){
+ const workspace=useWorkspace();
+ if(workspace?.view!=='command')return <>{children}</>;
  return workspace[name]?createPortal(children,workspace[name]):null;
 }
 export function WorkspaceHeaderDetails({locale,children}:{locale:Locale;children:ReactNode}){
@@ -112,13 +122,15 @@ export function IncidentWorkspace({locale,header,operations,secondary,children,v
  },[]);
  useEffect(()=>{if(command&&selected&&!expanded){setRight(true);setTools(false);if(!wide){setLeft(false);setHistory(false);}}},[selected?.kind,selected?.id,command,wide]);
  useEffect(()=>{if(command&&rts?.open){setExpanded(false);setRight(true);setTools(false);if(!wide){setLeft(false);setHistory(false);}}},[command,rts?.open,wide]);
+ const [mapActions,setMapActions]=useState<HTMLElement|null>(null),[mapStatus,setMapStatus]=useState<HTMLElement|null>(null);
  const [bottom,setBottom]=useState<HTMLElement|null>(null);
  const [operational,setOperational]=useState<HTMLElement|null>(null),[selectedPane,setSelectedPane]=useState<HTMLElement|null>(null);
  const showDetails=useCallback(()=>{setExpanded(false);setRight(true);setTools(false);if(!wide){setLeft(false);setHistory(false);}
   requestAnimationFrame(()=>document.getElementById(ids+'-right')?.querySelector<HTMLButtonElement>('.command-panel-close')?.focus());
  },[wide,ids]);
+ const showTools=useCallback(()=>{setExpanded(false);setTools(true);setRight(false);if(!wide){setLeft(false);setHistory(false);}},[wide]);
  const showOperations=useCallback(()=>{setExpanded(false);setLeft(true);if(!wide){setRight(false);setTools(false);setHistory(false);}},[wide]);
- const context=useMemo(()=>({view,selected,select,showDetails,showOperations,operational,selectedPane,bottom}),[view,selected,select,showDetails,showOperations,operational,selectedPane,bottom]);
+ const context=useMemo(()=>({setMapActions,setMapStatus,mapActions,mapStatus,view,selected,select,showTools,showDetails,showOperations,operational,selectedPane,bottom}),[mapActions,mapStatus,view,selected,select,showTools,showDetails,showOperations,operational,selectedPane,bottom]);
  return <Context.Provider value={context}>
   <section ref={root} className={'incident-workspace'+(command?' command-workspace':'')+(expanded?' command-expanded':'')}
    data-wide={wide} data-left={leftOpen} data-right={rightOpen||toolsOpen}
@@ -135,7 +147,7 @@ export function IncidentWorkspace({locale,header,operations,secondary,children,v
       <div className="actions command-panel-toggles">
        {(['left','right','tools','history'] as const).map((panel,index)=><button type="button" key={panel} ref={node=>{buttons.current[panel]=node;}}
         disabled={expanded} aria-expanded={panel==='left'?leftOpen:panel==='right'?rightOpen:panel==='tools'?toolsOpen:historyOpen}
-        aria-controls={ids+'-'+panel} aria-label={wt(['roster','context','tools','history'][index])} onClick={()=>toggle(panel)}>{wt(panel+'Short')}</button>)}
+        aria-controls={ids+'-'+panel} aria-label={wt(['roster','context','tools','history'][index])} onClick={()=>toggle(panel)}>{wt(panel==='left'?(leftOpen?'hideLeft':'showLeft'):panel==='right'?(rightOpen?'hideRight':'showRight'):panel+'Short')}</button>)}
        <button type="button" data-expand aria-pressed={expanded} onClick={()=>{setExpanded(v=>!v);if(!expanded)heading.current?.scrollIntoView({block:'start'});}}>{wt(expanded?'exit':'expand')}</button>
       </div>
       <p className="command-selection-summary" role="status">{wt('selected')}: {rts?.recipients.length??0} · {selected?t('copSelected'):wt('empty')}{expanded?' · '+wt('focusHelp'):''}</p>
@@ -148,12 +160,12 @@ export function IncidentWorkspace({locale,header,operations,secondary,children,v
    </div>
    <div className="workspace-grid">
     <aside className="workspace-operational" id={ids+'-left'} hidden={command&&!leftOpen} aria-label={t('workspaceOperations')}>
-     {command&&<button type="button" className="command-panel-close" onClick={()=>close('left')}>{wt('close')}</button>}
+     {command&&<button type="button" className="command-panel-close" onClick={()=>close('left')}>{wt('hideLeft')}</button>}
      {operations}<ScenarioEventsPanel locale={locale}/><div ref={setOperational}/>
     </aside>
     <div className="workspace-map" role="region" aria-label={wt('map')}>{children}</div>
     <aside className="workspace-selected" id={ids+'-right'} hidden={command&&!rightOpen} aria-label={t('copSelected')}>
-     {command&&<button type="button" className="command-panel-close" onClick={()=>close('right')}>{wt('close')}</button>}
+     {command&&<button type="button" className="command-panel-close" onClick={()=>close('right')}>{wt('hideRight')}</button>}
      <h3>{t('copSelected')}</h3>
      {selected?<button type="button" onClick={()=>select(null)}>{t('workspaceClear')}</button>:<p>{t('workspaceSelect')}</p>}
      <CommandMapDetails locale={locale}/><ScenarioEventDetails locale={locale}/><div ref={setSelectedPane} aria-live="polite"/>

@@ -22,3 +22,5 @@ export function simulationInitialPosition(seed:number,template:SimulationTemplat
  const nextLon=(lon+Math.atan2(Math.sin(bearing)*Math.sin(distance)*Math.cos(lat),Math.cos(distance)-Math.sin(lat)*Math.sin(nextLat)))*180/Math.PI;
  return [nextLon-360*Math.floor((nextLon+180)/360),nextLat*180/Math.PI];
 }
+
+export type SimulationSample={motion_epoch:string|null;scenario_id:string;scenario_version:string;status:string;observed_at:string;positions:SimulationPosition[];runs:(import('./commandMap').MapRun&{unit_id:string;position_version:string;assignment_id:string})[]};

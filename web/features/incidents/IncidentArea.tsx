@@ -1,4 +1,5 @@
 'use client';
+import {mapMetric} from '../../lib/operational/mapDiagnostics';
 import {SimulationSetup} from './SimulationSetup';
 import {TemplateLibrary} from './TemplateLibrary';
 import {TemplateInitialization} from './TemplateInitialization';
@@ -114,7 +115,9 @@ export function IncidentArea({locale,account,destination,initialOrg}:{locale:Loc
   if(sending.current)return;sending.current=true;setBusy(true);setError('');setNotice('');setPending(request);
   if(request.action==='add_crew_member'){const payload=request.args.p_payload as {user_id:string;unit_assignment_id:string};setCrewOutcomes(v=>({...v,[payload.unit_assignment_id+':'+payload.user_id]:{state:'pending'}}));}
   try {
+   const submitted=performance.now();
    const receipt=await rpc<Receipt>(mutationNames[request.action],request.args,undefined,account);
+   if(request.action==='issue_task')mapMetric('task_accept',performance.now()-submitted);
    try{sessionStorage.removeItem(request.storageKey);}catch{/* Stable in-memory request still covers this session. */}
    if(!alive.current)return;
    setPending(null);setConfirmation(null);setReason('');setNotice('saved');setEditing(false);

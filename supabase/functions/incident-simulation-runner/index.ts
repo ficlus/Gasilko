@@ -24,6 +24,7 @@ Deno.serve(async(request:Request)=>{
   if(!result.ok)throw new Error('RUNNER_RPC');
   return await result.json();
  }
+ const phases:Record<string,number>={},started=performance.now();
  try{
   const batch=await rpc('simulation_runner_batch',{}) as {scenario:string;tick:string;operation:string}[];
   let completed=0,failed=0;
@@ -31,22 +32,30 @@ Deno.serve(async(request:Request)=>{
    const result=await rpc('simulation_runner_tick',{p_scenario:row.scenario,p_tick:row.tick,p_operation:row.operation});
    if(result.error)failed++;else completed++;
   }
+  phases.movement_ms=Math.round(performance.now()-started);
+  const eventStart=performance.now();
   // Bounded transactional event work; failure must not starve H1 preparation.
   let events:unknown={error:'EVENT_BATCH_UNAVAILABLE'};
   try{events=await rpc('simulation_scenario_event_batch',{},AbortSignal.any([abort.signal,AbortSignal.timeout(3500)]));}catch{/* Retry only on a later runner invocation; no effect replay here. */}
+  phases.events_ms=Math.round(performance.now()-eventStart);
+  const claimStart=performance.now();
   // Movement is processed first on every invocation. One leased route at most;
   // overlapping Cron requests can continue ticking while this request waits for the provider.
   let automation='IDLE';
   const job=await rpc('simulation_automation_claim',{}) as {id?:string;lease?:string;origin?:unknown;destination?:unknown;started?:boolean}|null;
+  phases.claim_ms=Math.round(performance.now()-claimStart);
   if(job?.id&&job.lease){
+   const providerStart=performance.now();
    let route:unknown=null,error:string|null=null;
    const planningSignal=AbortSignal.any([abort.signal,AbortSignal.timeout(20000)]);
    try{route=await calculateIncidentRoadRoute(job.origin,job.destination,planningSignal);}
    catch(e){error=planningSignal.aborted?'AUTO_TIMEOUT':e instanceof RoutingError?e.code:'ROUTE_PROVIDER';}
+   phases.provider_ms=Math.round(performance.now()-providerStart);
+   const commitStart=performance.now();
    const result=await rpc('simulation_automation_finish',{p_job:job.id,p_lease:job.lease,p_route:route,p_error:error});
-   automation=result.state;
+   phases.commit_and_start_ms=Math.round(performance.now()-commitStart);automation=result.state;
   }else if(job?.started)automation='STARTED';
-  return response({completed,failed,automation,events});
+  return response({completed,failed,automation,events,phases:{...phases,total_ms:Math.round(performance.now()-started)}});
  }catch{return response({error:'RUNNER_UNAVAILABLE'},503);}
  finally{clearTimeout(timeout);}
 });

@@ -1,9 +1,9 @@
 import type {Geometry,Position} from '../incidents/cop';
 import {accessDistance,type NavigationRoute} from './navigation';
-export type MapRun={id:string;route_id:string|null;version:string;status:string;progress_m:number;length_m:number;remaining_s:number|null;sample:string};
+export type MapRun={confirmed?:boolean;id:string;route_id:string|null;version:string;status:string;progress_m:number;length_m:number;remaining_s:number|null;sample:string};
 export type CommandMapRow={id:string;task_id:string;unit_id:string;callsign:string;status:string;version:string;title:string|null;priority:string;label_sl:string;label_de:string;native_behavior:string;target:string|null;target_type:string;target_entity_id:string|null;target_geometry:Geometry|null;
- session_id:string|null;navigation_state:string|null;route:NavigationRoute|null;run:MapRun|null;automation:{id:string;state:string;error:string|null}|null};
-export type MapPage={rows:(Omit<CommandMapRow,'route'>&{route:(Omit<NavigationRoute,'route_geometry'>&{route_geometry?:NavigationRoute['route_geometry']})|null})[];cursor:string|null;more:boolean;simulation:boolean;automation:boolean|null;observed_at:string};
+ session_id:string|null;navigation_state:string|null;route:NavigationRoute|null;run:MapRun|null;automation:{queued_at?:string;id:string;state:string;error:string|null}|null};
+export type MapPage={removals:{route_id:string;reason:'COMPLETED'|'CANCELLED'|'SUPERSEDED'|'INVALIDATED'|'VISIBILITY_CHANGED'}[];revision:string;rows:(Omit<CommandMapRow,'route'>&{route:(Omit<NavigationRoute,'route_geometry'>&{route_geometry?:NavigationRoute['route_geometry']})|null})[];cursor:string|null;more:boolean;simulation:boolean;automation:boolean|null;observed_at:string};
 export type RoutePath={points:Position[];cumulative:Float64Array;length:number};
 /** Same sphere/ordered arc length as SIM agent_path. No nearest-segment search:
  * loops, crossings and reversed paths remain ordered by authoritative progress. */
@@ -31,4 +31,14 @@ export function remainingPath(path:RoutePath,progress:number):Position[]{
  while(lo<points.length-1&&cumulative[lo]-cumulative[lo-1]<1e-6)lo++;
  const d=cumulative[lo]-cumulative[lo-1],f=d<1e-6?1:Math.max(0,Math.min(1,(p-cumulative[lo-1])/d));
  return [interpolate(points[lo-1],points[lo],f,d),...points.slice(lo)];
+}
+
+/** O(log n) presentation lookup; no provider calls or full path copies. */
+export function pointAtProgress(path:RoutePath,progress:number):Position{
+ const {points,cumulative,length}=path,p=Math.max(0,Math.min(length,progress));
+ if(p<=0)return points[0];if(p>=length)return points[points.length-1];
+ let lo=1,hi=points.length-1;
+ while(lo<hi){const mid=(lo+hi)>>>1;if(cumulative[mid]<p)lo=mid+1;else hi=mid;}
+ const d=cumulative[lo]-cumulative[lo-1];
+ return interpolate(points[lo-1],points[lo],d<1e-6?1:(p-cumulative[lo-1])/d,d);
 }

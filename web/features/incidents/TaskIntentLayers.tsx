@@ -1,4 +1,5 @@
 'use client';
+import {MapOverlaySlot} from './workspace';
 import {useEffect} from 'react';
 import type {Map,GeoJSONSource,ExpressionSpecification} from 'maplibre-gl';
 import type {Locale} from '../../lib/i18n';
@@ -40,10 +41,10 @@ export function TaskIntentLayers({map,locale}:{map:Map;locale:Locale}){
    intent?t(intent.status==='OPEN'?'issuedTarget':'historyTarget')+' · '+intent.label:'',intent?.status!=='OPEN'));
  },[map,intent,locale,represented]);
  if(!preview?.geometry&&!intent?.target_geometry_snapshot)return null;
- return <aside className="rts-intent-legend" aria-live="polite">
+ return <MapOverlaySlot name="mapStatus"><aside className="rts-intent-legend" aria-live="polite">
   {preview?.geometry&&<p><strong>{t('draftTarget')}</strong> · {preview.label}
    {preview.geometry.type==='Point'&&<span> · {preview.geometry.coordinates.join(', ')}</span>}</p>}
   {intent?.target_geometry_snapshot&&<p><strong>{t(intent.status==='OPEN'?'issuedTarget':'historyTarget')}</strong> · {intent.label}
    <span className="task-priority" data-priority={intent.priority}>{tt(intent.priority)}</span> · {tt(intent.status)}{intent.outcome?' · '+tt(intent.outcome):''}</p>}
- </aside>;
+ </aside></MapOverlaySlot>;
 }

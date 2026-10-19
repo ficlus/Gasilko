@@ -1,13 +1,14 @@
 'use client';
-import {useEffect,useRef} from 'react';
+import {useEffect,useRef,useMemo} from 'react';
 import {type Map,type GeoJSONSource} from 'maplibre-gl';
+import {MapOverlapStacks} from './MapOverlapStacks';
 import {useScenarioEvents} from './ScenarioEvents';
 import {ScenarioEventMapLayer,scenarioEventLayers} from './ScenarioEventMapLayer';
 import {useCommandMap} from './CommandMapProvider';
 import {IncidentNavigationLayer} from './IncidentNavigationLayer';
 import {useIncidentNavigation} from './IncidentNavigationProvider';
 import {useRts} from './rtsSession';
-import {useWorkspace} from './workspace';
+import {MapOverlayHosts,useWorkspace} from './workspace';
 import {SimulationMapLayer,useSimulationPositionLayer} from './SimulationMapLayer';
 import {useSimulation} from './SimulationProvider';
 import {pickPositionRecipient,RtsMapInteraction} from './RtsMapInteraction';
@@ -32,8 +33,14 @@ export default function CopMap(props:Props){
  const scenarioEvents=useScenarioEvents();
  const navigation=useIncidentNavigation(),commandMap=useCommandMap();
  const rts=useRts(),workspace=useWorkspace(),sim=useSimulation(),positionLayer=useSimulationPositionLayer();
- const recipientLayers=positionLayer?[positionLayer]:[];
+ useEffect(()=>{sim?.setMapActive(workspace?.view==='command');return()=>sim?.setMapActive(false);},[workspace?.view,sim?.setMapActive]);
+ const recipientLayers=useMemo(()=>positionLayer?[positionLayer]:[],[positionLayer]);
  const c=props.cop,primary:Position|null=c.incident.longitude!==null&&c.incident.latitude!==null?[c.incident.longitude,c.incident.latitude]:null;
+ const representedTargets=useMemo(()=>new globalThis.Map<string,readonly number[]>([
+    ...(props.layers.markers?c.objects.filter(o=>o.geometry.type==='Point').map(o=>['INCIDENT_MAP_OBJECT:'+o.id,o.geometry.type==='Point'?o.geometry.coordinates:[]] as const):[]),
+    ...(props.layers.hydrants?c.links.flatMap(l=>l.hydrant?.longitude!=null&&l.hydrant.latitude!=null?[['HYDRANT:'+l.hydrant.id,[l.hydrant.longitude,l.hydrant.latitude]] as const]:[]):[]),
+    ...props.contextHydrants.map(h=>['HYDRANT:'+h.id,[h.longitude,h.latitude]] as const)
+   ]),[props.layers.markers,props.layers.hydrants,c.objects,c.links,props.contextHydrants]);
  const selectedKind=c.sectors.some(s=>s.id===props.selected)?'INCIDENT_SECTOR':c.objects.some(o=>o.id===props.selected)?'INCIDENT_MAP_OBJECT':'HYDRANT';
  const selectedGeometry=resolveTarget(selectedKind==='HYDRANT'?{kind:selectedKind,entityId:props.selected}:{kind:selectedKind,entityId:props.selected,incidentId:c.incident.id},{cop:c,hydrants:props.contextHydrants});
  const points=selectedGeometry?geometryPositions(selectedGeometry):primary?[primary]:[...c.sectors.flatMap(s=>s.geometry?geometryPositions(s.geometry):[]),...c.objects.flatMap(o=>geometryPositions(o.geometry)),
@@ -97,11 +104,7 @@ export default function CopMap(props:Props){
    const clickable=map.getStyle().layers.filter(l=>(l.id.startsWith('cop-')||l.id.startsWith('context-'))&&!l.id.startsWith('cop-draft')).map(l=>l.id);
    const id=map.queryRenderedFeatures(event.point,{layers:clickable}).find(f=>typeof f.properties?.id==='string')?.properties?.id;
    if(typeof id==='string')props.onSelect(id);
-  }}>{map=><><CopRendering map={map} props={props}/><ScenarioEventMapLayer map={map}/><TaskIntentLayers map={map} locale={props.locale}/><SimulationMapLayer map={map} locale={props.locale}/><IncidentNavigationLayer map={map} locale={props.locale} representedTargets={new globalThis.Map<string,readonly number[]>([
-    ...(props.layers.markers?c.objects.filter(o=>o.geometry.type==='Point').map(o=>['INCIDENT_MAP_OBJECT:'+o.id,o.geometry.type==='Point'?o.geometry.coordinates:[]] as const):[]),
-    ...(props.layers.hydrants?c.links.flatMap(l=>l.hydrant?.longitude!=null&&l.hydrant.latitude!=null?[['HYDRANT:'+l.hydrant.id,[l.hydrant.longitude,l.hydrant.latitude]] as const]:[]):[]),
-    ...props.contextHydrants.map(h=>['HYDRANT:'+h.id,[h.longitude,h.latitude]] as const)
-   ])}/><RtsMapInteraction map={map} locale={props.locale} layers={recipientLayers}/>{workspace?.view==='command'&&<RtsContextMenu onCreateObject={props.onCreateObject} onEditObject={props.onEditObject} onDeactivateObject={props.onDeactivateObject} busy={props.busy||!!props.drawing||!!navigation?.picking||!!sim?.move} map={map} locale={props.locale} cop={props.cop} hydrants={props.contextHydrants} layers={recipientLayers}/>}</>}</OperationalMapCanvas>;
+  }}>{map=><><MapOverlayHosts/><CopRendering map={map} props={props}/><ScenarioEventMapLayer map={map}/><TaskIntentLayers map={map} locale={props.locale}/><SimulationMapLayer map={map} locale={props.locale}/><IncidentNavigationLayer map={map} locale={props.locale} representedTargets={representedTargets}/><RtsMapInteraction map={map} locale={props.locale} layers={recipientLayers}/>{workspace?.view==='command'&&<MapOverlapStacks map={map} locale={props.locale} cop={props.cop} hydrants={props.contextHydrants} layers={recipientLayers} busy={props.busy||!!props.drawing||!!navigation?.picking||!!sim?.move}/>}{workspace?.view==='command'&&<RtsContextMenu onCreateObject={props.onCreateObject} onEditObject={props.onEditObject} onDeactivateObject={props.onDeactivateObject} busy={props.busy||!!props.drawing||!!navigation?.picking||!!sim?.move} map={map} locale={props.locale} cop={props.cop} hydrants={props.contextHydrants} layers={recipientLayers}/>}</>}</OperationalMapCanvas>;
 }
 function CopRendering({map,props}:{map:Map;props:Props}){
  const fitted=useRef(''),previewed=useRef(0),focused=useRef(0),sourceBytes=useRef(new globalThis.Map<string,string>());
