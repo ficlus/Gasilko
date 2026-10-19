@@ -19,14 +19,14 @@ export function IncidentNavigationPanel({locale}:{locale:Locale}){
  const terminal=!!s&&!['PLANNED','ACTIVE','PAUSED'].includes(s.status);
  const state=s?.effective_status;
  const distances=r?[accessDistance(r.origin_snapshot.coordinate,r.snapped_origin),accessDistance(r.destination_snapshot.geometry.coordinates,r.snapped_destination)]:[];
- return <WorkspaceSlot name="operational"><section className="admin-card incident-navigation-panel">
-  <h3>{t('title')}</h3><p>{t('planningNotice')}</p>
+ return <WorkspaceSlot name="operational"><details className="workspace-section incident-navigation-panel" open={workspace?.view!=='command'||undefined}>
+  <summary>{t('title')} · {nav.data?.rows.length??0}</summary><p>{t('planningNotice')}</p>
   <button disabled={locked} onClick={nav.refresh}>{t('refresh')}</button>
   {nav.error&&<p role="alert">{t(nav.error)}</p>}
   {!nav.data?<p>{t('loading')}</p>:<>
    {!nav.assignment&&<><div className="navigation-assignment-list">{nav.data.rows.map(a=><article key={a.id} className="web-row">
     <strong>{a.callsign}</strong><p>{locale==='de'?a.label_de:a.label_sl} → {a.target}</p><p>{tt(a.status)}</p>
-    <button disabled={locked} onClick={()=>nav.select(a.id)}>{t('open')}</button>
+    <button disabled={locked} onClick={()=>{nav.select(a.id);workspace?.select({kind:'INCIDENT_UNIT',id:a.unit_id});}}>{t('open')} · {a.callsign}</button>
    </article>)}</div>{!nav.data.rows.length&&<p>{t('empty')}</p>}
    <div className="actions"><button disabled={locked||nav.page===0} onClick={()=>nav.pageTo(nav.page-1)}>{t('previous')}</button><button disabled={locked||!nav.data.more} onClick={()=>nav.pageTo(nav.page+1)}>{t('next')}</button></div></>}
    {row&&<><h4>{row.callsign}</h4><p>{locale==='de'?row.label_de:row.label_sl} → {row.target}</p><p>{tt(row.status)}</p>
@@ -65,5 +65,5 @@ export function IncidentNavigationPanel({locale}:{locale:Locale}){
     </>}
    </>}
   </>}
- </section></WorkspaceSlot>;
+ </details></WorkspaceSlot>;
 }

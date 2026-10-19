@@ -13,7 +13,7 @@ import {contextText} from '../../lib/operational/contextMessages';
 import {operationalText} from '../../lib/operational/messages';
 import {recipientFeature,type RecipientPositionLayer} from './RtsMapInteraction';
 import {useRtsSession} from './rtsSession';
-import {useWorkspace} from './workspace';
+import {MapOverlaySlot,useWorkspace} from './workspace';
 
 export type TacticalObjectActions={onCreateObject:(kind:MapKind,point:Position)=>void;onEditObject:(id:string)=>void;onDeactivateObject:(id:string)=>void};
 type Props=TacticalObjectActions&{busy:boolean;map:LibreMap;locale:Locale;cop:Cop;hydrants:ContextHydrant[];layers:readonly RecipientPositionLayer[]};
@@ -74,31 +74,43 @@ export function RtsContextMenu(props:Props){
   const canvas=map.getCanvas();
   let timer:ReturnType<typeof setTimeout>|undefined,held:{pointer:number;point:Position;coordinate:Position}|null=null,suppressUntil=0;
   const touches=new Set<number>();
+  let right:{id:number;x:number;y:number;distance:number;dragged:boolean}|null=null,touchDragged=false;
   const pixel=(e:{clientX:number;clientY:number}):Position=>{const rect=canvas.getBoundingClientRect();return [e.clientX-rect.left,e.clientY-rect.top];};
   const cancel=()=>{clearTimeout(timer);timer=undefined;held=null;};
   const context=(event:MouseEvent)=>{
    const state=latest.current.rts;
    if(latest.current.props.busy||state.blocked||state.locked||state.copEditing||state.externalEditing||state.mode!=='NORMAL'||state.open)return;
    event.preventDefault();event.stopPropagation();cancel();
-   if(Date.now()<suppressUntil)return;
+   if(right?.dragged||touchDragged||Date.now()<suppressUntil)return;
    const p=pixel(event),g=map.unproject(p);openRef.current(p,[g.lng,g.lat]);
   };
   const down=(event:PointerEvent)=>{
-   if(event.pointerType!=='touch')return;touches.add(event.pointerId);
-   if(touches.size!==1){cancel();return;}
+   if(event.pointerType==='mouse'&&event.button===2){
+    right={id:event.pointerId,x:event.clientX,y:event.clientY,distance:0,dragged:false};touchDragged=false;suppressUntil=0;return;
+   }
+   if(event.pointerType!=='touch')return;if(!touches.size)touchDragged=false;touches.add(event.pointerId);
+   if(touches.size!==1){touchDragged=true;cancel();return;}
    const state=latest.current.rts;
    if(latest.current.props.busy||state.blocked||state.locked||state.copEditing||state.externalEditing||state.mode!=='NORMAL'||state.open)return;
    const point=pixel(event),g=map.unproject(point);held={pointer:event.pointerId,point,coordinate:[g.lng,g.lat]};
    timer=setTimeout(()=>{const value=held;cancel();if(value&&touches.size===1){suppressUntil=Date.now()+1200;openRef.current(value.point,value.coordinate);}},600);
   };
-  const move=(event:PointerEvent)=>{if(held&&held.pointer===event.pointerId){const p=pixel(event);if(Math.hypot(p[0]-held.point[0],p[1]-held.point[1])>8)cancel();}};
+  const move=(event:PointerEvent)=>{
+   if(right?.id===event.pointerId&&(event.buttons&2)){
+    right.distance+=Math.hypot(event.clientX-right.x,event.clientY-right.y);
+    right.x=event.clientX;right.y=event.clientY;if(right.distance>8){right.dragged=true;setMenu(null);}
+   }
+   if(held&&held.pointer===event.pointerId){const p=pixel(event);if(Math.hypot(p[0]-held.point[0],p[1]-held.point[1])>8){touchDragged=true;cancel();}}
+  };
+  const movement=()=>{if(right)right.dragged=true;if(touches.size)touchDragged=true;cancel();};
+  const reset=()=>{right=null;touches.clear();touchDragged=true;cancel();};
   const up=(event:PointerEvent)=>{touches.delete(event.pointerId);cancel();};
   const click=(event:MouseEvent)=>{if(Date.now()<swallowClick.current||Date.now()<suppressUntil||latest.current.menu){swallowClick.current=0;event.preventDefault();event.stopImmediatePropagation();}};
-  canvas.addEventListener('contextmenu',context,true);canvas.addEventListener('pointerdown',down,true);canvas.addEventListener('pointermove',move,true);
-  canvas.addEventListener('pointerup',up,true);canvas.addEventListener('pointercancel',up,true);canvas.addEventListener('click',click,true);
-  map.on('movestart',cancel);window.addEventListener('blur',cancel);
-  return()=>{cancel();canvas.removeEventListener('contextmenu',context,true);canvas.removeEventListener('pointerdown',down,true);canvas.removeEventListener('pointermove',move,true);
-   canvas.removeEventListener('pointerup',up,true);canvas.removeEventListener('pointercancel',up,true);canvas.removeEventListener('click',click,true);map.off('movestart',cancel);window.removeEventListener('blur',cancel);};
+  canvas.addEventListener('contextmenu',context,true);canvas.addEventListener('pointerdown',down,true);window.addEventListener('pointermove',move,true);
+  window.addEventListener('pointerup',up,true);window.addEventListener('pointercancel',reset,true);canvas.addEventListener('click',click,true);
+  map.on('movestart',movement);window.addEventListener('blur',reset);
+  return()=>{cancel();canvas.removeEventListener('contextmenu',context,true);canvas.removeEventListener('pointerdown',down,true);window.removeEventListener('pointermove',move,true);
+   window.removeEventListener('pointerup',up,true);window.removeEventListener('pointercancel',reset,true);canvas.removeEventListener('click',click,true);map.off('movestart',movement);window.removeEventListener('blur',reset);};
  },[map]);
  useEffect(()=>{
   if(!menu)return;
@@ -135,8 +147,8 @@ export function RtsContextMenu(props:Props){
  const commands=context?contextCommands(context,rts.catalog?.rows??[],recipients,rts.commandTypes):[];
  const showDetails=()=>{if(context&&context.kind!=='COORDINATE'){workspace?.select(context.entity);workspace?.showDetails();close(false);}};
  return <>
-  <button type="button" className="rts-context-entry" ref={entry} aria-haspopup="dialog" aria-expanded={!!menu} aria-controls={menu?id:undefined}
-   disabled={blocked} title={blocked?t('busy'):t('center')} onClick={()=>{if(menu){close();return;}const canvas=map.getCanvas(),point:Position=[canvas.clientWidth/2,canvas.clientHeight/2],g=map.unproject(point);openAt(point,[g.lng,g.lat]);}}>{t('actions')} ({rts.recipients.length})</button>
+  <MapOverlaySlot name="mapActions"><button type="button" className="rts-context-entry" ref={entry} aria-haspopup="dialog" aria-expanded={!!menu} aria-controls={menu?id:undefined}
+   disabled={blocked} title={blocked?t('busy'):t('center')} onClick={()=>{if(menu){close();return;}const canvas=map.getCanvas(),point:Position=[canvas.clientWidth/2,canvas.clientHeight/2],g=map.unproject(point);openAt(point,[g.lng,g.lat]);}}>{t('actions')} ({rts.recipients.length})</button></MapOverlaySlot>
   {menu&&<div ref={panel} id={id} className="rts-context-menu" role="dialog" aria-modal="false" aria-label={t('context')} tabIndex={-1}
    style={{left:placement.left,top:placement.top,maxHeight:placement.maxHeight}}
    onKeyDown={event=>{

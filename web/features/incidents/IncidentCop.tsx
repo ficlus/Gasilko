@@ -11,7 +11,7 @@ import {validPosition} from '../../lib/operational/target';
 import {isUuid} from '../../lib/operational/entity';
 import type {ContextHydrant} from '../../lib/hydrants/viewport';
 import {useRts} from './rtsSession';
-import {useWorkspace,WorkspaceSlot,WorkspaceSection,ContextActions} from './workspace';
+import {MapOverlaySlot,useWorkspace,WorkspaceSlot,WorkspaceSection,ContextActions} from './workspace';
 import {IncidentLiveStatus} from './IncidentLiveStatus';
 import {useIncidentLive} from './IncidentLiveProvider';
 import {HydrantDetailsAction} from './HydrantDetailsAction';
@@ -162,22 +162,12 @@ export function IncidentCop({locale,account,org,incidentId,refresh,feedback,disa
   </details>
   {workspace?.view==='command' ? (
    (initialMapLoading||error||context.error||context.more||saved)&&
-   <div
-    aria-live="polite"
-    style={{
-     position:'absolute',top:'3.25rem',left:'.5rem',right:'3.75rem',zIndex:4,
-     pointerEvents:'none',width:'max-content',maxWidth:'min(24rem, calc(100% - 5rem))',
-     maxHeight:'35%',overflow:'hidden',padding:'.2rem .55rem',
-     border:'1px solid #a6b6c0',borderRadius:'.35rem',
-     background:'rgba(255,255,255,.94)',boxShadow:'0 2px 8px rgba(0,0,0,.12)',
-     color:'#202e35',fontSize:'.8rem'
-    }}
-   >
+   <MapOverlaySlot name="mapStatus"><div className="command-map-feedback" aria-live="polite">
     {saved&&<p role="status">{t('saved')}</p>}{initialMapLoading&&<p role="status">{t('loading')}</p>}
     {error&&<p role="alert">{t(error)}</p>}
     {context.error&&<p role="alert">{t('workspaceHydrantError')}</p>}
     {context.more&&<p role="status">{t('workspaceHydrantLimit')}</p>}
-   </div>
+   </div></MapOverlaySlot>
   ) : classicMapStatus}
   {cop&&<>
    <CopMap focusRequest={focusRequest} busy={actionLocked} previewRequest={previewRequest} onCreateObject={createAt} onEditObject={id=>begin('object',id)} onDeactivateObject={id=>{const object=cop.objects.find(o=>o.id===id);if(object)deactivate('object',object.id,object.version,object.label);}} selected={selection||shownHydrant||selected==='primary'?selected:''} contextHydrants={mapHydrants} onBounds={setBounds} locale={locale} cop={cop} layers={layers} drawing={locked?null:drawing} draft={draft?.geometry??null} vertices={vertices} onPoint={point} onSelect={setSelected}/>

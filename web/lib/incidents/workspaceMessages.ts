@@ -1,5 +1,7 @@
 import type {Locale} from '../i18n';
 const messages:Record<string,readonly [string,string]>={
+ hideLeft:['◀ Skrij levi panel','◀ Linken Bereich ausblenden'],showLeft:['▶ Prikaži levi panel','▶ Linken Bereich anzeigen'],
+ hideRight:['Skrij desni panel ▶','Rechten Bereich ausblenden ▶'],showRight:['Prikaži desni panel ◀','Rechten Bereich anzeigen ◀'],
  leftShort:['Enote','Einheiten'],rightShort:['Podrobnosti','Details'],toolsShort:['Kontrole','Steuerung'],historyShort:['Zgodovina','Verlauf'],
  view:['Pogled intervencije','Einsatzansicht'],
  classic:['Klasični pogled','Klassische Ansicht'],

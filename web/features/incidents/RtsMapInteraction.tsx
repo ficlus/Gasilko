@@ -1,4 +1,5 @@
 'use client';
+import {MapOverlaySlot} from './workspace';
 import {useEffect,useRef} from 'react';
 import type {Map,MapGeoJSONFeature} from 'maplibre-gl';
 import type {Locale} from '../../lib/i18n';
@@ -106,9 +107,9 @@ export function RtsMapInteraction({map,locale,layers=noPositionLayers}:{map:Map;
  if(!rts||locked||mode==='NORMAL')return null;
  return <>
   <svg className="rts-gesture" aria-hidden="true"><path ref={outline}/></svg>
-  <aside className="rts-map-mode" aria-live="polite"><strong>{t(mode==='CHOOSE_TARGET'?'targetMode':mode==='SELECT_BOX'?'box':'lasso')}</strong>
+  <MapOverlaySlot name="mapStatus"><aside className="rts-map-mode" aria-live="polite"><strong>{t(mode==='CHOOSE_TARGET'?'targetMode':mode==='SELECT_BOX'?'box':'lasso')}</strong>
    <p>{t(mode==='CHOOSE_TARGET'?'targetResolvedLater':layers.length?'gestureHelp':'noPositions')}</p>
    <button type="button" onClick={rts.cancelMode}>{t('cancelMode')}</button>
-  </aside>
+  </aside></MapOverlaySlot>
  </>;
 }

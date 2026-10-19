@@ -436,3 +436,40 @@ button:disabled { opacity: .6; cursor: wait; }
 /* Background feedback must not move the measured Command Map shell. */
 .incident-area:has(.command-workspace)>.incident-feedback{position:fixed;z-index:8;left:.5rem;bottom:4rem;max-width:min(28rem,calc(100vw - 1rem));max-height:25vh;overflow:auto;padding:.3rem .65rem;background:#fff;border:1px solid #a6b6c0;border-radius:.4rem;box-shadow:0 2px 8px #0002;box-sizing:border-box;font-size:.85rem}
 .incident-area:has(.command-workspace)>.incident-feedback p{margin:.2rem 0}
+
+/* B1: fixed action/status overlay zones, no map resize when notices appear. */
+.command-map-chrome{position:absolute;top:.5rem;left:.5rem;right:3.5rem;z-index:4;pointer-events:none;display:grid;grid-template-rows:44px minmax(0,1fr);gap:.4rem;max-height:45%;max-width:30rem}
+.command-map-action-zone{min-height:44px;pointer-events:none}
+.command-map-action-zone .rts-context-entry{position:static;pointer-events:auto;max-width:100%;margin:0}
+.command-map-status-zone{min-height:0;overflow:auto;overscroll-behavior:contain;pointer-events:auto;display:flex;flex-direction:column;gap:.3rem}
+.command-map-status-zone:empty{pointer-events:none}
+.command-workspace .command-map-status-zone :is(.simulation-map-banner,.navigation-map-note,.rts-intent-legend,.rts-map-mode,.command-map-feedback){position:static;inset:auto;max-width:100%;max-height:none;margin:0;pointer-events:auto;font-size:.8rem;box-sizing:border-box}
+.command-map-feedback{background:#fff;border:1px solid #a6b6c0;border-radius:.35rem;padding:.3rem .5rem}
+.command-map-status-zone p{margin:.2rem 0}
+.command-map-status-zone .simulation-map-banner :is(small,label){display:block;background:#fff;padding:.15rem .4rem}
+.command-workspace :is(.operational-card,.admin-card,.web-row){padding:.45rem .55rem;margin-block:.35rem;border-radius:.4rem}
+.command-workspace :is(h3,h4){margin:.35rem 0;font-size:.95rem}
+.command-workspace :is(.web-row,.operational-card) p{margin:.2rem 0;overflow-wrap:anywhere}
+.command-workspace .workspace-section>summary{min-height:44px;padding:.4rem;font-weight:650;cursor:pointer}
+.command-workspace :is(.workspace-selected,.workspace-operational,.workspace-tools){padding:.4rem;overflow-wrap:anywhere}
+.command-workspace :is(button,select){min-height:44px;white-space:normal;overflow-wrap:anywhere}
+.command-workspace .command-panel-close{color:#172b38;background:#edf2f5;border:1px solid #607888;width:100%;text-align:left}
+.command-workspace .navigation-assignment-list{max-height:24rem;overflow:auto}
+.command-workspace .navigation-assignment-list .web-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:.15rem .4rem}
+.command-workspace .navigation-assignment-list .web-row p{grid-column:1}
+.command-workspace .navigation-assignment-list .web-row button{grid-column:2;grid-row:1 / span 3;max-width:7rem}
+.command-workspace .command-route-facts{display:grid;grid-template-columns:minmax(5rem,1fr) minmax(0,2fr);gap:.2rem .5rem;font-size:.82rem}
+.command-workspace .command-route-facts dd{margin:0;overflow-wrap:anywhere}
+.map-overlap-host{position:absolute;inset:0;pointer-events:none;z-index:3;overflow:hidden}
+.map-overlap-badge,.map-overlap-fan{position:absolute;transform:translate(-50%,-50%);min-width:44px;min-height:44px;pointer-events:auto;border:2px solid #37566b;border-radius:50%;background:#fff;color:#172b38;font-weight:700}
+.map-overlap-badge[data-selected=true]{outline:3px solid #0877b3;outline-offset:2px}
+.map-overlap-chooser,.map-overlap-preview{position:absolute;width:min(292px,calc(100% - 8px));box-sizing:border-box;background:#fff;color:#172b38;border:1px solid #526e80;border-radius:.4rem;padding:.4rem;box-shadow:0 3px 12px #0003;overflow:auto}
+.map-overlap-chooser{pointer-events:auto;z-index:2}
+.map-overlap-chooser header{display:flex;align-items:center;justify-content:space-between;gap:.4rem}
+.map-overlap-chooser .actions{gap:.25rem}
+.map-overlap-item{display:block;width:100%;text-align:left;min-height:44px}
+.map-overlap-item[aria-pressed=true]{background:#d9edf8;border-color:#075f93}
+.map-overlap-preview{pointer-events:none;max-height:160px;font-size:.8rem}
+.map-overlap-leaders{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;stroke:#284d66;stroke-width:2}
+.map-overlap-fan{z-index:3;min-width:44px;min-height:44px}
+@media(max-width:40rem){.command-map-chrome{right:3rem;max-width:calc(100% - 3.5rem)}.command-workspace .command-panel-toggles{display:flex;flex-wrap:wrap}.command-workspace .command-panel-toggles button{flex:1 1 8rem}}
