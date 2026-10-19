@@ -39,7 +39,7 @@ export function IncidentLiveProvider({account,org,incidentId,read,onInvalidate,o
    clearTimeout(timer);
    if(disposed||deniedScope.current||inFlight||!fast.current||document.visibilityState!=='visible'||!navigator.onLine)return;
    inFlight=true;const ac=new AbortController();controller=ac;
-   const timeout=setTimeout(()=>ac.abort(),5000);
+   const timeout=setTimeout(()=>ac.abort(new DOMException('Position refresh timed out','TimeoutError')),5000);
    try{await fast.current(ac.signal);if(!ac.signal.aborted)backoff=1000;}
    catch(error){
     if(disposed)return;
@@ -118,9 +118,9 @@ export function IncidentLiveProvider({account,org,incidentId,read,onInvalidate,o
     if(!disposed&&!deniedScope.current&&!denied){if(signal.aborted)setStatus(navigator.onLine?'STALE':'OFFLINE');if(document.visibilityState==='visible'&&navigator.onLine)schedule(backoff);}
    }
   }
-  const visible=()=>{if(document.visibilityState==='visible'){backoff=8000;void refresh();}else{clearTimeout(timer);controller?.abort();setStatus('STALE');}};
+  const visible=()=>{if(deniedScope.current)return;if(document.visibilityState==='visible'){backoff=8000;void refresh();}else{clearTimeout(timer);controller?.abort();setStatus('STALE');}};
   const online=()=>{backoff=8000;void refresh();};
-  const offline=()=>{clearTimeout(timer);controller?.abort();setStatus('OFFLINE');};
+  const offline=()=>{if(deniedScope.current)return;clearTimeout(timer);controller?.abort();setStatus('OFFLINE');};
   void refresh();document.addEventListener('visibilitychange',visible);window.addEventListener('online',online);window.addEventListener('offline',offline);
   return()=>{disposed=true;clearTimeout(timer);controller?.abort();document.removeEventListener('visibilitychange',visible);window.removeEventListener('online',online);window.removeEventListener('offline',offline);};
  },[account,org,incidentId,read,epoch]);

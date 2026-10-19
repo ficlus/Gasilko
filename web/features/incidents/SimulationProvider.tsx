@@ -41,7 +41,7 @@ export function SimulationProvider({account,org,incidentId,refresh:externalRefre
     if(runKey(previous.runs)===runKey(value.runs))value.runs=previous.runs;
    }
    lastSample.current=value;setSample(value);setSampleStale(false);
-  }catch(e){if(!signal.aborted)setSampleStale(true);throw e;}
+  }catch(e){if(!signal.aborted||signal.reason instanceof DOMException&&signal.reason.name==='TimeoutError')setSampleStale(true);throw e;}
  },[account,org,incidentId,read]);
  useEffect(()=>{
   if(!mapActive||!data?.enabled||!data.scenario||data.scenario.status==='FINISHED'||rts.blocked)return;
