@@ -14,7 +14,7 @@ export function useTemplateMutation(account:string,org:string,surface:string,rea
  useEffect(()=>{
   alive.current=true;
   try{const saved=sessionStorage.getItem(key);if(saved){const value=JSON.parse(saved) as Request;
-   if(['simulation_template_command','simulation_template_initialize','simulation_scenario_event_command'].includes(value.name)&&value.args.p_organization_id===org)setPending(value);}}
+   if(['simulation_hazard_command','simulation_template_command','simulation_template_initialize','simulation_scenario_event_command'].includes(value.name)&&value.args.p_organization_id===org)setPending(value);}}
   catch{/* Storage may be unavailable. */}
   return()=>{alive.current=false;};
  },[key,org]);

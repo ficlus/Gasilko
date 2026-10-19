@@ -200,7 +200,7 @@ language sql immutable set search_path='' as $$
  round(greatest(-radius/2,least(radius/2,dy+(cos(direction)*wind*5)::numeric)),6) dy
  from fire
  )
- select jsonb_agg(to_jsonb(r) order by id) from result r;
+ select case when (m->>'enabled')::boolean then jsonb_agg(to_jsonb(r) order by id) else state end from result r;
 $$;
 
 create function private.hazard_record(p_model uuid,p_kind text,p_operation uuid,p_payload jsonb,p_snapshot boolean) returns void
@@ -337,9 +337,9 @@ begin
    if m.last_error is not null then continue;end if;
    select least(5760,seconds/5) into target from public.simulation_scenario_clock where scenario_id=s.id;
    perform private.hazard_apply(m.id);
-   for n in 1..2 loop
+   for n in 1..10 loop
     select * into m from private.simulation_hazard_models where id=q.id;
-    exit when m.last_step>=target;
+    exit when m.last_step>=target or clock_timestamp()-started>interval '2 seconds';
     v:=private.hazard_step(m.configuration,m.state,(m.last_step+1-m.started_step)*5);
     update private.simulation_hazard_models set last_step=last_step+1,version=version+1,
      state=case when state is distinct from v then v else state end where id=m.id returning * into m;
@@ -351,7 +351,8 @@ begin
    when lock_not_available or deadlock_detected or serialization_failure then failed:=failed+1;
    when others then
     -- This subtransaction rolls back its state/effect/history together.
-    update private.simulation_hazard_models set last_error='HAZARD_PROCESSING_FAILED',last_scan_at=clock_timestamp() where id=q.id;
+    update private.simulation_hazard_models set last_error='HAZARD_PROCESSING_FAILED',last_scan_at=clock_timestamp(),version=version+1 where id=q.id;
+    perform private.hazard_record(q.id,'ERROR',null,jsonb_build_object('error','HAZARD_PROCESSING_FAILED'),false);
     failed:=failed+1;
   end;
  end loop;
@@ -410,7 +411,7 @@ language sql stable set search_path='' as $$
  features as(
  select c.id||':fire' id,'FIRE' kind,c.intensity intensity,
  private.hazard_polygon(cfg.c->'center',c.x*cell,c.y*cell,case when cfg.c->>'type'='WILDFIRE' then cell/2 else 5+15*c.intensity end,cfg.c->>'type'='WILDFIRE',radius) geometry,
- case when c.intensity=0 then 'EXTINGUISHED' when c.intensity<0.25 then 'INITIAL' when c.intensity<0.7 then 'DEVELOPING' else 'INTENSE' end phase
+ case when c.intensity=0 then 'EXTINGUISHED' when cfg.c->>'type'='STRUCTURE_FIRE' and (cfg.c->>'decline_seconds')::numeric>0 and (m.last_step-m.started_step)*5>=(cfg.c->>'decline_seconds')::numeric then 'DECLINING' when c.intensity<0.25 then 'INITIAL' when c.intensity<0.7 then 'DEVELOPING' else 'INTENSE' end phase
  from cells c cross join cfg where c.intensity>0
  union all
  select c.id||':burned','BURNED',c.burned,private.hazard_polygon(cfg.c->'center',c.x*cell,c.y*cell,cell/2,true,radius),'BURNED'

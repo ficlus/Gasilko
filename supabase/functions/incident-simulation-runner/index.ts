@@ -38,6 +38,10 @@ Deno.serve(async(request:Request)=>{
   let events:unknown={error:'EVENT_BATCH_UNAVAILABLE'};
   try{events=await rpc('simulation_scenario_event_batch',{},AbortSignal.any([abort.signal,AbortSignal.timeout(3500)]));}catch{/* Retry only on a later runner invocation; no effect replay here. */}
   phases.events_ms=Math.round(performance.now()-eventStart);
+  const hazardStart=performance.now();
+  let hazards:unknown={error:'HAZARD_BATCH_UNAVAILABLE'};
+  try{hazards=await rpc('simulation_hazard_batch',{},AbortSignal.any([abort.signal,AbortSignal.timeout(3500)]));}catch{/* Hazard failure cannot suppress movement/events or H1 planning. */}
+  phases.hazards_ms=Math.round(performance.now()-hazardStart);
   const claimStart=performance.now();
   // Movement is processed first on every invocation. One leased route at most;
   // overlapping Cron requests can continue ticking while this request waits for the provider.
@@ -55,7 +59,7 @@ Deno.serve(async(request:Request)=>{
    const result=await rpc('simulation_automation_finish',{p_job:job.id,p_lease:job.lease,p_route:route,p_error:error});
    phases.commit_and_start_ms=Math.round(performance.now()-commitStart);automation=result.state;
   }else if(job?.started)automation='STARTED';
-  return response({completed,failed,automation,events,phases:{...phases,total_ms:Math.round(performance.now()-started)}});
+  return response({completed,failed,automation,events,hazards,phases:{...phases,total_ms:Math.round(performance.now()-started)}});
  }catch{return response({error:'RUNNER_UNAVAILABLE'},503);}
  finally{clearTimeout(timeout);}
 });
