@@ -1,9 +1,10 @@
 'use client';
-import {createContext,useContext,useEffect,useRef,useState,type ReactNode} from 'react';
+import {createContext,useCallback,useContext,useEffect,useRef,useState,type ReactNode} from 'react';
+import {mapMetric} from '../../lib/operational/mapDiagnostics';
 import type {Locale} from '../../lib/i18n';
 import type {Position} from '../../lib/incidents/cop';
 import type {TaskRead} from '../../lib/operational/tasks';
-import {simulationErrors,type SimulationAction,type SimulationView} from '../../lib/operational/simulation';
+import {simulationErrors,type SimulationAction,type SimulationView,type SimulationSample} from '../../lib/operational/simulation';
 import {simulationText} from '../../lib/operational/simulationMessages';
 import {typingTarget} from '../../lib/operational/rts';
 import {useIncidentLive} from './IncidentLiveProvider';
@@ -11,7 +12,7 @@ import {useRtsSession} from './rtsSession';
 
 type Request={action:SimulationAction;args:{p_operation:string;p_acting_organization_id:string;p_incident_id:string;p_expected_version:string;p_action:SimulationAction;p_payload:Record<string,unknown>};summary:string};
 type Move={unitId:string;positionVersion:string;longitude:string;latitude:string;heading:string;speed:string};
-type Controller={data:SimulationView|null;error:string;busy:boolean;pending:boolean;proposal:Request|null;move:Move|null;before:string|null;
+type Controller={sample:SimulationSample|null;sampleStale:boolean;setMapActive:(active:boolean)=>void;data:SimulationView|null;error:string;busy:boolean;pending:boolean;proposal:Request|null;move:Move|null;before:string|null;
  refresh:()=>void;older:(sequence:string|null)=>void;propose:(action:SimulationAction,payload:Record<string,unknown>,summary:string)=>void;
  startMove:(move:Move)=>void;cancelMove:()=>void;pickPosition:(position:Position)=>void};
 const Context=createContext<Controller|null>(null);
@@ -21,6 +22,32 @@ export function SimulationProvider({account,org,incidentId,refresh:externalRefre
  const live=useIncidentLive(),rts=useRtsSession(),t=simulationText(locale);
  const [data,setData]=useState<SimulationView|null>(null),[error,setError]=useState(''),[epoch,setEpoch]=useState(0),[before,setBefore]=useState<string|null>(null);
  const [proposal,setProposal]=useState<Request|null>(null),[pending,setPending]=useState<Request|null>(null),[busy,setBusy]=useState(false),[rejected,setRejected]=useState(false),[move,setMove]=useState<Move|null>(null);
+ const [sample,setSample]=useState<SimulationSample|null>(null),[sampleStale,setSampleStale]=useState(false),[mapActive,setMapActive]=useState(false);
+ const latestData=useRef(data);latestData.current=data;
+ const lastSample=useRef<SimulationSample|null>(null);
+ const fastRead=useCallback(async(signal:AbortSignal)=>{
+  try{
+   const started=performance.now();
+   const value=await read<SimulationSample>('simulation_map_sample',{p_incident_id:incidentId,p_acting_organization_id:org},signal,account);
+   if(signal.aborted||value.scenario_id!==latestData.current?.scenario?.id)return;
+   const previous=lastSample.current;
+   if(previous&&Date.parse(value.observed_at)<Date.parse(previous.observed_at))return;
+   mapMetric('position_fetch',performance.now()-started,value.positions.length);
+   for(const p of value.positions)mapMetric('position_age',Date.now()-Date.parse(p.observed_at));
+   if(previous?.scenario_id===value.scenario_id){
+    const positionKey=(rows:SimulationSample['positions'])=>rows.map(p=>[p.incident_unit_id,p.version,p.can_command,p.deployment_status,p.callsign,p.sector_id,p.organization_name].join(':')).join('|');
+    const runKey=(rows:SimulationSample['runs'])=>rows.map(r=>r.id+':'+r.version+':'+r.position_version+':'+r.confirmed).join('|');
+    if(positionKey(previous.positions)===positionKey(value.positions))value.positions=previous.positions;
+    if(runKey(previous.runs)===runKey(value.runs))value.runs=previous.runs;
+   }
+   lastSample.current=value;setSample(value);setSampleStale(false);
+  }catch(e){if(!signal.aborted)setSampleStale(true);throw e;}
+ },[account,org,incidentId,read]);
+ useEffect(()=>{
+  if(!mapActive||!data?.enabled||!data.scenario||data.scenario.status==='FINISHED'||rts.blocked)return;
+  return live?.bindFastRefresh(fastRead);
+ },[mapActive,data?.enabled,data?.scenario?.id,data?.scenario?.status,rts.blocked,live?.bindFastRefresh,fastRead]);
+ useEffect(()=>{if(rts.blocked||live?.status==='ACCESS_LOST'){setSample(null);lastSample.current=null;setData(null);}},[rts.blocked,live?.status]);
  const alive=useRef(true),sending=useRef(false),dialog=useRef<HTMLDialogElement>(null);
  const key='gasilko.simulation.pending.'+account+'.'+org+'.'+incidentId;
  useEffect(()=>{alive.current=true;return()=>{alive.current=false;};},[]);
@@ -31,12 +58,13 @@ export function SimulationProvider({account,org,incidentId,refresh:externalRefre
  },[key,incidentId,org]);
  useEffect(()=>{
   const ac=new AbortController();
+  if(rts.blocked||live?.status==='ACCESS_LOST')return()=>ac.abort();
   void read<SimulationView>('simulation_read',{p_incident_id:incidentId,p_acting_organization_id:org,p_before_sequence:before},ac.signal,account)
    .then(value=>{if(!ac.signal.aborted){setData(value);if(!value.enabled||!value.can_control)setMove(null);}})
-   .catch(e=>{if(ac.signal.aborted)return;setData(null);setMove(null);const code=e instanceof Error?e.message:'SERVER';setError(t(code)==code?'SERVER':code);
-    if(['NOT_AUTHORIZED','EXPIRED'].includes(code)){setProposal(null);setPending(null);rts.revoke();}})
+   .catch(e=>{if(ac.signal.aborted)return;setMove(null);const code=e instanceof Error?e.message:'SERVER';setError(t(code)==code?'SERVER':code);
+    if(['NOT_AUTHORIZED','EXPIRED'].includes(code)){setData(null);setSample(null);lastSample.current=null;setProposal(null);setPending(null);rts.revoke();}})
   return()=>ac.abort();
- },[account,org,incidentId,externalRefresh,epoch,before,read,live?.lastSuccess]);
+ },[account,org,incidentId,externalRefresh,epoch,before,read,live?.lastSuccess,rts.blocked,live?.status==='ACCESS_LOST']);
  useEffect(()=>{rts.setExternalEditing(!!move||!!proposal||!!pending);return()=>rts.setExternalEditing(false);},[!!move,!!proposal,!!pending,rts.setExternalEditing]);
  useEffect(()=>{if(proposal){dialog.current?.showModal();}return()=>dialog.current?.close();},[!!proposal]);
  useEffect(()=>{if(rts.locked)setMove(null);},[rts.locked]);
@@ -61,7 +89,8 @@ export function SimulationProvider({account,org,incidentId,refresh:externalRefre
    if(['NOT_AUTHORIZED','EXPIRED'].includes(code)){setData(null);setMove(null);rts.revoke();}
   }finally{sending.current=false;if(alive.current)setBusy(false);}
  }
- const controller:Controller={data,error,busy,pending:!!pending,proposal,move,before,refresh:()=>{setError('');setEpoch(v=>v+1);},older:setBefore,propose,
+ const currentSample=sample&&data?.scenario&&sample.scenario_id===data.scenario.id&&BigInt(sample.scenario_version)>=BigInt(data.scenario.version)?sample:null;
+ const controller:Controller={sample:currentSample,sampleStale,setMapActive,data,error,busy,pending:!!pending,proposal,move,before,refresh:()=>{setError('');setEpoch(v=>v+1);},older:setBefore,propose,
   startMove:value=>{if(!data?.can_control||!data.enabled||pending||proposal||rts.locked||rts.externalEditing||rts.copEditing||rts.mode!=='NORMAL'){setError('modeBusy');return;}rts.cancelMode();setMove(value);},
   cancelMove:()=>setMove(null),pickPosition:p=>{if(!move||rts.locked)return;propose('SET_POSITION',{unit_id:move.unitId,position_version:move.positionVersion,longitude:p[0],latitude:p[1],heading_degrees:Number(move.heading),speed_mps:Number(move.speed)},t('SET_POSITION')+'\n'+p.join(', '));}};
  return <Context.Provider value={controller}><div className="simulation-scope" onKeyDownCapture={e=>{
