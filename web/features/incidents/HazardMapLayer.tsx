@@ -1,11 +1,14 @@
 'use client';
 import {useEffect,useRef} from 'react';
 import type {Map,GeoJSONSource} from 'maplibre-gl';
+import type {Locale} from '../../lib/i18n';
+import {hazardText} from '../../lib/operational/hazardMessages';
+import {MapOverlaySlot} from './workspace';
 import {useSimulationHazards} from './SimulationHazards';
 const source='simulation-hazards';
 const layers=['sim-hazard-burned','sim-hazard-fire','sim-hazard-smoke','sim-hazard-zones','sim-hazard-origin'];
 /** Passive overlays: no hit-test registration, pointer handlers or camera changes. */
-export function HazardMapLayer({map}:{map:Map}){
+export function HazardMapLayer({map,locale}:{map:Map;locale:Locale}){
  const ctx=useSimulationHazards(),signature=useRef(''),rows=ctx?.data?.models;
  useEffect(()=>{
   signature.current='';
@@ -31,5 +34,5 @@ export function HazardMapLayer({map}:{map:Map}){
   for(const [id,visible] of [[layers[0],ctx?.layers.fire],[layers[1],ctx?.layers.fire],[layers[2],ctx?.layers.smoke],[layers[3],ctx?.layers.hazards],[layers[4],ctx?.layers.fire]] as const)
    if(map.getLayer(id))map.setLayoutProperty(id,'visibility',visible?'visible':'none');
  },[map,ctx?.layers.fire,ctx?.layers.smoke,ctx?.layers.hazards]);
- return null;
+ return rows?.length?<MapOverlaySlot name="mapStatus"><aside className="command-map-feedback" role="note">{hazardText(locale)('title')} · {hazardText(locale)('simSmoke')}</aside></MapOverlaySlot>:null;
 }

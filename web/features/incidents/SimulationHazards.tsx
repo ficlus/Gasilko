@@ -46,11 +46,12 @@ export function SimulationHazardsPanel({locale}:{locale:Locale}){
   <div className="template-items">{data.models.map(m=><button type="button" key={m.id} aria-pressed={row?.id===m.id} onClick={()=>ctx.select(m.id)}>{m.title} · {t(m.type)} · {t('burning')}: {m.burning}</button>)}</div>
   {row&&<section aria-label={t('selected')}><h4>{row.title}</h4>
    <dl className="command-route-facts"><dt>{t('step')}</dt><dd>{row.step}</dd><dt>{t('elapsed')}</dt><dd>{row.step*5}</dd><dt>{t('lag')}</dt><dd>{row.lag_steps}</dd><dt>{t('freshness')}</dt><dd>{row.last_scan_at?new Date(row.last_scan_at).toLocaleString(locale):'—'}</dd>
-    <dt>{t('wind_direction')}</dt><dd>{row.wind_direction}°</dd><dt>{t('wind_speed')}</dt><dd>{row.wind_speed} m/s</dd>
+    <dt>{t('enabled')}</dt><dd>{row.enabled?'✓':'—'}</dd><dt>{t('wind_direction')}</dt><dd>{row.wind_direction}°</dd><dt>{t('wind_speed')}</dt><dd>{row.wind_speed} m/s</dd>
     {ctx.instructor&&<><dt>{t('pending')}</dt><dd>{row.pending_effects}</dd><dt>{t('processing')}</dt><dd>{row.processing_ms??'—'}</dd><dt>{t('visibility')}</dt><dd>{t(row.revealed?'revealed':'hidden')}</dd></>}
    </dl>
    <p>{t('phase')}: {[...new Set(row.features.filter(f=>f.properties?.kind==='FIRE').map(f=>String(f.properties?.phase)))].map(t).join(', ')||t('EXTINGUISHED')}</p>
-   {row.step>=5760&&<p role="status">{t('budget')}</p>}{row.error&&<p role="alert">{t('error')} ({row.error})</p>}
+   <ul>{row.features.filter(f=>f.properties?.phase==='INSTRUCTOR').map(f=><li key={f.id}>{t(String(f.properties?.kind))}</li>)}</ul>
+   {row.step>=5760&&<p role="status">{t('budget')}</p>}{row.error&&<p role="alert">{t(row.error)}</p>}
    {ctx.instructor&&data.can_control&&row.configuration&&<HazardControls key={ctx.scope.account+':'+ctx.scope.org+':'+ctx.scope.incidentId+':'+row.id} locale={locale} row={row}/>}
   </section>}
   <p>{t('simSmoke')}</p><button type="button" onClick={ctx.reload}>{t('refresh')}</button>
@@ -64,7 +65,7 @@ function HazardControls({locale,row}:{locale:Locale;row:HazardRow}){
  return <div><p>{t('queueHelp')}</p>
   <HazardEffectFields locale={locale} model={row.configuration!} value={effect} onChange={setEffect} disabled={disabled}/>
   <button type="button" disabled={disabled} onClick={()=>setConfirm({version:row.version,effect:structuredClone(effect)})}>{t('apply')}</button>
-  {row.error&&<button type="button" disabled={disabled} onClick={()=>setConfirm({version:row.version,effect:{type:'RETRY',value:null}})}>{t('RETRY')}</button>}
+  {row.error==='HAZARD_PROCESSING_FAILED'&&<button type="button" disabled={disabled} onClick={()=>setConfirm({version:row.version,effect:{type:'RETRY',value:null}})}>{t('RETRY')}</button>}
   {mutation.error&&<p role="alert">{tt(mutation.error)}</p>}
   {mutation.pending&&<button type="button" disabled={mutation.busy} onClick={mutation.retry}>{t('retry')}</button>}
   {confirm&&<TemplateConfirmation locale={locale} busy={mutation.busy||!!mutation.pending} onCancel={()=>setConfirm(null)}

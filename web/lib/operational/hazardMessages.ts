@@ -1,5 +1,6 @@
 import type {Locale} from '../i18n';
 const sl:Record<string,string>={
+ HAZARD_HISTORY_LIMIT:'Dosežena je omejitev zgodovine modela. Ustvari novo učno sejo.',HAZARD_PROCESSING_FAILED:'Obdelava modela je ustavljena zaradi napake. Inštruktor lahko izrecno ponovi obdelavo.',
  title:'SIM · Požar in nevarnosti',disclaimer:'Učni model; ni napoved resničnega požara ali izmerjena koncentracija dima.',
  STRUCTURE_FIRE:'Požar objekta',WILDFIRE:'Vegetacijski požar',add:'Dodaj model',remove:'Odstrani',name:'Ime',type:'Model',enabled:'Model omogočen',
  visibility:'Razkritje',START:'Vidno od začetka',HIDDEN:'Skrito do izrecnega razkritja',center:'Središče območja',radius_m:'Polmer območja (m)',cell_m:'Celica (m)',
@@ -14,6 +15,7 @@ const sl:Record<string,string>={
  elapsed:'Čas modela (s)',hidden:'Skrito',revealed:'Razkrito',apply:'Preglej in potrdi',phase:'Faza',INITIAL:'Začetna',DEVELOPING:'Razvijajoča',INTENSE:'Intenzivna',DECLINING:'Upadajoča',EXTINGUISHED:'Pogašena',BURNED:'Pogorelo',cancel:'Prekliči'
 };
 const de:Record<string,string>={
+ HAZARD_HISTORY_LIMIT:'Das Modell-Historienlimit ist erreicht. Eine neue Übungssitzung anlegen.',HAZARD_PROCESSING_FAILED:'Die Modellverarbeitung wurde wegen eines Fehlers angehalten. Der Ausbilder kann sie ausdrücklich erneut versuchen.',
  title:'SIM · Feuer und Gefahren',disclaimer:'Übungsmodell; keine reale Brandvorhersage oder gemessene Rauchkonzentration.',
  STRUCTURE_FIRE:'Gebäudebrand',WILDFIRE:'Vegetationsbrand',add:'Modell hinzufügen',remove:'Entfernen',name:'Name',type:'Modell',enabled:'Modell aktiviert',
  visibility:'Offenlegung',START:'Von Beginn sichtbar',HIDDEN:'Bis zur Freigabe verborgen',center:'Gebietsmittelpunkt',radius_m:'Gebietsradius (m)',cell_m:'Zelle (m)',

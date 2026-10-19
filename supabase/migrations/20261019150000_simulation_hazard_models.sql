@@ -8,7 +8,7 @@ create table private.simulation_hazard_models(
  id uuid primary key default gen_random_uuid(), scenario_id uuid not null references public.simulation_scenarios(id),
  model_key text not null, model_version integer not null default 1 check(model_version=1),
  initial_configuration jsonb not null, configuration jsonb not null, state jsonb not null,
- revealed boolean not null, version bigint not null default 1, last_step bigint not null default 0 check(last_step between 0 and 5760),
+ revealed boolean not null, version bigint not null default 1 check(version between 1 and 10002), last_step bigint not null default 0 check(last_step between 0 and 5760),
  started_step bigint not null default 0, last_scan_at timestamptz, last_error text, processing_ms integer,
  unique(scenario_id,model_key), check(octet_length(state::text)<=200000)
 );
@@ -78,7 +78,7 @@ begin
  when 'SPREAD' then perform private.hazard_number(e->'value',0,2);
  when 'BOOST' then perform private.hazard_number(e->'value',0,1);
  when 'IGNITE' then
-  if not exists(select 1 from jsonb_array_elements(m->'origins') o where o->>'id'=e->>'value') then raise exception 'VALIDATION_FAILED';end if;
+  if jsonb_typeof(e->'value') is distinct from 'string' or not exists(select 1 from jsonb_array_elements(m->'origins') o where o->>'id'=e->>'value') then raise exception 'VALIDATION_FAILED';end if;
  when 'ENABLE' then if jsonb_typeof(e->'value') is distinct from 'boolean' then raise exception 'VALIDATION_FAILED';end if;
  when 'REVEAL' then if e->'value' is distinct from 'null'::jsonb then raise exception 'VALIDATION_FAILED';end if;
  when 'STOP' then if e->'value' is distinct from 'null'::jsonb then raise exception 'VALIDATION_FAILED';end if;
@@ -139,7 +139,7 @@ begin
   end loop;
   for e in select value from jsonb_array_elements(m->'effects') loop
    perform private.sim_template_keys(e,array['event_id','effect']);
-   if not exists(select 1 from jsonb_array_elements(events->'events') ev where ev->>'id'=e->>'event_id') then raise exception 'VALIDATION_FAILED';end if;
+   if jsonb_typeof(e->'event_id') is distinct from 'string' or not exists(select 1 from jsonb_array_elements(events->'events') ev where ev->>'id'=e->>'event_id') then raise exception 'VALIDATION_FAILED';end if;
    perform private.hazard_effect_valid(e->'effect',m);
   end loop;
   if exists(select 1 from jsonb_array_elements(m->'effects') e group by e->>'event_id' having count(*)>1) then raise exception 'VALIDATION_FAILED';end if;
@@ -176,7 +176,7 @@ language sql immutable set search_path='' as $$
  influence as(
  select c.id,coalesce(sum(n.intensity*greatest(0.2,1+cfg.wind/10*
  (sin(cfg.direction)*(c.x-n.x)::float8+cos(cfg.direction)*(c.y-n.y)::float8)/sqrt(((c.x-n.x)^2+(c.y-n.y)^2)::float8))/8),0)::numeric fire,
- coalesce(sum(n.smoke*greatest(0.05,1+0.8*(sin(cfg.direction)*(c.x-n.x)::float8+cos(cfg.direction)*(c.y-n.y)::float8)/sqrt(((c.x-n.x)^2+(c.y-n.y)^2)::float8))/8),0)::numeric smoke_in
+ coalesce(sum(n.smoke*greatest(0.05,1+0.8*least(1,cfg.wind/10)*(sin(cfg.direction)*(c.x-n.x)::float8+cos(cfg.direction)*(c.y-n.y)::float8)/sqrt(((c.x-n.x)^2+(c.y-n.y)^2)::float8))/8),0)::numeric smoke_in
  from cells c cross join cfg left join cells n on n.x between c.x-1 and c.x+1 and n.y between c.y-1 and c.y+1 and n.id<>c.id and m->>'type'='WILDFIRE'
  group by c.id
  ), heat as(
@@ -196,8 +196,8 @@ language sql immutable set search_path='' as $$
  round(case when (m->>'enabled')::boolean then least(1,burned+0.005*next_intensity/greatest(0.1,fuel)) else burned end,6) burned,
  round(case when (m->>'enabled')::boolean then next_heat else heat end,6) heat,
  round(least(1,greatest(0,case when m->>'type'='WILDFIRE' then 0.65*smoke+0.25*smoke_in else 0.9*smoke end+0.08*next_intensity)),6) smoke,
- round(greatest(-radius/2,least(radius/2,dx+(sin(direction)*wind*5)::numeric)),6) dx,
- round(greatest(-radius/2,least(radius/2,dy+(cos(direction)*wind*5)::numeric)),6) dy
+ round(case when m->>'type'='STRUCTURE_FIRE' and (smoke>0 or next_intensity>0) then greatest(-radius/2,least(radius/2,dx+(sin(direction)*wind*5)::numeric)) else 0 end,6) dx,
+ round(case when m->>'type'='STRUCTURE_FIRE' and (smoke>0 or next_intensity>0) then greatest(-radius/2,least(radius/2,dy+(cos(direction)*wind*5)::numeric)) else 0 end,6) dy
  from fire
  )
  select case when (m->>'enabled')::boolean then jsonb_agg(to_jsonb(r) order by id) else state end from result r;
@@ -240,6 +240,7 @@ declare m private.simulation_hazard_models;seconds_value bigint;
 begin
  select * into m from private.simulation_hazard_models where id=p_model for update;
  if not found then raise exception 'VALIDATION_FAILED';end if;
+ if m.version>=9980 then raise exception 'SIM_LIMIT';end if;
  if exists(select 1 from private.simulation_hazard_effects where model_id=m.id and operation_id=p_operation) then return;end if;
  if (select count(*) from private.simulation_hazard_effects where model_id=m.id)>=200 then raise exception 'SIM_LIMIT';end if;
  if p_effect->>'type'<>'RESET' then perform private.hazard_effect_valid(p_effect,m.configuration);end if;
@@ -267,11 +268,18 @@ language plpgsql security definer set search_path='' as $$
 declare m private.simulation_hazard_models;
 begin
  for m in select * from private.simulation_hazard_models where scenario_id=new.scenario_id order by id for update loop
+  if m.version>=9980 and new.event_type<>'SIMULATION_FINISHED' then
+   if m.last_error is distinct from 'HAZARD_HISTORY_LIMIT' then
+    update private.simulation_hazard_models set version=version+1,last_error='HAZARD_HISTORY_LIMIT' where id=m.id;
+    perform private.hazard_record(m.id,'LIMIT',null,'{"error":"HAZARD_HISTORY_LIMIT"}',true);
+   end if;
+   continue;
+  end if;
   if new.event_type='SIMULATION_RESET' then
    perform private.hazard_enqueue(m.id,new.operation_id,'{"type":"RESET","value":null}',new.actor_user_id,'LIFECYCLE');
   end if;
   update private.simulation_hazard_models set version=version+1 where id=m.id;
-  perform private.hazard_record(m.id,new.event_type,null,jsonb_build_object('operation_id',new.operation_id,'actor',new.actor_user_id),true);
+  perform private.hazard_record(m.id,new.event_type,null,jsonb_build_object('operation_id',new.operation_id,'actor',new.actor_user_id),new.event_type='SIMULATION_FINISHED');
  end loop;
  return new;
 end $$;
@@ -288,7 +296,7 @@ begin
  for e in select q.* from private.simulation_hazard_effects q
  where q.model_id=m.id and q.effective_step<=m.last_step
  and not exists(select 1 from private.simulation_hazard_history h where h.model_id=m.id and h.operation_id=q.operation_id)
- order by q.effective_step,q.sequence limit 200 loop
+ order by q.effective_step,q.sequence limit 4 loop
   cfg:=m.configuration;v:=m.state;
   case e.effect->>'type'
   when 'WIND' then cfg:=cfg||jsonb_build_object('wind_direction',e.effect#>'{value,direction}','wind_speed',e.effect#>'{value,speed}');
@@ -303,9 +311,10 @@ begin
   when 'IGNITE' then
    select value into o from jsonb_array_elements(cfg->'origins') where value->>'id'=e.effect->>'value';
    xy:=private.hazard_xy(o->'position',cfg->'center');
+   cfg:=jsonb_set(cfg,'{origins}',(select jsonb_agg(case when a.value->>'id'=o->>'id' then a.value||jsonb_build_object('initial',true) else a.value end order by a.ordinality) from jsonb_array_elements(cfg->'origins') with ordinality a));
    select jsonb_agg(case when (cfg->>'type'='STRUCTURE_FIRE' and c->>'id'=o->>'id') or
     (cfg->>'type'='WILDFIRE' and (c->>'x')::numeric=round((xy->>0)::numeric/(cfg->>'cell_m')::numeric) and (c->>'y')::numeric=round((xy->>1)::numeric/(cfg->>'cell_m')::numeric))
-    then c||jsonb_build_object('intensity',o->'intensity','burned',0,'heat',0) else c end order by c->>'id') into v from jsonb_array_elements(v) c;
+    then c||jsonb_build_object('intensity',o->'intensity','burned',0,'heat',0,'dx',0,'dy',0) else c end order by c->>'id') into v from jsonb_array_elements(v) c;
   else raise exception 'VALIDATION_FAILED';
   end case;
   update private.simulation_hazard_models set configuration=cfg,state=v,revealed=m.revealed,started_step=m.started_step,version=version+1 where id=m.id returning * into m;
@@ -331,18 +340,28 @@ begin
   begin
    perform private.agent_locks(q.scenario_id);
    select * into s from public.simulation_scenarios where id=q.scenario_id;
+   update private.simulation_hazard_models set last_scan_at=clock_timestamp() where id=q.id;
    if s.status<>'RUNNING' or not private.simulation_event_authority(s.id)
     or not exists(select 1 from private.simulation_template_instances where scenario_id=s.id and state='READY') then continue;end if;
    select * into m from private.simulation_hazard_models where id=q.id for update;
    if m.last_error is not null then continue;end if;
+   if m.version>=9980 then
+    update private.simulation_hazard_models set version=version+1,last_error='HAZARD_HISTORY_LIMIT' where id=m.id;
+    perform private.hazard_record(m.id,'LIMIT',null,'{"error":"HAZARD_HISTORY_LIMIT"}',true);continue;
+   end if;
    select least(5760,seconds/5) into target from public.simulation_scenario_clock where scenario_id=s.id;
    perform private.hazard_apply(m.id);
    for n in 1..10 loop
     select * into m from private.simulation_hazard_models where id=q.id;
-    exit when m.last_step>=target or clock_timestamp()-started>interval '2 seconds';
+    exit when m.last_step>=target or m.version>=9980 or clock_timestamp()-started>interval '2 seconds' or exists(
+     select 1 from private.simulation_hazard_effects e where e.model_id=m.id and e.effective_step<=m.last_step
+     and not exists(select 1 from private.simulation_hazard_history h where h.model_id=m.id and h.operation_id=e.operation_id));
     v:=private.hazard_step(m.configuration,m.state,(m.last_step+1-m.started_step)*5);
-    update private.simulation_hazard_models set last_step=last_step+1,version=version+1,
-     state=case when state is distinct from v then v else state end where id=m.id returning * into m;
+    if m.state is distinct from v then
+     update private.simulation_hazard_models set last_step=last_step+1,version=version+1,state=v where id=m.id returning * into m;
+    else
+     update private.simulation_hazard_models set last_step=last_step+1,version=version+1 where id=m.id returning * into m;
+    end if;
     perform private.hazard_record(m.id,'STEP',null,jsonb_build_object('burning',(select count(*) from jsonb_array_elements(v) c where (c->>'intensity')::numeric>0)),m.last_step%60=0 or m.last_step=5760);
     perform private.hazard_apply(m.id);steps:=steps+1;
    end loop;
@@ -379,6 +398,7 @@ begin
  select * into m from private.simulation_hazard_models where id=p_model and scenario_id=s.id for update;
  if not found then raise exception 'NOT_AUTHORIZED';end if;
  if m.version<>p_expected_version then raise exception 'STALE_VERSION';end if;
+ if m.version>=9980 then raise exception 'SIM_LIMIT';end if;
  if s.status not in ('RUNNING','PAUSED') then raise exception 'INVALID_TRANSITION';end if;
  perform private.sim_template_keys(p_effect,array['type','value']);
  if p_effect->>'type'='RETRY' then
@@ -430,7 +450,7 @@ language sql stable set search_path='' as $$
  union all
  select 'origin:'||(o->>'id'),'ORIGIN',(o->>'intensity')::numeric,jsonb_build_object('type','Point','coordinates',o->'position'),'SIM'
  from cfg,jsonb_array_elements(cfg.c->'origins') o
- where exists(select 1 from cells c where c.intensity>0 and
+ where (o->>'initial')::boolean and exists(select 1 from cells c where c.intensity>0 and
  ((cfg.c->>'type'='STRUCTURE_FIRE' and c.id=o->>'id') or (cfg.c->>'type'='WILDFIRE' and c.x=round((private.hazard_xy(o->'position',cfg.c->'center')->>0)::numeric/cell) and c.y=round((private.hazard_xy(o->'position',cfg.c->'center')->>1)::numeric/cell))))
  )
  select coalesce(jsonb_agg(jsonb_build_object('type','Feature','id',m.id::text||':'||id,'geometry',geometry,
@@ -443,8 +463,9 @@ begin
  if not private.incident_acting_member(p_organization_id) or not private.can_read_incident(p_incident_id) then raise exception 'NOT_AUTHORIZED';end if;
  select * into s from public.simulation_scenarios where incident_id=p_incident_id;
  if not found then return null;end if;
- if not private.simulation_visible(p_incident_id,p_organization_id) or not private.simulation_enabled() then raise exception 'NOT_AUTHORIZED';end if;
+ if not private.simulation_enabled() then raise exception 'NOT_AUTHORIZED';end if;
  controller:=coalesce(private.simulation_template_editor(p_organization_id) and private.simulation_controller(s.id,p_organization_id),false);
+ if not private.simulation_visible(p_incident_id,p_organization_id) and not controller then raise exception 'NOT_AUTHORIZED';end if;
  if p_instructor is null or p_instructor and not controller then raise exception 'NOT_AUTHORIZED';end if;
  select seconds into seconds_value from public.simulation_scenario_clock where scenario_id=s.id;
  select coalesce(jsonb_agg(jsonb_build_object('id',m.id,'version',m.version::text,'title',m.configuration->>'title','type',m.configuration->>'type',
@@ -455,7 +476,7 @@ begin
  ||case when p_instructor then jsonb_build_object('configuration',m.configuration,'revealed',m.revealed,'processing_ms',m.processing_ms,
  'pending_effects',(select count(*) from private.simulation_hazard_effects e where e.model_id=m.id and not exists(select 1 from private.simulation_hazard_history h where h.model_id=m.id and h.operation_id=e.operation_id)))
  else '{}'::jsonb end order by m.id),'[]') into models
- from private.simulation_hazard_models m where m.scenario_id=s.id and (p_instructor or m.revealed);
+ from private.simulation_hazard_models m where m.scenario_id=s.id and (p_instructor or (s.status<>'DRAFT' and m.revealed));
  result_value:=jsonb_build_object('can_control',controller,'status',s.status,'seconds',coalesce(seconds_value,0),'models',models);
  if octet_length(result_value::text)>1500000 then raise exception 'SIM_LIMIT';end if;
  return result_value;
