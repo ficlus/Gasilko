@@ -45,7 +45,7 @@ export function EventPlanEditor({locale,definition,plan,onChange,disabled}:{loca
    {event.effect&&<section aria-label={t('geometry')}>
     <div className="actions"><button type="button" disabled={disabled} onClick={()=>{setPlacing(true);setDrawing(false);setVertices([]);}}>{t('point')}</button>
      <button type="button" disabled={disabled} onClick={()=>{setPlacing(true);setDrawing(true);setVertices([]);}}>{t('polygon')}</button>
-     {placing&&<button type="button" onClick={()=>{setPlacing(false);setDrawing(false);setVertices([]);}}>{t('cancel')}</button></div>
+     {placing&&<button type="button" onClick={()=>{setPlacing(false);setDrawing(false);setVertices([]);}}>{t('cancel')}</button>}</div>
     <CoordinateEditor locale={locale} value={drawing?null:geometry?.type==='Point'?geometry.coordinates:null} disabled={disabled||drawing&&vertices.length>=32} onApply={p=>{if(drawing){if(vertices.length<32)setVertices(v=>[...v,p]);}else move(p);}}/>
     {drawing&&<div className="actions"><span>{vertices.length}/32</span><button type="button" disabled={disabled||vertices.length<3} onClick={()=>{setGeometry({type:'Polygon',coordinates:[[...vertices,vertices[0]]]});setDrawing(false);setPlacing(false);setVertices([]);}}>{t('finish')}</button><button type="button" disabled={disabled||!vertices.length} onClick={()=>setVertices(v=>v.slice(0,-1))}>{t('undo')}</button></div>}
     <div className="template-map-pane"><TemplateMap locale={locale} definition={mapDefinition} selected={'event-'+event.id} editable={!disabled} placing={placing&&!disabled} vertices={vertices}
