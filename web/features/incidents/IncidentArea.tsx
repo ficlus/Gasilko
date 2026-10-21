@@ -27,10 +27,13 @@ import {CommandSection,CommandRequests} from './CommandSection';
 import {IncidentCop} from './IncidentCop';
 import {copErrors,copMutations,type CopFeedback} from '../../lib/incidents/cop';
 
-class IncidentError extends Error {}
+class IncidentError extends Error {constructor(message:string,public outcome?:string,public correlation?:string){super(message);}}
 async function rpc<T>(name:string,args:Record<string,unknown>,signal?:AbortSignal,expectedAccount?:string):Promise<T> {
- const response=await fetch('/api/incidents',{method:'POST',headers:{'Content-Type':'application/json',...(expectedAccount?{'X-Gasilko-Account':expectedAccount}:{})},body:JSON.stringify({name,args}),signal,cache:'no-store'});
- const result=await response.json();if(!response.ok)throw new IncidentError(result.error??'SERVER');return result.data as T;
+ const controller=new AbortController(),abort=()=>controller.abort();signal?.addEventListener('abort',abort,{once:true});if(signal?.aborted)abort();
+ const timer=setTimeout(abort,25000);
+ try{const response=await fetch('/api/incidents',{method:'POST',headers:{'Content-Type':'application/json',...(expectedAccount?{'X-Gasilko-Account':expectedAccount}:{})},body:JSON.stringify({name,args}),signal:controller.signal,cache:'no-store'});
+ const result=await response.json();if(!response.ok)throw new IncidentError(result.error??'SERVER',result.outcome,result.correlation);return result.data as T;
+ }finally{clearTimeout(timer);signal?.removeEventListener('abort',abort);}
 }
 type RequestState={action:Mutation;args:Record<string,unknown>;storageKey:string};
 type Confirmation={training?:boolean;action:Mutation;payload:Record<string,unknown>;incident:string;version:string;org:string;description?:string};

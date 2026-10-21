@@ -13,8 +13,8 @@ export type Definition={
  simulation_defaults:{clock_scale:1|5|10;automatic_execution:false;response_profile:typeof templateProfiles[number]};
 };
 export type Template={id:string;revision:string;builtin:boolean;archived:boolean;version_id:string;version:number;state:'DRAFT'|'PUBLISHED';definition:Definition;event_plan:EventPlan;hazard_plan:HazardPlan};
-export type TemplateRow=Omit<Template,'definition'|'event_plan'|'hazard_plan'>&{title:string;description:string;category:string};
-export type Initialization={state:'WAITING_COMMAND'|'READY';scenario_version:string;incident_version:string;objects:number;units:number;clock_scale:number|null;response_profile:string|null;can_initialize:boolean};
+export type TemplateRow=Omit<Template,'definition'|'event_plan'|'hazard_plan'>&{updated_at?:string;organization_id?:string|null;title:string;description:string;category:string};
+export type Initialization={source_version_id:string;source_title:string;source_version:number;duration_minutes:number;preview:boolean;incident_status:string;simulation_status:string;state:'WAITING_COMMAND'|'READY';scenario_version:string;incident_version:string;objects:number;units:number;clock_scale:number|null;response_profile:string|null;can_initialize:boolean};
 export type TemplateRead=<T>(name:string,args:Record<string,unknown>,signal?:AbortSignal,account?:string)=>Promise<T>;
 export const templateRpcs=['simulation_template_list','simulation_template_read','simulation_template_command','simulation_template_initialization','simulation_template_initialize'] as const;
 export function blankDefinition(title:string):Definition{
