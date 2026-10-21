@@ -6,6 +6,7 @@ import {workspaceText} from '../../lib/incidents/workspaceMessages';
 import {incidentText} from '../../lib/incidents/messages';
 import {mapKinds,type Cop,type CopFeedback,type Geometry,type Position,type MapKind} from '../../lib/incidents/cop';
 import type {CommandAction} from './CommandSection';
+import {TrainingMapLayers} from './TrainingMapLayers';
 import type {CopLayers} from './CopMap';
 import {validPosition} from '../../lib/operational/target';
 import {isUuid} from '../../lib/operational/entity';
@@ -155,7 +156,7 @@ export function IncidentCop({locale,account,org,incidentId,refresh,feedback,disa
    <button disabled={locked} onClick={()=>{setEpoch(n=>n+1);live?.requestRefresh();}}>{t('refresh')}</button>{workspace?.view==='command'&&<IncidentLiveStatus locale={locale}/>}
    {cop&&<>
     <p>{t('status')}: {t(cop.incident.status)} · {t('copRevision')}: {cop.incident.revision}</p>
-    <div className="actions">{(Object.keys(layers) as (keyof CopLayers)[]).map(k=><label key={k}><input type="checkbox" checked={layers[k]} onChange={e=>setLayers(v=>({...v,[k]:e.target.checked}))}/>{t('copLayer_'+k)}</label>)}</div>
+    <TrainingMapLayers locale={locale}/><div className="actions">{(Object.keys(layers) as (keyof CopLayers)[]).map(k=><label key={k}><input type="checkbox" checked={layers[k]} onChange={e=>setLayers(v=>({...v,[k]:e.target.checked}))}/>{t('copLayer_'+k)}</label>)}</div>
     <label><input type="checkbox" checked={background} onChange={e=>setBackground(e.target.checked)}/>{t('workspaceHydrants')}</label>
     <p className="workspace-map-legend">{t('workspaceMarkerLegend')}</p><p className="workspace-map-legend">{t('copTacticalLegend')}</p>
    </>}

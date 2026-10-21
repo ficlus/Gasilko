@@ -1,4 +1,5 @@
 'use client';
+import {workflowText} from '../../lib/operational/workflowMessages';
 import {useState} from 'react';
 import type {Locale} from '../../lib/i18n';
 import {simulationInitialPosition,type SimulationPosition,type SimulationAction} from '../../lib/operational/simulation';
@@ -14,13 +15,14 @@ export function SimulationPanel({locale}:{locale:Locale}){
  if(!s)return sim.error?<WorkspaceSlot name="operational"><p role="alert">{t(sim.error)}</p><button onClick={sim.refresh}>{t('refresh')}</button></WorkspaceSlot>:null;
  const selected=workspace?.selected?.kind==='INCIDENT_UNIT'?workspace.selected.id:local;
  const position=data.positions.find(p=>p.incident_unit_id===selected);
- const locked=sim.busy||sim.pending||!!sim.proposal||!data.can_control||!data.enabled;
+ const locked=s.status==='FINISHED'||sim.busy||sim.pending||!!sim.proposal||!data.can_control||!data.enabled;
  const setup=['DRAFT','PAUSED'].includes(s.status);
  const preview=Array.from({length:count},(_,i)=>simulationInitialPosition(s.seed,s.template,[s.center_longitude,s.center_latitude],s.radius_m,(data.next_ordinal??1)+i));
  const actions:SimulationAction[]=s.status==='DRAFT'?['START','RESET','FINISH']:s.status==='RUNNING'?['PAUSE','RESET','FINISH']:s.status==='PAUSED'?['RESUME','RESET','FINISH']:[];
  return <>
   <WorkspaceSlot name="operational"><WorkspaceSection title={t('title')} open>
    <SimulationBanner locale={locale}/><h3>{s.title}</h3><p>{t(s.template)} · {t(s.status)}</p>
+   {s.status==='FINISHED'&&<p className="admin-notice">{workflowText(locale)('closeStep')}</p>}
    <p>{t('setup')}</p><p>{t('ack')}</p>
    {!data.enabled&&<p role="alert">{t('SIMULATION_DISABLED')}</p>}
    {sim.error&&<p role="alert">{t(sim.error)}</p>}

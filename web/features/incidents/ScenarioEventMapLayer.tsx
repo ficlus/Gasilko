@@ -16,6 +16,7 @@ export function ScenarioEventMapLayer({map}:{map:Map}){
   map.addLayer({id:scenarioEventLayers[3],type:'symbol',source,layout:{'text-field':['concat','SIM · ',['get','title']],'text-size':12,'text-offset':[0,1.6],'text-anchor':'top'},paint:{'text-color':'#633000','text-halo-color':'#fff','text-halo-width':2}});
   return()=>{for(const id of [...scenarioEventLayers].reverse())if(map.getLayer(id))map.removeLayer(id);if(map.getSource(source))map.removeSource(source);};
  },[map]);
+ useEffect(()=>{for(const id of scenarioEventLayers)if(map.getLayer(id))map.setLayoutProperty(id,'visibility',ctx?.visible===false?'none':'visible');},[map,ctx?.visible]);
  useEffect(()=>{
   const features={type:'FeatureCollection' as const,features:(rows??[]).map(a=>({type:'Feature' as const,id:a.id,geometry:a.geometry,properties:{id:a.id,title:a.title}}))};
   const next=JSON.stringify(features);if(bytes.current===next)return;

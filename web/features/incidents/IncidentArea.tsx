@@ -1,5 +1,8 @@
 'use client';
 import {mapMetric} from '../../lib/operational/mapDiagnostics';
+import {SimulationHome} from './SimulationHome';
+import {TrainingLifecycle} from './TrainingLifecycle';
+import {workflowText} from '../../lib/operational/workflowMessages';
 import {SimulationSetup} from './SimulationSetup';
 import {TemplateLibrary} from './TemplateLibrary';
 import {TemplateInitialization} from './TemplateInitialization';
@@ -35,12 +38,14 @@ async function rpc<T>(name:string,args:Record<string,unknown>,signal?:AbortSigna
  const result=await response.json();if(!response.ok)throw new IncidentError(result.error??'SERVER',result.outcome,result.correlation);return result.data as T;
  }finally{clearTimeout(timer);signal?.removeEventListener('abort',abort);}
 }
-type RequestState={action:Mutation;args:Record<string,unknown>;storageKey:string};
+type RequestState={training?:boolean;action:Mutation;args:Record<string,unknown>;storageKey:string};
 type Confirmation={training?:boolean;action:Mutation;payload:Record<string,unknown>;incident:string;version:string;org:string;description?:string};
 const emptyCore:Core={title:'',summary:'',incident_type_id:'',priority:'NORMAL',severity:'UNKNOWN',latitude:'',longitude:'',address:'',unknown_location_reason:''};
 export function IncidentArea({locale,account,destination,initialOrg}:{locale:Locale;account:string;destination?:string;initialOrg?:string}) {
  const baseText=incidentText(locale),simText=simulationText(locale),t=(key:string)=>key==='create_simulation'?simText('new'):(simulationErrors as readonly string[]).includes(key)?simText(key):baseText(key),router=useRouter();
  const requestedTraining=useSearchParams().get('training')==='1';
+ const requestedHome=useSearchParams().get('sim')==='1';
+ const templateStatus=useSearchParams().get('templateStatus')??'';
  const requestedTemplates=useSearchParams().get('templates')==='1';
  const [simulationEnvironment,setSimulationEnvironment]=useState<{enabled:boolean;can_create:boolean}|null>(null),[training,setTraining]=useState(false),[simulationSetup,setSimulationSetup]=useState(defaultSimulationSetup);
  const [entry,setEntry]=useState<Entry|null>(null),[org,setOrg]=useState(initialOrg??''),[rows,setRows]=useState<IncidentRow[]>([]);
@@ -56,7 +61,7 @@ export function IncidentArea({locale,account,destination,initialOrg}:{locale:Loc
  const [taskFeedback,setTaskFeedback]=useState<CopFeedback>({sequence:0,kind:'saved'});
  const [resourceFeedback,setResourceFeedback]=useState<CopFeedback>({sequence:0,kind:'saved'});
  const alive=useRef(true),sending=useRef(false),coreLoaded=useRef(false);
- const isNew=destination==='new',isList=!destination&&!requestedTemplates;
+ const isNew=destination==='new',isList=!destination&&!requestedTemplates&&!requestedHome;
  const url=(id?:string,acting=org)=>`/${locale}/incidents${id?'/'+id:''}${acting?'?org='+encodeURIComponent(acting):''}`;
  const date=(value:string|null|undefined)=>value?new Date(value).toLocaleString(locale==='de'?'de-DE':'sl-SI'): '—';
  const safeError=(e:unknown)=>{
@@ -114,14 +119,22 @@ export function IncidentArea({locale,account,destination,initialOrg}:{locale:Loc
   return()=>ac.abort();
  },[entry,org,destination,filter,page,isList,isNew,refresh]);
 
+ const trainingPendingKey='gasilko.sim.core.pending.'+account+'.'+org;
+ useEffect(()=>{
+  setPending(null);
+  try{const raw=sessionStorage.getItem(trainingPendingKey);if(raw&&raw.length<200000){const r=JSON.parse(raw) as RequestState;if(r.training&&r.action in mutationNames&&r.args.p_acting_organization_id===org&&typeof r.args.p_operation==='string')setPending(r);}}catch{setError('error');}
+ },[trainingPendingKey,org]);
  async function send(request:RequestState) {
+  const wasPending=!!pending;
+  if(request.training){try{const raw=JSON.stringify(request);sessionStorage.setItem(trainingPendingKey,raw);if(sessionStorage.getItem(trainingPendingKey)!==raw)throw new Error();}catch{setError('error');return;}}
+
   if(sending.current)return;sending.current=true;setBusy(true);setError('');setNotice('');setPending(request);
   if(request.action==='add_crew_member'){const payload=request.args.p_payload as {user_id:string;unit_assignment_id:string};setCrewOutcomes(v=>({...v,[payload.unit_assignment_id+':'+payload.user_id]:{state:'pending'}}));}
   try {
    const submitted=performance.now();
    const receipt=await rpc<Receipt>(mutationNames[request.action],request.args,undefined,account);
    if(request.action==='issue_task')mapMetric('task_accept',performance.now()-submitted);
-   try{sessionStorage.removeItem(request.storageKey);}catch{/* Stable in-memory request still covers this session. */}
+   try{sessionStorage.removeItem(request.storageKey);if(request.training)sessionStorage.removeItem(trainingPendingKey);}catch{/* Stable in-memory request still covers this session. */}
    if(!alive.current)return;
    setPending(null);setConfirmation(null);setReason('');setNotice('saved');setEditing(false);
    if((taskMutations as readonly string[]).includes(request.action))setTaskFeedback(v=>({sequence:v.sequence+1,kind:'saved'}));
@@ -139,7 +152,7 @@ export function IncidentArea({locale,account,destination,initialOrg}:{locale:Loc
    if(e instanceof IncidentError&&['NOT_AUTHORIZED','EXPIRED'].includes(e.message)){setTaskFeedback(v=>({sequence:v.sequence+1,kind:'blocked'}));setCopFeedback(v=>({sequence:v.sequence+1,kind:'blocked'}));setResourceFeedback(v=>({sequence:v.sequence+1,kind:'blocked'}));}
    // A domain rejection is final. A transport/server failure is ambiguous and
    // retains the exact operation/payload for retry, never silently rebased.
-   if(e instanceof IncidentError&&e.message!=='SERVER'){
+   if(e instanceof IncidentError&&(request.training?!wasPending&&e.outcome==='REJECTED':e.message!=='SERVER')){
     setPending(null);try{sessionStorage.removeItem(request.storageKey);}catch{/* optional retry key storage */}
     if(e.message==='NOT_AUTHORIZED'||e.message==='EXPIRED'){setDetail(null);setRows([]);setCommandInbox([]);setConfirmation(null);}
    }
@@ -155,7 +168,7 @@ export function IncidentArea({locale,account,destination,initialOrg}:{locale:Loc
    const storageKey=`gasilko.incident.operation.${account}.${hash}`;
    let operation:string=crypto.randomUUID();try{operation=sessionStorage.getItem(storageKey)??operation;sessionStorage.setItem(storageKey,operation);}catch{/* Retain operation in memory. */}
    sending.current=false;if(!alive.current)return;
-   await send({action,args:{...base,p_operation:operation},storageKey});
+   await send({training:action==='create_simulation'||!!detail?.training,action,args:{...base,p_operation:operation},storageKey});
   }catch{sending.current=false;setBusy(false);setError('error');}
  }
  function ask(action:Mutation,payload:Record<string,unknown>={},item?:InboxItem,description?:string) {
@@ -175,6 +188,7 @@ export function IncidentArea({locale,account,destination,initialOrg}:{locale:Loc
  const coreForm=<form onSubmit={submitCore} className="incident-form"><fieldset disabled={loading||busy||!!pending}>
   <legend>{isNew?t('new'):t('edit')}</legend>
   {isNew&&simulationEnvironment?.can_create&&<label><input type="checkbox" checked={training} onChange={e=>setTraining(e.target.checked)}/>{simText('enable')}</label>}
+  {isNew&&training&&<p>{workflowText(locale)('quickHelp')}</p>}
   {isNew&&training&&<SimulationSetup locale={locale} value={simulationSetup} onChange={setSimulationSetup} core={core} onCore={setCore}/>}
 
   <label>{t('name')}<input required maxLength={200} value={core.title} onChange={e=>setCore({...core,title:e.target.value})}/></label>
@@ -191,14 +205,15 @@ export function IncidentArea({locale,account,destination,initialOrg}:{locale:Loc
  if(!sessionValid)return <p role="alert">{t('expired')}</p>;
  const organizationActions=<div className="registry-toolbar"><label>{t('organization')}<select value={org} disabled={loading||busy||!!pending} onChange={e=>router.push(url(destination,e.target.value))}>
    <option value="">{t('select')}</option>{entry?.organizations.map(o=><option value={o.id} key={o.id}>{o.name}</option>)}</select></label>
-   <Link href={url()}>{t('list')}</Link>{simulationEnvironment?.can_create&&<Link href={url()+'&templates=1'}>{templateText(locale)('library')}</Link>}{simulationEnvironment?.can_create&&<Link href={url('new')+'&training=1'}>{simText('new')}</Link>}{entry?.organizations.find(o=>o.id===org)?.can_create&&<Link href={url('new')}>{t('new')}</Link>}
+   <Link href={url()}>{t('list')}</Link>{simulationEnvironment?.enabled&&<Link href={url()+'&sim=1'}>{workflowText(locale)('home')}</Link>}{entry?.organizations.find(o=>o.id===org)?.can_create&&<Link href={url('new')}>{t('new')}</Link>}
    <button disabled={loading||busy||!!pending} onClick={reload}>{t('refresh')}</button></div>;
  return <div className="registry incident-area">
   {!detail&&organizationActions}
   {(error||notice||loading)&&<div className="incident-feedback">{error&&<p role="alert">{t(error)}</p>}{notice&&<p role="status">{t(notice)}</p>}{loading&&<p role="status">{t('loading')}</p>}</div>}
   {pending&&<section className="admin-notice"><p>{t('pending')}</p><button disabled={busy} onClick={()=>void send(pending)}>{t('retry')}</button></section>}
   {entry?.organizations.length===0&&<p>{t('noOrg')}</p>}
-  {requestedTemplates&&!destination&&entry&&org&&<TemplateLibrary key={account+'/'+org} locale={locale} account={account} org={org} organizationName={entry.organizations.find(o=>o.id===org)?.name??org} types={entry.types} read={rpc}/>}
+  {requestedHome&&!destination&&entry&&org&&simulationEnvironment?.enabled&&<SimulationHome key={account+'/'+org} locale={locale} account={account} org={org} canCreate={simulationEnvironment.can_create} read={rpc}/>}
+  {requestedTemplates&&!destination&&entry&&org&&<TemplateLibrary key={account+'/'+org} locale={locale} account={account} org={org} organizationName={entry.organizations.find(o=>o.id===org)?.name??org} types={entry.types} read={rpc} initialStatus={templateStatus}/>}
   {isList&&entry&&<>
    {simulationEnvironment?.enabled&&org&&<SimulationOverview key={account+org} locale={locale} account={account} org={org} read={rpc}/>}
    {commandInbox.length>0&&<section className="admin-card"><h2>{t('commandInbox')}</h2><p>{t('commandInboxLimit')}</p><CommandRequests locale={locale} items={commandInbox} disabled={loading||busy||!!pending} onAction={ask}/></section>}
@@ -226,14 +241,15 @@ export function IncidentArea({locale,account,destination,initialOrg}:{locale:Loc
     {['CLOSED','CANCELLED'].includes(detail.status)?<p>{t('terminal')}</p>:!Object.values(detail.actions).some(Boolean)&&<p>{t('readOnly')}</p>}
    </header>}
    operations={<>
+    {detail.training&&<TrainingLifecycle locale={locale} incident={detail} disabled={loading||busy||!!pending} onAction={action=>ask(action)}/>}
     {detail.training&&<TemplateInitialization key={account+'/'+org+'/'+detail.id} locale={locale} account={account} org={org} incident={detail.id} refresh={refresh} read={rpc} onRefresh={reload}/>}
-    <WorkspaceSection title={t('commandTree')}>   {detail.status!=='DRAFT'&&<CommandSection key={`${account}/${org}/${detail.id}`} locale={locale} account={account} org={org} incident={detail} disabled={loading||busy||!!pending} read={rpc} onAction={ask}/>}
+    <div id="sim-command"><WorkspaceSection title={t('commandTree')}>   {detail.status!=='DRAFT'&&<CommandSection key={`${account}/${org}/${detail.id}`} locale={locale} account={account} org={org} incident={detail} disabled={loading||busy||!!pending} read={rpc} onAction={ask}/>}
    <section className="admin-card"><h2>{t('commander')}</h2><p>{detail.commander?.name??t('noCommander')}</p>
     {detail.commander&&!detail.commander.valid&&!['CLOSED','CANCELLED'].includes(detail.status)&&<p role="alert">{t('invalidCommander')}</p>}
     {detail.nomination&&<p>{t('nomination')}: {detail.nomination.name} · {t(detail.nomination.status)} · {date(detail.nomination.expires_at)}</p>}
     {detail.actions.nominate&&<><p>{t('consentNotice')}</p><CandidatePicker key={`member/${detail.id}/${detail.version}`} locale={locale} org={org} incident={detail.id} kind="MEMBER" disabled={loading||busy||!!pending} onChoose={id=>ask('nominate',{user_id:id})}/></>}
    </section>
-</WorkspaceSection>
+</WorkspaceSection></div>
     <WorkspaceSection title={t('participants')}>   <section className="admin-card"><h2>{t('participants')}</h2>{detail.participants.length<=1&&<p>{t('noParticipant')}</p>}
     {detail.participants.map(p=><article className="web-row" key={p.id}><strong>{p.name}</strong><p>{t(p.status)} · {t(p.agency_role)}</p>{p.end_reason&&<p>{p.end_reason}</p>}
      <div className="actions">{p.can_consent_release&&<button disabled={loading||busy||!!pending} onClick={()=>ask('consent_release',{participant_id:p.id})}>{t('consent_release')}</button>}

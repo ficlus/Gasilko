@@ -39,7 +39,7 @@ export function SimulationMapLayer({map,locale}:{map:Map;locale:Locale}){
  const sourceText=useRef('');
  const stale=!!sim?.sampleStale||!!live&&['STALE','OFFLINE','ACCESS_LOST'].includes(live.status);
  const oldest=positions?.length?Math.min(...positions.map(p=>Date.parse(p.observed_at))):null;
- const visible=!!sim?.data?.enabled&&!!s&&s.status!=='FINISHED'&&sim?.sample?.status!=='FINISHED'&&!rts.blocked&&live?.status!=='ACCESS_LOST';
+ const visible=!!sim?.data?.enabled&&!!s&&sim?.unitsVisible!==false&&!rts.blocked&&live?.status!=='ACCESS_LOST';
  useEffect(()=>{
   if(!visible)return;
   const before=map.getStyle().layers.find(l=>l.id.startsWith('rts-')||l.id.startsWith('cop-selection'))?.id;
@@ -50,9 +50,9 @@ export function SimulationMapLayer({map,locale}:{map:Map;locale:Locale}){
   return()=>{if(!map.getStyle())return;for(const id of ['simulation-units-label','simulation-units-point'])if(map.getLayer(id))map.removeLayer(id);if(map.getSource('simulation-units'))map.removeSource('simulation-units');};
  },[map,visible,s?.id]);
  useEffect(()=>{
-  rts.setHasPositionLayers(visible&&!!positions?.length);
+  rts.setHasPositionLayers(visible&&s?.status!=='FINISHED'&&!!positions?.length);
   return()=>rts.setHasPositionLayers(false);
- },[visible,positions?.length,rts.setHasPositionLayers]);
+ },[visible,s?.status,positions?.length,rts.setHasPositionLayers]);
  useEffect(()=>{
   if(!visible||!s)return;
   let frame=0,lastFrame=0;

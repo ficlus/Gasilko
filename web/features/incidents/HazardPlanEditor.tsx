@@ -52,7 +52,7 @@ export function HazardPlanEditor({locale,definition,events,plan,onChange,disable
   ...m.zones.map(z=>({id:z.id,kind:'HAZARD' as const,label:t(z.kind),description:'',geometry:{type:'Polygon' as const,coordinates:[Array.from({length:17},(_,i)=>offsetPosition(z.position,z.radius_m,i*360/16))]}})),
   ...m.blocked.map(b=>{const r=Math.PI/180,center:Position=[m.center[0]+b[0]*m.cell_m/6371008.8/Math.cos(m.center[1]*r)/r,m.center[1]+b[1]*m.cell_m/6371008.8/r];return {id:'blocked:'+b.join(':'),kind:'NOTE' as const,label:t('blocked'),description:'',geometry:{type:'Point' as const,coordinates:center}};})
  ]}:definition;
- return <details className="admin-card"><summary>{t('title')} ({plan.models.length}/4)</summary><p>{t('disclaimer')}</p><p>{t('limits')}</p>
+ return <details className="admin-card" open><p>{workflowText(locale)('layerHelp')}</p><p>{workflowText(locale)('referenceWarning')}</p><summary>{t('title')} ({plan.models.length}/4)</summary><p>{t('disclaimer')}</p><p>{t('limits')}</p>
   <div className="actions">{plan.models.map(model=><button type="button" key={model.id} aria-pressed={selected===model.id} onClick={()=>{setSelected(model.id);setPlacing('');}}>{model.title}</button>)}
    <button type="button" disabled={disabled||plan.models.length>=4} onClick={()=>{const value=newHazard(definition.world.center??[14.5,46.1],t('STRUCTURE_FIRE'));onChange({...plan,models:[...plan.models,value]});setSelected(value.id);}}>{t('add')}</button></div>
   {m&&<>
