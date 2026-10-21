@@ -1,0 +1,1387 @@
+# GASILKO — M14.6C.2 SIM Workflow Recovery, Consolidation & Operational UX
+
+Repository: https://github.com/ficlus/Gasilko
+
+Implement **M14.6C.2 — Complete Simulation Workflow Recovery, Scenario Management and Operational UX Consolidation**.
+
+Base on current main AFTER merged PR #77 — M14.6C Hazard Models.
+
+Create ONE PR only. Do not merge.
+
+This is an implementation-only milestone.
+
+## 0. Critical context
+
+Gasilko has a simulation/training environment built incrementally through M14.6A, M14.6B, M14.6B1 and M14.6C.
+
+The current implementation contains:
+
+- simulation scenarios;
+- built-in quick simulation presets;
+- saved template/scenario library;
+- organization-specific drafts;
+- published immutable versions;
+- template creation/copy/revision;
+- configurable initial objects;
+- virtual units;
+- event plans;
+- hazard plans;
+- fire/smoke simulations;
+- deterministic scenario clock;
+- simulator runner;
+- automated SIM movement;
+- command/map workspace;
+- pause/resume/reset/finish controls;
+- simulation initialization;
+- protected real-vs-SIM data boundaries.
+
+Many individual features exist, but the user experience and recovery mechanisms are fragmented.
+
+This milestone must connect existing implementation into one predictable workflow.
+
+Do not rewrite the entire simulation domain.
+
+Do not create a new simulator engine.
+
+## 1. Confirmed user-facing defect
+
+The user encountered the following issue:
+
+1. Opened SIM scenario library.
+2. Copied an existing wildfire scenario into a DRAFT.
+3. Edited the scenario.
+4. Attempted "Save Draft".
+5. Received a generic failure and an unconfirmed-operation warning.
+6. Could no longer open any scenarios in that browser tab.
+7. Restarted the Next.js server.
+8. The original tab remained blocked.
+9. Opened a fresh browser tab.
+10. Scenarios became accessible again.
+
+Source investigation identified:
+
+`web/features/incidents/useTemplateMutation.ts`
+
+stores pending requests in `sessionStorage` under an account/organization/surface-scoped key.
+
+`web/features/incidents/TemplateLibrary.tsx`
+
+uses:
+
+`busy = loading || mutation.busy || !!mutation.pending`
+
+and its normal scenario `open()` method checks `busy`.
+
+Consequently, a single unresolved write can block all scenario reading/opening in the current tab indefinitely.
+
+This is a confirmed UX/state-management defect.
+
+The original server-side reason for the SAVE failure has NOT been conclusively identified.
+
+Do not assume the underlying failure was necessarily a missing migration, invalid data, authorization or network outage.
+
+Investigate the current implementation and correct the recovery model without sacrificing idempotency.
+
+## 2. Inspect relevant current source
+
+Inspect the actual current files and contracts, including:
+
+- `TemplateLibrary.tsx`
+- `useTemplateMutation.ts`
+- `TemplateEditor.tsx`
+- `TemplateMap.tsx`
+- `EventPlanEditor.tsx`
+- `HazardPlanEditor.tsx`
+- `TemplateInitialization.tsx`
+- `SimulationSetup.tsx`
+- `SimulationOverview.tsx`
+- `SimulationProvider.tsx`
+- `IncidentArea.tsx`
+- relevant IncidentWorkspace/SIM controls
+- existing incident API bridge
+- simulation template/event/hazard models and localization
+- M14.6A/B/B1/C migrations
+- existing operation receipts, locks and permissions
+- simulation lifecycle and template provenance
+- current simulator runner integration
+
+Check the source-level relationship between:
+
+`simulation_template_command`
+
+`simulation_template_read`
+
+`simulation_template_list`
+
+`simulation_template_initialization`
+
+`simulation_template_initialize`
+
+`simulation_command`
+
+`simulation_read`
+
+`simulation_overview`
+
+and existing incident lifecycle operations.
+
+Do not invent replacement APIs before inspecting what already exists.
+
+Do not inspect unrelated Android, Room, Gradle, Oracle or Caddy modules.
+
+Do not modify local KAPT/Gradle configuration.
+
+## 3. Overall goal
+
+Deliver a coherent SIM experience:
+
+```text
+SIM HOME
+   |
+   +-- Existing training exercises
+   |
+   +-- Scenario Library
+   |      |
+   |      +-- Built-in templates
+   |      +-- Organization templates
+   |      +-- Drafts
+   |      +-- Published versions
+   |
+   +-- Create / Edit Scenario
+   |      |
+   |      +-- Basic information
+   |      +-- Map and initial positions
+   |      +-- Virtual units
+   |      +-- Objects
+   |      +-- Fire / smoke / hazards
+   |      +-- Dynamic events
+   |      +-- Simulation settings
+   |      +-- Review
+   |
+   +-- Save Draft
+   |
+   +-- Publish / Start Preview
+   |
+   +-- Create Training Incident
+   |
+   +-- Command and Activation
+   |
+   +-- Initialize Scenario
+   |
+   +-- Start Simulation
+   |
+   +-- Execute Training
+   |
+   +-- Pause / Resume / Reset
+   |
+   +-- Finish Simulation
+   |
+   +-- Close Training Incident
+   |
+   +-- Historical Read-Only View
+```
+
+This is conceptual UX organization.
+
+Preserve the existing authoritative backend state machines and permissions.
+
+Do not silently merge distinct domain transitions.
+
+---
+
+# PART A — CRITICAL SAVE/RETRY RECOVERY
+
+## 4. Correct global UI blocking
+
+A pending template mutation must not indefinitely prevent unrelated READ operations.
+
+Separate:
+
+- read loading state;
+- editor loading state;
+- active mutation execution;
+- unresolved mutation;
+- current template write lock;
+- unrelated template navigation;
+- unsaved local changes.
+
+Do not use one broad boolean to disable the entire library.
+
+While a template SAVE is unresolved:
+
+- Allow viewing the library.
+- Allow reading existing templates when safe.
+- Keep the unresolved operation visible.
+- Preserve the original operation UUID and payload.
+- Prevent incompatible writes to the affected template.
+- Prevent accidental duplicate CREATE, COPY or START.
+- Do not silently discard unsaved editor data.
+- Do not allow a second SAVE with different data against the same unresolved operation.
+
+Browsing must remain available.
+
+Actual mutation authority remains server-side.
+
+## 5. Explicit mutation states
+
+Implement an explicit, reusable mutation state model.
+
+Conceptually:
+
+```typescript
+type MutationState =
+  | "IDLE"
+  | "SENDING"
+  | "CONFIRMED"
+  | "DEFINITIVELY_REJECTED"
+  | "OUTCOME_UNKNOWN"
+  | "RECOVERING";
+```
+
+Distinguish:
+
+- confirmed database success;
+- confirmed domain rejection;
+- ambiguous response/timeout;
+- unavailable server;
+- account authorization loss;
+- stale revision;
+- unresolved previous operation.
+
+A generic SERVER error is not sufficient evidence that an operation was never committed.
+
+Do not treat all errors as safe to retry with a new UUID.
+
+Do not treat every HTTP failure as an ambiguous committed operation if authoritative evidence proves a definitive rejection.
+
+## 6. Retry must remain idempotent
+
+Preserve the original:
+
+- operation UUID;
+- actor/account;
+- organization;
+- template;
+- action;
+- expected version;
+- exact payload.
+
+"Retry same action" must reuse the original immutable request.
+
+Never regenerate operation UUID on an exact retry.
+
+Never rebase the original request silently onto a newer template revision.
+
+Never allow a retry to unexpectedly create a second exercise.
+
+Preserve current durable database operation receipts.
+
+## 7. Operation reconciliation
+
+Implement a safe server-authoritative recovery process.
+
+Prefer existing receipt infrastructure if sufficient.
+
+If necessary, add a narrowly scoped read-only operation-resolution RPC that determines whether a previous operation was durably recorded.
+
+It must:
+
+- authenticate the current user;
+- verify exact organization authority;
+- check the operation UUID;
+- bind it to the expected actor/org/action/request identity;
+- return a sanitized result;
+- never expose arbitrary receipts or instructor-only data;
+- never disclose credentials or raw internal SQL;
+- not report "not committed" merely because the request was not immediately found while it may still be in flight.
+
+Possible resolution:
+
+- confirmed applied;
+- confirmed rejected with safe reason;
+- unresolved/unknown.
+
+A receipt lookup must not claim definitive failure based only on absence of a receipt.
+
+If resolution succeeds:
+
+- clear the obsolete pending request;
+- refresh authoritative template data;
+- restore the correct editor state;
+- show a useful success message.
+
+If outcome remains ambiguous:
+
+- keep original request available;
+- allow exact idempotent retry;
+- allow safe read-only navigation;
+- provide a clear explanation.
+
+If the operation cannot safely be discarded, do not implement a dangerous generic "Clear Pending" button.
+
+## 8. Recover editor state
+
+Preserve local unsaved template data separately from the immutable pending request.
+
+Protect:
+
+- template definition;
+- virtual unit positions;
+- initial objects;
+- event plan;
+- hazard plan.
+
+A user should not lose hours of scenario editing because one SAVE response failed.
+
+Use bounded, account/org/template-scoped local draft recovery where appropriate.
+
+Do not store credentials.
+
+Do not allow account switching to expose another person's private instructor content.
+
+On return to the same editor:
+
+- identify recoverable unsaved changes;
+- show recovery/compare options;
+- never silently overwrite newer authoritative data;
+- handle version conflicts explicitly.
+
+Avoid uncontrolled localStorage persistence of sensitive operational information.
+
+## 9. Fix actual SAVE failure diagnostics
+
+Inspect the current failure path through:
+
+`POST /api/incidents`
+
+and the Supabase RPC error mapping.
+
+Distinguish:
+
+- unsupported RPC argument/version;
+- invalid template;
+- invalid event plan;
+- invalid hazard plan;
+- stale revision;
+- missing permissions;
+- request size limit;
+- definite SQL rejection;
+- transport ambiguity.
+
+Only expose allowlisted safe error codes to normal users.
+
+Preserve detailed database diagnostics server-side where permitted, with safe correlation IDs.
+
+Do not log secrets, authentication headers, full private scenario definitions or sensitive payloads unnecessarily.
+
+Use SI/DE messages that explain the problem and recovery action.
+
+Check compatibility with:
+
+`20261019150000_simulation_hazard_models.sql`
+
+including correct `hazard_plan`/`event_plan` SAVE behavior.
+
+Do not edit previously applied migrations.
+
+If a real SQL defect is found, use a forward-only migration.
+
+---
+
+# PART B — UNIFIED SIM NAVIGATION
+
+## 10. Consolidate SIM entry points
+
+The current application offers separate paths:
+
+A) generic new SIM exercise with fixed presets;
+
+B) Scenario Library with versioned custom/built-in scenarios.
+
+Both must remain supported, but their purpose must become obvious.
+
+Build a clear SIM entry/workspace:
+
+**SIM — Usposabljanje**
+
+Main actions:
+
+- New quick exercise
+- New exercise from scenario
+- Scenario library
+- My drafts
+- Active exercises
+- Finished exercises
+
+The experience should not force users to guess which route supports fire and smoke models.
+
+## 11. Clearly distinguish quick vs scenario-based exercise
+
+Quick exercise:
+
+- existing four basic presets;
+- seed;
+- initial area;
+- immediate standard workflow;
+- does not claim to contain a configurable hazard plan automatically.
+
+Scenario-based exercise:
+
+- versioned template;
+- configured units;
+- initial objects;
+- events;
+- hazard plan;
+- wind/smoke/fire settings;
+- scenario provenance.
+
+Do not silently convert quick fixture data into a published template.
+
+Do not automatically add fire simply because an incident type is STRUCTURE_FIRE.
+
+Show the user which creation mode is selected.
+
+Avoid two nearly identical "Create Exercise" actions with unexplained differences.
+
+## 12. Preserve backwards compatibility
+
+Existing deep links and URLs must continue working.
+
+Preserve:
+
+- existing quick SIM scenarios;
+- existing drafts;
+- published templates;
+- archived templates;
+- previously started exercises;
+- existing running simulations;
+- historical incident references.
+
+Do not duplicate existing templates through migration.
+
+Do not physically delete duplicated-looking drafts.
+
+Templates with identical titles are distinct records unless their canonical IDs match.
+
+Allow authorized archive/cleanup using existing lifecycle semantics.
+
+---
+
+# PART C — SCENARIO EDITOR UX
+
+## 13. Create a cohesive editing workspace
+
+Current scenario editing combines multiple separate panels and maps.
+
+Restructure the UI into a clear editor with sections:
+
+1. Overview
+2. Area and map
+3. Units and objects
+4. Fire / smoke / hazards
+5. Dynamic events
+6. Simulation defaults
+7. Review and save
+
+The user must understand which part they are editing.
+
+Avoid a single huge vertical form containing every editor and every map.
+
+Prefer one primary scenario map with context-sensitive edit tools.
+
+Reuse existing MapLibre and TemplateMap capabilities.
+
+Do not create another map engine.
+
+Business editing logic may remain in specialized components, but composition should be unified.
+
+## 14. Shared map context
+
+The scenario map should display:
+
+- scenario center;
+- incident origin;
+- initial units;
+- initial objects;
+- fire origins;
+- hazard model extent;
+- initial smoke/fire preview where supported;
+- dynamic event locations.
+
+Distinguish by layer and styling.
+
+Selecting a unit, event or hazard should focus the map and open the appropriate inspector.
+
+Selecting an object on the map should identify its editing section.
+
+Preserve proper WGS84 longitude/latitude semantics.
+
+No fake real-world telemetry.
+
+## 15. Hazard model UX
+
+Make creation of an initial fire intuitive.
+
+Example:
+
+Choose "Fire in building".
+
+Then:
+
+1. Name the fire model.
+2. Choose its center/ignition point.
+3. Select initial ignition state.
+4. Set visibility.
+5. Configure permitted wind parameters.
+6. Configure spread/fuel/moisture using existing bounded model.
+7. Review.
+8. Save.
+
+Similarly for wildfire.
+
+Explicitly show whether the model is:
+
+- disabled;
+- enabled but not ignited;
+- hidden from participants;
+- visible initially;
+- revealed later by an event.
+
+Explain that enabling map layers does not create a fire model.
+
+If no visible model exists, the UI should explain WHY.
+
+Do not change fire/smoke physics in this milestone.
+
+Do not implement M14.6D suppression or water consumption.
+
+## 16. Dynamic events
+
+Reuse existing M14.6B event plans.
+
+Provide clear event timeline editing.
+
+Show:
+
+- trigger mode;
+- simulated time;
+- dependent event;
+- visibility;
+- event effect;
+- target object/model;
+- current validity.
+
+Warn about broken references.
+
+Avoid deleting a referenced object/event without a visible warning.
+
+Keep event plans bounded to existing authoritative limits.
+
+## 17. Draft editing
+
+Make dirty/saved state reliable.
+
+Use explicit indicators:
+
+- Unsaved changes
+- Saving
+- Saved
+- Conflict
+- Save outcome unknown
+
+Do not show "Saved" if the request merely left the browser.
+
+Never silently discard `event_plan` or `hazard_plan`.
+
+Preserve DRAFT revision concurrency.
+
+If another editor modifies the same template:
+
+- show conflict;
+- preserve local draft;
+- offer reload/compare;
+- require explicit review before retry.
+
+No last-write-wins.
+
+## 18. Preview mode
+
+Preview must not mutate the database.
+
+Built-in/published templates remain immutable.
+
+Preview should display:
+
+- title;
+- scenario category;
+- initial units;
+- objects;
+- enabled hazard models;
+- planned events;
+- center/area;
+- duration;
+- initialization requirements.
+
+No simulation runner activity should be triggered by simply previewing a template.
+
+---
+
+# PART D — PUBLISHING AND EXERCISE CREATION
+
+## 19. Consistent template lifecycle
+
+Preserve current semantics:
+
+- CREATE
+- COPY
+- REVISE
+- SAVE
+- PUBLISH
+- ARCHIVE
+- START
+
+Published versions remain immutable.
+
+Do not rewrite past exercises when a template changes.
+
+Keep source template version provenance.
+
+Use existing IDs and version checks.
+
+## 20. Clear preflight validation
+
+Before Publish or Create Exercise, show an actionable readiness summary.
+
+Check existing authoritative requirements:
+
+- required metadata;
+- scenario location;
+- configured initial objects;
+- units and positions;
+- event-plan validity;
+- hazard-plan validity;
+- broken references;
+- existing limits;
+- authorized organization;
+- valid version/state.
+
+Show invalid sections and link directly to the relevant editor.
+
+Do not use one generic "invalid scenario" message if the specific issue can be safely identified.
+
+Server validation remains authoritative.
+
+## 21. Create exercise from scenario
+
+Provide a single clear action:
+
+**Create Training Exercise**
+
+The confirmation must include:
+
+- selected template;
+- exact immutable source version;
+- owning organization;
+- incident location;
+- initial units;
+- objects;
+- fire/hazard model count;
+- event count;
+- required setup steps.
+
+Reuse `simulation_template_command` with the existing START semantics.
+
+Do not use browser-created incident records or independent raw inserts.
+
+If the START response is ambiguous:
+
+- preserve operation UUID;
+- reconcile/retry safely;
+- do not create another exercise automatically.
+
+After confirmed success:
+
+Navigate to the created training incident.
+
+## 22. Draft previews
+
+Preserve the existing ability to create a separate preview exercise from a DRAFT where the backend permits it.
+
+A preview exercise must be clearly labeled.
+
+Do not automatically publish the template.
+
+Do not mutate the source DRAFT merely because an exercise was created.
+
+## 23. Initialization workflow
+
+Scenario-based training incidents currently require additional authoritative setup.
+
+Preserve the existing sequence:
+
+- training incident created;
+- commander/consent setup;
+- incident activation;
+- template initialization;
+- SIM objects and virtual units prepared;
+- simulation ready to start.
+
+Make this visible as a step-by-step readiness checklist.
+
+Show completed steps and the next authorized action.
+
+Explain disabled actions.
+
+Provide direct links/focus to the existing relevant controls.
+
+Do NOT bypass:
+
+- command hierarchy;
+- consent;
+- incident activation;
+- resource/position guards;
+- existing role permissions;
+- initialization idempotency.
+
+Do not silently initialize before prerequisites are satisfied.
+
+## 24. Initialization failure recovery
+
+If initialization fails:
+
+- preserve the original operation;
+- avoid partial committed child objects;
+- provide safe exact retry;
+- distinguish a confirmed conflict from ambiguous response;
+- refresh authoritative initialization status.
+
+Existing atomic database behavior must remain authoritative.
+
+Do not recreate incident units merely because an HTTP response was lost.
+
+Do not allow two successful initialization passes.
+
+---
+
+# PART E — RUNNING SIMULATIONS
+
+## 25. Consolidated training controls
+
+For an active SIM, present controls in one coherent panel:
+
+- Start
+- Pause
+- Resume
+- Reset
+- Finish
+
+Display only valid actions for the current authoritative scenario status.
+
+Clearly distinguish:
+
+- simulation status;
+- incident status;
+- initialization status.
+
+Do not label an active incident as FINISHED just because the simulator has stopped.
+
+Do not claim the simulator is running solely because the incident is ACTIVE.
+
+## 26. Operational status summary
+
+Display a compact summary:
+
+- exercise title;
+- scenario source/version;
+- current SIM status;
+- simulated time;
+- scenario clock multiplier;
+- unit count;
+- units moving;
+- active navigation jobs;
+- enabled hazard models;
+- active/revealed fire models;
+- pending events;
+- last successful refresh;
+- runner/sample freshness where available.
+
+Use bounded existing read APIs.
+
+Avoid creating a massive new dashboard RPC unless required.
+
+## 27. Preserve existing live architecture
+
+Continue using existing:
+
+- `incident-simulation-runner`;
+- existing Cron;
+- H1 navigation execution;
+- B events;
+- B1 fast samples;
+- C hazard models;
+- MapLibre visualization.
+
+Do NOT add another scheduler.
+
+Do NOT create a browser-side simulation physics engine.
+
+Do NOT regenerate fabricated GPS positions.
+
+Do NOT implement new AI behavior.
+
+## 28. Map/readability improvements
+
+The SIM command map should have clear layer groups:
+
+- Units
+- Routes
+- Hydrants
+- Tactical objects
+- Fire
+- Smoke
+- Hazard zones
+- Dynamic events
+
+Show clear explanations when a layer has no data.
+
+Example:
+
+"Smoke is enabled for display, but this exercise has no visible active smoke model."
+
+Do not display a generic empty message when a more precise safe explanation is available.
+
+Keep default map layout compact.
+
+Preserve:
+
+- unit overlap chooser;
+- route visualizations;
+- selection;
+- command map controls;
+- right-button pan/interaction fixes;
+- B1 interpolation behavior.
+
+---
+
+# PART F — FINISH AND CLOSE WITHOUT BLOCKING
+
+## 29. SIM finishing workflow
+
+The user must be able to complete a training exercise from beginning to end.
+
+Implement an explicit completion flow using the current authoritative `FINISH` operation.
+
+From RUNNING or PAUSED state, where allowed:
+
+1. User selects Finish Simulation.
+2. Show confirmation.
+3. Show current exercise summary.
+4. Highlight remaining activities, if relevant.
+5. Explicitly confirm.
+6. Execute the existing FINISH mutation.
+7. Preserve the exact operation UUID for ambiguous retry.
+8. Refresh authoritative scenario status.
+9. Display FINISHED.
+
+Do not silently mark incomplete tasks as completed.
+
+Do not fabricate acknowledgements or results.
+
+Do not rely on local UI state to determine success.
+
+## 30. After FINISH
+
+A finished simulation must:
+
+- stop further simulated progression;
+- stop inappropriate fast polling;
+- disable SIM movement/control mutations;
+- preserve historical positions/events;
+- keep past operations visible;
+- retain task and incident history;
+- permit authorized read-only review.
+
+Where existing business rules require additional closure of the incident, provide a clear next action.
+
+Example:
+
+**Simulation finished → Close training incident**
+
+Do not silently equate SIM FINISH with incident CLOSED.
+
+Do not automatically close a real incident.
+
+## 31. Incident closure
+
+Inspect current incident lifecycle.
+
+Make the training path to closure discoverable.
+
+If closure requires a reason, preserve that rule.
+
+If prerequisite tasks/roles/assignments block closure:
+
+- show the authoritative blocking condition;
+- show how to resolve it;
+- do not invent bypass permissions.
+
+A user must not become permanently trapped in an ACTIVE training incident simply because the SIM clock is FINISHED.
+
+If existing backend guards make legitimate closure impossible, implement the smallest correct forward-only domain fix while retaining audit, concurrency and authorization.
+
+Do not weaken closure guards for REAL incidents.
+
+## 32. Early exit, cancellation and recovery
+
+Handle legitimate cases:
+
+- never started;
+- initialized but not running;
+- running;
+- paused;
+- finished;
+- terminal incident.
+
+Provide valid Cancel/Close/Finish pathways according to existing state machines.
+
+Avoid creating permanent unusable draft exercises.
+
+Do not physically delete historical SIM incidents.
+
+## 33. Historical exercise access
+
+Finished/closed training exercises remain accessible.
+
+Display:
+
+- original template/version;
+- exercise timeline;
+- initial configuration summary;
+- major events;
+- hazard state/history;
+- resulting unit states;
+- final SIM time;
+- finish status;
+- incident closure status.
+
+Do not implement full M14.7 replay or M14.8 after-action analytics in this PR.
+
+Only prepare their UI entry points where already supported.
+
+---
+
+# PART G — REMOVE DUPLICATE UX, NOT DOMAIN RULES
+
+## 34. Eliminate duplicated user journeys
+
+Identify and consolidate redundant UI flows such as:
+
+- two confusing exercise-creation screens;
+- duplicated save/retry warnings;
+- separate scenario navigation states;
+- redundant scenario settings presentations;
+- repeated maps;
+- repeated training-control explanations;
+- redundant creation buttons.
+
+Do not eliminate legitimate differences between quick simulation and versioned templates.
+
+Do not merge separate authoritative domain state machines.
+
+## 35. Shared components
+
+Extract focused reusable UI/hooks where useful:
+
+- SIM operation recovery status
+- Scenario lifecycle actions
+- Scenario readiness summary
+- Scenario editor navigation
+- SIM status badge
+- Training lifecycle checklist
+- Simulation control summary
+- Confirmation/retry components
+
+Avoid creating one oversized `SimulationEverything.tsx`.
+
+Prefer small domain-specific components and shared presentation adapters.
+
+Do not rewrite working database/business implementations merely for visual consolidation.
+
+## 36. Duplicate scenario cards
+
+The library may contain legitimately distinct drafts with identical titles.
+
+Do not deduplicate by title.
+
+Display:
+
+- source category;
+- owner/source;
+- draft/published status;
+- version;
+- updated timestamp;
+- distinction between built-in and organization-owned;
+- clear archive action where authorized.
+
+Allow proper filtering for:
+
+- Built-in
+- My organization
+- Draft
+- Published
+- Archived
+
+Do not destroy existing drafts.
+
+---
+
+# PART H — SECURITY AND DOMAIN INVARIANTS
+
+## 37. Strict REAL vs SIM separation
+
+Every simulation must remain training-only.
+
+Never allow:
+
+- SIM position to become real GPS;
+- SIM incident to trigger real dispatch;
+- automatic real push alarm;
+- SIM unit identity to become real personnel identity;
+- simulation hazard state to overwrite live incident data;
+- fake inspections or hydrant status changes.
+
+Preserve all existing TRAINING/SIM marking.
+
+## 38. Authorization
+
+Organization ADMIN/MANAGER does not automatically gain incident command authority.
+
+Maintain existing:
+
+- exact organization permissions;
+- instructor permissions;
+- command/consent;
+- participant visibility;
+- private hazard model visibility;
+- event hidden/reveal semantics.
+
+Do not expose instructor-only scenario details to unauthorized participants.
+
+A failed save must not cause the UI to ignore revoked access.
+
+All mutations remain server authoritative.
+
+## 39. Database and audit
+
+Prefer reusing existing migrations and RPCs.
+
+Only introduce forward-only migrations when genuinely necessary.
+
+Preserve:
+
+- operation UUID;
+- immutable receipts;
+- optimistic concurrency;
+- append-only audit;
+- template version provenance;
+- safe retries;
+- scenario history;
+- simulation model privacy.
+
+Do not modify already-applied historical migrations.
+
+No destructive rewrite.
+
+No database truncation.
+
+No deletion of user-created exercises to "clean up duplicates".
+
+## 40. Operational safety
+
+Do not bypass validation just to make the UI work.
+
+Do not auto-publish drafts.
+
+Do not auto-start simulations.
+
+Do not auto-consent on behalf of commanders.
+
+Do not create new incident roles to simplify exercise creation.
+
+Do not silently mark incomplete real or simulated activities as completed.
+
+Do not change M14.6C fire/spread/smoke physics.
+
+Do not implement M14.6D water/action effects.
+
+---
+
+# PART I — ERROR HANDLING AND LOCALIZATION
+
+## 41. Better user errors
+
+Support meaningful SI/DE messages for:
+
+- saved;
+- still saving;
+- unsaved changes;
+- ambiguous response;
+- retry;
+- recovery in progress;
+- confirmed rejected operation;
+- server temporarily unavailable;
+- stale version;
+- invalid hazard plan;
+- invalid event plan;
+- scenario not ready;
+- setup prerequisites missing;
+- role/authority missing;
+- scenario already started;
+- scenario already finished;
+- invalid lifecycle transition;
+- incident closure prerequisites missing.
+
+No raw stack traces to browser.
+
+No secrets in logs.
+
+Do not use misleading success messages.
+
+## 42. State consistency
+
+Handle:
+
+- browser refresh;
+- new tab;
+- closed/reopened editor;
+- same template changed in another tab;
+- organization switch;
+- account switch;
+- session revocation;
+- lost HTTP response;
+- temporary network failure;
+- server restart;
+- migration/schema version mismatch;
+- interrupted initialization;
+- lost FINISH response.
+
+Avoid infinite loading/busy states.
+
+Use authoritative refetch after confirmed mutations.
+
+Do not overwrite unsaved editor drafts on background refresh.
+
+---
+
+# PART J — MANUAL ACCEPTANCE TARGETS
+
+## 43. Acceptance checklist
+
+Implement the system so that the user can manually perform all these checks later.
+
+Do NOT execute them yourself.
+
+### Library and drafts
+
+1. Open the scenario library.
+2. Open a built-in template.
+3. Copy it.
+4. Edit the draft.
+5. Change title.
+6. Move a unit on the map.
+7. Add a tactical object.
+8. Add a dynamic event.
+9. Add a STRUCTURE_FIRE hazard.
+10. Set initial ignition.
+11. Configure smoke/wind.
+12. Save.
+13. Refresh browser.
+14. Reopen draft.
+15. Verify all data persisted.
+
+### Failure recovery
+
+16. Interrupt a SAVE response.
+17. Verify the operation remains recoverable.
+18. Verify the entire library does not lock.
+19. Browse other scenarios.
+20. Retry the original operation with same UUID.
+21. Verify no duplicate template/version.
+22. Handle a definitive validation failure without permanent pending state.
+23. Handle a SERVER/transport failure without claiming guaranteed rejection.
+24. Handle concurrent revision changes.
+25. Verify no silent local draft loss.
+
+### Publishing and creation
+
+26. Publish a valid draft.
+27. Verify published version is immutable.
+28. Revise published template.
+29. Create a preview exercise from a valid draft.
+30. Create a normal exercise from a published template.
+31. Verify only one incident was created for the operation.
+32. Verify template source/version provenance.
+33. Verify its units, objects and hazard plan remain correct.
+
+### Exercise lifecycle
+
+34. Assign/confirm commander using existing workflow.
+35. Activate training incident.
+36. Initialize template.
+37. Verify initial units/objects appear once.
+38. Verify hazard models initialize.
+39. Start simulation.
+40. Verify simulated clock/progression.
+41. Display fire/smoke layers.
+42. Verify event/reveal behavior.
+43. Pause.
+44. Resume.
+45. Finish.
+46. Verify FINISHED persists after browser refresh.
+47. Verify model progression stops.
+48. Verify historical information remains accessible.
+49. Close training incident through valid existing workflow.
+50. Verify closed incident is read-only.
+51. Verify no real incident side effects.
+
+### Usability and compatibility
+
+52. Quick exercise creation still works.
+53. Four existing quick presets remain supported.
+54. Existing drafts remain accessible.
+55. Existing published templates remain usable.
+56. Duplicate titles are distinguishable.
+57. Existing running SIM exercises remain accessible.
+58. Account/org switching clears unauthorized UI context.
+59. SI localization works.
+60. DE localization works.
+61. Tablet layout remains usable.
+62. Map selection/drag/editing remains functional.
+63. No fake real GPS is generated.
+64. Existing simulator runner/Cron architecture remains unchanged.
+65. No new duplicate SIM backend is introduced.
+
+These are implementation targets and a later USER-run manual verification checklist.
+
+They are not instructions to run tests.
+
+---
+
+# PART K — DOCUMENTATION
+
+## 44. Documentation
+
+Create or update a focused document:
+
+`docs/M14.6C.2-sim-workflow-recovery.md`
+
+Include:
+
+- SIM architecture before/after;
+- source-level root cause of current library lock;
+- exact mutation recovery policy;
+- ambiguity/idempotency model;
+- safe server error diagnostics;
+- quick vs template-based exercise semantics;
+- unified UI navigation;
+- editor save/publish flow;
+- training incident preparation;
+- SIM lifecycle;
+- FINISH vs incident CLOSE;
+- compatibility with M14.6A/B/B1/C;
+- any migrations;
+- manual rollout instructions;
+- manual acceptance checklist;
+- outstanding limitations.
+
+Do not claim runtime success without actual runtime verification.
+
+---
+
+# PART L — STRICT IMPLEMENTATION RULES
+
+## 45. Implementation only
+
+Implement the complete M14.6C.2 milestone.
+
+Do not stop after fixing only the `busy` condition.
+
+Do not redesign unrelated modules.
+
+Do not add or run tests.
+
+Do not run:
+
+- build;
+- lint;
+- typecheck;
+- CI;
+- browser automation;
+- runtime verification;
+- emulator;
+- Gradle;
+- Docker;
+- Supabase local stack;
+- migration execution;
+- deployment checks.
+
+Do not apply SQL migrations.
+
+Do not deploy Edge Functions.
+
+Do not deploy Web.
+
+Do not change existing Cron jobs.
+
+Do not rotate secrets.
+
+Do not inspect local configuration files unnecessarily.
+
+Do not modify Android/KAPT/Gradle/local settings.
+
+Source inspection required for implementation decisions is allowed.
+
+Do not perform post-implementation validation.
+
+Use current repository architecture and dependencies.
+
+Keep changes focused on simulation integration and recovery.
+
+Use `[skip ci]` in the implementation commit according to project conventions.
+
+**Create exactly ONE PR. Do not merge.**
+
+## 46. PR description
+
+The final PR description must include:
+
+1. Root cause of the persistent library lock.
+2. Original SAVE error investigation findings.
+3. Mutation state/recovery behavior.
+4. Operation UUID and receipt reconciliation.
+5. Local draft preservation.
+6. Quick vs template exercise flow.
+7. Unified scenario editor.
+8. Hazard/event/map integration.
+9. SAVE/PUBLISH/START behavior.
+10. Commander/activation/initialization workflow.
+11. START/PAUSE/RESUME/RESET/FINISH behavior.
+12. FINISH and incident CLOSE handling.
+13. Existing drafts/exercises compatibility.
+14. SI/DE coverage.
+15. Security and privacy preservation.
+16. Database migrations, if any.
+17. Required manual SQL/deploy steps.
+18. Remaining limitations.
+19. Exact statement that no tests, builds, lint, typecheck or CI were performed.
+20. Confirmation that nothing was deployed.
+
+Do not claim "all flows tested" or "verified working".
+
+Implement everything in scope.
+
+Create ONE PR.
+
+Do not merge.
+
+Stop and provide the complete PR summary.
