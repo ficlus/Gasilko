@@ -1,4 +1,5 @@
 'use client';
+import {useScenarioEditor} from './ScenarioEditorContext';
 import {useEffect,useRef} from 'react';
 import {Marker,type Map,type GeoJSONSource} from 'maplibre-gl';
 import type {FeatureCollection,Feature,Geometry as GeoGeometry} from 'geojson';
@@ -10,15 +11,17 @@ import {OperationalMapCanvas} from '../map/OperationalMapCanvas';
 type Props={locale:Locale;definition:Definition;selected:string;editable:boolean;placing:boolean;vertices:Position[];
  onSelect:(id:string)=>void;onPoint:(p:Position)=>void;onMove:(p:Position)=>void};
 export default function TemplateMap(props:Props){
+ const context=useScenarioEditor();
  const initial=useRef<Position[]>(props.definition.world.center?[props.definition.world.center]:[]);
  return <OperationalMapCanvas locale={props.locale} label={templateText(props.locale)('map')} initialPoints={initial.current}
   onClick={(map,e)=>{
    if(props.editable&&props.placing){props.onPoint([e.lngLat.lng,e.lngLat.lat]);return;}
    const hit=map.getLayer('template-points')?map.queryRenderedFeatures(e.point,{layers:['template-points','template-fill']}).find(f=>f.properties?.id!=='bounds'&&f.properties?.id!=='drawing'):null;
-   if(hit?.properties?.id)props.onSelect(String(hit.properties.id));
+   if(hit?.properties?.section&&context)context.select(hit.properties.section,String(hit.properties.target));else if(hit?.properties?.id)props.onSelect(String(hit.properties.id));
   }}>{map=><Layers map={map} {...props}/>}</OperationalMapCanvas>;
 }
 function Layers({map,definition:d,selected,editable,placing,vertices,onMove,locale}:Props&{map:Map}){
+ const context=useScenarioEditor();
  const move=useRef(onMove);move.current=onMove;
  const items:Feature<GeoGeometry>[]=[];
  const add=(id:string,label:string,geometry:GeoGeometry,color:string)=>items.push({type:'Feature',geometry,properties:{id,label,color}});
@@ -31,6 +34,16 @@ function Layers({map,definition:d,selected,editable,placing,vertices,onMove,loca
  if(d.world.incident_location)add('incident',t('incident'),{type:'Point',coordinates:d.world.incident_location},'#dc2626');
  d.initial_objects.forEach(o=>{if(o.geometry)add(o.id,o.label,o.geometry,'#d97706');});
  d.virtual_units.forEach((u,i)=>{if(u.position)add(u.id,'SIM-'+(i+1),{type:'Point',coordinates:u.position},'#2563eb');});
+ if(context){
+  context.definition.virtual_units.forEach((u,i)=>{if(u.position&&!items.some(f=>f.properties?.id===u.id)){items.push({type:'Feature',geometry:{type:'Point',coordinates:u.position},properties:{id:u.id,label:'SIM-'+(i+1),color:'#2563eb',section:'units',target:u.id}});}});
+  context.definition.initial_objects.forEach(o=>{if(o.geometry&&!items.some(f=>f.properties?.id===o.id))items.push({type:'Feature',geometry:o.geometry,properties:{id:o.id,label:o.label,color:'#d97706',section:'objects',target:o.id}});});
+  context.events.events.forEach(e=>{const g=e.effect?.geometry??context.definition.initial_objects.find(o=>o.id===e.effect?.source_object_id)?.geometry;if(g)items.push({type:'Feature',geometry:g,properties:{id:'context-event-'+e.id,label:e.title,color:'#7c3aed',section:'events',target:e.id}});});
+  context.hazards.models.forEach(m=>{
+   const ring=Array.from({length:65},(_,i)=>offsetPosition(m.center,m.radius_m,i*360/64));
+   items.push({type:'Feature',geometry:{type:'Polygon',coordinates:[ring]},properties:{id:'context-model-'+m.id,label:m.title,color:m.enabled?'#ef4444':'#64748b',section:'hazards',target:m.id}});
+   m.origins.forEach(o=>items.push({type:'Feature',geometry:{type:'Point',coordinates:o.position},properties:{id:'context-origin-'+o.id,label:m.title,color:o.initial?'#dc2626':'#64748b',section:'hazards',target:m.id}}));
+  });
+ }
  if(vertices.length>1)add('drawing','',{type:'LineString',coordinates:vertices},'#dc2626');
  const data:FeatureCollection={type:'FeatureCollection',features:items};
  useEffect(()=>{
@@ -41,7 +54,7 @@ function Layers({map,definition:d,selected,editable,placing,vertices,onMove,loca
   map.addLayer({id:'template-labels',type:'symbol',source:'template-data',layout:{'text-field':['get','label'],'text-size':12,'text-offset':[0,1.7],'text-anchor':'top'},paint:{'text-color':'#111827','text-halo-color':'#ffffff','text-halo-width':2}});
   return()=>{try{for(const id of ['template-labels','template-points','template-lines','template-fill'])if(map.getLayer(id))map.removeLayer(id);if(map.getSource('template-data'))map.removeSource('template-data');}catch{/* Canvas may already be disposed. */}};
  },[map]);
- useEffect(()=>{(map.getSource('template-data') as GeoJSONSource|undefined)?.setData(data);},[map,d,vertices,locale]);
+ useEffect(()=>{(map.getSource('template-data') as GeoJSONSource|undefined)?.setData(data);},[map,d,vertices,locale,context]);
  const geometry=items.find(f=>f.properties?.id===selected)?.geometry;
  const point=geometry?.type==='Point'?geometry.coordinates:null;
  const x=point?.[0],y=point?.[1];

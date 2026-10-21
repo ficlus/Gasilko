@@ -1,6 +1,8 @@
 'use client';
+import {useScenarioEditor} from './ScenarioEditorContext';
+import {workflowText} from '../../lib/operational/workflowMessages';
 import dynamic from 'next/dynamic';
-import {useState} from 'react';
+import {useState,useEffect} from 'react';
 import type {Locale} from '../../lib/i18n';
 import type {Geometry,Position} from '../../lib/incidents/cop';
 import type {Definition} from '../../lib/operational/templates';
@@ -10,16 +12,18 @@ import {CoordinateEditor} from './TemplateEditor';
 const TemplateMap=dynamic(()=>import('./TemplateMap'),{ssr:false});
 export function EventPlanEditor({locale,definition,plan,onChange,disabled}:{locale:Locale;definition:Definition;plan:EventPlan;onChange:(p:EventPlan)=>void;disabled:boolean}){
  const t=scenarioEventText(locale),[selected,setSelected]=useState(''),[placing,setPlacing]=useState(false),[drawing,setDrawing]=useState(false),[vertices,setVertices]=useState<Position[]>([]);
+ const context=useScenarioEditor();
+ useEffect(()=>{if(context?.selected)setSelected(context.selected);},[context?.selected]);
  const index=plan.events.findIndex(e=>e.id===selected),event=plan.events[index],prior=plan.events.slice(0,Math.max(index,0));
  const geometry=event?.effect?.source_object_id?definition.initial_objects.find(o=>o.id===event.effect?.source_object_id)?.geometry:event?.effect?.geometry;
- const mapDefinition:Definition={...definition,virtual_units:[],initial_objects:[...definition.initial_objects,...(event&&geographicEvent(event.type)?[{id:'event-'+event.id,kind:'HAZARD' as const,label:event.title,description:event.description,geometry:geometry??null}]:[])]};
+ const mapDefinition:Definition={...definition,virtual_units:definition.virtual_units,initial_objects:[...definition.initial_objects,...(event&&geographicEvent(event.type)?[{id:'event-'+event.id,kind:'HAZARD' as const,label:event.title,description:event.description,geometry:geometry??null}]:[])]};
  function choose(id:string){setSelected(id);setPlacing(false);setDrawing(false);setVertices([]);}
  function patch(value:Partial<EventDefinition>){if(!disabled&&event)onChange({...plan,events:plan.events.map(e=>e.id===event.id?{...e,...value}:e)});}
  function setGeometry(g:Geometry){if(event?.effect)patch({effect:{...event.effect,source_object_id:null,geometry:g}});}
  function move(p:Position){setGeometry({type:'Point',coordinates:p});}
  function reorder(from:number,to:number){if(disabled||to<0||to>=plan.events.length)return;const events=[...plan.events];[events[from],events[to]]=[events[to],events[from]];onChange({...plan,events});}
  return <section className="admin-card scenario-event-editor">
-  <h3>{t('title')}</h3><p>{t('help')}</p>{disabled&&<p>{t('readonly')}</p>}
+  <h3>{t('title')}</h3><p>{workflowText(locale)('referenceWarning')}</p><p>{t('help')}</p>{disabled&&<p>{t('readonly')}</p>}
   <ol className="template-items">{plan.events.map((e,i)=><li key={e.id}>
    <button type="button" aria-pressed={selected===e.id} onClick={()=>choose(e.id)}>{e.trigger.mode==='SIMULATION_TIME'?eventTime(e.trigger.offset_seconds??0):t(e.trigger.mode)} · {e.title} · {t(e.type)}</button>
    <div className="actions"><button type="button" aria-label={t('up')+' · '+e.title} disabled={disabled||i===0} onClick={()=>reorder(i,i-1)}>{t('up')}</button>
