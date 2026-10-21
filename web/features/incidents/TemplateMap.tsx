@@ -44,6 +44,11 @@ function Layers({map,definition:d,selected,editable,placing,vertices,onMove,loca
    m.origins.forEach(o=>items.push({type:'Feature',geometry:{type:'Point',coordinates:o.position},properties:{id:'context-origin-'+o.id,label:m.title,color:o.initial?'#dc2626':'#64748b',section:'hazards',target:m.id}}));
   });
  }
+ if(context)for(const item of items){
+  const id=String(item.properties?.id);
+  if(context.definition.virtual_units.some(u=>u.id===id))item.properties={...item.properties,section:'units',target:id};
+  else if(context.definition.initial_objects.some(o=>o.id===id))item.properties={...item.properties,section:'objects',target:id};
+ }
  if(vertices.length>1)add('drawing','',{type:'LineString',coordinates:vertices},'#dc2626');
  const data:FeatureCollection={type:'FeatureCollection',features:items};
  useEffect(()=>{
@@ -55,6 +60,11 @@ function Layers({map,definition:d,selected,editable,placing,vertices,onMove,loca
   return()=>{try{for(const id of ['template-labels','template-points','template-lines','template-fill'])if(map.getLayer(id))map.removeLayer(id);if(map.getSource('template-data'))map.removeSource('template-data');}catch{/* Canvas may already be disposed. */}};
  },[map]);
  useEffect(()=>{(map.getSource('template-data') as GeoJSONSource|undefined)?.setData(data);},[map,d,vertices,locale,context]);
+ useEffect(()=>{
+  const feature=items.find(f=>f.properties?.target===context?.selected||f.properties?.id===selected),g=feature?.geometry;
+  const p=g?.type==='Point'?g.coordinates:g?.type==='Polygon'?g.coordinates[0]?.[0]:g?.type==='LineString'?g.coordinates[0]:null;
+  if(p&&Number.isFinite(p[0])&&Number.isFinite(p[1]))map.easeTo({center:[p[0],p[1]],duration:250});
+ },[map,selected,context?.selected]);
  const geometry=items.find(f=>f.properties?.id===selected)?.geometry;
  const point=geometry?.type==='Point'?geometry.coordinates:null;
  const x=point?.[0],y=point?.[1];

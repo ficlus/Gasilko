@@ -252,4 +252,24 @@ begin
 end; $$;
 revoke all on function public.simulation_overview(uuid,integer,text) from public,anon,authenticated,service_role;
 grant execute on function public.simulation_overview(uuid,integer,text) to authenticated;
+create function public.simulation_hazard_history(p_organization_id uuid,p_incident_id uuid,p_model uuid,p_before bigint default null) returns jsonb
+language plpgsql stable security definer set search_path='' as $
+declare s public.simulation_scenarios;m private.simulation_hazard_models;controller boolean;first_visible bigint;
+begin
+ if not private.simulation_enabled() or not private.simulation_visible(p_incident_id,p_organization_id) then raise exception 'NOT_AUTHORIZED' using errcode='42501';end if;
+ select * into s from public.simulation_scenarios where incident_id=p_incident_id;
+ select * into m from private.simulation_hazard_models where id=p_model and scenario_id=s.id;
+ if not found then raise exception 'NOT_AUTHORIZED' using errcode='42501';end if;
+ controller:=coalesce(private.simulation_template_editor(p_organization_id) and private.simulation_controller(s.id,p_organization_id),false);
+ if not controller and (s.status='DRAFT' or not m.revealed) then raise exception 'NOT_AUTHORIZED' using errcode='42501';end if;
+ select min(version) into first_visible from private.simulation_hazard_snapshots where model_id=m.id and revealed;
+ -- Deliberately omit payload/configuration/operations: these may contain instructor secrets.
+ return coalesce((select jsonb_agg(q.dto order by q.version desc) from (
+  select h.version,jsonb_build_object('version',h.version::text,'step',h.step,'kind',h.kind,'recorded_at',h.recorded_at) dto
+  from private.simulation_hazard_history h where h.model_id=m.id and (p_before is null or h.version<p_before)
+   and (controller or (h.version>=first_visible and coalesce((select snap.revealed from private.simulation_hazard_snapshots snap where snap.model_id=m.id and snap.version<=h.version order by snap.version desc limit 1),false))) order by h.version desc limit 25
+ ) q),'[]'::jsonb);
+end; $;
+revoke all on function public.simulation_hazard_history(uuid,uuid,uuid,bigint) from public,anon,authenticated,service_role;
+grant execute on function public.simulation_hazard_history(uuid,uuid,uuid,bigint) to authenticated;
 commit;

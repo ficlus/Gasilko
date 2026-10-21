@@ -1,5 +1,6 @@
 'use client';
 import {mapMetric} from '../../lib/operational/mapDiagnostics';
+import type {Initialization} from '../../lib/operational/templates';
 import {SimulationHome} from './SimulationHome';
 import {TrainingLifecycle} from './TrainingLifecycle';
 import {workflowText} from '../../lib/operational/workflowMessages';
@@ -49,6 +50,7 @@ export function IncidentArea({locale,account,destination,initialOrg}:{locale:Loc
  const requestedTemplates=useSearchParams().get('templates')==='1';
  const [simulationEnvironment,setSimulationEnvironment]=useState<{enabled:boolean;can_create:boolean}|null>(null),[training,setTraining]=useState(false),[simulationSetup,setSimulationSetup]=useState(defaultSimulationSetup);
  const [entry,setEntry]=useState<Entry|null>(null),[org,setOrg]=useState(initialOrg??''),[rows,setRows]=useState<IncidentRow[]>([]);
+ const [initialization,setInitialization]=useState<{incident:string;value:Initialization|null}|null>(null);
  const [detail,setDetail]=useState<Incident|null>(null);
  const [filter,setFilter]=useState(''),[page,setPage]=useState<{created:string;id:string}|null>(null),[refresh,setRefresh]=useState(0);
  const [loading,setLoading]=useState(true),[error,setError]=useState(''),[notice,setNotice]=useState('');
@@ -60,6 +62,7 @@ export function IncidentArea({locale,account,destination,initialOrg}:{locale:Loc
  const [crewOutcomes,setCrewOutcomes]=useState<CrewOutcomes>({});
  const [taskFeedback,setTaskFeedback]=useState<CopFeedback>({sequence:0,kind:'saved'});
  const [resourceFeedback,setResourceFeedback]=useState<CopFeedback>({sequence:0,kind:'saved'});
+ const scopeKey=account+'/'+org,scopeRef=useRef(scopeKey);scopeRef.current=scopeKey;
  const alive=useRef(true),sending=useRef(false),coreLoaded=useRef(false);
  const isNew=destination==='new',isList=!destination&&!requestedTemplates&&!requestedHome;
  const url=(id?:string,acting=org)=>`/${locale}/incidents${id?'/'+id:''}${acting?'?org='+encodeURIComponent(acting):''}`;
@@ -125,7 +128,7 @@ export function IncidentArea({locale,account,destination,initialOrg}:{locale:Loc
   try{const raw=sessionStorage.getItem(trainingPendingKey);if(raw&&raw.length<200000){const r=JSON.parse(raw) as RequestState;if(r.training&&r.action in mutationNames&&r.args.p_acting_organization_id===org&&typeof r.args.p_operation==='string')setPending(r);}}catch{setError('error');}
  },[trainingPendingKey,org]);
  async function send(request:RequestState) {
-  const wasPending=!!pending;
+  const wasPending=!!pending,submittedScope=scopeRef.current;
   if(request.training){try{const raw=JSON.stringify(request);sessionStorage.setItem(trainingPendingKey,raw);if(sessionStorage.getItem(trainingPendingKey)!==raw)throw new Error();}catch{setError('error');return;}}
 
   if(sending.current)return;sending.current=true;setBusy(true);setError('');setNotice('');setPending(request);
@@ -135,7 +138,7 @@ export function IncidentArea({locale,account,destination,initialOrg}:{locale:Loc
    const receipt=await rpc<Receipt>(mutationNames[request.action],request.args,undefined,account);
    if(request.action==='issue_task')mapMetric('task_accept',performance.now()-submitted);
    try{sessionStorage.removeItem(request.storageKey);if(request.training)sessionStorage.removeItem(trainingPendingKey);}catch{/* Stable in-memory request still covers this session. */}
-   if(!alive.current)return;
+   if(!alive.current||request.training&&submittedScope!==scopeRef.current)return;
    setPending(null);setConfirmation(null);setReason('');setNotice('saved');setEditing(false);
    if((taskMutations as readonly string[]).includes(request.action))setTaskFeedback(v=>({sequence:v.sequence+1,kind:'saved'}));
    if(copMutations.includes(request.action))setCopFeedback(v=>({sequence:v.sequence+1,kind:'saved'}));
@@ -144,7 +147,7 @@ export function IncidentArea({locale,account,destination,initialOrg}:{locale:Loc
    if(request.action==='create'||request.action==='create_simulation')router.push(url(receipt.incident_id,request.args.p_acting_organization_id as string));
    else {setRefresh(n=>n+1);}
   } catch(e) {
-   if(!alive.current)return;setError(safeError(e));
+   if(!alive.current||request.training&&submittedScope!==scopeRef.current)return;setError(safeError(e));
    if(request.action==='add_crew_member'){const payload=request.args.p_payload as {user_id:string;unit_assignment_id:string};const person=payload.unit_assignment_id+':'+payload.user_id;setCrewOutcomes(v=>({...v,[person]:{state:e instanceof IncidentError&&e.message!=='SERVER'?'failed':'pending',error:safeError(e)}}));}
    if((taskMutations as readonly string[]).includes(request.action)&&e instanceof IncidentError&&['STALE_VERSION','INVALID_ACTION_DEFINITION'].includes(e.message))setTaskFeedback(v=>({sequence:v.sequence+1,kind:'stale'}));
    if(copMutations.includes(request.action)&&e instanceof IncidentError&&e.message==='STALE_VERSION')setCopFeedback(v=>({sequence:v.sequence+1,kind:'stale'}));
@@ -241,8 +244,8 @@ export function IncidentArea({locale,account,destination,initialOrg}:{locale:Loc
     {['CLOSED','CANCELLED'].includes(detail.status)?<p>{t('terminal')}</p>:!Object.values(detail.actions).some(Boolean)&&<p>{t('readOnly')}</p>}
    </header>}
    operations={<>
-    {detail.training&&<TrainingLifecycle locale={locale} incident={detail} disabled={loading||busy||!!pending} onAction={action=>ask(action)}/>}
-    {detail.training&&<TemplateInitialization key={account+'/'+org+'/'+detail.id} locale={locale} account={account} org={org} incident={detail.id} refresh={refresh} read={rpc} onRefresh={reload}/>}
+    {detail.training&&<TrainingLifecycle locale={locale} incident={detail} initialization={initialization?.incident===detail.id?initialization.value:undefined} disabled={loading||busy||!!pending} onAction={action=>ask(action)}/>}
+    {detail.training&&<TemplateInitialization key={account+'/'+org+'/'+detail.id} locale={locale} account={account} org={org} incident={detail.id} refresh={refresh} read={rpc} onRefresh={reload} onState={value=>setInitialization({incident:detail.id,value})}/>}
     <div id="sim-command"><WorkspaceSection title={t('commandTree')}>   {detail.status!=='DRAFT'&&<CommandSection key={`${account}/${org}/${detail.id}`} locale={locale} account={account} org={org} incident={detail} disabled={loading||busy||!!pending} read={rpc} onAction={ask}/>}
    <section className="admin-card"><h2>{t('commander')}</h2><p>{detail.commander?.name??t('noCommander')}</p>
     {detail.commander&&!detail.commander.valid&&!['CLOSED','CANCELLED'].includes(detail.status)&&<p role="alert">{t('invalidCommander')}</p>}
@@ -267,9 +270,9 @@ export function IncidentArea({locale,account,destination,initialOrg}:{locale:Loc
    secondary={<IncidentTimeline locale={locale} account={account} org={org} incident={detail.id} revision={refresh} read={rpc}/>}>
    <IncidentCop key={`cop/${account}/${org}/${detail.id}`} locale={locale} account={account} org={org} incidentId={detail.id} refresh={refresh} feedback={copFeedback} disabled={loading||busy||!!pending} read={rpc} onAction={ask}/>
    <IncidentTasks submission={pending?.action==='issue_task'?(busy?'sending':'pending'):confirmation?.action==='issue_task'&&error?'rejected':'idle'} key={`tasks/${account}/${org}/${detail.id}`} locale={locale} account={account} org={org} incidentId={detail.id} version={detail.version} incidentReference={detail.reference_number} organizationName={entry?.organizations.find(o=>o.id===org)?.name??org} operational={['ACTIVE','STABILIZED'].includes(detail.status)} refresh={refresh} feedback={taskFeedback} disabled={loading||busy||!!pending} read={rpc} onAction={ask}/>
-   <IncidentResources crewOutcomes={crewOutcomes} key={`resources/${account}/${org}/${detail.id}`} locale={locale} account={account} org={org} incidentId={detail.id} refresh={refresh} feedback={resourceFeedback} disabled={loading||busy||!!pending} read={rpc} onAction={ask}/>
+   <div id="sim-resources"><IncidentResources crewOutcomes={crewOutcomes} key={`resources/${account}/${org}/${detail.id}`} locale={locale} account={account} org={org} incidentId={detail.id} refresh={refresh} feedback={resourceFeedback} disabled={loading||busy||!!pending} read={rpc} onAction={ask}/></div>
   </IncidentLayout>}
-  {confirmation&&<ConfirmationDialog title={t(confirmation.action)} text={t('confirmation')} busy={busy||!!pending} onDismiss={()=>setConfirmation(null)}>
+  {confirmation&&<ConfirmationDialog title={t(confirmation.action)} text={t('confirmation')} busy={busy||!!pending&&!confirmation.training} onDismiss={()=>setConfirmation(null)}>
     {confirmation.action==='issue_task'&&<p role="status">{contextText(locale)(busy?'sending':pending?'pending':error?'rejected':'draft')}</p>}
    {confirmation.training&&<SimulationBanner locale={locale}/>}
    {commandDraftStale&&!pending&&<p role="alert">{t('stale')}</p>}

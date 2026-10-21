@@ -30,8 +30,9 @@ export function EventPlanEditor({locale,definition,plan,onChange,disabled}:{loca
     <button type="button" aria-label={t('down')+' · '+e.title} disabled={disabled||i===plan.events.length-1} onClick={()=>reorder(i,i+1)}>{t('down')}</button></div>
   </li>)}</ol>
   <button type="button" disabled={disabled||plan.events.length>=40} onClick={()=>{const e=newEvent(t('INCIDENT_REPORT'));onChange({...plan,events:[...plan.events,e]});choose(e.id);}}>{t('add')} ({plan.events.length}/40)</button>
+  {(!event||!event.effect)&&<TemplateMap locale={locale} definition={definition} selected={selected} editable={false} placing={false} vertices={[]} onSelect={()=>{}} onMove={()=>{}} onPoint={()=>{}}/>}
   {event&&<>
-   <fieldset disabled={disabled} className="web-form-grid">
+   <p>{workflowText(locale)('eventVisibility')} · {event.effect?.source_object_id??event.effect?.target_event_id??'—'}</p><fieldset disabled={disabled} className="web-form-grid">
     <label>{t('name')}<input maxLength={200} value={event.title} onChange={e=>patch({title:e.target.value})}/></label>
     <label>{t('description')}<textarea maxLength={2000} value={event.description} onChange={e=>patch({description:e.target.value})}/></label>
     <label>{t('type')}<select value={event.type} onChange={e=>{const type=e.target.value as EventDefinition['type'];patch({type,effect:geographicEvent(type)?{geometry:null,source_object_id:null,target_event_id:null,expected_version:type==='HAZARD_UPDATE'?1:null}:null});}}>{scenarioEventTypes.map(v=><option key={v} value={v}>{t(v)}</option>)}</select></label>

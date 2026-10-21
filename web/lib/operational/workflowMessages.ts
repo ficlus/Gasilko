@@ -223,6 +223,42 @@ const messages:Record<string,[string,string]>={
  "noSmoke": [
   "Ni vidnega aktivnega modela dima.",
   "Kein sichtbares aktives Rauchmodell."
+ ],
+ "clock": [
+  "Simulirani čas",
+  "Simulationszeit"
+ ],
+ "navigationJobs": [
+  "Navigacijska opravila (naložena stran)",
+  "Navigationsaufträge (geladene Seite)"
+ ],
+ "lastRefresh": [
+  "Zadnja uspešna osvežitev",
+  "Letzte erfolgreiche Aktualisierung"
+ ],
+ "routes": [
+  "Poti",
+  "Routen"
+ ],
+ "eventVisibility": [
+  "Vidnost: poveljstvo po razkritju",
+  "Sichtbarkeit: Führung nach Freigabe"
+ ],
+ "noIgnition": [
+  "Omogočeno, brez začetnega vžiga",
+  "Aktiviert, ohne anfängliche Zündung"
+ ],
+ "reviewIssues": [
+  "Razdelki za pregled",
+  "Zu prüfende Abschnitte"
+ ],
+ "prerequisites": [
+  "Dejanje ni na voljo, dokler niso izpolnjeni poveljevanje, soglasja in stanje intervencije. Uporabite obstoječe kontrole spodaj.",
+  "Aktion erst nach gültiger Führung, Zustimmung und Einsatzstatus verfügbar. Bestehende Bedienelemente unten verwenden."
+ ],
+ "resources": [
+  "Preglej aktivne vire in naloge",
+  "Aktive Ressourcen und Aufgaben prüfen"
  ]
 };
 export const workflowText=(locale:Locale)=>(key:string)=>messages[key]?.[locale==='de'?1:0]??key;

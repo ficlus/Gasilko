@@ -7,13 +7,13 @@ import {useTemplateMutation} from './useTemplateMutation';
 import {SimOperationRecovery} from './SimOperationRecovery';
 import {workflowText} from '../../lib/operational/workflowMessages';
 import {TemplateConfirmation} from './TemplateLibrary';
-export function TemplateInitialization({locale,account,org,incident,refresh,read,onRefresh}:{locale:Locale;account:string;org:string;incident:string;refresh:number;read:TemplateRead;onRefresh:()=>void}){
+export function TemplateInitialization({locale,account,org,incident,refresh,read,onRefresh,onState}:{locale:Locale;account:string;org:string;incident:string;refresh:number;read:TemplateRead;onRefresh:()=>void;onState?:(v:Initialization|null)=>void}){
  const t=templateText(locale),[value,setValue]=useState<Initialization|null>(null),[error,setError]=useState(''),[loading,setLoading]=useState(true),[confirm,setConfirm]=useState<Initialization|null>(null);
  const mutation=useTemplateMutation(account,org,'initialize.'+incident,read,()=>{setConfirm(null);onRefresh();});
  useEffect(()=>{
   const ac=new AbortController();setLoading(true);setValue(null);setError('');
   read<Initialization|null>('simulation_template_initialization',{p_organization_id:org,p_incident_id:incident},ac.signal,account)
-   .then(data=>{if(!ac.signal.aborted){setValue(data);mutation.setError('');}})
+   .then(data=>{if(!ac.signal.aborted){setValue(data);onState?.(data);mutation.setError('');}})
    .catch(e=>{if(!ac.signal.aborted)setError(templateError(e instanceof Error?e.message:'SERVER'));})
    .finally(()=>{if(!ac.signal.aborted)setLoading(false);});
   return()=>ac.abort();
@@ -28,6 +28,7 @@ export function TemplateInitialization({locale,account,org,incident,refresh,read
    <p role="status">{t(value.state)} · {t('objects')}: {value.objects} · {t('units')}: {value.units}</p>
    <p>{t(value.state==='READY'?'readyHelp':'setupHelp')}</p>
    {value.clock_scale!==null&&value.response_profile!==null&&<p>{t('clock')}: {value.clock_scale}× · {t('profile')}: {t(value.response_profile)}</p>}
+   {!value.can_initialize&&value.state!=='READY'&&<p>{workflowText(locale)('prerequisites')}</p>}
    {value.can_initialize&&<button disabled={busy} onClick={()=>setConfirm(value)}>{t('initialize')}</button>}
 
    {confirm&&<TemplateConfirmation locale={locale} busy={mutation.busy} onCancel={()=>setConfirm(null)} onConfirm={()=>{

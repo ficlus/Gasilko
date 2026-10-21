@@ -3,13 +3,10 @@ import {useEffect,useRef,useState} from 'react';
 import {useRouter} from 'next/navigation';
 import type {Locale} from '../../lib/i18n';
 import type {IncidentType} from '../../lib/incidents/model';
-import {blankDefinition,placementMissing,templateCategories,type Definition,type Template,type TemplateRead,type TemplateRow} from '../../lib/operational/templates';
+import {blankDefinition,templateCategories,type Definition,type Template,type TemplateRead,type TemplateRow} from '../../lib/operational/templates';
 import {templateError,templateText} from '../../lib/operational/templateMessages';
 import {emptyEventPlan,type EventPlan} from '../../lib/operational/scenarioEvents';
 import {emptyHazardPlan,type HazardPlan} from '../../lib/operational/hazards';
-import {HazardPlanEditor} from './HazardPlanEditor';
-import {EventPlanEditor} from './EventPlanEditor';
-import {TemplateEditor} from './TemplateEditor';
 import {useTemplateMutation} from './useTemplateMutation';
 import {ScenarioEditorWorkspace} from './ScenarioEditorWorkspace';
 import {SimOperationRecovery} from './SimOperationRecovery';
@@ -124,6 +121,7 @@ export function TemplateLibrary({locale,account,org,organizationName,types,read,
      <button disabled={busy||dirty} onClick={()=>setConfirm('ARCHIVE')}>{t('archive')}</button>
     </>}
    </div>
+   {issues.length>0&&<p className="admin-notice">{w('reviewIssues')}: {[...new Set(issues.map(i=>w(i.section)))].join(', ')} · {w('review')}</p>}
    {recovery&&<section className="admin-notice">
     <h3>{w('recovery')}</h3><p>{recovery.at}</p>{recovery.base.revision!==value.revision&&<p>{w('revisionWarning')}</p>}
     <button type="button" onClick={()=>setCompared(true)}>{w('compare')}</button>
