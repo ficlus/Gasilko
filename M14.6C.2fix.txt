@@ -1,0 +1,722 @@
+# GASILKO — PR #78 CORRECTION & COMPLETION
+
+## M14.6C.2 — SQL Blocker Fix, Simulation Recovery and Workflow Refinements
+
+Repository:
+https://github.com/ficlus/Gasilko
+
+Existing PR:
+https://github.com/ficlus/Gasilko/pull/78
+
+Branch:
+`codex/m14-6c2-sim-workflow`
+
+**IMPORTANT: UPDATE EXISTING PR #78. DO NOT CREATE ANOTHER PR. DO NOT MERGE.**
+
+This is a focused correction and completion pass for M14.6C.2.
+
+Base all changes on the existing PR branch, not a new implementation from main.
+
+The milestone has already implemented extensive SIM workflow improvements. Preserve them.
+
+## 0. Mandatory confirmed SQL blocker
+
+The existing migration:
+
+`supabase/migrations/20261021120000_simulation_workflow_recovery.sql`
+
+contains malformed PostgreSQL dollar-quoted function delimiters.
+
+Confirmed locations:
+
+- Line approximately 86: `END; $;`
+- Line approximately 135: `END; $;`
+- Line approximately 197: `END; $;`
+- Line approximately 254: `AS $`
+- Line approximately 270: `END; $;`
+
+The affected functions are:
+
+- `private.validate_simulation_template`
+- `private.validate_simulation_event_plan`
+- `private.validate_hazard_plan`
+- `public.simulation_hazard_history`
+
+Correct all malformed function delimiters.
+
+Use properly paired `AS $$ ... END; $$;` or consistent named dollar-quoting.
+
+This is a mandatory merge blocker.
+
+Inspect the entire new migration for the same defect, including nested SQL statements and anonymous blocks.
+
+Preserve the existing transaction boundary.
+
+Do not modify historical migrations.
+
+Do not execute the migration.
+
+## 1. SQL compatibility and authoritative contract review
+
+Inspect the current authoritative SQL signatures and receipt models for:
+
+- `simulation_template_command`
+- `simulation_template_initialize`
+- `simulation_command`
+- `simulation_operation_resolve`
+- `simulation_template_list`
+- `simulation_template_initialization`
+- `simulation_overview`
+- `simulation_hazard_history`
+
+Ensure the resolver reconstructs the exact request representation used by existing immutable operation receipts.
+
+Important:
+
+Receipt identity includes the authoritative actor, organization, operation UUID and canonical immutable request.
+
+Never match only by operation UUID.
+
+A mismatched operation UUID/payload must not return another receipt.
+
+An absent receipt is OUTCOME_UNKNOWN, not definitive rejection.
+
+Verify that any newly introduced function has correct:
+
+- schema qualification;
+- argument types;
+- return type;
+- execution grants;
+- security-definer search path;
+- authorization checks;
+- cross-organization restrictions;
+- source-data privacy.
+
+Keep the resolver read-only.
+
+Do not add broad receipt-listing capability.
+
+## 2. Address the original hazard-plan SAVE failure
+
+Review the identified PL/pgSQL variable/alias collision in `private.validate_hazard_plan`.
+
+Ensure the corrected implementation uses unambiguous qualified references in the duplicate-effect validation query.
+
+Inspect other modified validators for equivalent ambiguous references.
+
+Preserve the complete M14.6C hazard-plan business contract.
+
+Do not change numerical limits or simulation physics without a demonstrated compatibility reason.
+
+Keep specific safe error codes for:
+
+- INVALID_TEMPLATE
+- INVALID_EVENT_PLAN
+- INVALID_HAZARD_PLAN
+- STALE_VERSION
+- SCHEMA_MISMATCH
+- REQUEST_TOO_LARGE
+- NOT_AUTHORIZED
+- OPERATION_REUSED
+
+Do not leak raw Postgres exception text to browsers.
+
+The initial reported SAVE error was not reproduced.
+
+Do NOT claim that this migration definitively fixes that exact historic failure.
+
+## 3. Recovery state and operation identity
+
+Review the new `useTemplateMutation` implementation.
+
+Preserve:
+
+- IDLE
+- SENDING
+- CONFIRMED
+- DEFINITIVELY_REJECTED
+- OUTCOME_UNKNOWN
+- RECOVERING
+
+Check the following transitions:
+
+- first SAVE;
+- confirmed success;
+- confirmed rejection;
+- transport failure;
+- timeout;
+- schema mismatch;
+- authorization loss;
+- retry;
+- receipt reconciliation;
+- unmount/navigation;
+- account switch;
+- organization switch.
+
+Only clear a pending operation when the result is authoritatively resolved or a proven safe terminal rejection occurs.
+
+Keep exact retry using the same operation UUID and immutable payload.
+
+A retry cannot create a second template, exercise or version.
+
+Do not automatically regenerate an operation UUID after a timeout.
+
+Ensure any failure to persist a pending request is handled before dispatch.
+
+Avoid misleading "Saved" indications while server confirmation is missing.
+
+## 4. Scenario library must remain accessible
+
+Preserve the confirmed improvement:
+
+A pending write must not globally block reading.
+
+The user must still be able to:
+
+- open the library;
+- browse scenarios;
+- search;
+- filter;
+- paginate;
+- inspect another scenario;
+- view published templates;
+- view their own authorized drafts.
+
+Only conflicting mutations should remain blocked.
+
+Never introduce another shared `busy` condition that includes `pending` and blocks unrelated reads.
+
+A previous unsuccessful SAVE must not lock the library after a browser refresh.
+
+## 5. Draft preservation and safe recovery
+
+Inspect:
+
+- `draftRecovery.ts`
+- `useTemplateMutation.ts`
+- `TemplateLibrary.tsx`
+- `ScenarioEditorWorkspace.tsx`
+
+Verify the relationships between:
+
+- server template revision;
+- local editor baseline;
+- unsaved definition;
+- unsaved event plan;
+- unsaved hazard plan;
+- pending immutable mutation;
+- confirmed saved revision.
+
+Review the sequence:
+
+Edit → Save → lost response → navigate away → return → reconcile → reload.
+
+No silent loss of local edits.
+
+No silent rebase over a newer server revision.
+
+No duplicate save.
+
+No automatic overwrite of a newer server version.
+
+Compare/restoration must be explicit.
+
+If authoritative confirmation returns a newer revision, update the editor baseline safely.
+
+Do not retain stale draft recovery in a way that can accidentally replace newer saved content.
+
+Ensure saved recovery records are removed only when doing so is safe.
+
+Local recovery must stay account/organization/template scoped.
+
+Preserve bounded storage limits and visible storage-failure warnings.
+
+Do not create a new cross-device draft synchronization system.
+
+## 6. Review rapid user interactions
+
+Check source-level interaction handling for:
+
+- rapid double-click on SAVE;
+- rapid double-click on COPY;
+- repeated PUBLISH confirmation;
+- repeated START confirmation;
+- pressing Enter repeatedly;
+- opening another scenario while a read is in flight;
+- switching organization while pending;
+- changing scenario while the editor is loading;
+- browser back/forward;
+- repeated retries of a previously applied operation.
+
+Use existing request locks, generation guards and AbortController patterns.
+
+Do not let stale asynchronous responses overwrite the current selected scenario.
+
+No duplicate incident creation.
+
+No duplicate template copy.
+
+No duplicate audit mutations.
+
+## 7. Scenario editor consistency
+
+Preserve the sectioned editor:
+
+- Overview
+- Area
+- Units
+- Objects
+- Hazards
+- Events
+- Settings
+- Review
+
+Inspect shared selection/context behavior.
+
+Ensure selecting an element from the map opens the correct editor section and selects the correct canonical ID.
+
+Ensure temporary editing state is not accidentally carried into unrelated sections.
+
+Pay attention to:
+
+- pending coordinate placement;
+- active polygon drawing;
+- selected hazard model;
+- selected event;
+- selected initial object;
+- selected virtual unit.
+
+When switching sections, cancel or preserve temporary geometry only through an explicit, predictable rule.
+
+Never persist unfinished geometry as a completed object.
+
+Do not duplicate MapLibre instances unnecessarily.
+
+Avoid map recentering on every unrelated state change.
+
+Preserve the original bounds/zoom where practical.
+
+## 8. Fire and smoke usability
+
+Improve information when fire/smoke is absent.
+
+Distinguish:
+
+- no hazard model configured;
+- model disabled;
+- model enabled but not initially ignited;
+- model hidden until an event;
+- model not yet initialized;
+- no active fire cells;
+- no currently visible smoke;
+- runner/snapshot information stale;
+- historical finished simulation.
+
+Do not disclose hidden instructor-only models to unauthorized participants.
+
+Instructor/controller users may receive more detailed diagnostic state according to existing permissions.
+
+Map visibility switches must never create simulation hazards.
+
+Do not automatically ignite a model merely because "Show Fire" is enabled.
+
+Do not modify M14.6C physics or implement M14.6D action effects.
+
+Keep model provenance, observed time and visibility consistent.
+
+## 9. Scenario creation and duplicate UX
+
+Preserve both supported flows:
+
+QUICK TRAINING EXERCISE
+
+and
+
+VERSIONED SCENARIO-BASED EXERCISE.
+
+Do not merge their authoritative identities.
+
+Make their difference immediately understandable.
+
+Avoid duplicate buttons that have different backend effects but nearly identical labels.
+
+Existing deep links must continue working.
+
+Keep the four original quick presets.
+
+Custom published scenarios should remain discoverable in the Scenario Library.
+
+Do not make custom templates appear as ordinary quick presets unless that is implemented through the existing canonical template START flow.
+
+Display clear counts and readiness information before START.
+
+## 10. Scenario lifecycle
+
+Preserve:
+
+CREATE
+COPY
+REVISE
+SAVE
+PUBLISH
+ARCHIVE
+START
+
+Published versions must remain immutable.
+
+Maintain original source version when a training exercise is created.
+
+Verify that current template read/list/save calls use matching shapes, revisions and identifiers.
+
+The UI must not claim Publish succeeded solely because the request was sent.
+
+Any new START after an ambiguous result must reuse exact operation identity.
+
+No duplicate training incidents.
+
+## 11. Command and initialization
+
+Review the complete transition:
+
+Template START
+→ training incident created
+→ commander nomination/consent
+→ incident activation
+→ template initialization
+→ simulation ready
+→ simulation START.
+
+Make the next required step visible in the UI.
+
+Preserve authoritative requirements.
+
+No automatic commander consent.
+
+No new implicit command authority.
+
+No automatic incident activation merely for convenience.
+
+No duplicate initialization.
+
+When initialization is not permitted, identify the blocking prerequisite where already available from authorized existing read models.
+
+Do not expose privileged diagnostics.
+
+## 12. Running and finishing a simulation
+
+Review both normal and failure flows.
+
+RUNNING → PAUSED → RUNNING → FINISHED.
+
+FINISH must be explicit.
+
+Do not allow duplicate FINISH effects on an identical retry.
+
+A finished simulation must:
+
+- stop future automatic state progression;
+- stop inappropriate fast polling;
+- preserve final recorded positions;
+- preserve event/hazard history;
+- prevent new movement execution;
+- retain task/command history;
+- show clear FINISHED state.
+
+FINISH must NOT automatically:
+
+- mark all tasks completed;
+- acknowledge all commands;
+- close the incident;
+- change real incident status;
+- generate real GPS;
+- trigger real dispatch.
+
+Historical view must remain available.
+
+## 13. FINISH versus CLOSE
+
+Preserve the explicit distinction:
+
+SIM FINISH
+
+and
+
+INCIDENT CLOSE.
+
+After FINISH, the user should see an actionable next-step panel.
+
+If closure is blocked by:
+
+- active resources;
+- unfinished tasks;
+- unresolved command responsibilities;
+- missing closure reason;
+- lifecycle state;
+
+show the relevant authoritative reason and guide the user to the existing control.
+
+Do not bypass backend guards.
+
+Do not create special hidden privileges for training users.
+
+Where legitimate training closure is impossible due to a demonstrated source-level domain defect, implement the smallest safe forward-only correction.
+
+Never weaken REAL incident closure semantics.
+
+## 14. Recovery of simulation control actions
+
+Inspect `SimulationProvider.tsx`.
+
+Verify exact pending mutation handling for:
+
+START
+PAUSE
+RESUME
+RESET
+FINISH
+
+and existing permitted unit-related SIM operations.
+
+A timeout after FINISH must be recoverable.
+
+A confirmed FINISH followed by an identical retry must not generate another terminal event.
+
+Ensure the simulation controls can recover from:
+
+- interrupted fetch;
+- browser reload;
+- stale scenario revision;
+- lost confirmation response;
+- server restart;
+- temporary connectivity loss.
+
+Check whether rejected-proposal review actually permits constructing a new request after authoritative refresh.
+
+Do not silently reuse an invalid stale request as a new command.
+
+Do not lose the original pending request during review.
+
+## 15. Historical read models and privacy
+
+Review:
+
+- `simulation_overview`
+- `simulation_hazard_history`
+- existing incident/SIM event reads.
+
+Maintain:
+
+- incident scope;
+- organization visibility;
+- instructor restrictions;
+- bounded paging;
+- no hidden hazard configuration leakage;
+- no private simulation payload leakage;
+- no real-person tracking exposure.
+
+Archived and completed exercises must remain discoverable when the viewer is authorized.
+
+Do not force users to scroll through operationally irrelevant historical data during an active exercise.
+
+## 16. Performance and usability
+
+Target rapid usage during simulated command exercises.
+
+Avoid:
+
+- remounting the whole map on section changes where a shared map can remain mounted;
+- unbounded scenario reads;
+- duplicate hydration requests;
+- full incident history refreshes for every small UI action;
+- unnecessary recalculation of large GeoJSON objects;
+- resetting map zoom/pan on unrelated form edits.
+
+Improve:
+
+- context retention;
+- consistent active section indication;
+- compact readiness summary;
+- responsive tablet layout;
+- actionable localized errors;
+- keyboard focus after dialogs;
+- clear loading/saving/recovery feedback.
+
+Do not add a new UI framework.
+
+Prefer existing components and CSS.
+
+## 17. Security and compatibility
+
+Preserve:
+
+- TRAINING vs REAL separation;
+- existing RLS;
+- organization permissions;
+- incident command permissions;
+- exact operation UUID idempotency;
+- optimistic concurrency;
+- append-only audit;
+- private instructor data;
+- hidden event/hazard visibility;
+- existing simulator runner/Cron behavior.
+
+Do not modify:
+
+- Android;
+- Room;
+- KAPT;
+- Gradle;
+- Oracle;
+- Caddy;
+- M14.6D;
+- unrelated modules.
+
+Do not add new dependencies unless strictly necessary.
+
+Do not rewrite historical migrations.
+
+## 18. Deployment requirement
+
+Correct the existing new migration in PR #78, since it has NOT been applied.
+
+Migration filename:
+
+`20261021120000_simulation_workflow_recovery.sql`
+
+Do not create a second migration merely to fix syntax in this unapplied migration.
+
+If additional SQL changes are needed, include them in that same unapplied migration where appropriate.
+
+Preserve forward-only semantics relative to existing already-applied production migrations.
+
+Do NOT apply SQL.
+
+Do NOT deploy Web.
+
+Do NOT deploy Edge Functions.
+
+Runner and Cron remain unchanged.
+
+## 19. Manual acceptance targets
+
+Implement so the user can later manually verify:
+
+1. The SQL migration has correctly paired function delimiters.
+2. Existing template list opens.
+3. DRAFT copy opens.
+4. SAVE persists definition, event_plan and hazard_plan.
+5. SAVE errors do not lock the library.
+6. Same pending operation retries with original UUID.
+7. Receipt lookup can confirm previously committed SAVE.
+8. Missing receipt does not falsely confirm failure.
+9. Rejected SAVE can be corrected safely.
+10. Local draft comparison shows correct baseline.
+11. Local recovery does not erase newer server revisions.
+12. Switching templates does not lose local changes.
+13. Switching organization clears unrelated scoped data.
+14. Built-in templates remain immutable.
+15. Published versions remain immutable.
+16. Quick training creation still works.
+17. Scenario-based creation uses canonical template version.
+18. START retry does not create duplicate incident.
+19. Commander consent remains required.
+20. Activation uses existing permissions.
+21. Initialization creates resources/objects only once.
+22. Initial hazards appear when configured and visible.
+23. Hidden hazards do not leak to participants.
+24. Fire and smoke layer messages are accurate.
+25. Dynamic events remain attached to correct objects.
+26. Pause and Resume work.
+27. FINISH is durable.
+28. FINISH does not close the incident.
+29. Closure prerequisites are understandable.
+30. Closed training exercises remain historically readable.
+31. No live incident data is modified.
+32. Slovenian UI works.
+33. German UI works.
+34. Narrow screens/tablets remain usable.
+35. No stale browser pending state causes another global lock.
+
+These are USER-RUN manual acceptance targets.
+
+Codex must NOT execute them.
+
+## 20. Documentation and PR summary
+
+Update:
+
+`docs/M14.6C.2-sim-workflow-recovery.md`
+
+Document:
+
+- SQL delimiter correction;
+- validator correction;
+- migration dependencies;
+- request receipt compatibility;
+- pending mutation recovery;
+- draft safety;
+- scenario lifecycle;
+- initialization/activation;
+- FINISH/CLOSE separation;
+- resolved usability issues;
+- known limitations;
+- manual rollout sequence.
+
+PR summary must distinguish:
+
+CONFIRMED DEFECTS FIXED
+
+from
+
+ADDITIONAL HARDENING
+
+and
+
+REMAINING UNVERIFIED ITEMS.
+
+Do not claim an error was reproduced if it was only found through source review.
+
+## 21. Strict Codex constraints
+
+Implementation only.
+
+No tests.
+
+No build.
+
+No lint.
+
+No typecheck.
+
+No CI.
+
+No browser or runtime validation.
+
+No emulator.
+
+No Supabase local stack.
+
+No SQL execution.
+
+No migrations applied.
+
+No Edge Functions deployed.
+
+No Web deployment.
+
+No deployment verification.
+
+Inspect source only as necessary to implement the changes.
+
+Do not perform post-implementation validation.
+
+Commit to the EXISTING PR #78 branch.
+
+Use `[skip ci]` according to project conventions.
+
+**Do not create a new PR.**
+
+**Do not merge.**
+
+Stop after pushing the additional commits and provide the updated PR summary.
+
