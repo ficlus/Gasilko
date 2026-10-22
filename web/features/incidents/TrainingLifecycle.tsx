@@ -16,6 +16,8 @@ export function TrainingLifecycle({locale,incident,disabled,onAction,initializat
  const s=sim?.data?.scenario;
  return <section className="admin-card"><h3>{w('lifecycle')}</h3>
  <p>{w('incidentStatus')}: {t(incident.status)} · {w('simStatus')}: {s?st(s.status):'—'}</p>
+ <p role="status">{w('next')}: {w(['CLOSED','CANCELLED'].includes(incident.status)?'history':s?.status==='FINISHED'?'closeStep':!incident.commander?.valid?'commandStep':incident.status==='DRAFT'?'activateStep':initialization!==null&&initialization?.state!=='READY'?'initializeStep':s?.status==='RUNNING'||s?.status==='PAUSED'?'simStatus':'startStep')}</p>
+ {initialization&&initialization.state!=='READY'&&<p>{w('hazardUninitialized')}</p>}
  <ol><li>{incident.commander?.valid?'✓ ':''}<button onClick={()=>{const el=document.getElementById('sim-command');el?.scrollIntoView({block:'center'});el?.querySelector('details')?.setAttribute('open','');}}>{w('commandStep')}</button></li>
  <li>{['ACTIVE','STABILIZED','CLOSED'].includes(incident.status)?'✓ ':''}{w('activateStep')}</li>{initialization!==null&&<li>{initialization?.state==='READY'?'✓ ':''}{w('initializeStep')}</li>}<li>{s&&s.status!=='DRAFT'?'✓ ':''}{w('startStep')}</li></ol>
  {agents?.data&&<dl className="command-route-facts"><dt>{w('clock')}</dt><dd>{Math.floor(agents.data.clock.seconds)} s · {agents.data.clock.scale}×</dd>

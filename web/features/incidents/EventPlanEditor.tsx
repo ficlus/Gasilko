@@ -13,7 +13,7 @@ const TemplateMap=dynamic(()=>import('./TemplateMap'),{ssr:false});
 export function EventPlanEditor({locale,definition,plan,onChange,disabled}:{locale:Locale;definition:Definition;plan:EventPlan;onChange:(p:EventPlan)=>void;disabled:boolean}){
  const t=scenarioEventText(locale),[selected,setSelected]=useState(''),[placing,setPlacing]=useState(false),[drawing,setDrawing]=useState(false),[vertices,setVertices]=useState<Position[]>([]);
  const context=useScenarioEditor();
- useEffect(()=>{if(context?.selected)setSelected(context.selected);},[context?.selected]);
+ useEffect(()=>{if(context?.selected){setSelected(context.selected);setPlacing(false);setDrawing(false);setVertices([]);}},[context?.selected]);
  const index=plan.events.findIndex(e=>e.id===selected),event=plan.events[index],prior=plan.events.slice(0,Math.max(index,0));
  const geometry=event?.effect?.source_object_id?definition.initial_objects.find(o=>o.id===event.effect?.source_object_id)?.geometry:event?.effect?.geometry;
  const mapDefinition:Definition={...definition,virtual_units:definition.virtual_units,initial_objects:[...definition.initial_objects,...(event&&geographicEvent(event.type)?[{id:'event-'+event.id,kind:'HAZARD' as const,label:event.title,description:event.description,geometry:geometry??null}]:[])]};

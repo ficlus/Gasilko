@@ -19,7 +19,7 @@ export function TemplateInitialization({locale,account,org,incident,refresh,read
   return()=>ac.abort();
  },[account,org,incident,refresh,read]);
  if(!value&&!error&&!mutation.pending)return null;
- const busy=loading||mutation.busy||!!mutation.pending;
+ const busy=loading||!mutation.ready||mutation.busy||!!mutation.pending;
  return <section className="admin-card"><h3>{t('initialization')}</h3>
   {(error||mutation.error)&&<p role="alert">{t(mutation.error||error)}</p>}
   <SimOperationRecovery locale={locale} mutation={mutation}/><button disabled={loading} onClick={onRefresh}>{t('refresh')}</button>
@@ -28,7 +28,7 @@ export function TemplateInitialization({locale,account,org,incident,refresh,read
    <p role="status">{t(value.state)} · {t('objects')}: {value.objects} · {t('units')}: {value.units}</p>
    <p>{t(value.state==='READY'?'readyHelp':'setupHelp')}</p>
    {value.clock_scale!==null&&value.response_profile!==null&&<p>{t('clock')}: {value.clock_scale}× · {t('profile')}: {t(value.response_profile)}</p>}
-   {!value.can_initialize&&value.state!=='READY'&&<p>{workflowText(locale)('prerequisites')}</p>}
+   {!value.can_initialize&&value.state!=='READY'&&<p>{workflowText(locale)(!['ACTIVE','STABILIZED'].includes(value.incident_status)?'activateStep':'prerequisites')}</p>}
    {value.can_initialize&&<button disabled={busy} onClick={()=>setConfirm(value)}>{t('initialize')}</button>}
 
    {confirm&&<TemplateConfirmation locale={locale} busy={mutation.busy} onCancel={()=>setConfirm(null)} onConfirm={()=>{

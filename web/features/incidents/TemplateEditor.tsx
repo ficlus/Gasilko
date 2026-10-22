@@ -13,9 +13,10 @@ type Props={locale:Locale;value:Template;draft:Definition;onChange:(d:Definition
 const kinds:MapKind[]=['COMMAND_POST','STAGING','TRIAGE_POINT','WATER_SOURCE','ACCESS_POINT','NOTE','HAZARD','PERIMETER'];
 export function TemplateEditor({locale,value,draft:d,onChange,disabled,section}:Props){
  const context=useScenarioEditor();
- useEffect(()=>{if(context?.selected){setSelected(context.selected);setInspectorOpen(true);}},[context?.selected]);
+ useEffect(()=>{if(context?.selected){setSelected(context.selected);setInspectorOpen(true);setPlacing(false);setDrawing(false);setVertices([]);}},[context?.selected]);
  const t=templateText(locale),[preview,setPreview]=useState(value.builtin||value.state==='PUBLISHED'),[selected,setSelected]=useState('center');
  const [placing,setPlacing]=useState(false),[drawing,setDrawing]=useState(false),[vertices,setVertices]=useState<Position[]>([]);
+ useEffect(()=>{setPlacing(false);setDrawing(false);setVertices([]);},[section]);
  const [kind,setKind]=useState<MapKind>('COMMAND_POST');
  const [configurationOpen,setConfigurationOpen]=useState(true),[inspectorOpen,setInspectorOpen]=useState(true);
  useEffect(()=>{if(window.matchMedia('(max-width:1100px)').matches){setConfigurationOpen(false);setInspectorOpen(false);}},[]);

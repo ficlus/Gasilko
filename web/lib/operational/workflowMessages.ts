@@ -1,5 +1,16 @@
 import type {Locale} from '../i18n';
 const messages:Record<string,[string,string]>={
+"baseline":["Izvorna lokalna revizija","Ursprüngliche lokale Revision"],
+"hazardLoading":["Podatki o požaru in dimu še niso na voljo.","Feuer- und Rauchdaten sind noch nicht verfügbar."],
+"hazardUnavailable":["Podatkov ni bilo mogoče osvežiti. Odsotnost prikaza ne pomeni odsotnosti požara.","Daten konnten nicht aktualisiert werden. Eine leere Anzeige bedeutet nicht, dass kein Feuer vorhanden ist."],
+"hazardNone":["Ni nastavljenega modela nevarnosti v pripravljenem scenariju.","Im vorbereiteten Szenario ist kein Gefahrenmodell konfiguriert."],
+"hazardUnrevealed":["Trenutno ni razkritih modelov za ta pogled.","Für diese Ansicht sind derzeit keine Modelle freigegeben."],
+"hazardDisabled":["Model je onemogočen.","Modell ist deaktiviert."],
+"hazardHidden":["Model čaka na razkritje z dogodkom.","Modell wartet auf Freigabe durch ein Ereignis."],
+"hazardStale":["Posnetek zaostaja ali vsebuje napako; prikaz ni potrditev trenutnega stanja.","Snapshot ist verzögert oder fehlerhaft; die Anzeige bestätigt nicht den aktuellen Zustand."],
+"hazardHistory":["Zaključena simulacija: prikaz zadnjega zabeleženega stanja.","Beendete Simulation: zuletzt aufgezeichneter Zustand."],
+"hazardUninitialized":["Scenarij še ni pripravljen. Pred prikazom začetnega požara dokončajte pripravo.","Szenario ist noch nicht vorbereitet. Vorbereitung vor der Anzeige des anfänglichen Feuers abschließen."],
+"geometryCancel":["Menjava razdelka ali izbire prekine nedokončano risanje in postavljanje.","Wechsel des Abschnitts oder der Auswahl verwirft unvollständiges Zeichnen und Platzieren."],
  "IDLE": [
   "Pripravljeno",
   "Bereit"
@@ -217,12 +228,12 @@ const messages:Record<string,[string,string]>={
   "Aktualisiert"
  ],
  "noFire": [
-  "Ni vidnega aktivnega požarnega modela.",
-  "Kein sichtbares aktives Feuermodell."
+  "Ni vidnih aktivnih požarnih celic.",
+  "Keine sichtbaren aktiven Feuerzellen."
  ],
  "noSmoke": [
-  "Ni vidnega aktivnega modela dima.",
-  "Kein sichtbares aktives Rauchmodell."
+  "Trenutno ni vidnega dima.",
+  "Derzeit kein sichtbarer Rauch."
  ],
  "clock": [
   "Simulirani čas",

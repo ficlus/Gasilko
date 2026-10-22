@@ -25,7 +25,7 @@ export function HazardEffectFields({locale,value,model,onChange,disabled=false}:
 export function HazardPlanEditor({locale,definition,events,plan,onChange,disabled}:{locale:Locale;definition:Definition;events:EventPlan;plan:HazardPlan;onChange:(p:HazardPlan)=>void;disabled:boolean}){
  const t=hazardText(locale),[selected,setSelected]=useState(''),[placing,setPlacing]=useState(''),[eventId,setEventId]=useState('');
  const context=useScenarioEditor();
- useEffect(()=>{if(context?.selected)setSelected(context.selected);},[context?.selected]);
+ useEffect(()=>{if(context?.selected){setSelected(context.selected);setPlacing('');}},[context?.selected]);
  const m=plan.models.find(v=>v.id===selected);
  function patch(value:Partial<HazardModel>){if(m&&!disabled)onChange({...plan,models:plan.models.map(v=>v.id===m.id?{...v,...value}:v)});}
  function point(position:Position){

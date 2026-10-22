@@ -1,5 +1,5 @@
 'use client';
-import {useState} from 'react';
+import {useState,useRef} from 'react';
 import dynamic from 'next/dynamic';
 import type {Locale} from '../../lib/i18n';
 import type {Definition,Template} from '../../lib/operational/templates';
@@ -15,9 +15,11 @@ import {HazardPlanEditor} from './HazardPlanEditor';
 const TemplateMap=dynamic(()=>import('./TemplateMap'),{ssr:false});
 export function ScenarioEditorWorkspace({locale,value,draft,events,hazards,onDraft,onEvents,onHazards,disabled}:{locale:Locale;value:Template;draft:Definition;events:EventPlan;hazards:HazardPlan;onDraft:(d:Definition)=>void;onEvents:(p:EventPlan)=>void;onHazards:(p:HazardPlan)=>void;disabled:boolean}){
  const [section,setSection]=useState<EditorSection>('overview'),[selected,setSelected]=useState('center'),w=workflowText(locale),t=templateText(locale);
+ const viewport=useRef<{center:[number,number];zoom:number;bearing:number;pitch:number}|null>(null);
  const select=(next:EditorSection,id:string)=>{setSection(next);setSelected(id);};
  const readonly=disabled||value.builtin||value.archived||value.state==='PUBLISHED',issues=scenarioReadiness(draft,events,hazards);
- return <ScenarioEditorContext.Provider value={{definition:draft,events,hazards,selected,select}}>
+ return <ScenarioEditorContext.Provider value={{definition:draft,events,hazards,selected,viewport,select}}>
+ <p>{w('geometryCancel')}</p>
  <nav className="actions scenario-sections" aria-label={t('configuration')}>{(['overview','area','units','objects','hazards','events','settings','review'] as EditorSection[]).map(s=><button type="button" key={s} aria-current={s===section?'step':undefined} onClick={()=>setSection(s)}>{w(s)}</button>)}</nav>
  {['overview','area','units','objects','settings'].includes(section)&&<TemplateEditor locale={locale} value={value} draft={draft} onChange={onDraft} disabled={readonly} section={section}/>}
  {section==='events'&&<EventPlanEditor locale={locale} definition={draft} plan={events} onChange={onEvents} disabled={readonly}/>}

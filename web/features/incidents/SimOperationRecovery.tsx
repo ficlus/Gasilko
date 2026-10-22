@@ -9,8 +9,9 @@ export function SimOperationRecovery({locale,mutation}:{locale:Locale;mutation:R
  return <section className="admin-notice" aria-live="polite">
  <p>{w(mutation.state)}</p>{mutation.error&&<p role="alert">{t(mutation.error)}</p>}
  {mutation.correlation&&<small>{mutation.correlation}</small>}
- {mutation.pending&&<><small>{String(mutation.pending.args.p_operation)}</small><div className="actions">
- {['simulation_template_command','simulation_template_initialize'].includes(mutation.pending.name)&&<button type="button" disabled={mutation.busy} onClick={mutation.reconcile}>{w('reconcile')}</button>}
- <button type="button" disabled={mutation.busy} onClick={mutation.retry}>{t('retry')}</button></div></>}
+ {mutation.pendingRequests.map(request=><div key={String(request.args.p_operation)}>
+ <small>{String(request.args.p_action??'')} · {String(request.args.p_template_id??request.args.p_incident_id??'')} · {String(request.args.p_operation)}</small><div className="actions">
+ {['simulation_template_command','simulation_template_initialize'].includes(request.name)&&<button type="button" disabled={mutation.busy} onClick={()=>mutation.reconcileRequest(request)}>{w('reconcile')}</button>}
+ <button type="button" disabled={mutation.busy} onClick={()=>mutation.retryRequest(request)}>{t('retry')}</button></div></div>)}
  </section>;
 }

@@ -17,3 +17,18 @@ export function readDraft(account:string,org:string,id:string):DraftSnapshot|nul
  return value.base?.id===id&&value.definition?.schema_version===1&&value.event_plan?.schema_version===1&&value.hazard_plan?.schema_version===1?value:null;
 }
 export function removeDraft(account:string,org:string,id:string){sessionStorage.removeItem(key(account,org,id));}
+
+function canonical(value:unknown):string{
+ if(Array.isArray(value))return '['+value.map(canonical).join(',')+']';
+ if(value&&typeof value==='object')return '{'+Object.keys(value).sort().map(k=>JSON.stringify(k)+':'+canonical((value as Record<string,unknown>)[k])).join(',')+'}';
+ return JSON.stringify(value)??'null';
+}
+export function draftPayload(value:Pick<DraftSnapshot,'definition'|'event_plan'|'hazard_plan'>,version:string){
+ return {version_id:version,definition:{...value.definition,metadata:{...value.definition.metadata,objectives:value.definition.metadata.objectives.filter(x=>x.trim())}},event_plan:value.event_plan,hazard_plan:value.hazard_plan};
+}
+export function samePayload(a:unknown,b:unknown){return canonical(a)===canonical(b);}
+/** Delete only the exact draft that this receipt acknowledged, never a newer edit. */
+export function removeAcknowledgedDraft(account:string,org:string,id:string,expected:string,payload:unknown){
+ const saved=readDraft(account,org,id);
+ if(saved&&saved.base.revision===expected&&samePayload(draftPayload(saved,saved.base.version_id),payload))removeDraft(account,org,id);
+}

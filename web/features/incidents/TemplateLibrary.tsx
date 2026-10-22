@@ -10,7 +10,7 @@ import {emptyHazardPlan,type HazardPlan} from '../../lib/operational/hazards';
 import {useTemplateMutation} from './useTemplateMutation';
 import {ScenarioEditorWorkspace} from './ScenarioEditorWorkspace';
 import {SimOperationRecovery} from './SimOperationRecovery';
-import {preserveDraft,readDraft,removeDraft,type DraftSnapshot} from './draftRecovery';
+import {preserveDraft,readDraft,removeDraft,removeAcknowledgedDraft,draftPayload,samePayload,type DraftSnapshot} from './draftRecovery';
 import {scenarioReadiness} from '../../lib/operational/scenarioReadiness';
 import {workflowText} from '../../lib/operational/workflowMessages';
 import './templates.css';
@@ -25,28 +25,44 @@ export function TemplateLibrary({locale,account,org,organizationName,types,read,
  const [loading,setLoading]=useState(false),[error,setError]=useState(''),[epoch,setEpoch]=useState(0),[confirm,setConfirm]=useState<Action|null>(null);
  const [type,setType]=useState(types[0]?.id??''),[blocked,setBlocked]=useState(false);
  const [editorLoading,setEditorLoading]=useState(false),[recovery,setRecovery]=useState<DraftSnapshot|null>(null),[compared,setCompared]=useState(false);
- const selection=useRef<string|null>(null);
+ const selection=useRef<string|null>(null),navigation=useRef(0);
+ const acknowledged=useRef(new Map<string,{revision:string;payload:unknown}>());
  const loader=useRef<AbortController|null>(null);
  const mutation=useTemplateMutation(account,org,'library',read,(data,request)=>{
   if(!alive.current)return;setConfirm(null);setEpoch(v=>v+1);
   if(data&&typeof data==='object'&&'incident_id' in data){
-   router.push('/'+locale+'/incidents/'+String(data.incident_id)+'?org='+encodeURIComponent(org));return;
+   if(selection.current===request.args.p_template_id)router.push('/'+locale+'/incidents/'+String(data.incident_id)+'?org='+encodeURIComponent(org));return;
   }
-  const updated=data as Template;
-  if(request.args.p_action==='SAVE')try{removeDraft(account,org,String(request.args.p_template_id));}catch{}
-  if(['CREATE','COPY','REVISE'].includes(String(request.args.p_action))||selection.current===updated.id)void open(updated.id,false);
+  const updated=data as Template,action=String(request.args.p_action),id=String(request.args.p_template_id);
+  if(action==='SAVE'){
+   acknowledged.current.set(id,{revision:String(request.args.p_expected_version),payload:request.args.p_payload});
+   try{removeAcknowledgedDraft(account,org,id,String(request.args.p_expected_version),request.args.p_payload);}catch{setError('storage');}
+   const current=latest.current;
+   if(current.value?.id===id&&current.value.revision===String(request.args.p_expected_version)&&current.draft&&samePayload(draftPayload({definition:current.draft,event_plan:current.eventPlan,hazard_plan:current.hazardPlan},current.value.version_id),request.args.p_payload)){
+    latest.current={...current,value:updated,draft:updated.definition,eventPlan:updated.event_plan??emptyEventPlan(),hazardPlan:updated.hazard_plan??emptyHazardPlan(),dirty:false};
+    setValue(updated);setDraft(updated.definition);setEventPlan(updated.event_plan??emptyEventPlan());setHazardPlan(updated.hazard_plan??emptyHazardPlan());setRecovery(null);
+   }
+  }
+  const sameSelection=selection.current===updated.id||['CREATE','COPY','REVISE'].includes(action)&&selection.current===(request.args.p_template_id??null);
+  if(sameSelection)void open(updated.id);
+
  });
  const dirty=!!value&&!!draft&&(JSON.stringify(value.definition)!==JSON.stringify(draft)||JSON.stringify(value.event_plan??emptyEventPlan())!==JSON.stringify(eventPlan)||JSON.stringify(value.hazard_plan??emptyHazardPlan())!==JSON.stringify(hazardPlan));
- const busy=editorLoading||mutation.busy||!!mutation.pending||!mutation.ready||!!recovery;
+ const latest=useRef({value,draft,eventPlan,hazardPlan,dirty});latest.current={value,draft,eventPlan,hazardPlan,dirty};
+ const affected=mutation.conflicts(value?.id??null);
+ const busy=editorLoading||mutation.busy||affected||!mutation.ready||!!recovery;
  const issues=draft?scenarioReadiness(draft,eventPlan,hazardPlan):[];
  function preserve(){
-  if(!dirty||!value||!draft)return true;
-  try{preserveDraft(account,org,{base:value,definition:draft,event_plan:eventPlan,hazard_plan:hazardPlan,at:new Date().toISOString()});return true;}
-  catch{setError('storage');return false;}
+  const current=latest.current;
+  if(!current.dirty||!current.value||!current.draft)return true;
+  const snapshot={base:current.value,definition:current.draft,event_plan:current.eventPlan,hazard_plan:current.hazardPlan,at:new Date().toISOString()};
+  const ack=acknowledged.current.get(current.value.id);
+  if(ack?.revision===current.value.revision&&samePayload(ack.payload,draftPayload(snapshot,current.value.version_id)))return true;
+  try{preserveDraft(account,org,snapshot);return true;}catch{setError('storage');return false;}
  }
  useEffect(()=>{if(dirty)preserve();},[draft,eventPlan,hazardPlan,dirty]);
 
- useEffect(()=>{alive.current=true;return()=>{alive.current=false;loader.current?.abort();};},[]);
+ useEffect(()=>{alive.current=true;return()=>{alive.current=false;navigation.current++;loader.current?.abort();};},[]);
  useEffect(()=>{
   const warn=(event:BeforeUnloadEvent)=>{if(dirty||mutation.pending){event.preventDefault();event.returnValue='';}};
   const link=(event:MouseEvent)=>{if(!dirty||event.defaultPrevented)return;const anchor=(event.target as Element)?.closest?.('a[href]');
@@ -59,7 +75,7 @@ export function TemplateLibrary({locale,account,org,organizationName,types,read,
   const timer=setTimeout(()=>{
    read<TemplateRow[]>('simulation_template_list',{p_organization_id:org,p_query:query,p_category:category,p_status:status,p_after:after},ac.signal,account)
     .then(data=>{if(!ac.signal.aborted){setRows(data);setBlocked(false);}})
-    .catch(e=>{if(!ac.signal.aborted){const code=templateError(e instanceof Error?e.message:'SERVER');setError(code);if(code==='denied'){setBlocked(true);setValue(null);setDraft(null);setEventPlan(emptyEventPlan());setHazardPlan(emptyHazardPlan());}}})
+    .catch(e=>{if(!ac.signal.aborted){const code=templateError(e instanceof Error?e.message:'SERVER');setError(code);if(code==='denied'){navigation.current++;loader.current?.abort();selection.current=null;setEditorLoading(false);setRecovery(null);setBlocked(true);setValue(null);setDraft(null);setEventPlan(emptyEventPlan());setHazardPlan(emptyHazardPlan());}}})
     .finally(()=>{if(!ac.signal.aborted)setLoading(false);});
   },200);
   return()=>{clearTimeout(timer);ac.abort();};
@@ -70,15 +86,15 @@ export function TemplateLibrary({locale,account,org,organizationName,types,read,
  },[]);
  async function open(id:string,saveCurrent=true){
   if(saveCurrent&&!preserve())return;
-  loader.current?.abort();const ac=new AbortController();loader.current=ac;setEditorLoading(true);setError('');setConfirm(null);
+  loader.current?.abort();const attempt=++navigation.current;selection.current=id;const ac=new AbortController();loader.current=ac;setEditorLoading(true);setError('');setConfirm(null);
   try{
    const item=await read<Template>('simulation_template_read',{p_organization_id:org,p_template_id:id},ac.signal,account);
-   if(ac.signal.aborted)return;selection.current=item.id;setRecovery(null);setCompared(false);try{setRecovery(readDraft(account,org,item.id));}catch{setError('storage');}setValue(item);setDraft(item.definition);setEventPlan(item.event_plan??emptyEventPlan());setHazardPlan(item.hazard_plan??emptyHazardPlan());mutation.setError('');setBlocked(false);
-  }catch(e){if(!ac.signal.aborted){setValue(null);setDraft(null);setEventPlan(emptyEventPlan());setHazardPlan(emptyHazardPlan());setError(templateError(e instanceof Error?e.message:'SERVER'));}}
-  finally{if(!ac.signal.aborted)setEditorLoading(false);}
+   if(ac.signal.aborted||!alive.current||attempt!==navigation.current)return;selection.current=item.id;setRecovery(null);setCompared(false);try{setRecovery(readDraft(account,org,item.id));}catch{setError('storage');}setValue(item);setDraft(item.definition);setEventPlan(item.event_plan??emptyEventPlan());setHazardPlan(item.hazard_plan??emptyHazardPlan());mutation.setError('');setBlocked(false);
+  }catch(e){if(!ac.signal.aborted&&alive.current&&attempt===navigation.current){setValue(null);setDraft(null);setEventPlan(emptyEventPlan());setHazardPlan(emptyHazardPlan());setError(templateError(e instanceof Error?e.message:'SERVER'));}}
+  finally{if(!ac.signal.aborted&&alive.current&&attempt===navigation.current){loader.current=null;setEditorLoading(false);}}
  }
  function command(action:Action){
-  if(blocked||busy)return;
+  if(blocked||busy||loader.current)return;
   let payload:Record<string,unknown>={};
   if(action==='CREATE')payload={definition:blankDefinition(t('blank'))};
   else if(!value||!draft)return;
@@ -99,7 +115,7 @@ export function TemplateLibrary({locale,account,org,organizationName,types,read,
   disabled={false}
   onClick={() => {
     if (preserve()) {
-      selection.current=null;setRecovery(null);setConfirm(null);
+      navigation.current++;loader.current?.abort();loader.current=null;setEditorLoading(false);selection.current=null;setRecovery(null);setConfirm(null);
       setValue(null);
       setDraft(null);
     }
@@ -108,7 +124,7 @@ export function TemplateLibrary({locale,account,org,organizationName,types,read,
   {t('back')}
 </button>
     <span className="admin-badge">{t(value.archived?'ARCHIVED':value.state)} · {t('version')} {value.version}</span>
-    <span role="status">{mutation.busy?w(mutation.state):mutation.pending?w('OUTCOME_UNKNOWN'):t(mutation.error==='stale'?'stale':dirty?'unsaved':'saved')}</span>
+    <span role="status">{mutation.busy?w(mutation.state):affected?w('OUTCOME_UNKNOWN'):t(mutation.error==='stale'?'stale':dirty?'unsaved':'saved')}</span>
     <button disabled={editorLoading} onClick={()=>void open(value.id)}>{t('refresh')}</button>
     {!value.archived&&<button disabled={busy||dirty} onClick={()=>command('COPY')}>{t('copy')}</button>}
     {!value.builtin&&!value.archived&&value.state==='PUBLISHED'&&<button disabled={busy} onClick={()=>command('REVISE')}>{t('revise')}</button>}
@@ -123,11 +139,11 @@ export function TemplateLibrary({locale,account,org,organizationName,types,read,
    </div>
    {issues.length>0&&<p className="admin-notice">{w('reviewIssues')}: {[...new Set(issues.map(i=>w(i.section)))].join(', ')} · {w('review')}</p>}
    {recovery&&<section className="admin-notice">
-    <h3>{w('recovery')}</h3><p>{recovery.at}</p>{recovery.base.revision!==value.revision&&<p>{w('revisionWarning')}</p>}
+    <h3>{w('recovery')}</h3><p>{recovery.at}</p><p>{w('baseline')}: {recovery.base.revision} → {value.revision}</p>{recovery.base.revision!==value.revision&&<p>{w('revisionWarning')}</p>}
     <button type="button" onClick={()=>setCompared(true)}>{w('compare')}</button>
-    {compared&&<div className="sim-compare"><section><h4>{w('local')}</h4><pre>{JSON.stringify({definition:recovery.definition,event_plan:recovery.event_plan,hazard_plan:recovery.hazard_plan},null,2)}</pre></section><section><h4>{w('server')}</h4><pre>{JSON.stringify({definition:value.definition,event_plan:value.event_plan,hazard_plan:value.hazard_plan},null,2)}</pre></section></div>}
-    <div className="actions"><button type="button" disabled={!!mutation.pending||!compared||value.state!=='DRAFT'||value.builtin||value.archived} onClick={()=>{setDraft(recovery.definition);setEventPlan(recovery.event_plan);setHazardPlan(recovery.hazard_plan);setRecovery(null);}}>{w('restore')}</button>
-    <button type="button" disabled={!!mutation.pending} onClick={()=>{try{removeDraft(account,org,value.id);setRecovery(null);}catch{setError('storage');}}}>{w('discardLocal')}</button></div>
+    {compared&&<><details><summary>{w('baseline')}</summary><pre>{JSON.stringify(recovery.base,null,2)}</pre></details><div className="sim-compare"><section><h4>{w('local')}</h4><pre>{JSON.stringify({definition:recovery.definition,event_plan:recovery.event_plan,hazard_plan:recovery.hazard_plan},null,2)}</pre></section><section><h4>{w('server')}</h4><pre>{JSON.stringify({definition:value.definition,event_plan:value.event_plan,hazard_plan:value.hazard_plan},null,2)}</pre></section></div></>}
+    <div className="actions"><button type="button" disabled={affected||!compared||value.state!=='DRAFT'||value.builtin||value.archived} onClick={()=>{setDraft(recovery.definition);setEventPlan(recovery.event_plan);setHazardPlan(recovery.hazard_plan);setRecovery(null);}}>{w('restore')}</button>
+    <button type="button" disabled={affected} onClick={()=>{try{removeDraft(account,org,value.id);setRecovery(null);}catch{setError('storage');}}}>{w('discardLocal')}</button></div>
    </section>}
    <ScenarioEditorWorkspace key={value.id+':'+value.version_id} locale={locale} value={value} draft={draft} events={eventPlan} hazards={hazardPlan} onDraft={setDraft} onEvents={setEventPlan} onHazards={setHazardPlan} disabled={busy||!!confirm}/>
    {confirm&&<TemplateConfirmation locale={locale} busy={mutation.busy} onCancel={()=>setConfirm(null)} onConfirm={()=>command(confirm)}>
@@ -155,7 +171,7 @@ export function TemplateLibrary({locale,account,org,organizationName,types,read,
 }
 export function TemplateConfirmation({locale,busy,onCancel,onConfirm,children}:{locale:Locale;busy:boolean;onCancel:()=>void;onConfirm:()=>void;children:React.ReactNode}){
  const ref=useRef<HTMLDialogElement>(null),t=templateText(locale);
- useEffect(()=>{const d=ref.current;d?.showModal();return()=>d?.close();},[]);
+ useEffect(()=>{const d=ref.current,opener=document.activeElement;d?.showModal();return()=>{d?.close();if(opener instanceof HTMLElement&&opener.isConnected)opener.focus();};},[]);
  return <dialog ref={ref} className="template-confirm" aria-labelledby="template-confirm-title" onCancel={e=>{e.preventDefault();if(!busy)onCancel();}}>
   <h2 id="template-confirm-title">{t('review')}</h2><form onSubmit={e=>{e.preventDefault();onConfirm();}}>
    {children}<label><input required type="checkbox" disabled={busy}/>{t('confirm')}</label>

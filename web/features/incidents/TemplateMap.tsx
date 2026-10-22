@@ -16,7 +16,7 @@ export default function TemplateMap(props:Props){
  return <OperationalMapCanvas locale={props.locale} label={templateText(props.locale)('map')} initialPoints={initial.current}
   onClick={(map,e)=>{
    if(props.editable&&props.placing){props.onPoint([e.lngLat.lng,e.lngLat.lat]);return;}
-   const hit=map.getLayer('template-points')?map.queryRenderedFeatures(e.point,{layers:['template-points','template-fill']}).find(f=>f.properties?.id!=='bounds'&&f.properties?.id!=='drawing'):null;
+   const hit=map.getLayer('template-points')?map.queryRenderedFeatures(e.point,{layers:['template-points','template-lines','template-fill']}).find(f=>f.properties?.id!=='bounds'&&f.properties?.id!=='drawing'):null;
    if(hit?.properties?.section&&context)context.select(hit.properties.section,String(hit.properties.target));else if(hit?.properties?.id)props.onSelect(String(hit.properties.id));
   }}>{map=><Layers map={map} {...props}/>}</OperationalMapCanvas>;
 }
@@ -46,6 +46,11 @@ function Layers({map,definition:d,selected,editable,placing,vertices,onMove,loca
  }
  if(context)for(const item of items){
   const id=String(item.properties?.id);
+  const event=context.events.events.find(e=>'event-'+e.id===id);
+  const model=context.hazards.models.find(m=>m.origins.some(o=>o.id===id||'extent:'+o.id===id)||m.zones.some(z=>z.id===id));
+  if(event)item.properties={...item.properties,section:'events',target:event.id};
+  else if(model)item.properties={...item.properties,section:'hazards',target:model.id};
+  else if(id==='center'||id==='incident'){const modelCenter=id==='center'?context.hazards.models.find(m=>m.center===d.world.center):null;item.properties={...item.properties,section:modelCenter?'hazards':'area',target:modelCenter?.id??id};}
   if(context.definition.virtual_units.some(u=>u.id===id))item.properties={...item.properties,section:'units',target:id};
   else if(context.definition.initial_objects.some(o=>o.id===id))item.properties={...item.properties,section:'objects',target:id};
  }
@@ -59,9 +64,16 @@ function Layers({map,definition:d,selected,editable,placing,vertices,onMove,loca
   map.addLayer({id:'template-labels',type:'symbol',source:'template-data',layout:{'text-field':['get','label'],'text-size':12,'text-offset':[0,1.7],'text-anchor':'top'},paint:{'text-color':'#111827','text-halo-color':'#ffffff','text-halo-width':2}});
   return()=>{try{for(const id of ['template-labels','template-points','template-lines','template-fill'])if(map.getLayer(id))map.removeLayer(id);if(map.getSource('template-data'))map.removeSource('template-data');}catch{/* Canvas may already be disposed. */}};
  },[map]);
- useEffect(()=>{(map.getSource('template-data') as GeoJSONSource|undefined)?.setData(data);},[map,d,vertices,locale,context]);
+ const serialized=JSON.stringify(data);
+ useEffect(()=>{(map.getSource('template-data') as GeoJSONSource|undefined)?.setData(JSON.parse(serialized));},[map,serialized]);
  useEffect(()=>{
-  const feature=items.find(f=>f.properties?.target===context?.selected||f.properties?.id===selected),g=feature?.geometry;
+  const viewport=context?.viewport;if(!viewport)return;
+  const frame=requestAnimationFrame(()=>{if(viewport.current)map.jumpTo(viewport.current);});
+  const remember=()=>{const c=map.getCenter();viewport.current={center:[c.lng,c.lat],zoom:map.getZoom(),bearing:map.getBearing(),pitch:map.getPitch()};};
+  map.on('moveend',remember);return()=>{cancelAnimationFrame(frame);map.off('moveend',remember);};
+ },[map]);
+ useEffect(()=>{
+  const feature=items.find(f=>!!selected&&f.properties?.id===selected)??items.find(f=>!!context?.selected&&f.properties?.target===context.selected),g=feature?.geometry;
   const p=g?.type==='Point'?g.coordinates:g?.type==='Polygon'?g.coordinates[0]?.[0]:g?.type==='LineString'?g.coordinates[0]:null;
   if(p&&Number.isFinite(p[0])&&Number.isFinite(p[1]))map.easeTo({center:[p[0],p[1]],duration:250});
  },[map,selected,context?.selected]);

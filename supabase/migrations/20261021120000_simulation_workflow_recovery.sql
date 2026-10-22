@@ -1,11 +1,11 @@
 -- M14.6C.2: narrow recovery reads and forward-only validation diagnostics.
 begin;
 create function public.simulation_operation_resolve(p_organization_id uuid,p_name text,p_args jsonb) returns jsonb
-language plpgsql stable security definer set search_path='' as $$
+language plpgsql stable security definer set search_path='' as $workflow$
 declare op uuid;req jsonb;saved private.simulation_template_receipts;core private.incident_operation_receipts;incident uuid;
 begin
  if not private.is_active_user() or not private.incident_acting_member(p_organization_id) then raise exception 'NOT_AUTHORIZED' using errcode='42501';end if;
- if jsonb_typeof(p_args)<>'object' or octet_length(p_args::text)>131072 then raise exception 'VALIDATION_FAILED';end if;
+ if jsonb_typeof(p_args) is distinct from 'object' or octet_length(p_args::text)>131072 then raise exception 'VALIDATION_FAILED';end if;
  op:=(p_args->>'p_operation')::uuid;
  if op is null then raise exception 'VALIDATION_FAILED';end if;
  if p_name in ('simulation_template_command','simulation_template_initialize') then
@@ -26,16 +26,16 @@ begin
    or not exists(select 1 from public.simulation_scenarios where incident_id=incident and organization_id=p_organization_id)
    then raise exception 'NOT_AUTHORIZED' using errcode='42501';end if;
   req:=jsonb_build_object('command','SIM_'||(p_args->>'p_action'),'org',p_organization_id,'incident',incident,'expected',(p_args->>'p_expected_version')::bigint,'payload',p_args->'p_payload');
-  select * into core from private.incident_operation_receipts where operation_id=op and actor_user_id=auth.uid() and request=req;
+  select * into core from private.incident_operation_receipts where operation_id=op and actor_user_id=auth.uid() and acting_organization_id=p_organization_id and incident_id=incident and command_code='SIM_'||(p_args->>'p_action') and request=req;
   if found then return jsonb_build_object('state','CONFIRMED','data',core.result);end if;
  else raise exception 'VALIDATION_FAILED';
  end if;
  return jsonb_build_object('state','OUTCOME_UNKNOWN');
-end; $$;
+end; $workflow$;
 revoke all on function public.simulation_operation_resolve(uuid,text,jsonb) from public,anon,authenticated,service_role;
 grant execute on function public.simulation_operation_resolve(uuid,text,jsonb) to authenticated;
 create or replace function private.validate_simulation_template(d jsonb,ready boolean) returns void
-language plpgsql immutable set search_path='' as $$
+language plpgsql immutable set search_path='' as $workflow$
 declare v jsonb;m jsonb:=d->'metadata';w jsonb:=d->'world';cfg jsonb:=d->'simulation_defaults';ids text[]:=array['center','incident','bounds','drawing'];g jsonb;
 begin
  if d is null or octet_length(d::text)>48000 then raise exception 'VALIDATION_FAILED'; end if;
@@ -85,9 +85,9 @@ begin
  end loop;
 exception when raise_exception or invalid_text_representation or numeric_value_out_of_range or invalid_parameter_value then
  raise exception 'INVALID_TEMPLATE';
-end; $;
+end; $workflow$;
 create or replace function private.validate_simulation_event_plan(p jsonb,d jsonb,ready boolean) returns void
-language plpgsql immutable set search_path='' as $$
+language plpgsql immutable set search_path='' as $workflow$
 declare e jsonb;t jsonb;f jsonb;g jsonb;prior jsonb;ids text[]:='{}';seen jsonb:='{}';n numeric;
 begin
  if p is null or octet_length(p::text)>60000 then raise exception 'VALIDATION_FAILED';end if;
@@ -134,9 +134,9 @@ begin
  end loop;
 exception when raise_exception or invalid_text_representation or numeric_value_out_of_range or invalid_parameter_value then
  raise exception 'INVALID_EVENT_PLAN';
-end; $;
+end; $workflow$;
 create or replace function private.validate_hazard_plan(p jsonb,events jsonb) returns void
-language plpgsql immutable set search_path='' as $$
+language plpgsql immutable set search_path='' as $workflow$
 declare m jsonb;o jsonb;z jsonb;e jsonb;xy jsonb;ids text[]:='{}';origin_ids text[];zone_ids text[];
  radius numeric;cell numeric;center jsonb;wildfires integer:=0;
 begin
@@ -196,9 +196,9 @@ begin
  end loop;
 exception when raise_exception or invalid_text_representation or numeric_value_out_of_range or invalid_parameter_value then
  raise exception 'INVALID_HAZARD_PLAN';
-end; $;
+end; $workflow$;
 create or replace function public.simulation_template_list(p_organization_id uuid,p_query text default '',p_category text default '',p_status text default '',p_after uuid default null) returns jsonb
-language plpgsql stable security definer set search_path='' as $$
+language plpgsql stable security definer set search_path='' as $workflow$
 begin
  if not private.simulation_template_editor(p_organization_id) then raise exception 'NOT_AUTHORIZED' using errcode='42501';end if;
  if p_query is null or length(p_query)>100 or p_category is null or p_status is null or p_category not in ('','STRUCTURE_FIRE','WILDFIRE','TRAFFIC_ACCIDENT','SANDBOX')
@@ -214,9 +214,9 @@ begin
  and ((p_status='' and not t.archived) or p_status='ARCHIVED' and t.archived or not t.archived and
  (p_status='BUILT_IN' and t.organization_id is null or p_status='ORGANIZATION' and t.organization_id=p_organization_id or v.state=p_status))
  order by t.id limit 25) q),'[]');
-end; $$;
+end; $workflow$;
 create or replace function public.simulation_template_initialization(p_organization_id uuid,p_incident_id uuid) returns jsonb
-language plpgsql stable security definer set search_path='' as $$
+language plpgsql stable security definer set search_path='' as $workflow$
 declare s public.simulation_scenarios;p private.simulation_template_instances;i public.incidents;
 begin
  if not private.simulation_enabled() or not private.simulation_visible(p_incident_id,p_organization_id) then raise exception 'NOT_AUTHORIZED' using errcode='42501';end if;
@@ -236,9 +236,9 @@ begin
  and private.simulation_template_editor(p_organization_id) and private.simulation_controller(s.id,p_organization_id)
  and (jsonb_array_length(p.definition->'virtual_units')=0 or private.can_manage_incident_unit(i.id,p_organization_id,p_organization_id,null,'DEPLOY'))
  and (jsonb_array_length(p.definition->'initial_objects')=0 or private.has_incident_capability(i.id,p_organization_id,'MANAGE_COP')));
-end; $$;
+end; $workflow$;
 create or replace function public.simulation_overview(p_acting_organization_id uuid,p_page integer,p_view text) returns jsonb
-language plpgsql stable security definer set search_path='' as $$
+language plpgsql stable security definer set search_path='' as $workflow$
 begin
  if not private.incident_acting_member(p_acting_organization_id) then raise exception 'NOT_AUTHORIZED' using errcode='42501'; end if;
  if p_view is null or p_view not in ('all','active','finished') then raise exception 'VALIDATION_FAILED';end if;
@@ -249,11 +249,11 @@ begin
  'created_by',coalesce(p.display_name,s.created_by::text),'unit_count',(select count(*) from public.simulation_unit_positions pos where pos.scenario_id=s.id and pos.active)) dto
  from public.simulation_scenarios s join public.incidents i on i.id=s.incident_id join public.profiles p on p.id=s.created_by
  where (p_view='all' or p_view='finished' and (s.status='FINISHED' or i.status in ('CLOSED','CANCELLED')) or p_view='active' and s.status<>'FINISHED' and i.status not in ('CLOSED','CANCELLED')) and private.simulation_visible(s.incident_id,p_acting_organization_id) order by s.created_at desc,s.id limit 25 offset p_page*25) q),'[]');
-end; $$;
+end; $workflow$;
 revoke all on function public.simulation_overview(uuid,integer,text) from public,anon,authenticated,service_role;
 grant execute on function public.simulation_overview(uuid,integer,text) to authenticated;
 create function public.simulation_hazard_history(p_organization_id uuid,p_incident_id uuid,p_model uuid,p_before bigint default null) returns jsonb
-language plpgsql stable security definer set search_path='' as $
+language plpgsql stable security definer set search_path='' as $workflow$
 declare s public.simulation_scenarios;m private.simulation_hazard_models;controller boolean;first_visible bigint;
 begin
  if not private.simulation_enabled() or not private.simulation_visible(p_incident_id,p_organization_id) then raise exception 'NOT_AUTHORIZED' using errcode='42501';end if;
@@ -269,7 +269,34 @@ begin
   from private.simulation_hazard_history h where h.model_id=m.id and (p_before is null or h.version<p_before)
    and (controller or (h.version>=first_visible and coalesce((select snap.revealed from private.simulation_hazard_snapshots snap where snap.model_id=m.id and snap.version<=h.version order by snap.version desc limit 1),false))) order by h.version desc limit 25
  ) q),'[]'::jsonb);
-end; $;
+end; $workflow$;
 revoke all on function public.simulation_hazard_history(uuid,uuid,uuid,bigint) from public,anon,authenticated,service_role;
 grant execute on function public.simulation_hazard_history(uuid,uuid,uuid,bigint) to authenticated;
+
+-- Safe preparation state; retains the existing authorized model projection.
+create or replace function public.simulation_hazards_read(p_organization_id uuid,p_incident_id uuid,p_instructor boolean default false) returns jsonb
+language plpgsql volatile security definer set search_path='' as $hazard_read$
+declare s public.simulation_scenarios;controller boolean;models jsonb;seconds_value bigint;result_value jsonb;
+begin
+ if not private.incident_acting_member(p_organization_id) or not private.can_read_incident(p_incident_id) then raise exception 'NOT_AUTHORIZED';end if;
+ select * into s from public.simulation_scenarios where incident_id=p_incident_id;
+ if not found then return null;end if;
+ if not private.simulation_enabled() then raise exception 'NOT_AUTHORIZED';end if;
+ controller:=coalesce(private.simulation_template_editor(p_organization_id) and private.simulation_controller(s.id,p_organization_id),false);
+ if not private.simulation_visible(p_incident_id,p_organization_id) and not controller then raise exception 'NOT_AUTHORIZED';end if;
+ if p_instructor is null or p_instructor and not controller then raise exception 'NOT_AUTHORIZED';end if;
+ select seconds into seconds_value from public.simulation_scenario_clock where scenario_id=s.id;
+ select coalesce(jsonb_agg(jsonb_build_object('id',m.id,'version',m.version::text,'title',m.configuration->>'title','type',m.configuration->>'type',
+ 'step',m.last_step,'features',private.hazard_features(m),'lag_steps',greatest(0,coalesce(seconds_value,0)/5-m.last_step),
+ 'last_scan_at',m.last_scan_at,'error',m.last_error,'enabled',m.configuration->'enabled',
+ 'wind_direction',m.configuration->'wind_direction','wind_speed',m.configuration->'wind_speed',
+ 'burning',(select count(*) from jsonb_array_elements(m.state) c where (c->>'intensity')::numeric>0))
+ ||case when p_instructor then jsonb_build_object('configuration',m.configuration,'revealed',m.revealed,'processing_ms',m.processing_ms,
+ 'pending_effects',(select count(*) from private.simulation_hazard_effects e where e.model_id=m.id and not exists(select 1 from private.simulation_hazard_history h where h.model_id=m.id and h.operation_id=e.operation_id)))
+ else '{}'::jsonb end order by m.id),'[]') into models
+ from private.simulation_hazard_models m where m.scenario_id=s.id and (p_instructor or (s.status<>'DRAFT' and m.revealed));
+ result_value:=jsonb_build_object('can_control',controller,'status',s.status,'seconds',coalesce(seconds_value,0),'models',models,'initialization_state',(select instance.state from private.simulation_template_instances instance where instance.scenario_id=s.id));
+ if octet_length(result_value::text)>1500000 then raise exception 'SIM_LIMIT';end if;
+ return result_value;
+end; $hazard_read$;
 commit;
