@@ -4,6 +4,7 @@ import type {Geometry,Position,MapKind} from '../incidents/cop';
 export const templateCategories=['STRUCTURE_FIRE','WILDFIRE','TRAFFIC_ACCIDENT','SANDBOX'] as const;
 export const templateProfiles=['NORMAL','SLOW_RESPONSE','NO_RESPONSE','BREAKDOWN','COMMUNICATION_LOSS','ROUTE_BLOCKED'] as const;
 export type Definition={
+ operational?:import('./operations').OperationalConfig;
  schema_version:1;
  metadata:{title:string;description:string;category:typeof templateCategories[number];difficulty:'BEGINNER'|'INTERMEDIATE'|'ADVANCED';objectives:string[];duration_minutes:number;initial_situation:string};
  world:{center:Position|null;incident_location:Position|null;radius_m:number};
