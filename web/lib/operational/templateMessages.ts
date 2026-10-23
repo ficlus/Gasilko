@@ -1,3 +1,4 @@
+import {workflowText} from './workflowMessages';
 import type {Locale} from '../i18n';
 const sl:Record<string,string>={
  storage:'Za varno ponavljanje omogočite shrambo seje brskalnika. Dejanje ni bilo poslano.',startPreview:'Ustvari preizkusno vajo iz osnutka',library:'SIM · Scenariji vaj',blank:'Ustvari prazno vajo',templates:'Predloge vaj',search:'Iskanje',category:'Kategorija',all:'Vse',
@@ -65,8 +66,9 @@ const de:Record<string,string>={
  COMMAND_POST:'Führungsstelle',STAGING:'Bereitstellung',TRIAGE_POINT:'Triage',WATER_SOURCE:'Wasserentnahme',ACCESS_POINT:'Zufahrt',NOTE:'Notiz',HAZARD:'Gefahr',PERIMETER:'Bereich',
  reviewDefaults:'Keine automatische Bewegung. Startpositionen sind simuliert.',scope:'Organisation',refresh:'Aktualisieren'
 };
-export const templateText=(locale:Locale)=>(key:string)=>(locale==='de'?de:sl)[key]??key;
+export const templateText=(locale:Locale)=>(key:string)=>(locale==='de'?de:sl)[key]??workflowText(locale)(key);
 export function templateError(code:string){
+ if(['INVALID_TEMPLATE','INVALID_EVENT_PLAN','INVALID_HAZARD_PLAN','SCHEMA_MISMATCH','REQUEST_TOO_LARGE','SERVER','storage'].includes(code))return code;
  return ['NOT_AUTHORIZED','EXPIRED','SIMULATION_DISABLED'].includes(code)?'denied':code==='STALE_VERSION'?'stale':
  ['VALIDATION_FAILED','INVALID_GEOMETRY','UNSUPPORTED_GEOMETRY','GEOMETRY_TOO_LARGE','INVALID_TRANSITION'].includes(code)?'invalid':code==='TEMPLATE_SETUP_REQUIRED'?'setupRequired':'error';
 }

@@ -1,4 +1,7 @@
 'use client';
+import {useScenarioEditor} from './ScenarioEditorContext';
+import {workflowText} from '../../lib/operational/workflowMessages';
+import type {EditorSection} from '../../lib/operational/scenarioReadiness';
 import dynamic from 'next/dynamic';
 import {useState,useEffect} from 'react';
 import type {Locale} from '../../lib/i18n';
@@ -6,11 +9,14 @@ import type {Position,Geometry,MapKind} from '../../lib/incidents/cop';
 import {placeUnset,placementMissing,templateCategories,templateProfiles,type Definition,type Template} from '../../lib/operational/templates';
 import {templateText} from '../../lib/operational/templateMessages';
 const TemplateMap=dynamic(()=>import('./TemplateMap'),{ssr:false});
-type Props={locale:Locale;value:Template;draft:Definition;onChange:(d:Definition)=>void;disabled:boolean};
+type Props={locale:Locale;value:Template;draft:Definition;onChange:(d:Definition)=>void;disabled:boolean;section?:EditorSection};
 const kinds:MapKind[]=['COMMAND_POST','STAGING','TRIAGE_POINT','WATER_SOURCE','ACCESS_POINT','NOTE','HAZARD','PERIMETER'];
-export function TemplateEditor({locale,value,draft:d,onChange,disabled}:Props){
+export function TemplateEditor({locale,value,draft:d,onChange,disabled,section}:Props){
+ const context=useScenarioEditor();
+ useEffect(()=>{if(context?.selected){setSelected(context.selected);setInspectorOpen(true);setPlacing(false);setDrawing(false);setVertices([]);}},[context?.selected]);
  const t=templateText(locale),[preview,setPreview]=useState(value.builtin||value.state==='PUBLISHED'),[selected,setSelected]=useState('center');
  const [placing,setPlacing]=useState(false),[drawing,setDrawing]=useState(false),[vertices,setVertices]=useState<Position[]>([]);
+ useEffect(()=>{setPlacing(false);setDrawing(false);setVertices([]);},[section]);
  const [kind,setKind]=useState<MapKind>('COMMAND_POST');
  const [configurationOpen,setConfigurationOpen]=useState(true),[inspectorOpen,setInspectorOpen]=useState(true);
  useEffect(()=>{if(window.matchMedia('(max-width:1100px)').matches){setConfigurationOpen(false);setInspectorOpen(false);}},[]);
@@ -46,9 +52,9 @@ export function TemplateEditor({locale,value,draft:d,onChange,disabled}:Props){
    <p>{t('reviewDefaults')}</p></div>
   {placementMissing(d)&&<p className="admin-notice" role="status">{t('missing')}</p>}
   <div className="template-editor-grid">
-   <details className="admin-card template-configuration" open={configurationOpen} onToggle={e=>setConfigurationOpen(e.currentTarget.open)}><summary>{t('configuration')}</summary>
+   {(!section||section==='overview'||section==='settings')&&<details className="admin-card template-configuration" open={configurationOpen} onToggle={e=>setConfigurationOpen(e.currentTarget.open)}><summary>{t('configuration')}</summary>
     <fieldset disabled={!canEdit}>
-     <label>{t('title')}<input maxLength={200} value={d.metadata.title} onChange={e=>meta('title',e.target.value)}/></label>
+     {section!=='settings'&&<><label>{t('title')}<input maxLength={200} value={d.metadata.title} onChange={e=>meta('title',e.target.value)}/></label>
      <label>{t('description')}<textarea maxLength={2000} value={d.metadata.description} onChange={e=>meta('description',e.target.value)}/></label>
      <label>{t('category')}<select value={d.metadata.category} onChange={e=>meta('category',e.target.value)}>{templateCategories.map(k=><option key={k} value={k}>{t(k)}</option>)}</select></label>
      <label>{t('difficulty')}<select value={d.metadata.difficulty} onChange={e=>meta('difficulty',e.target.value)}>{['BEGINNER','INTERMEDIATE','ADVANCED'].map(k=><option key={k} value={k}>{t(k)}</option>)}</select></label>
@@ -56,12 +62,12 @@ export function TemplateEditor({locale,value,draft:d,onChange,disabled}:Props){
      <label>{t('duration')}<input type="number" min={5} max={480} value={d.metadata.duration_minutes} onChange={e=>meta('duration_minutes',Number(e.target.value))}/></label>
      <label>{t('situation')}<textarea maxLength={4000} value={d.metadata.initial_situation} onChange={e=>meta('initial_situation',e.target.value)}/></label>
      {(['commander','instructor'] as const).map(k=><label key={k}>{t(k)}<textarea maxLength={4000} value={d.briefings[k]} onChange={e=>onChange({...d,briefings:{...d.briefings,[k]:e.target.value}})}/></label>)}
-     <label>{t('radius')}<input type="number" min={10} max={5000} value={d.world.radius_m} onChange={e=>onChange({...d,world:{...d.world,radius_m:Number(e.target.value)}})}/></label>
+     </>}{section!=='overview'&&<><label>{t('radius')}<input type="number" min={10} max={5000} value={d.world.radius_m} onChange={e=>onChange({...d,world:{...d.world,radius_m:Number(e.target.value)}})}/></label>
      <label>{t('clock')}<select value={d.simulation_defaults.clock_scale} onChange={e=>onChange({...d,simulation_defaults:{...d.simulation_defaults,clock_scale:Number(e.target.value) as 1|5|10}})}>{[1,5,10].map(n=><option key={n} value={n}>{n}×</option>)}</select></label>
      <label>{t('profile')}<select value={d.simulation_defaults.response_profile} onChange={e=>onChange({...d,simulation_defaults:{...d.simulation_defaults,response_profile:e.target.value as Definition['simulation_defaults']['response_profile']}})}>{templateProfiles.map(p=><option key={p} value={p}>{t(p)}</option>)}</select></label>
-    </fieldset><p>{t('defaultsHelp')}</p>
-   </details>
-   <div className="template-map-pane">
+    </>}</fieldset><p>{t('defaultsHelp')}</p>
+   </details>}
+   {(!section||['area','units','objects'].includes(section))&&<><div className="template-map-pane">
     <div className="actions"><button type="button" onClick={()=>choose('center')}>{t('center')}</button><button type="button" onClick={()=>choose('incident')}>{t('incident')}</button>
      <button type="button" disabled={!canEdit||object?.kind==='PERIMETER'||(!!object?.geometry&&object.geometry.type!=='Point')} aria-pressed={placing&&!drawing}
       onClick={()=>{setPlacing(!placing);setDrawing(false);setVertices([]);}}>{t('place')}</button>
@@ -89,7 +95,7 @@ export function TemplateEditor({locale,value,draft:d,onChange,disabled}:Props){
     </fieldset>}
     {unit&&<label>{t('heading')}<input disabled={!canEdit} type="number" min={0} max={359.99} step="any" value={unit.heading}
      onChange={e=>onChange({...d,virtual_units:d.virtual_units.map(u=>u.id===selected?{...u,heading:Number(e.target.value)}:u)})}/></label>}
-    {(object||unit)&&<button type="button" disabled={!canEdit} onClick={()=>{onChange({...d,initial_objects:d.initial_objects.filter(o=>o.id!==selected),virtual_units:d.virtual_units.filter(u=>u.id!==selected)});choose('center');}}>{t('remove')}</button>}
+    {(object||unit)&&<><p>{workflowText(locale)('referenceWarning')}</p><button type="button" disabled={!canEdit} onClick={()=>{onChange({...d,initial_objects:d.initial_objects.filter(o=>o.id!==selected),virtual_units:d.virtual_units.filter(u=>u.id!==selected)});choose('center');}}>{t('remove')}</button></>}
     <h3>{t('objects')} ({d.initial_objects.length}/40)</h3>
     <ul className="template-items">{d.initial_objects.map(o=><li key={o.id}><button type="button" aria-pressed={selected===o.id} onClick={()=>choose(o.id)}>{o.label} · {t(o.kind)}</button></li>)}</ul>
     <label>{t('kind')}<select disabled={!canEdit} value={kind} onChange={e=>setKind(e.target.value as MapKind)}>{kinds.map(k=><option key={k} value={k}>{t(k)}</option>)}</select></label>
@@ -99,7 +105,7 @@ export function TemplateEditor({locale,value,draft:d,onChange,disabled}:Props){
     <button type="button" disabled={!canEdit||d.virtual_units.length>=30} onClick={()=>{
      const id=crypto.randomUUID();onChange({...d,virtual_units:[...d.virtual_units,{id,kind:'OTHER',heading:0,position:d.world.center}]});choose(id);
     }}>{t('addUnit')}</button>
-   </details>
+   </details></>}
   </div>
  </section>;
 }

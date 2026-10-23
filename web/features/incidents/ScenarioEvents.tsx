@@ -11,12 +11,13 @@ import {useTemplateMutation} from './useTemplateMutation';
 import {TemplateConfirmation} from './TemplateLibrary';
 import {useWorkspace} from './workspace';
 type Scope={account:string;org:string;incidentId:string;refresh:number;read:TemplateRead;onInventoryChanged:()=>void};
-type Value={data:Snapshot|null;error:boolean;selected:string;select:(id:string)=>void;focus:{id:string;nonce:number};focusEvent:(id:string)=>void;reload:()=>void;scope:Scope};
+type Value={visible:boolean;setVisible:(v:boolean)=>void;data:Snapshot|null;error:boolean;selected:string;select:(id:string)=>void;focus:{id:string;nonce:number};focusEvent:(id:string)=>void;reload:()=>void;scope:Scope};
 const Context=createContext<Value|null>(null);
 export const useScenarioEvents=()=>useContext(Context);
 /** Only revealed DTOs live here. Instructor definitions are fetched in the gated panel. */
 export function ScenarioEventsProvider({children,...scope}:Scope&{children:ReactNode}){
  const live=useIncidentLive(),[data,setData]=useState<Snapshot|null>(null),[error,setError]=useState(false),[epoch,setEpoch]=useState(0);
+ const [visible,setVisible]=useState(true);
  const [selected,select]=useState(''),[focus,setFocus]=useState({id:'',nonce:0});
  const {account,org,incidentId,read,refresh}=scope;
  useEffect(()=>{
@@ -27,7 +28,7 @@ export function ScenarioEventsProvider({children,...scope}:Scope&{children:React
   return()=>ac.abort();
  },[account,org,incidentId,read,refresh,epoch,live?.lastSuccess]);
  const reload=()=>{setEpoch(n=>n+1);live?.requestRefresh();scope.onInventoryChanged();};
- return <Context.Provider value={{data,error,selected,select,focus,focusEvent:id=>setFocus(v=>({id,nonce:v.nonce+1})),reload,scope}}>{children}</Context.Provider>;
+ return <Context.Provider value={{visible,setVisible,data:live?.status==='ACCESS_LOST'?null:data,error,selected,select,focus,focusEvent:id=>setFocus(v=>({id,nonce:v.nonce+1})),reload,scope}}>{children}</Context.Provider>;
 }
 export function ScenarioEventsPanel({locale}:{locale:Locale}){
  const ctx=useScenarioEvents(),workspace=useWorkspace(),t=scenarioEventText(locale);

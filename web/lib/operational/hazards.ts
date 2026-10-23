@@ -8,7 +8,7 @@ export type HazardModel={id:string;type:'STRUCTURE_FIRE'|'WILDFIRE';title:string
 export type HazardPlan={schema_version:1;models:HazardModel[]};
 export const emptyHazardPlan=():HazardPlan=>({schema_version:1,models:[]});
 export type HazardRow={id:string;version:string;title:string;type:HazardModel['type'];step:number;features:Feature[];lag_steps:number;last_scan_at:string|null;error:string|null;enabled:boolean;wind_direction:number;wind_speed:number;burning:number;configuration?:HazardModel;revealed?:boolean;processing_ms?:number;pending_effects?:number};
-export type HazardSnapshot={can_control:boolean;status:string;seconds:number;models:HazardRow[]};
+export type HazardSnapshot={initialization_state?:string|null;can_control:boolean;status:string;seconds:number;models:HazardRow[]};
 export const hazardRpcs=['simulation_hazards_read','simulation_hazard_command'] as const;
 export function newHazard(center:Position,title:string):HazardModel{
  return {id:crypto.randomUUID(),type:'STRUCTURE_FIRE',title,enabled:true,visibility:'START',center,radius_m:100,cell_m:25,wind_direction:90,wind_speed:2,fuel:0.7,moisture:0.3,spread:1,decline_seconds:900,

@@ -1,4 +1,5 @@
 'use client';
+import {HazardHistory} from './HazardHistory';
 import {createContext,useContext,useEffect,useMemo,useState,type ReactNode} from 'react';
 import type {Locale} from '../../lib/i18n';
 import type {TemplateRead} from '../../lib/operational/templates';
@@ -52,6 +53,7 @@ export function SimulationHazardsPanel({locale}:{locale:Locale}){
    <p>{t('phase')}: {[...new Set(row.features.filter(f=>f.properties?.kind==='FIRE').map(f=>String(f.properties?.phase)))].map(t).join(', ')||t('EXTINGUISHED')}</p>
    <ul>{row.features.filter(f=>f.properties?.phase==='INSTRUCTOR').map(f=><li key={f.id}>{t(String(f.properties?.kind))}</li>)}</ul>
    {row.step>=5760&&<p role="status">{t('budget')}</p>}{row.error&&<p role="alert">{t(row.error)}</p>}
+   <HazardHistory key={ctx.scope.account+ctx.scope.org+ctx.scope.incidentId+row.id} locale={locale} account={ctx.scope.account} org={ctx.scope.org} incident={ctx.scope.incidentId} model={row.id} read={ctx.scope.read}/>
    {ctx.instructor&&data.can_control&&row.configuration&&<HazardControls key={ctx.scope.account+':'+ctx.scope.org+':'+ctx.scope.incidentId+':'+row.id} locale={locale} row={row}/>}
   </section>}
   <p>{t('simSmoke')}</p><button type="button" onClick={ctx.reload}>{t('refresh')}</button>
@@ -68,7 +70,7 @@ function HazardControls({locale,row}:{locale:Locale;row:HazardRow}){
   {row.error==='HAZARD_PROCESSING_FAILED'&&<button type="button" disabled={disabled} onClick={()=>setConfirm({version:row.version,effect:{type:'RETRY',value:null}})}>{t('RETRY')}</button>}
   {mutation.error&&<p role="alert">{tt(mutation.error)}</p>}
   {mutation.pending&&<button type="button" disabled={mutation.busy} onClick={mutation.retry}>{t('retry')}</button>}
-  {confirm&&<TemplateConfirmation locale={locale} busy={mutation.busy||!!mutation.pending} onCancel={()=>setConfirm(null)}
+  {confirm&&<TemplateConfirmation locale={locale} busy={mutation.busy} onCancel={()=>setConfirm(null)}
    onConfirm={()=>mutation.mutate('simulation_hazard_command',{p_incident_id:scope.incidentId,p_model:row.id,p_expected_version:confirm.version,p_effect:confirm.effect})}>
    <h3>{row.title} · {t((confirm.effect as {type:string}).type)}</h3><p>{t('queueHelp')}</p>
    {mutation.error&&<p role="alert">{tt(mutation.error)}</p>}
