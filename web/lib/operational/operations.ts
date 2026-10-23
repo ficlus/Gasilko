@@ -1,0 +1,8 @@
+import type {Position} from '../incidents/cop';
+export type OperationalConfig={schema_version:1;resources:{unit_key:string;capacity_l:number;initial_l:number;pump_lpm:number;range_m:number;efficiency:number}[];bindings:{action_version_id:string;kernel:'APPLY_WATER';flow_lpm:number;duration_seconds:number}[]};
+export type WaterResource={id:string;unit_id:string;name:string;capacity_l:number;remaining_l:number;pump_lpm:number;range_m:number;version:string;source_version_id:string;available:boolean;position:Position|null};
+export type OperationalExecution={id:string;resource_id:string;model_id:string;assignment_id:string|null;state:string;reason:string|null;target:Position;flow_lpm:number;duration_seconds:number;active_seconds:number;delivered_l:number;version:string;last_step:number};
+export type WaterConnection={id:string;source_id:string;consumer_id:string;flow_lpm:number;version:string};
+export type OperationalRead={scenario_id:string;status:string;seconds:number;observed_at:string;can_control:boolean;resources:WaterResource[];executions:OperationalExecution[];connections:WaterConnection[];history:{id:string;kind:string;sim_second:number;data:Record<string,unknown>;recorded_at:string}[];assignments:{id:string;resource_id:string;title:string|null;status:string;target:Position;flow_lpm:number;duration_seconds:number}[]};
+export const operationalErrors=['OP_RESOURCE_UNAVAILABLE','OP_CATCHUP_REQUIRED','OP_CAPABILITY_REQUIRED','OP_RESOURCE_BUSY','OP_TARGET_UNAVAILABLE','OP_TASK_UNAVAILABLE','OP_OUT_OF_RANGE'];
+export const emptyOperationalConfig=():OperationalConfig=>({schema_version:1,resources:[],bindings:[]});

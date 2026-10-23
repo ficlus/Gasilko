@@ -1,4 +1,5 @@
 'use client';
+import {OperationalEffectsProvider,OperationalEffectsPanel} from './OperationalEffects';
 import {SimulationHazardsProvider,SimulationHazardsPanel} from './SimulationHazards';
 import {ScenarioEventsProvider,ScenarioEventsPanel,ScenarioEventDetails} from './ScenarioEvents';
 import {createContext,useContext,useState,useEffect,useRef,useId,useCallback,useMemo,type ReactNode,type CSSProperties} from 'react';
@@ -162,7 +163,7 @@ export function IncidentWorkspace({locale,header,operations,secondary,children,v
    <div className="workspace-grid">
     <aside className="workspace-operational" id={ids+'-left'} hidden={command&&!leftOpen} aria-label={t('workspaceOperations')}>
      {command&&<button type="button" className="command-panel-close" onClick={()=>close('left')}>{wt('hideLeft')}</button>}
-     {operations}<ScenarioEventsPanel locale={locale}/><SimulationHazardsPanel locale={locale}/><div ref={setOperational}/>
+     {operations}<ScenarioEventsPanel locale={locale}/><SimulationHazardsPanel locale={locale}/><OperationalEffectsPanel locale={locale}/><div ref={setOperational}/>
     </aside>
     <div className="workspace-map" role="region" aria-label={wt('map')}>{children}</div>
     <aside className="workspace-selected" id={ids+'-right'} hidden={command&&!rightOpen} aria-label={t('copSelected')}>
@@ -186,9 +187,9 @@ function WorkspaceViews({operational,...props}:{operational:boolean;locale:Local
  // Draft/closed classic screens keep their existing non-workspace composition.
  if(operational||view==='command')return <IncidentWorkspace {...props} view={view} onView={choose}/>;
  return <><div className="workspace-heading">{props.header}<div className="workspace-view-bar"><IncidentViewSwitch locale={props.locale} view={view} onChange={choose}/></div></div>
- <SimulationPanel locale={props.locale}/><IncidentNavigationPanel locale={props.locale}/><AutonomousSimulationPanel locale={props.locale}/>{props.operations}<ScenarioEventsPanel locale={props.locale}/><SimulationHazardsPanel locale={props.locale}/>{props.children}{props.secondary}</>;
+ <SimulationPanel locale={props.locale}/><IncidentNavigationPanel locale={props.locale}/><AutonomousSimulationPanel locale={props.locale}/>{props.operations}<ScenarioEventsPanel locale={props.locale}/><SimulationHazardsPanel locale={props.locale}/><OperationalEffectsPanel locale={props.locale}/>{props.children}{props.secondary}</>;
 }
 export function IncidentLayout({operational,locked,onAccessLost,simulation,...props}:{operational:boolean;locked:boolean;onAccessLost:()=>void;simulation:{account:string;org:string;incidentId:string;refresh:number;read:TaskRead;onInventoryChanged:()=>void};locale:Locale;header:ReactNode;operations:ReactNode;secondary:ReactNode;children:ReactNode}){
- const content=<SimulationProvider key={simulation.account+':'+simulation.org+':'+simulation.incidentId} {...simulation} locale={props.locale}><IncidentNavigationProvider {...simulation} locale={props.locale}><AutonomousSimulationProvider {...simulation} locale={props.locale}><CommandMapProvider {...simulation}><ScenarioEventsProvider {...simulation}><SimulationHazardsProvider {...simulation}><WorkspaceViews operational={operational} {...props}/></SimulationHazardsProvider></ScenarioEventsProvider></CommandMapProvider></AutonomousSimulationProvider></IncidentNavigationProvider></SimulationProvider>;
+ const content=<SimulationProvider key={simulation.account+':'+simulation.org+':'+simulation.incidentId} {...simulation} locale={props.locale}><IncidentNavigationProvider {...simulation} locale={props.locale}><AutonomousSimulationProvider {...simulation} locale={props.locale}><CommandMapProvider {...simulation}><ScenarioEventsProvider {...simulation}><SimulationHazardsProvider {...simulation}><OperationalEffectsProvider {...simulation}><WorkspaceViews operational={operational} {...props}/></OperationalEffectsProvider></SimulationHazardsProvider></ScenarioEventsProvider></CommandMapProvider></AutonomousSimulationProvider></IncidentNavigationProvider></SimulationProvider>;
  return <RtsProvider key={simulation.account+':'+simulation.org+':'+simulation.incidentId} enabled={operational} locked={locked} onAccessLost={onAccessLost}>{operational?<IncidentLiveProvider account={simulation.account} org={simulation.org} incidentId={simulation.incidentId} read={simulation.read} onInvalidate={simulation.onInventoryChanged} onAccessLost={onAccessLost}>{content}</IncidentLiveProvider>:content}</RtsProvider>;
 }

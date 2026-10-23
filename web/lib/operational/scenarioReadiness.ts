@@ -22,5 +22,9 @@ export function scenarioReadiness(d:Definition,e:EventPlan,h:HazardPlan){
  h.models.forEach(m=>{
   if(!m.title.trim()||m.origins.length<1||m.origins.length>8||m.radius_m<25||m.radius_m>250||m.radius_m%m.cell_m!==0||Math.abs(m.center[1])>75||m.effects.some(x=>!e.events.some(v=>v.id===x.event_id)||x.effect.type==='IGNITE'&&!m.origins.some(o=>o.id===x.effect.value)))add('hazards','INVALID_HAZARD_PLAN');
  });
+ if(d.operational){
+  const cfg=d.operational;
+  if(cfg.resources.length>30||cfg.bindings.length>16||cfg.resources.some(r=>!d.virtual_units.some(u=>u.id===r.unit_key)||![r.capacity_l,r.initial_l,r.pump_lpm,r.range_m,r.efficiency].every(Number.isFinite)||r.initial_l<0||r.initial_l>r.capacity_l||r.capacity_l<0||r.capacity_l>100000||r.pump_lpm<0||r.pump_lpm>5000||r.range_m<1||r.range_m>100||r.efficiency<0.000001||r.efficiency>0.001)||cfg.bindings.some(b=>b.duration_seconds<5||b.duration_seconds>3600||b.duration_seconds%5!==0||b.flow_lpm<=0||b.flow_lpm>5000))add('settings','INVALID_TEMPLATE');
+ }
  return issues;
 }
