@@ -146,7 +146,7 @@ export function SimulationProvider({account,org,incidentId,refresh:externalRefre
    {proposal.action==='FINISH'&&<><p>{workflowText(locale)('finishWarning')}</p><p>{data?.scenario?.title} · {data?.positions.length} {t('positions')}</p></>}
    <p>{t('ack')}</p>{['RESET','RESET_POSITION','FINISH'].includes(proposal.action)&&<p>{t('resetWarning')}</p>}
    {error&&<p role="alert">{t(error)===error?workflowText(locale)(error):t(error)}</p>}
-   {rejected?<><p>{t('STALE_VERSION')}</p><button disabled={busy||!data?.can_control||!data.scenario} onClick={()=>void review()}}>{t('review')}</button><button onClick={()=>{setProposal(null);setRejected(false);}}>{t('cancel')}</button></>:pending?<><p>{t('pending')}</p><button disabled={busy} onClick={()=>void send(pending)}>{t('retry')}</button><button disabled={busy} onClick={()=>void reconcile()}>{workflowText(locale)('reconcile')}</button><button disabled={busy} onClick={()=>setProposal(null)}>{t('cancel')}</button></>:
+   {rejected?<><p>{t('STALE_VERSION')}</p><button disabled={busy||!data?.can_control||!data.scenario} onClick={()=>void review()}>{t('review')}</button><button onClick={()=>{setProposal(null);setRejected(false);}}>{t('cancel')}</button></>:pending?<><p>{t('pending')}</p><button disabled={busy} onClick={()=>void send(pending)}>{t('retry')}</button><button disabled={busy} onClick={()=>void reconcile()}>{workflowText(locale)('reconcile')}</button><button disabled={busy} onClick={()=>setProposal(null)}>{t('cancel')}</button></>:
     <div className="actions"><button disabled={busy} onClick={()=>void send(proposal)}>{t('confirm')}</button><button disabled={busy} onClick={()=>setProposal(null)}>{t('cancel')}</button></div>}
   </dialog>}
  </div></Context.Provider>;
