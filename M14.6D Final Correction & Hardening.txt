@@ -1,0 +1,270 @@
+# GASILKO — PR #79 M14.6D Final Correction & Hardening
+
+Repository: https://github.com/ficlus/Gasilko
+
+Existing PR: https://github.com/ficlus/Gasilko/pull/79
+
+Branch: `codex/m14-6d-operational-effects`
+
+Base: latest commit on the existing PR branch.
+
+**Update PR #79 only. Do not create another PR. Do not merge.**
+
+Implementation only. No tests, build, lint, typecheck, CI, SQL execution, runtime validation or deployment.
+
+## 1. Preserve existing work
+
+Keep the implemented M14.6D simulation operational-effects architecture.
+
+Preserve:
+- Existing M14.5A task/assignment engine.
+- M14.5B RTS interaction.
+- H1 movement/navigation.
+- M14.6A/B/B1/C/C.2.
+- Existing simulator runner and Cron.
+- Immutable action versions.
+- Private simulation inventory.
+- Exact operation UUID and receipts.
+- Atomic water consumption and hazard updates.
+- Existing SI/DE localization.
+- Strict REAL/SIM separation.
+
+Do not rewrite the new feature.
+
+## 2. Command authority consistency — priority
+
+Inspect the authoritative M14.5A task issuance and command-scope implementation.
+
+The new `private.operational_step` currently rechecks task issuer authority using an inline role list limited to:
+
+- INCIDENT_COMMANDER
+- AGENCY_COMMANDER
+- SECTOR_COMMANDER
+
+The canonical M14.5A contract also includes scoped UNIT_LEADER task issuance to subordinate crew members.
+
+Determine which recipient/action combinations can legitimately use the M14.6D operational-effect kernel.
+
+Do not blindly add UNIT_LEADER to the existing OR condition.
+
+Instead:
+- Use the existing authoritative command-scope helper if suitable.
+- Preserve exact incident, organization, sector, unit and recipient restrictions.
+- Reject unsupported recipient types explicitly.
+- Ensure authorized tasks are not falsely blocked.
+- Ensure unauthorized tasks cannot gain authority through the simulator.
+- Preserve authority revalidation and task cancellation behavior.
+- Document how command handover affects already-armed executions.
+
+Do not invent a simulator-only command role.
+
+## 3. Simulation RESET consistency
+
+Inspect the existing authoritative RESET contract across M14.6A/B/B1/C and M14.6D.
+
+Current M14.6D cancels operational executions and supply connections but retains consumed water.
+
+Determine whether this matches the intended distinction between:
+- resetting simulation execution;
+- replaying the same exercise from initial conditions;
+- continuing the current exercise after a pause.
+
+If RESET is intended to restart the exercise from its initial configuration, restore simulation-only inventory from the immutable scenario initialization snapshot atomically and idempotently.
+
+If RESET intentionally preserves inventory, keep that behavior but make it explicit in the UI and documentation.
+
+Never restore real-world inventory.
+
+Never create duplicate water resources.
+
+Never silently overwrite historical consumption events.
+
+Preserve exact UUID/retry semantics.
+
+## 4. Operational history privacy
+
+Inspect `public.simulation_operations_read`.
+
+Review the visibility conditions for:
+
+- controller/instructor history;
+- ordinary training participants;
+- hidden hazard models;
+- execution-linked history;
+- records whose execution_id is NULL;
+- REFILL reasons;
+- connection source/consumer identities;
+- model references and historical targets.
+
+Ensure participant visibility follows the existing authorized incident/training scope.
+
+Do not allow NULL execution references to bypass sensitive-history authorization.
+
+At the same time, do not hide legitimately shared operational state without reason.
+
+Keep history bounded and paginated.
+
+Do not expose private instructor model configuration.
+
+## 5. Event identity and idempotency
+
+Inspect `private.operational_log` and the existing `private.agent_event` implementation.
+
+M14.6D intentionally records multiple lifecycle events associated with an operation.
+
+Verify compatibility with:
+
+- event uniqueness constraints;
+- operation UUID semantics;
+- event ordinals;
+- append-only history;
+- replay receipts;
+- runner-origin events;
+- actor attribution.
+
+If the same operation UUID cannot represent multiple event rows under existing constraints, correct event identity without losing operation correlation.
+
+Do not create new operation UUIDs for duplicate command retries.
+
+Do not duplicate shared incident timeline events.
+
+## 6. Hazard-step processing and recovery
+
+Review the interaction:
+
+`simulation_hazard_batch`
+→ `hazard_step`
+→ `operational_step`
+→ `hazard_record`
+→ queued effects.
+
+Ensure:
+- one durable debit per processed step;
+- no consumption after PAUSE/FINISH;
+- no double consumption after retries;
+- correct behavior after interrupted catch-up;
+- blocked source/consumer transitions are deterministic;
+- one bad execution cannot permanently poison unrelated scenarios;
+- existing fairness/time budgets remain intact.
+
+Inspect runner failures and the existing authorized recovery pathway.
+
+Improve safe diagnostics if needed, without exposing model configuration or sensitive SQL details.
+
+Do not create another runner, scheduler or Cron.
+
+## 7. Resource and water-supply edge cases
+
+Review:
+
+- source depletion;
+- consumer depletion;
+- disconnect during ACTIVE execution;
+- source movement;
+- consumer movement;
+- source release;
+- resource version conflicts;
+- active execution after task cancellation;
+- invalid/cross-scenario connections;
+- one-hop and no-cycle invariants;
+- blocked execution resume;
+- zero-capacity resources;
+- fractional-liter precision.
+
+Preserve the bounded first-version model.
+
+Do not add unlimited hydrants or external water supplies.
+
+Do not expand into a full hydraulic simulator.
+
+## 8. User-facing usability
+
+Make the resource/consumption interface operationally clear:
+
+- configured capacity versus remaining water;
+- own tank versus connected supply;
+- command assigned versus effect armed;
+- awaiting ACK versus actual execution;
+- ACTIVE/BLOCKED/COMPLETED;
+- reason for blocked actions;
+- exact retry/pending operation;
+- paused/finished state;
+- historical consumption.
+
+Prevent rapid double-submission or ambiguous UI success.
+
+Keep one shared mutation controller.
+
+Preserve selection context and MapLibre state.
+
+Do not render training-only supply links on REAL incident maps.
+
+Add SI/DE messages if additional error states require them.
+
+## 9. Source-level implementation corrections
+
+Perform focused source inspection of the 17 files changed by PR #79.
+
+Correct concrete defects, including any:
+- incorrect SQL identifiers/signatures;
+- malformed function/trigger definitions;
+- accidental authorization widening;
+- invalid TSX/TypeScript expressions;
+- wrong RPC argument mapping;
+- stale UI state;
+- incompatible configuration validation;
+- mismatched localization keys.
+
+Do not invent defects or claim runtime validation.
+
+Do not modify historical migrations.
+
+Because PR #79's new migration is not yet applied, corrections to it may be made directly in:
+
+`supabase/migrations/20261023120000_simulation_operational_effects.sql`
+
+Do not execute it.
+
+## 10. Documentation
+
+Update:
+
+`docs/M14.6D-operational-action-effects.md`
+
+Include:
+- confirmed corrections;
+- command-scope behavior;
+- RESET decision;
+- history privacy;
+- event identity;
+- runner failure recovery;
+- resource constraints;
+- remaining limitations;
+- manual acceptance instructions.
+
+Clearly distinguish confirmed defects from investigated risks and intentional design limitations.
+
+## 11. Strict constraints
+
+Implementation only.
+
+Do not add tests.
+Do not run tests.
+Do not build.
+Do not lint.
+Do not typecheck.
+Do not run CI.
+Do not execute SQL.
+Do not run runtime/browser validation.
+Do not deploy any services.
+Do not modify runner or Cron unless fixing an essential source-level contract requires it.
+Do not change Android, KAPT, Gradle, Oracle or Caddy.
+
+Push corrections to the **existing PR #79 branch**.
+
+Do not create another PR.
+Do not merge.
+
+Report the exact fixes, files changed, remaining unverified risks and manual rollout order.
+
+Stop after updating PR #79.
