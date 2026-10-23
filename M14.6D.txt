@@ -1,0 +1,808 @@
+# GASILKO — M14.6D Operational Action Effects, Water Supply & Resource Consumption
+
+Repository: https://github.com/ficlus/Gasilko
+
+Base: current main after merged PR #78 — M14.6C.2.
+
+Implement M14.6D, including mandatory correction of remaining confirmed M14.6C.2 source defects.
+
+Implementation only.
+
+Create exactly ONE PR. Do not merge.
+
+## 0. Important development principles
+
+Preserve all existing M14 domain rules, authorization, command hierarchy, template lifecycle, audit, immutable operation receipts, optimistic concurrency and strict REAL/SIM separation.
+
+Integration-safe changes to previous implementation ARE ALLOWED AND EXPECTED.
+
+Do not duplicate the task engine, simulation runner, hazard physics, routing system, incident resource model or scenario editor.
+
+Inspect the actual current main implementation before choosing SQL schema, RPC signatures or component paths.
+
+Reuse and extend the authoritative existing systems.
+
+Do not modify Android, KAPT, Gradle, Oracle, Caddy or unrelated modules.
+
+## 1. MANDATORY FIRST FIX — JSX blocker
+
+Current main contains a confirmed syntax defect in:
+
+`web/features/incidents/SimulationProvider.tsx`
+
+Around line 147:
+
+```tsx
+onClick={()=>void review()}}
+```
+
+Correct to:
+
+```tsx
+onClick={()=>void review()}
+```
+
+Preserve rejected-proposal review behavior, fresh authoritative snapshot retrieval, operation identity and retry semantics.
+
+Also inspect relevant M14.6C.2 TSX files for equivalent concrete syntactic mistakes and correct any found.
+
+Do not rewrite working components.
+
+Do not perform build, typecheck or validation.
+
+Record this correction explicitly in the PR description.
+
+## 2. M14.6D objective
+
+Implement deterministic operational effects for SIM training.
+
+The simulator must support:
+
+- explicit action execution;
+- resource consumption;
+- water supply relationships;
+- bounded suppression effects on existing hazard models;
+- configurable simulated resource capabilities;
+- operational result reporting;
+- event/timeline history;
+- map visualization;
+- safe recovery from interrupted operations.
+
+The user should be able to issue an operational task, observe simulated execution and see its effects.
+
+The software must never treat a movement command alone as a physical action.
+
+**COMMAND INTENT != EXECUTION != PHYSICAL EFFECT**
+
+## 3. Existing architecture to reuse
+
+Inspect:
+
+- M14.5A configurable Action Definitions and assignment episodes;
+- M14.5B RTS command interaction;
+- H1 Movement/Navigation Execution;
+- M14.6A virtual units;
+- M14.6B autonomous agents;
+- M14.6B1 simulation samples;
+- M14.6C hazard models;
+- M14.6C.2 template/event/hazard workflows;
+- existing incident unit/resource data;
+- existing canonical hydrant links;
+- simulation scenario clock;
+- existing `simulation_hazard_batch`;
+- existing `simulation_automation_claim` / finish logic;
+- `incident-simulation-runner`;
+- private hazard effects/history/snapshots.
+
+Do not implement a second simulation clock.
+
+Do not implement another Cron.
+
+Do not duplicate the runner.
+
+## 4. Execution model
+
+Create a bounded SIM action execution model.
+
+Conceptual states:
+
+```text
+PENDING
+READY
+ACTIVE
+BLOCKED
+COMPLETED
+FAILED
+CANCELLED
+```
+
+Adapt names to existing domain conventions.
+
+An action execution must reference:
+
+- SIM scenario;
+- source task/assignment or authorized instructor action;
+- acting resource;
+- action type/version;
+- target;
+- operation UUID;
+- simulation clock;
+- state;
+- start/end information;
+- resource requirements;
+- effect progress;
+- current version.
+
+Separate the existing recipient assignment state from simulated physical execution state.
+
+Task acknowledgement is not proof of physical execution.
+
+Task completion must not be fabricated by the effect engine.
+
+Preserve manual recipient acknowledgement requirements where applicable.
+
+## 5. Action bindings
+
+Do not hardcode localized labels as behavior.
+
+Use configured Action Definitions or a versioned simulation-specific action-binding configuration.
+
+Provide a small documented native action kernel.
+
+Suggested capabilities:
+
+- APPLY_WATER
+- STOP_WATER
+- CONNECT_SUPPLY
+- DISCONNECT_SUPPLY
+- REFILL
+- REPOSITION_RESOURCE
+- OBSERVE
+- STOP_ACTIVITY
+
+Only implement actions whose authoritative resources and execution guards can be modeled correctly.
+
+Do not infer behavior from action title text.
+
+Do not auto-execute every task with a similar name.
+
+Keep simulation execution opt-in and explicitly bounded to a training scenario.
+
+## 6. Resource capacity model
+
+Create simulated resource inventory separate from permanent organizational inventory.
+
+Conceptual properties:
+
+```text
+resource_id
+scenario_id
+water_capacity_l
+water_remaining_l
+pump_capacity_lpm
+operating_flow_lpm
+supply_state
+consumption_state
+version
+```
+
+Not every resource must support every property.
+
+Use capability definitions.
+
+Examples:
+
+- Tanker: stored water capacity.
+- Pump: bounded flow capability.
+- Hydrant: potential external water source.
+- Portable tank: simulated reserve.
+- Crew: personnel resource, not automatically a water carrier.
+
+Do not modify permanent resource definitions.
+
+Do not invent physical capacity for a real hydrant.
+
+Instructor-configured exercise capacities must be visibly marked as simulation parameters.
+
+Preserve provenance.
+
+## 7. Water supply graph
+
+Implement explicit directed simulation water connections.
+
+Concept:
+
+```text
+HYDRANT / RESERVOIR / TANKER
+             |
+         SUPPLY EDGE
+             |
+          PUMP/UNIT
+             |
+       SUPPRESSION ACTION
+             |
+         HAZARD MODEL
+```
+
+Each active connection should record:
+
+- source;
+- consumer;
+- source type;
+- maximum simulated flow;
+- connection state;
+- created/ended time;
+- actor/operation;
+- version.
+
+Avoid creating an unrestricted arbitrary graph.
+
+Prevent:
+
+- invalid self-connections;
+- invalid cross-scenario references;
+- accidental directed cycles;
+- duplicate active connection where prohibited;
+- resource use after release;
+- phantom unlimited water from finite tanks.
+
+Allow multiple consumers where resource policy permits.
+
+Do not interpret incident hydrant linkage alone as an active physical connection.
+
+## 8. Consumption algorithm
+
+Use deterministic simulation-clock deltas.
+
+For each active bounded action:
+
+```text
+requested_liters =
+  requested_flow_lpm * delta_seconds / 60
+```
+
+Actual delivered quantity is limited by:
+
+- remaining source inventory;
+- active connection;
+- source/consumer flow capacity;
+- resource availability;
+- valid execution state;
+- remaining action duration;
+- configured training constraints.
+
+Prevent negative inventory.
+
+Never consume more water than exists in a finite resource.
+
+For continuous/infinite scenario sources, require an explicitly configured simulation policy.
+
+Do not assume real hydrants have infinite capacity or known delivery pressure.
+
+Record actual delivered quantity, not merely requested quantity.
+
+Use stable numeric precision/rounding rules so replay is deterministic.
+
+The same SIM time step must not consume resources twice.
+
+## 9. Suppression effects
+
+Integrate with existing M14.6C hazard cells.
+
+Create a deterministic, bounded suppression effect.
+
+The effect may depend on:
+
+- actual simulated water delivered;
+- configured nozzle/action efficiency;
+- target geometry;
+- distance/coverage;
+- current fire intensity;
+- duration.
+
+Do not model exact real firefighting hydraulics.
+
+Do not present training calculations as certified engineering values.
+
+Suppression should reduce or modify existing fire-state values according to documented bounded equations.
+
+Effects must not:
+
+- increase water inventory;
+- create negative fire intensity;
+- corrupt hazard JSON;
+- bypass hazard version/history;
+- silently rewrite instructor source templates;
+- change real-world hydrant status.
+
+Existing wildfire/structure-fire progression remains authoritative.
+
+Apply operational effects in deterministic order relative to the existing five-second hazard steps.
+
+Explicitly define this ordering in documentation.
+
+## 10. Target and position guards
+
+A resource must not extinguish a fire from an arbitrary location.
+
+Validate the training action's target and source position.
+
+Use authoritative SIM positions and existing navigation state.
+
+No fabricated GPS.
+
+No sector centroid used as physical source location.
+
+No unlimited-distance effects.
+
+A resource must have a valid execution position and supported capability before applying a spatial effect.
+
+If the target is unreachable or conditions are not met, report BLOCKED or an equivalent explicit state.
+
+Movement into an area does not automatically authorize suppression.
+
+## 11. Simulation autonomy
+
+Virtual agents may execute supported training actions after an explicitly configured task assignment and applicable acceptance/execution conditions.
+
+Do not let autonomous agents invent tactical orders.
+
+Do not allow an agent to choose a new target or attack mode independently.
+
+Autonomous execution can:
+
+- acknowledge an eligible SIM command according to existing training policy;
+- prepare resources;
+- begin a configured effect;
+- consume simulated resources;
+- report progress;
+- report depletion;
+- report BLOCKED/UNABLE;
+- finish execution when the model's conditions are met.
+
+Avoid infinite retry loops.
+
+Do not bypass existing command roles.
+
+## 12. Instructor controls
+
+Provide bounded instructor controls for:
+
+- viewing current action effects;
+- inspecting resource consumption;
+- stopping an active SIM effect;
+- explicitly adding/refilling a simulated supply where allowed;
+- displaying execution diagnostics.
+
+All state-changing instructor commands require authoritative RPC authorization.
+
+Use operation UUID and version protection.
+
+Do not let the browser directly mutate inventory or hazard state.
+
+No manual editing of real resource inventory.
+
+## 13. Operational map
+
+Extend existing MapLibre layers.
+
+Show:
+
+- units executing effects;
+- active simulated water sources;
+- active supply connections where useful;
+- resource depletion;
+- suppression area;
+- fire intensity;
+- smoke;
+- current hazard geometry.
+
+Keep rendering bounded and understandable.
+
+Show actual resource inventory and task effect status in the selected unit panel.
+
+Do not overload the map with permanently visible numeric labels.
+
+Do not recreate the map instance on every simulation tick.
+
+Use existing B1 interpolation only for simulated positions.
+
+No fake movement generated from task assignment.
+
+## 14. Resource status and warnings
+
+Show operational SIM information such as:
+
+```text
+GVC-1
+Water remaining: 1,250 L
+Flow: 200 L/min
+Supply: Tank
+Action: APPLY_WATER
+Status: ACTIVE
+```
+
+If the unit exhausts its simulated tank:
+
+```text
+WATER DEPLETED
+Action BLOCKED
+```
+
+If an external water source is connected:
+
+```text
+SUPPLY CONNECTED
+Available flow: 400 L/min
+```
+
+Use values from persisted simulated resource state.
+
+No invented measurements from actual hydrant records.
+
+Implement SI/DE presentation.
+
+## 15. Clock, concurrency and fairness
+
+Preserve the existing durable simulation clock.
+
+Effects must progress by authoritative simulation time.
+
+No client-side authoritative effect calculation.
+
+Preserve:
+
+- bounded runner batches;
+- consistent lock ordering;
+- one accepted effect per operation;
+- idempotent tick processing;
+- no duplicate resource consumption;
+- no duplicate hazard effects;
+- fairness between active scenarios;
+- paused simulation means no time progression;
+- FINISHED simulation means no further operational effects.
+
+Use a bounded catch-up strategy.
+
+Never allow one problematic scenario to starve other scenarios.
+
+Avoid long database transactions over the entire incident.
+
+If execution fails, preserve historical state and allow safe recovery.
+
+## 16. Database implementation
+
+Implement forward-only additive SQL migrations as required.
+
+Inspect the actual existing schema before choosing names.
+
+Prefer:
+
+- simulation-only private state;
+- strict same-scenario references;
+- positive resource bounds;
+- explicit action state transitions;
+- indexed active execution lookup;
+- append-only consumption/effect history;
+- existing receipt and audit helpers;
+- security-definer RPCs with restricted grants.
+
+No client direct writes.
+
+No destructive rewrite.
+
+No modifications to historical M14.6 migrations.
+
+Do not weaken RLS.
+
+Preserve REAL/SIM isolation at database level.
+
+## 17. Existing hazard integration
+
+Reuse the M14.6C hazard system.
+
+Do not create a second wildfire model.
+
+Preserve:
+
+- existing hazard configuration;
+- immutable history;
+- model versions;
+- hazard step progression;
+- reveal/visibility behavior;
+- existing WIND/SPREAD/BOOST/IGNITE/ENABLE/REVEAL/STOP events.
+
+Any new suppression effect must remain distinguishable from existing instructor/scenario-event effects.
+
+Preserve attribution:
+
+- task/assignment;
+- resource;
+- source;
+- delivered water;
+- simulation step;
+- actor or simulator origin.
+
+Do not expose hidden hazard cells to ordinary participants.
+
+## 18. Scenario configuration
+
+Allow exercise authors to configure supported resources and water capacity within versioned scenario data.
+
+Keep the format bounded.
+
+Preserve existing templates.
+
+Old scenarios without consumption configuration must remain readable.
+
+Provide documented safe defaults or disable consumption-dependent actions until explicitly configured.
+
+Never silently invent unlimited capabilities.
+
+Do not auto-modify previously published template versions.
+
+## 19. SIM workflow integration
+
+Reuse M14.6C.2:
+
+- Scenario Library;
+- draft recovery;
+- publication;
+- scenario START;
+- initialization;
+- SIM lifecycle;
+- FINISH;
+- CLOSE;
+- historical views.
+
+Add resource/effect configuration to the existing sectioned scenario editor instead of creating another large editor.
+
+All added configuration must participate in:
+
+- dirty tracking;
+- SAVE;
+- PUBLISH;
+- versioning;
+- draft recovery;
+- server validation;
+- scenario initialization.
+
+Do not create an incompatible second template format.
+
+## 20. Failure handling
+
+Handle:
+
+- depleted resources;
+- disconnected supply;
+- invalid effect geometry;
+- stale task;
+- cancelled task;
+- released unit;
+- paused scenario;
+- finished scenario;
+- missing capability;
+- unreachable source/target;
+- concurrency conflict;
+- lost HTTP response;
+- duplicate operation;
+- runner interruption.
+
+Do not silently resolve command-sensitive conflicts.
+
+A missing effect result is not confirmation of success.
+
+Preserve exact operation IDs for retry.
+
+Do not fabricate task acknowledgements.
+
+## 21. Historical results
+
+Record bounded durable history for:
+
+- effect started;
+- effect stopped;
+- resources consumed;
+- water refilled/transferred;
+- supply connected/disconnected;
+- target changed;
+- effect blocked;
+- effect completed;
+- hazard intensity changed.
+
+Avoid one timeline event per visual animation frame.
+
+Use existing incident timeline conventions and private simulation histories.
+
+Finished training exercises must retain historical results.
+
+Do not invent completion of unrelated tasks.
+
+## 22. Performance
+
+Design for at least:
+
+- multiple concurrent training scenarios;
+- multiple active hazard models;
+- dozens of virtual units;
+- bounded simultaneous operational effects;
+- map refresh without remounting;
+- no N+1 queries per hazard cell;
+- no client-side authoritative simulation;
+- no unbounded location or consumption history reads.
+
+Explicitly cap:
+
+- active effects per scenario;
+- water connections;
+- execution duration;
+- target geometry size;
+- per-tick work;
+- history page size.
+
+Document chosen limits.
+
+Reuse existing five-second model cadence where appropriate.
+
+## 23. Localization and UX
+
+SI and DE localization are required.
+
+The user should clearly understand:
+
+- assigned command;
+- accepted command;
+- executing effect;
+- simulation progress;
+- remaining water;
+- depleted supply;
+- blocked execution;
+- completed effect;
+- fire response;
+- stale simulation data.
+
+Use normal Gasilko presentation conventions.
+
+Do not show unlocalized SQL codes.
+
+No new UI framework.
+
+## 24. Security
+
+Simulation effects must NEVER:
+
+- change real hydrant status;
+- perform real inspections;
+- change actual vehicle inventory;
+- dispatch emergency services;
+- create actual GPS telemetry;
+- trigger real emergency notifications;
+- bypass incident command authority;
+- expose instructor-only hazards;
+- affect a different incident.
+
+All mutations are server-authorized.
+
+Explicit training-only markings remain.
+
+## 25. Manual acceptance targets
+
+Implement so the user can later verify:
+
+1. Existing SIM scenarios still open.
+2. SAVE persists new resource configuration.
+3. Lost SAVE response remains recoverable.
+4. Existing simulator runner remains usable.
+5. A SIM task does not immediately cause a physical effect.
+6. MOVE_TO does not extinguish fire.
+7. A valid authorized APPLY_WATER execution consumes simulated water.
+8. Actual delivered water never exceeds available inventory.
+9. Consumption occurs once per simulation step.
+10. Double execution/retry does not duplicate resource loss.
+11. Finite source depletion blocks further delivery.
+12. Explicit refill restores simulated availability.
+13. Invalid connections are rejected.
+14. Cross-scenario resource references are rejected.
+15. Unsupported capability blocks action.
+16. Task cancellation stops future effects.
+17. Pause stops progression.
+18. Resume continues correctly.
+19. FINISH stops future effects permanently.
+20. Historical values remain available.
+21. Fire intensity changes only under valid bounded effects.
+22. Smoke/fire visibility rules remain correct.
+23. Existing B/B1 movement continues working.
+24. No real hydrant status changes.
+25. No real incident effects.
+26. SI and DE controls work.
+27. Tablet map remains usable.
+28. SQL changes remain forward-only.
+29. Confirmed JSX blocker is corrected.
+30. No deployment was performed by Codex.
+
+These are manual acceptance targets for the user.
+
+Do not execute them.
+
+## 26. Documentation
+
+Create:
+
+`docs/M14.6D-operational-action-effects.md`
+
+Document:
+
+- effect architecture;
+- resource model;
+- water supply graph;
+- consumption equations;
+- simulation clock ordering;
+- hazard integration;
+- authorization;
+- concurrency/idempotency;
+- simulation-only boundaries;
+- configuration format;
+- deployment requirements;
+- manual acceptance procedure;
+- known limitations.
+
+Also update the relevant M14 SPEC section without rewriting historical milestones.
+
+## 27. Strict implementation-only rules
+
+- Do not add tests.
+- Do not run tests.
+- Do not run build.
+- Do not run lint.
+- Do not run typecheck.
+- Do not run CI.
+- Do not run emulator.
+- Do not run browser automation.
+- Do not run Supabase locally.
+- Do not execute SQL.
+- Do not apply migrations.
+- Do not deploy Edge Functions.
+- Do not deploy Web or Android.
+- Do not modify Cron.
+- Do not rotate secrets.
+- Do not modify unrelated modules.
+- Do not perform post-implementation validation.
+
+Source inspection for implementation is allowed.
+
+If an existing previous module needs an integration-safe change, make that change rather than creating duplicate business logic.
+
+Use existing project conventions and `[skip ci]`.
+
+Create exactly ONE PR.
+
+Do not merge.
+
+## 28. PR summary
+
+Report:
+
+1. Confirmed JSX defect fixed.
+2. Additional concrete defects found, if any.
+3. New effect model.
+4. Water storage/capacity model.
+5. Water supply relationships.
+6. Consumption equations.
+7. Task/execution bindings.
+8. Hazard suppression integration.
+9. Existing runner changes, if any.
+10. Scenario editor additions.
+11. Map/operational UI.
+12. SI/DE localization.
+13. Database migrations.
+14. Security/authorization.
+15. Idempotency and concurrency.
+16. Historical records.
+17. Performance limits.
+18. Required manual rollout order.
+19. Remaining unverified behaviors.
+20. Explicit confirmation that tests/build/lint/typecheck/CI were not run and nothing was deployed.
+
+Stop after publishing the PR.
+
+DO NOT MERGE.
