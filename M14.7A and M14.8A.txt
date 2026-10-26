@@ -1,0 +1,1556 @@
+# GASILKO — M14.7A + M14.8A
+# Real-Time Incident Commands & Android Operational Field Pilot
+
+Repository: https://github.com/ficlus/Gasilko
+
+Base: latest `main`, including merged M14.6D and subsequent hotfix/hardening commits available on main.
+
+**Implement ONE integrated milestone in ONE pull request.**
+
+Do not merge. Do not deploy.
+
+## 0. Mission
+
+Turn Gasilko's existing incident command and task system into a practical Android field workflow for authenticated firefighters and unit leaders.
+
+The first deployment target is a **controlled pilot with real human accounts and manually created training incidents**.
+
+A commander using the existing Web interface must be able to issue an authorized task to a real, logged-in Android user or their deployed unit.
+
+The Android user must be able to:
+
+1. Discover their incident.
+2. Receive an incident/task notification when delivery is available.
+3. Open the relevant incident and task.
+4. Read the actual authoritative order.
+5. Explicitly acknowledge the order.
+6. Start performing the task.
+7. Report that the task is blocked or cannot be performed.
+8. Resume or complete the task where permitted.
+9. See the server-confirmed status and history.
+10. Recover safely after loss of network connectivity.
+
+A legitimate UNIT_LEADER must additionally be able to:
+
+- view their deployed unit and current crew;
+- see unit-directed tasks;
+- acknowledge and report on tasks directed to their own unit;
+- see crew task status;
+- issue new tasks to eligible subordinate crew members within the existing M14.5A command scope;
+- observe acknowledgement and completion of those tasks.
+
+The system must also support authorized REAL incident data contracts, but it must **not be declared ready for emergency operations solely because this PR is implemented**.
+
+No real dispatch or emergency response should be triggered by pilot creation, testing or notification delivery.
+
+---
+
+## 1. Read authoritative source first
+
+Inspect:
+
+- `AGENTS.md`
+- `docs/SPEC.md`
+- `docs/SPEC-M14-INCIDENT-OPERATIONS.md`
+- `docs/SYNC.md`
+- `docs/SECURITY.md`
+- existing Android application architecture
+- existing Android authentication/account/org selection
+- existing Room database and DAO structure
+- existing offline queue and WorkManager sync engine
+- existing Firebase Messaging integration
+- existing notification device registration
+- existing incident RPCs and SQL functions
+- M14.1 through M14.6 migrations
+- M14.5A task definitions/assignment transitions
+- M14.5B RTS command contracts
+- M14.6 mobilization/turnout integration
+- existing incident notification adapters, if any
+- existing MapLibre/NAV implementations.
+
+Do not assume names or signatures of functions.
+
+Discover and reuse their actual current implementations.
+
+Review source and current documentation before implementation decisions.
+
+Use the current project dependency versions. Do not silently upgrade libraries.
+
+Do not introduce new Firebase, Supabase, WorkManager or Compose dependencies.
+
+**Never change Android Gradle, KAPT, KSP, version catalogs, Gradle properties, dependency declarations or generated Room schemas.**
+
+If a required SDK API is unavailable through currently declared dependencies, use the existing supported capability or a clearly documented fallback; do not violate the no-Gradle constraint.
+
+---
+
+# PART A — PRODUCT AND DOMAIN CONTRACT
+
+## 2. Initial user roles
+
+### Firefighter / RESPONDER
+
+Can:
+
+- view incidents they are currently authorized to read;
+- view personally assigned tasks;
+- view relevant unit task context;
+- acknowledge their own assigned task;
+- start an authorized task;
+- report a blocked task;
+- report inability to perform a task;
+- complete their own assignment;
+- view permitted history;
+- read permitted target and map information.
+
+Cannot:
+
+- create unrelated incident commands;
+- assign other units;
+- acknowledge for another person;
+- mark another person's task complete;
+- gain command authority from organization membership alone.
+
+### UNIT_LEADER
+
+Can additionally:
+
+- see the effective deployed unit assignment they lead;
+- see the active crew episodes under that unit;
+- receive and acknowledge tasks addressed to their unit;
+- issue properly scoped tasks to eligible crew members in that unit;
+- view responses from those recipients;
+- perform existing authorized unit status/turnout actions where available.
+
+Cannot:
+
+- act as INCIDENT_COMMANDER without a separate effective assignment;
+- command another unit based only on organization membership;
+- change command hierarchy;
+- allocate unrelated units;
+- transfer incident command;
+- impersonate a crew member's acknowledgement.
+
+All capabilities must be derived from current server-authoritative role assignments and participation, not client-side role names.
+
+### Other incident roles
+
+The existing backend must retain full support for IC, agency commander, sector commander, operator and any other implemented roles.
+
+However, the first Android UI scope is RESPONDER and UNIT_LEADER.
+
+Existing Web commander workflows remain authoritative.
+
+Do not weaken other roles or real-incident guards.
+
+## 3. Training versus real operations
+
+Pilot procedure:
+
+- real authenticated accounts;
+- existing approved organization memberships;
+- manually created and clearly marked TRAINING incidents;
+- real human acknowledgements;
+- real server audit/history;
+- no automatic SIM agent impersonation;
+- no real-world dispatch;
+- no emergency-service integration.
+
+A training incident may use the existing SIM subsystem, but field task acknowledgements must be executed by actual authorized human accounts.
+
+SIM movement, fabricated positions and simulated water effects remain in the TRAINING domain only.
+
+REAL incidents must never receive simulated GPS, virtual water consumption or agent-generated acknowledgements.
+
+No automatic 112/CAD integration.
+
+Do not describe Gasilko as a replacement for ZA-RE radio.
+
+---
+
+# PART B — REUSE THE M14.5A TASK ENGINE
+
+## 4. Canonical task model
+
+Reuse:
+
+- `operational_action_definitions`
+- `operational_action_definition_versions`
+- `incident_tasks`
+- `incident_task_assignments`
+- existing recipient and role scope
+- existing task command RPCs
+- existing operation receipt infrastructure
+- existing incident timeline
+- existing audit helpers.
+
+Do not create:
+
+- android_tasks
+- mobile_orders
+- firefighter_commands
+- task_acknowledgements_v2
+- parallel task status tables
+- independent command engines.
+
+One task can have multiple independently progressing recipient assignment episodes.
+
+The Android UI must display the status of the specific assignment, not confuse it with the aggregate task status.
+
+## 5. Required assignment transitions
+
+Use the authoritative M14.5A state machine:
+
+```text
+ISSUED
+  |
+  +--> ACKNOWLEDGED
+  |       |
+  |       +--> IN_PROGRESS
+  |       |       |
+  |       |       +--> COMPLETED
+  |       |       |
+  |       |       +--> BLOCKED
+  |       |                 |
+  |       |                 +--> IN_PROGRESS
+  |       |                 +--> UNABLE
+  |       |
+  |       +--> UNABLE
+  |
+  +--> IN_PROGRESS
+  |    Only when the immutable action definition
+  |    explicitly permits starting without ACK
+  |
+  +--> UNABLE
+
+Any nonterminal assignment:
+  --> CANCELLED by its properly authorized issuer
+```
+
+Preserve actual current implementation guards.
+
+Reasons must be supplied where required.
+
+COMPLETED, UNABLE and CANCELLED are terminal.
+
+Do not silently reopen them.
+
+Do not mark a task successful merely because one recipient completed a multi-recipient task.
+
+## 6. Command intent and execution
+
+Strictly distinguish:
+
+- task issued;
+- notification sent;
+- notification delivered;
+- user opened task;
+- user acknowledged;
+- user started;
+- user reported blocked;
+- user completed;
+- server confirmed.
+
+Opening an FCM notification is not ACK.
+
+Receiving a push is not ACK.
+
+Selecting a task on the map is not START.
+
+Reaching a location is not COMPLETED.
+
+Completing a task must require an explicit authorized user operation.
+
+---
+
+# PART C — M14.7A REAL-TIME AND NOTIFICATIONS
+
+## 7. Reuse the M10 notification system
+
+Inspect the existing:
+
+- notification categories;
+- notification events;
+- recipient resolver;
+- notification delivery leases;
+- device token registrations;
+- Firebase Messaging service;
+- user notification preferences;
+- notification logs.
+
+Extend this architecture for incident/task events.
+
+Do not create a second FCM registration table.
+
+Do not create another push-delivery worker.
+
+Do not create a second notification service.
+
+Add incident-related categories through a forward-only migration only if they do not already exist.
+
+Suggested semantic categories:
+
+- INCIDENT_COMMAND
+- INCIDENT_TASK
+- INCIDENT_UNIT_UPDATE
+
+Use actual existing category conventions.
+
+## 8. Server-side recipient resolution
+
+An issued task must notify only currently authorized recipients.
+
+Resolve eligible recipients using:
+
+- ACTIVE account;
+- current exact organization membership;
+- ACTIVE incident participation;
+- effective role assignment;
+- recipient's task or deployed unit relationship;
+- correct acting organization;
+- current notification preferences.
+
+For a unit-recipient task, use its effective unit leadership and permitted recipient model.
+
+Do not send one task to every firefighter belonging to the organization.
+
+Do not derive access from inherited organization hierarchy.
+
+Delivery must recheck eligibility.
+
+If a user's authority is revoked between event creation and delivery, suppress the notification.
+
+Keep source-event IDs stable for deduplication.
+
+Replayed operations must not produce duplicate notification events.
+
+## 9. FCM payload safety
+
+Use minimal payloads.
+
+Conceptual example:
+
+```json
+{
+  "category": "INCIDENT_TASK",
+  "event_id": "<UUID>",
+  "incident_id": "<UUID>",
+  "recipient_hint": "<opaque-id>"
+}
+```
+
+Use only data allowed by the existing transport.
+
+No:
+
+- victim names;
+- full task instructions;
+- personal details;
+- sensitive incident locations;
+- exact GPS positions;
+- access tokens;
+- hidden hazard details;
+- signed attachment URLs.
+
+The notification displayed on the lock screen should be generic, for example:
+
+"Novo operativno obvestilo v Gasilku."
+
+The user must unlock and pass normal authentication/authorization before seeing protected content.
+
+## 10. Android notification handling
+
+Reuse the existing Firebase Messaging service.
+
+Support:
+
+- foreground notifications;
+- background notifications;
+- notification taps;
+- cold-start navigation;
+- account/session restoration;
+- pending deep links;
+- cancelled/expired assignments;
+- revoked organization access;
+- duplicate notifications.
+
+On Android 13+, use the existing appropriate POST_NOTIFICATIONS permission/request flow.
+
+Permission denial must not block use of the incident inbox.
+
+Avoid creating a second permission manager.
+
+Never automatically acknowledge an order from the notification callback.
+
+FCM callback should enqueue/focus a bounded refresh rather than directly mutate domain records.
+
+Do not rely on FCM as a guaranteed real-time delivery mechanism.
+
+## 11. Authorized change hints
+
+M14.7A should provide reliable foreground freshness without implementing an unrelated communications platform.
+
+Inspect whether the existing Android Supabase integration can already subscribe to authenticated PRIVATE incident channels.
+
+If supported without changing Gradle/dependencies, implement appropriately authorized minimal hints:
+
+```json
+{
+  "incident_id": "<UUID>",
+  "revision": "123",
+  "timeline_sequence": "456"
+}
+```
+
+The payload must not contain private task content.
+
+Use authoritative current access checks for channel entry.
+
+Never implement global public subscriptions with client-side organization filtering.
+
+Do not grant broad SELECT on all `realtime.messages`.
+
+On channel authorization failure, revoke the subscription and protect local data.
+
+If existing SDK limitations make secure private channels impossible without prohibited dependency changes, provide:
+
+- foreground event-driven refresh;
+- FCM-triggered refresh;
+- app-resume refresh;
+- bounded fallback polling only while relevant screens are active.
+
+Explicitly document that full private Realtime transport remains deferred.
+
+Do not claim private Realtime is operational if the secure channel is not implemented.
+
+## 12. Data reconciliation
+
+Realtime or FCM is only a hint.
+
+On every signal:
+
+1. Check the current account and acting organization.
+2. Schedule an authorized read.
+3. Fetch the current server version.
+4. Validate access.
+5. Reconcile into Room.
+6. Render the Room projection.
+
+Duplicate or out-of-order hints must be harmless.
+
+Do not treat a hint's revision as proof that the corresponding local data has been fetched.
+
+Avoid excessive simultaneous refresh requests.
+
+Debounce/coalesce signals without losing the need to reconcile to the latest revision.
+
+---
+
+# PART D — ANDROID FIELD DATA LAYER
+
+## 13. Preserve established architecture
+
+Mandatory architecture:
+
+```text
+Jetpack Compose UI
+      |
+   ViewModel
+      |
+IncidentRepository
+      |
+    Room
+      |
+Existing Sync Engine + WorkManager
+      |
+Authenticated Supabase RPC
+      |
+Existing incident/task domain
+```
+
+The Compose UI must not issue Supabase mutations directly.
+
+No second WorkManager queue.
+
+No separate local data source bypassing Room.
+
+No isolated mobile database for incidents.
+
+## 14. Inspect and extend the existing Room database
+
+Implement incident-related entities in the current account-scoped Room architecture.
+
+Conceptual projections:
+
+```text
+IncidentFieldCache
+  accountId
+  actingOrganizationId
+  incidentId
+  referenceNumber
+  title
+  incidentStatus
+  trainingMode
+  serverRevision
+  timelineSequence
+  lastVerifiedAt
+  accessLeaseExpiresAt
+
+TaskFieldCache
+  accountId
+  actingOrganizationId
+  incidentId
+  taskId
+  assignmentId
+  actionDefinitionVersionId
+  recipientKind
+  recipientId
+  title
+  instructions
+  priority
+  assignmentStatus
+  assignmentVersion
+  taskVersion
+  targetType
+  targetReferenceId
+  targetLatitude?
+  targetLongitude?
+  issuedAt
+  updatedAt
+  lastServerConfirmedAt
+
+UnitFieldCache
+  accountId
+  actingOrganizationId
+  incidentId
+  unitAssignmentId
+  organizationId
+  displayName
+  effectiveLeaderAssignmentId?
+  unitStatus
+  version
+
+CrewFieldCache
+  accountId
+  actingOrganizationId
+  incidentId
+  crewAssignmentId
+  unitAssignmentId
+  userId
+  role
+  effectiveStatus
+
+IncidentSyncCursor
+  accountId
+  actingOrganizationId
+  incidentId
+  serverRevision
+  timelineSequence
+  snapshotGeneration
+  synchronizedAt
+```
+
+These are conceptual names.
+
+Adapt them to actual Room and server schemas.
+
+Do not duplicate canonical user, organization, vehicle, hydrant or resource tables.
+
+Do not use organization ID as an incident ID.
+
+Do not use role labels as authorization credentials.
+
+Retain historical task identity and server versions.
+
+## 15. Room migration
+
+Create a normal forward-only Room schema migration using the existing database setup.
+
+Preserve all existing:
+
+- hydrant data;
+- inspections;
+- teams/plans;
+- unsynchronized operations;
+- photos;
+- existing authorization state.
+
+No destructive migration.
+
+No `fallbackToDestructiveMigration`.
+
+No database reset.
+
+No generated schema-file manipulation.
+
+Do not change Gradle/KAPT/KSP.
+
+If the project currently uses schema exports requiring a build task, do not run the task and do not hand-edit generated files. Document this as a follow-up for the human build/verification process.
+
+## 16. Authoritative read APIs
+
+Inspect existing incident read RPCs.
+
+Reuse those that are adequate for mobile firefighters.
+
+If current read models are insufficient, add a narrow, forward-only read projection for:
+
+- authorized relevant incidents;
+- own outstanding task assignments;
+- unit-directed assignments for effective unit leaders;
+- unit roster and status;
+- permitted task detail;
+- limited historical assignment events;
+- target/map reference.
+
+Do not broaden the administrative Web API merely to admit firefighters.
+
+Do not expose all tasks in another agency.
+
+Do not allow caller-provided target user IDs to expand own-task reads.
+
+Bound returned rows and payload sizes.
+
+Suggested pilot limits:
+
+- incident list: 50 per page;
+- task assignments: 100 per page;
+- unit crew: 100 per unit;
+- incident timeline: 100 per page;
+- selected active incident refresh: one coalesced request at a time.
+
+Adapt exact limits to existing server contracts.
+
+For large multi-page data, use consistent revision-pinned snapshots or a safe bounded manifest contract; never merge arbitrary pages from different authoritative revisions as one consistent view.
+
+Do not invent a completed change-feed implementation where none exists.
+
+If full M14.7 snapshot/change contracts are not yet available, explicitly implement the bounded pilot fallback with atomic authoritative snapshot replacement and document the remaining M14.7 work.
+
+## 17. Local authorization/read lease
+
+Follow the M14 SPEC.
+
+Incident field cache requires a server-verified authorized snapshot no older than 24 hours.
+
+Effective expiry is the earliest applicable:
+
+- incident read lease;
+- existing organization authorization window;
+- session invalidation;
+- explicit access revocation.
+
+Display an incident cache lease warning when two hours remain.
+
+After expiry:
+
+- hide protected incident fields;
+- require fresh online authorization;
+- preserve local pending evidence safely;
+- do not show the expired snapshot as operationally authoritative.
+
+Do not weaken the existing 30-day organization registry authorization model.
+
+Offline incident authorization is separate from registry authorization.
+
+No offline command authority grants.
+
+---
+
+# PART E — DURABLE TASK MUTATIONS
+
+## 18. Extend the existing offline operation queue
+
+Support only explicitly permitted offline operations in the first pilot:
+
+- own task ACK;
+- own task START;
+- own task BLOCKED;
+- own task RESUME;
+- own task COMPLETED;
+- own task UNABLE.
+
+Respect actual server state/actor guards.
+
+An operation record must persist:
+
+```text
+operationId: UUID
+accountId: UUID
+actingOrganizationId: UUID
+incidentId: UUID
+taskId: UUID
+assignmentId: UUID
+operationKind: string
+canonicalRequest: immutable payload
+expectedAssignmentVersion: bigint
+expectedTaskVersion: bigint? 
+createdAt: timestamp
+observedAt: timestamp?
+queueSequence: long
+parentOperationId: UUID?
+syncState: enum
+lastErrorCode: string?
+```
+
+Use existing queue entities or a compatible extension.
+
+The durable operation must be written before network dispatch.
+
+The queue must retain immutable request identity.
+
+## 19. Sync states
+
+Use explicit user-facing sync states:
+
+```text
+LOCAL_PENDING
+SENDING
+SERVER_CONFIRMED
+OUTCOME_UNKNOWN
+NEEDS_ATTENTION
+```
+
+Keep transport-specific details internally.
+
+A locally queued ACK must NOT immediately render as server-confirmed ACK.
+
+Display a label such as:
+
+"Potrditev čaka na povezavo."
+
+After authoritative server confirmation:
+
+"Ukaz potrjen."
+
+If server rejects:
+
+"Ukaz ni bil potrjen. Potreben pregled."
+
+Do not silently retry a semantically rejected operation with altered payload.
+
+## 20. Same UUID retry
+
+When an HTTP response is lost:
+
+- preserve original operation UUID;
+- preserve payload;
+- preserve expected versions;
+- preserve actor/org/incident identity;
+- retry exactly;
+- reconcile an existing receipt where supported.
+
+Never create a fresh UUID for the same uncertain operation.
+
+Do not invent a second task after retry.
+
+A confirmed rejection requires correction/review, not blind replay with a new operation ID.
+
+## 21. Offline dependency ordering
+
+Example:
+
+```text
+ACK(operation A)
+    |
+    v
+START(operation B)
+    |
+    v
+COMPLETE(operation C)
+```
+
+If offline actions are queued sequentially against one task assignment:
+
+- persist dependency relationships;
+- do not upload B before A has committed;
+- use server-confirmed versions for dependent operations;
+- preserve original user intent and operation IDs;
+- do not silently rewrite a previously submitted immutable request;
+- if dependency reconciliation cannot establish a valid original request, stop and request human review.
+
+Do not fake successful intermediate states.
+
+Separate independent incidents/tasks should not block one another unnecessarily.
+
+Extend the existing serial WorkManager queue.
+
+No new scheduler.
+
+## 22. Server conflicts and revoked authority
+
+Handle:
+
+- task reassigned;
+- recipient removed;
+- unit leader replaced;
+- assignment cancelled;
+- incident closed;
+- organization participation revoked;
+- user suspended;
+- stale assignment version;
+- different request reusing operation UUID;
+- server rejection;
+- transport timeout.
+
+Preserve queued evidence for review.
+
+Never submit under a new account simply because the user switched profiles.
+
+Do not auto-reassign to another recipient.
+
+Do not automatically overwrite new server state with stale offline evidence.
+
+## 23. Online-only actions
+
+The following must require immediate current server authorization:
+
+- task issuance;
+- task reassignment;
+- unit allocation/deployment;
+- command transfer;
+- incident role changes;
+- whole incident lifecycle commands;
+- operational sector edits;
+- resource reservations.
+
+No offline optimistic success.
+
+A unit leader can compose a draft order locally only as an unsent proposal if implemented safely.
+
+A draft is not an issued task.
+
+No background automatic issuance of an authority-sensitive command.
+
+---
+
+# PART F — ANDROID USER EXPERIENCE
+
+## 24. Entry screen: Intervencije
+
+Add a clearly discoverable navigation entry:
+
+**Intervencije**
+
+The screen should distinguish:
+
+- Active
+- Assigned to me
+- My unit
+- Completed/history
+- Training
+
+Only display authorized incidents.
+
+Indicate:
+
+- REAL / TRAINING;
+- incident reference;
+- title;
+- status;
+- organization/role context;
+- outstanding tasks count;
+- last successful synchronization;
+- offline/stale status.
+
+Do not invent current incident data for an empty account.
+
+Show useful empty states.
+
+## 25. My Orders inbox
+
+Build a clear **Moji ukazi** view.
+
+Each card includes:
+
+- task title/action;
+- parent incident;
+- issuer role/identity where authorized;
+- assigned recipient (me/my unit);
+- priority;
+- current assignment status;
+- issue time;
+- target summary;
+- ACK required;
+- locally pending status.
+
+Ordering should prioritize:
+
+1. new unacknowledged assignments;
+2. blocked/attention;
+3. in-progress;
+4. acknowledged;
+5. completed history.
+
+Allow bounded filtering.
+
+Never merge independent assignment episodes merely because the task titles are equal.
+
+## 26. Task detail
+
+Include:
+
+- exact action definition label;
+- immutable assignment identity;
+- original issued description;
+- required parameters;
+- valid target;
+- unit/crew context;
+- current server assignment state;
+- priority;
+- issuer;
+- issue time;
+- history;
+- available actions.
+
+Available buttons depend on authoritative current state.
+
+Example:
+
+```text
+NOV UKAZ
+
+Dogodek: Požar skladišča
+Enota: GVC-1
+
+Naloga:
+Vzpostavi oskrbo z vodo na severni strani objekta.
+
+Cilj:
+[Odpri na zemljevidu]
+
+[ POTRDI PREJEM ]
+[ NE MOREM IZVESTI ]
+```
+
+After ACK confirmation:
+
+```text
+POTRJENO
+
+[ ZAČNI IZVAJANJE ]
+```
+
+During execution:
+
+```text
+V IZVAJANJU
+
+[ NALOGA BLOKIRANA ]
+[ NALOGA KONČANA ]
+```
+
+Do not render buttons that require unsupported domain transitions.
+
+All actions require explicit user intent.
+
+## 27. Blocked / unable reasons
+
+Provide an understandable SI/DE dialog.
+
+The existing reason contract must be followed.
+
+Examples of user-entered reasons:
+
+- access blocked;
+- insufficient equipment;
+- unsafe conditions;
+- unit unavailable;
+- other reason.
+
+These are UI examples, not new server-enforced taxonomies unless existing configuration supports them.
+
+Do not fabricate a reason on the user's behalf.
+
+## 28. Unit leader workspace
+
+Create:
+
+**Moja enota**
+
+Display:
+
+- deployed unit identity;
+- incident context;
+- current effective unit leader;
+- crew membership;
+- unit status;
+- unit task assignments;
+- outstanding acknowledgements;
+- tasks in progress;
+- blocked/unable assignments.
+
+Provide the permitted ability to create a task for a selected subordinate crew member.
+
+Required flow:
+
+```text
+Select my deployed unit
+    |
+Select eligible crew recipient
+    |
+Select existing Action Definition
+    |
+Set authorized target/parameters
+    |
+Review
+    |
+Confirm task issuance ONLINE
+    |
+Server-authoritative acknowledgement
+    |
+Recipient sees new task
+```
+
+Do not permit a leader to select arbitrary members outside their command scope.
+
+Do not let a UNIT_LEADER allocate another unit to the incident.
+
+Other-unit assignment remains an existing Web/higher-command workflow.
+
+## 29. Unit leader issued-task status
+
+Provide a compact list:
+
+- recipient;
+- task title;
+- issued;
+- acknowledged;
+- in progress;
+- blocked;
+- completed;
+- unable;
+- cancelled.
+
+Display server-confirmed states and update via the same repository synchronization path.
+
+No duplicate command/task database.
+
+## 30. Map/target integration
+
+Reuse existing Android MapLibre and navigation architecture.
+
+In this milestone, support:
+
+- open incident point;
+- open task point target;
+- show authorized target marker;
+- show unit position only if authoritative REAL location data is actually available;
+- display permitted nearby canonical hydrants from existing registry;
+- navigate to a permitted location using existing routing integration where currently supported.
+
+Never invent GPS positions.
+
+Never use SIM virtual position as a real unit's location.
+
+Do not create another navigation engine.
+
+Do not automatically mark task complete after navigation arrival.
+
+A map action must not issue commands merely because an object was tapped.
+
+Keep WGS84 `[longitude, latitude]` and named coordinate fields correct.
+
+## 31. UI design
+
+Implement the field interface for use with gloves, motion and stressful conditions.
+
+Prefer:
+
+- large touch targets;
+- high contrast;
+- concise wording;
+- clear task state;
+- visible offline indicators;
+- explicit confirmation of consequential actions;
+- no deep nesting for urgent personal tasks;
+- readable tablet/mobile layouts.
+
+Reuse existing Compose theme and components.
+
+Do not introduce a new UI framework.
+
+## 32. Localization
+
+All new Android text must be available in:
+
+- Slovenian;
+- German.
+
+Use Android localization resources.
+
+Do not translate canonical stored task codes.
+
+Do not automatically translate user-authored instructions.
+
+Support missing optional fields gracefully.
+
+Avoid hard-coded localized strings in ViewModels or repositories.
+
+---
+
+# PART G — CROSS-PLATFORM WORKFLOW
+
+## 33. Web-to-Android
+
+Required pilot flow:
+
+```text
+Web IC / Authorized commander
+          |
+          | issue existing M14.5A task
+          v
+Supabase authoritative transaction
+          |
+          +--> task + assignment
+          +--> timeline/audit
+          +--> immutable operation receipt
+          +--> existing M10 notification event
+          |
+          v
+Android user notified/refreshed
+          |
+          v
+Room-authorized assignment projection
+          |
+          v
+Explicit ACK / START / COMPLETE
+          |
+          v
+Existing task assignment RPC
+          |
+          v
+Server receipt and revision
+          |
+          v
+Web commander sees actual confirmed state
+```
+
+Do not create a second Web task status update implementation.
+
+Web and Android must observe the same canonical task assignment.
+
+## 34. Android-to-Android
+
+A UNIT_LEADER issues a valid task to a crew member:
+
+- task is created through existing command API;
+- recipient identity/scope is checked by server;
+- receiving firefighter sees it through the same inbox;
+- acknowledgement appears in leader's screen;
+- completion is an independent recipient operation.
+
+If two Android users act concurrently, server version/receipt rules decide.
+
+No silent last-write-wins.
+
+## 35. Cross-platform operation identity
+
+Use canonical UUIDs for:
+
+- incident;
+- task;
+- recipient assignment;
+- actor;
+- acting organization;
+- operation;
+- versioned Action Definition.
+
+Do not replace UUIDs with display numbers.
+
+Do not infer command scope from the UI's current selected organization alone.
+
+---
+
+# PART H — SECURITY AND PRIVACY
+
+## 36. Authentication
+
+Reuse current Android Supabase Auth session.
+
+Do not implement another login.
+
+Only ACTIVE verified accounts with current exact organization membership may access incident content.
+
+Organization ADMIN/MANAGER is not automatically incident commander.
+
+Never expose service-role or Edge administrative secrets to Android.
+
+Use the current user's JWT.
+
+## 37. Account/org switching
+
+On sign-out, account switch or organization switch:
+
+- cancel active incident subscriptions;
+- cancel in-flight reads;
+- invalidate old response generation;
+- clear current visible protected incident data;
+- lock old-account incident cache;
+- prevent old pending operations uploading as the new user;
+- preserve pending evidence safely under the original account.
+
+Do not leak one organization's operations to another.
+
+No broad cross-organization query.
+
+## 38. Privacy
+
+FCM payloads and lock-screen notifications must be generic.
+
+No sensitive full order text on the lock screen.
+
+Limit participant reads to authorized scope.
+
+Never expose private instructor hazard configuration.
+
+No public Storage URLs.
+
+No real incident GPS tracking added in this first PR.
+
+No background location collection.
+
+No real-person location history.
+
+## 39. Operational safety
+
+This is a supplemental field command and status system.
+
+Do not:
+
+- replace ZA-RE;
+- integrate unofficial 112 endpoints;
+- infer command acknowledgement from push delivery;
+- create emergency dispatch automatically;
+- let AI issue tactical commands;
+- auto-acknowledge users;
+- fabricate response times;
+- silently accept expired offline orders;
+- invent responder presence or location;
+- cause SIM effects on REAL incidents.
+
+Include a visible pilot readiness limitation in the new documentation.
+
+---
+
+# PART I — DATABASE AND SERVER CHANGES
+
+## 40. Schema strategy
+
+Inspect current SQL before deciding exact migration content.
+
+Use forward-only migrations with timestamps newer than the latest currently merged migration.
+
+Do not edit historical applied migrations.
+
+Prefer existing domain tables and notification tables.
+
+If necessary, add narrow read RPCs, indexes or notification adapters.
+
+Do not add a new task engine, audit system, auth model or notification transport.
+
+All new SECURITY DEFINER RPCs require:
+
+- fixed safe search_path;
+- exact actor/organization checks;
+- bounded inputs;
+- appropriate grants;
+- no anonymous execute;
+- no uncontrolled service-role bypass;
+- server-derived actor identity;
+- safe sanitized errors.
+
+Never concatenate untrusted SQL identifiers.
+
+Check for PL/pgSQL variable/alias collisions, especially given the previous M14.6D hazard-batch incident.
+
+## 41. API contracts
+
+Document each exposed RPC exactly:
+
+```text
+RPC name
+Purpose
+Arguments
+Actor and scope
+Response shape
+Row limits
+Version requirements
+Receipt semantics
+Error codes
+RLS/auth guard
+```
+
+Use existing RPC names and signatures wherever possible.
+
+Do not invent a mobile-only command transport if the existing task command RPC is sufficient.
+
+If new read-only field projection endpoints are needed, they must remain actor-bound and incident-scoped.
+
+## 42. Shared data contracts
+
+Where helpful, use the existing shared contract definitions.
+
+Maintain BigInt-safe revision/version representations.
+
+Timestamps should be UTC server timestamps.
+
+A client observed_at timestamp must never become authoritative order time.
+
+No silent null/default normalization mismatches in operation retries.
+
+## 43. Delivery reliability
+
+Notification events must be emitted once per successful domain mutation, not on every RPC retry.
+
+The current M10 worker owns delivery retry, not the Android task repository.
+
+FCM delivery failure must not roll back an already committed operational task.
+
+Task command success must not depend on Firebase being available at that exact moment.
+
+A user opening the app manually must still discover missed orders.
+
+---
+
+# PART J — MANUAL PILOT ACCEPTANCE
+
+## 44. Pilot participants
+
+A human operator will later configure:
+
+- one approved organization;
+- one commander using the existing Web;
+- one Android UNIT_LEADER;
+- at least one Android RESPONDER;
+- manually created TRAINING incident;
+- effective command assignments;
+- a deployed unit;
+- an eligible crew member;
+- at least one supported Action Definition.
+
+No fake acceptance state or automatic pilot data is to be seeded into the production database.
+
+## 45. Manual checklist
+
+Implement so the user can later check:
+
+1. Android account signs in.
+2. ACTIVE membership is recognized.
+3. Unauthorized account sees no protected incident.
+4. Pilot training incident is visible.
+5. REAL and TRAINING are clearly distinguished.
+6. Web commander issues a task.
+7. Server commits the task once.
+8. Authorized Android firefighter discovers the task.
+9. FCM notification appears when configured and permitted.
+10. User can also find the task without FCM.
+11. Notification tap does not ACK the task.
+12. User opens task detail.
+13. Target and parameters are accurate.
+14. User explicitly ACKs.
+15. Server confirms ACK.
+16. Web sees ACK.
+17. User starts task.
+18. Web sees IN_PROGRESS.
+19. User reports BLOCKED with reason.
+20. Web sees BLOCKED.
+21. User resumes.
+22. User completes task.
+23. Web sees COMPLETED.
+24. Unit leader sees own unit and crew.
+25. Unit leader can issue a valid subordinate task.
+26. Unit leader cannot issue to another unit's crew.
+27. Unit leader cannot allocate another unit.
+28. Receiving crew member can ACK.
+29. Unit leader sees recipient ACK.
+30. Task with multiple recipients preserves independent assignment states.
+31. Offline ACK persists in Room.
+32. App restart preserves queued ACK.
+33. Reconnect retries original operation.
+34. Duplicate retry does not duplicate timeline/audit.
+35. Offline START waits for required ACK.
+36. Revoked assignment produces NEEDS_ATTENTION.
+37. A stale version is not silently overwritten.
+38. Organization switching does not leak old content.
+39. Account switching cannot upload old account's queue.
+40. Expired incident lease hides protected data.
+41. FCM payload contains no sensitive order text.
+42. Revoked recipient cannot open protected notification content.
+43. Map target opens correctly.
+44. Map does not invent real vehicle positions.
+45. Task completion does not follow automatically from navigation.
+46. Existing hydrant app behavior remains unchanged.
+47. Existing offline hydrant queue remains intact.
+48. Existing inspection sync remains intact.
+49. SI strings render correctly.
+50. DE strings render correctly.
+51. No SIM-generated acknowledgement becomes a human ACK.
+52. No REAL incident receives simulated effects.
+53. No 112/CAD/dispatch integration was introduced.
+54. No duplicate FCM or WorkManager infrastructure exists.
+55. No Android Gradle/KAPT changes were made.
+
+These are **USER-RUN manual checks**.
+
+Do not run them or claim they pass.
+
+---
+
+# PART K — DOCUMENTATION AND IMPLEMENTATION
+
+## 46. Documentation
+
+Create:
+
+`docs/M14.7A-M14.8A-android-field-pilot.md`
+
+Include:
+
+- current architecture inventory;
+- actual reused RPCs;
+- actual Android module paths;
+- database migrations;
+- account/org/incident authorization;
+- unit leader command scope;
+- canonical task state machine;
+- notification flow;
+- foreground refresh/realtime behavior;
+- Room schema and migration;
+- sync queue integration;
+- operation UUID retry;
+- offline lease;
+- Web ↔ Android sequence;
+- security and privacy;
+- pilot setup steps;
+- manual rollout order;
+- all acceptance steps;
+- current limitations.
+
+Update the relevant M14 SPEC progress notes without rewriting previous milestone history.
+
+## 47. Deliverables
+
+The PR should contain:
+
+1. Authorized incident/task read support.
+2. M10 incident/task notification integration.
+3. Android incident repository and Room cache.
+4. Offline task operation queue extension.
+5. Android Intervencije entry.
+6. Moji ukazi inbox.
+7. Task details and transitions.
+8. Unit leader workspace.
+9. Scoped crew task issuance.
+10. Cross-platform state reconciliation.
+11. Safe notification deep links.
+12. SI/DE localization.
+13. Documentation and rollout instructions.
+
+Do not stop after adding only UI screens.
+
+The feature must be wired end-to-end at the source level.
+
+Do not create disconnected demo screens.
+
+## 48. Implementation constraints — strict
+
+**Implementation only.**
+
+Do not add tests.
+
+Do not run tests.
+
+Do not run Android build.
+
+Do not run Gradle sync.
+
+Do not run lint.
+
+Do not run typecheck.
+
+Do not run CI.
+
+Do not run an emulator.
+
+Do not run instrumentation.
+
+Do not run browser automation.
+
+Do not run Supabase locally.
+
+Do not execute SQL.
+
+Do not apply migrations.
+
+Do not deploy Edge Functions.
+
+Do not deploy Web.
+
+Do not install Android APKs.
+
+Do not send real push notifications.
+
+Do not create real incidents or test users.
+
+Do not modify Cron.
+
+Do not rotate secrets.
+
+Do not modify Android Gradle/KAPT/KSP configuration.
+
+Do not upgrade dependencies.
+
+Do not touch local developer configuration or generated Room schemas.
+
+Do not perform post-implementation validation.
+
+Source inspection needed for implementation is allowed.
+
+Do not change unrelated modules.
+
+Maintain existing project conventions and `[skip ci]` for implementation commits.
+
+## 49. One PR only
+
+Create exactly ONE PR from the latest main.
+
+Suggested title:
+
+`M14.7A/M14.8A — Android Incident Commands & Field Pilot`
+
+Do not create a second PR for server wiring.
+
+Do not merge.
+
+Do not deploy.
+
+## 50. Completion report
+
+Report:
+
+- PR URL and branch;
+- relevant current-main commits inspected;
+- actual Android paths changed;
+- actual SQL functions reused;
+- new migrations;
+- task issuance and acknowledgement architecture;
+- firefighter capabilities;
+- unit leader capabilities;
+- notification integration;
+- exact offline operation semantics;
+- Room migration and retention behavior;
+- authorization/security safeguards;
+- SI/DE coverage;
+- expected manual rollout sequence;
+- prerequisites for pilot accounts/units;
+- remaining limitations;
+- any dependencies that were unavailable under the no-Gradle restriction;
+- any M14.7 private Realtime features deferred;
+- explicit statement that no tests, builds, lint, typecheck, SQL, CI, runtime verification or deployments were performed.
+
+Do not claim the Android pilot is verified or ready for actual emergency operations.
+
+Stop after opening ONE PR.
+
+**DO NOT MERGE.**
