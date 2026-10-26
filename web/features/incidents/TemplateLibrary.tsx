@@ -145,7 +145,7 @@ export function TemplateLibrary({locale,account,org,organizationName,types,read,
     <div className="actions"><button type="button" disabled={affected||!compared||value.state!=='DRAFT'||value.builtin||value.archived} onClick={()=>{setDraft(recovery.definition);setEventPlan(recovery.event_plan);setHazardPlan(recovery.hazard_plan);setRecovery(null);}}>{w('restore')}</button>
     <button type="button" disabled={affected} onClick={()=>{try{removeDraft(account,org,value.id);setRecovery(null);}catch{setError('storage');}}}>{w('discardLocal')}</button></div>
    </section>}
-   <ScenarioEditorWorkspace key={value.id+':'+value.version_id} locale={locale} value={value} draft={draft} events={eventPlan} hazards={hazardPlan} onDraft={setDraft} onEvents={setEventPlan} onHazards={setHazardPlan} disabled={busy||!!confirm}/>
+   <ScenarioEditorWorkspace read={read} account={account} org={org} key={value.id+':'+value.version_id} locale={locale} value={value} draft={draft} events={eventPlan} hazards={hazardPlan} onDraft={setDraft} onEvents={setEventPlan} onHazards={setHazardPlan} disabled={busy||!!confirm}/>
    {confirm&&<TemplateConfirmation locale={locale} busy={mutation.busy} onCancel={()=>setConfirm(null)} onConfirm={()=>command(confirm)}>
     <h3>{draft.metadata.title}</h3><p>{t(value.state)} · {t('version')} {value.version}</p><p>{t('scope')}: {organizationName}</p><p>{t(confirm==='START'?'reviewStart':confirm==='PUBLISH'?'reviewPublish':'reviewArchive')}</p>
     <p>{w('events')}: {eventPlan.events.length} · {w('hazards')}: {hazardPlan.models.filter(m=>m.enabled).length} · {t('duration')}: {draft.metadata.duration_minutes}</p><p>{t('setupHelp')}</p><p>{w('source')}: {value.version_id}</p>

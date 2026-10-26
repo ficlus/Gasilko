@@ -1,5 +1,15 @@
 import type {Locale} from '../i18n';
 const labels:Record<string,readonly [string,string]>={
+"OPERATIONAL_ARMED":["Učni učinek pripravljen","Übungswirkung vorbereitet"],
+"OPERATIONAL_STARTED":["Učni učinek začet","Übungswirkung gestartet"],
+"OPERATIONAL_BLOCKED":["Učni učinek blokiran","Übungswirkung blockiert"],
+"OPERATIONAL_COMPLETED":["Učni učinek zaključen","Übungswirkung beendet"],
+"OPERATIONAL_CANCELLED":["Učni učinek preklican","Übungswirkung abgebrochen"],
+"OPERATIONAL_STOPPED":["Učni učinek ustavljen","Übungswirkung gestoppt"],
+"OPERATIONAL_RESUMED":["Učni učinek ponovno pripravljen","Übungswirkung erneut vorbereitet"],
+"OPERATIONAL_REFILLED":["Dodana učna voda","Übungswasser ergänzt"],
+"OPERATIONAL_CONNECTED":["Učna oskrba povezana","Übungsversorgung verbunden"],
+"OPERATIONAL_DISCONNECTED":["Učna oskrba odklopljena","Übungsversorgung getrennt"],
 "autoTitle":["Samodejno izvajanje","Automatische Ausführung"],
 "autoOn":["Vključeno","Eingeschaltet"],
 "autoOff":["Izključeno","Ausgeschaltet"],

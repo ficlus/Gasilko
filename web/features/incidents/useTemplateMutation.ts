@@ -1,10 +1,11 @@
 'use client';
 import {useEffect,useRef,useState} from 'react';
 import type {TemplateRead} from '../../lib/operational/templates';
+import {operationalErrors} from '../../lib/operational/operations';
 import {templateError} from '../../lib/operational/templateMessages';
 export type MutationRequest={name:string;args:Record<string,unknown>};
 export type MutationState='IDLE'|'SENDING'|'CONFIRMED'|'DEFINITIVELY_REJECTED'|'OUTCOME_UNKNOWN'|'RECOVERING';
-const names=['simulation_hazard_command','simulation_template_command','simulation_template_initialize','simulation_scenario_event_command'];
+const names=['simulation_operational_command','simulation_hazard_command','simulation_template_command','simulation_template_initialize','simulation_scenario_event_command'];
 const identity=(r:MutationRequest)=>String(r.args.p_operation);
 function target(r:MutationRequest){return r.name==='simulation_template_command'?String(r.args.p_template_id??'CREATE'):r.name;}
 /** Bounded exact requests in one scoped storage envelope; legacy single requests remain readable. */
@@ -55,7 +56,7 @@ export function useTemplateMutation(account:string,org:string,surface:string,rea
   }catch(e){
    if(generation.current!==n||scope.current!==key)return;
    const failure=e as Error&{outcome?:string;correlation?:string};
-   setError(templateError(failure.message??'SERVER'));setCorrelation(failure.correlation??'');
+   setError(operationalErrors.includes(failure.message)?failure.message:templateError(failure.message??'SERVER'));setCorrelation(failure.correlation??'');
    if(!previous&&!recover&&failure.outcome==='REJECTED')resolved(r,'DEFINITIVELY_REJECTED');
    else setState('OUTCOME_UNKNOWN');
   }finally{if(generation.current===n&&scope.current===key)locked.current=false;}

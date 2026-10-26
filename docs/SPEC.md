@@ -1366,6 +1366,15 @@ Required:
 
 ------------------------------------------------------------------------
 
+### M14.6D — SIM Operational Action Effects
+
+Extend the existing incident training simulator with explicit, versioned operational action bindings, simulation-only finite water inventory, bounded supply connections and physical execution state separate from task acknowledgement/completion. Movement never implies suppression.
+
+Use the existing authoritative scenario clock, five-second hazard steps, runner, receipts, command permissions and append-only history. Apply bounded effects only from available authoritative SIM positions; preserve REAL/SIM separation and hidden-model privacy. Old scenarios without resource configuration retain disabled consumption capabilities.
+
+The first kernel supports finite virtual-unit tanks, single-hop source/consumer supply, point-target APPLY_WATER, explicit stop/resume and reasoned instructor refill. Configuration belongs to the existing versioned definition and draft lifecycle. See [M14.6D operational effects](M14.6D-operational-action-effects.md) for equations, bounds, rollout and manual acceptance.
+
+
 ## Gathering Results
 
 ### Synchronization Reliability
