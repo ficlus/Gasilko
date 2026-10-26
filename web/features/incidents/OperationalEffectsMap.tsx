@@ -9,12 +9,16 @@ export function OperationalEffectsMap({map}:{map:Map}){
  const ctx=useOperationalEffects(),data=ctx?.data;
  const features:Feature<Geometry>[]=[];
  if(data){
-  for(const r of data.resources)if(r.position)features.push({type:'Feature',geometry:{type:'Point',coordinates:r.position},properties:{kind:'SOURCE',empty:r.remaining_l<=0}});
+  for(const r of data.resources)if(r.position){
+   const connection=data.connections.find(c=>c.consumer_id===r.id),supply=connection?data.resources.find(v=>v.id===connection.source_id):r;
+   features.push({type:'Feature',geometry:{type:'Point',coordinates:r.position},properties:{kind:'SOURCE',empty:(supply?.remaining_l??0)<=0||!!connection&&!connection.available}});
+  }
   for(const c of data.connections){
+   if(!c.available)continue;
    const a=data.resources.find(r=>r.id===c.source_id)?.position,b=data.resources.find(r=>r.id===c.consumer_id)?.position;
    if(a&&b)features.push({type:'Feature',geometry:{type:'LineString',coordinates:[a,b]},properties:{kind:'SUPPLY'}});
   }
-  for(const e of data.executions)if(e.state==='ACTIVE'){
+  for(const e of data.executions)if(e.state==='ACTIVE'&&data.status==='RUNNING'&&data.seconds-e.last_step*5<=10){
    const r=data.resources.find(r=>r.id===e.resource_id);
    if(r?.position)features.push({type:'Feature',geometry:{type:'LineString',coordinates:[r.position,e.target]},properties:{kind:'APPLICATION'}});
    features.push({type:'Feature',geometry:{type:'Polygon',coordinates:[Array.from({length:33},(_,i)=>offsetPosition(e.target,25,i*360/32))]},properties:{kind:'AREA'}});

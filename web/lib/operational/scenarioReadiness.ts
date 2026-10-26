@@ -24,7 +24,8 @@ export function scenarioReadiness(d:Definition,e:EventPlan,h:HazardPlan){
  });
  if(d.operational){
   const cfg=d.operational;
-  if(cfg.resources.length>30||cfg.bindings.length>16||cfg.resources.some(r=>!d.virtual_units.some(u=>u.id===r.unit_key)||![r.capacity_l,r.initial_l,r.pump_lpm,r.range_m,r.efficiency].every(Number.isFinite)||r.initial_l<0||r.initial_l>r.capacity_l||r.capacity_l<0||r.capacity_l>100000||r.pump_lpm<0||r.pump_lpm>5000||r.range_m<1||r.range_m>100||r.efficiency<0.000001||r.efficiency>0.001)||cfg.bindings.some(b=>b.duration_seconds<5||b.duration_seconds>3600||b.duration_seconds%5!==0||b.flow_lpm<=0||b.flow_lpm>5000))add('settings','INVALID_TEMPLATE');
+  const millilitre=(v:number)=>Number.isFinite(v)&&v===Number(v.toFixed(3));
+  if(new Set(cfg.resources.map(r=>r.unit_key)).size!==cfg.resources.length||new Set(cfg.bindings.map(b=>b.action_version_id)).size!==cfg.bindings.length||cfg.resources.length>30||cfg.bindings.length>16||cfg.resources.some(r=>!d.virtual_units.some(u=>u.id===r.unit_key)||![r.capacity_l,r.initial_l,r.pump_lpm,r.range_m,r.efficiency].every(Number.isFinite)||![r.capacity_l,r.initial_l,r.pump_lpm].every(millilitre)||r.initial_l<0||r.initial_l>r.capacity_l||r.capacity_l<0||r.capacity_l>100000||r.pump_lpm<0||r.pump_lpm>5000||r.range_m<1||r.range_m>100||r.efficiency<0.000001||r.efficiency>0.001)||cfg.bindings.some(b=>!Number.isFinite(b.duration_seconds)||!millilitre(b.flow_lpm)||b.kernel!=='APPLY_WATER'||b.duration_seconds<5||b.duration_seconds>3600||b.duration_seconds%5!==0||b.flow_lpm<0.012||b.flow_lpm>5000))add('settings','INVALID_TEMPLATE');
  }
  return issues;
 }
