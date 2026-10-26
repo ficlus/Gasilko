@@ -1,5 +1,15 @@
 import type {Locale} from '../i18n';
 const labels:Record<string,[string,string]>={
+ "AWAITING_ACK":["Pripravljeno; čaka na potrditev naloge","Vorbereitet; wartet auf Aufgabenbestätigung"],
+ "FLOW_BELOW_PRECISION":["Pretok je prenizek za merljiv korak porabe","Durchfluss zu niedrig für einen messbaren Verbrauchsschritt"],
+ "RUNNING":["Vaja poteka","Übung läuft"],
+ "PAUSED":["Vaja je zaustavljena; poraba miruje","Übung pausiert; kein Verbrauch"],
+ "FINISHED":["Vaja je zaključena; prikazana je zgodovina","Übung beendet; Verlauf wird angezeigt"],
+ "DRAFT":["Vaja še ni zagnana","Übung noch nicht gestartet"],
+ "observed":["Podatki osveženi","Datenstand"],
+ "reconnect":["Odklopite in ponovno povežite oskrbo, nato izrecno pripravite učinek","Versorgung trennen und neu verbinden, danach Wirkung ausdrücklich vorbereiten"],
+ "confirmedCleanup":["Strežnik je potrdil operacijo, lokalni zapis ponovitve pa še ni odstranjen. Ponovitev ostane varna.","Server hat die Aktion bestätigt; lokaler Wiederholungseintrag noch vorhanden. Wiederholung bleibt sicher."],
+ "resetHelp":["RESET ponastavi položaje in model požara ter ustavi učinke; porabljena voda, ura, naloge in zgodovina ostanejo. Za novo vajo iz začetnih pogojev ustvarite nov primerek scenarija.","RESET setzt Positionen und Feuermodell zurück und stoppt Wirkungen; Wasserverbrauch, Uhr, Aufgaben und Verlauf bleiben erhalten. Für Anfangsbedingungen eine neue Szenarioinstanz erstellen."],
  "ACK_TIMEOUT":["Čakanje na potrditev je poteklo","Warten auf Bestätigung abgelaufen"],
  "RESUME_ACTIVITY":["Ponovno pripravi blokirani učinek","Blockierte Wirkung erneut vorbereiten"],
  "RESUMED":["Izvedba ponovno pripravljena","Ausführung erneut vorbereitet"],
