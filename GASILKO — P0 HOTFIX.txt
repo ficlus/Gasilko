@@ -1,0 +1,160 @@
+# GASILKO — P0 HOTFIX: Simulation Hazard Batch SQL Ambiguity
+
+Repository: https://github.com/ficlus/Gasilko
+
+Base branch: current `main` after merged M14.6D PR #79.
+
+Create ONE new focused hotfix PR. Do not merge or deploy.
+
+## Confirmed production defect
+
+The existing Supabase project repeatedly returns:
+
+`HAZARD_BATCH_UNAVAILABLE`
+
+from `incident-simulation-runner`, although the Edge Function receives HTTP 200 requests approximately every five seconds.
+
+A database diagnostic invocation of `public.simulation_hazard_batch()` conclusively returned:
+
+```text
+SQLSTATE: 42702
+column reference "s.id" is ambiguous
+
+PL/pgSQL function public.simulation_hazard_batch()
+line 9 at FOR over SELECT rows
+```
+
+The function is present, SECURITY DEFINER is enabled, and service_role has EXECUTE permission.
+
+The failure happens before any hazard models can be processed.
+
+Observed consequences:
+
+- RUNNING simulation.
+- Hazard model last_step = 0.
+- Simulation clock already at step 162.
+- Fire does not progress.
+- APPLY_WATER returns OP_CATCHUP_REQUIRED.
+- The Edge runner catches the error, returns HAZARD_BATCH_UNAVAILABLE and continues its other phases.
+
+## Root cause
+
+The authoritative function was redefined in:
+
+`supabase/migrations/20261023120000_simulation_operational_effects.sql`
+
+It declares composite PL/pgSQL variables:
+
+```sql
+m private.simulation_hazard_models;
+s public.simulation_scenarios;
+```
+
+and simultaneously uses `m` and `s` as SQL aliases in its opening cursor query.
+
+This produces the confirmed ambiguity.
+
+## Required implementation
+
+1. Create a NEW forward-only migration dated after M14.6D, for example:
+
+   `supabase/migrations/20261026110000_fix_simulation_hazard_batch_aliases.sql`
+
+2. Use `CREATE OR REPLACE FUNCTION public.simulation_hazard_batch()`.
+
+3. Base the replacement on the MOST RECENT full M14.6D function definition, not the obsolete M14.6C version.
+
+4. Rename PL/pgSQL composite variables to unambiguous names, such as `v_scenario` and `v_model`.
+
+5. Use explicit distinct SQL aliases, such as `hm` and `sc`, and qualify relevant identifiers consistently.
+
+6. Correct ALL variable/alias collisions in the entire function, not only the first `s.id` occurrence.
+
+7. Carefully examine queries, UPDATE expressions, nested EXISTS expressions, FOR loops and subsequent variable references for similar PL/pgSQL ambiguity.
+
+8. Preserve the entire existing hazard-processing algorithm and operational-effects integration.
+
+## Critical behavior to preserve
+
+- service_role authorization.
+- SECURITY DEFINER and restricted search_path.
+- Existing execution grants.
+- lock_timeout.
+- Existing model-selection fairness.
+- Lock ordering and advisory locks.
+- Max four models per batch.
+- Max ten hazard steps per model.
+- Existing bounded batch execution time.
+- Scenario readiness and command-authority checks.
+- Hazard version/history limits.
+- Existing M14.6C hazard progression.
+- M14.6D `private.operational_step` inside the same transaction.
+- Water inventory atomicity.
+- Existing hazard history and effect application.
+- Exception isolation between models.
+- Existing JSON response structure.
+- TRAINING/REAL isolation.
+
+Absolutely do not accidentally restore the old M14.6C function without M14.6D operational effect processing.
+
+## Additional focused source review
+
+Inspect all new and overridden PL/pgSQL functions introduced by M14.6C.2 and M14.6D for the same variable/SQL alias collision pattern.
+
+Correct additional concrete ambiguity defects if found.
+
+Do not refactor unrelated modules.
+
+If another affected function has already been applied in production, correct it using the new forward-only migration.
+
+Do not modify previously applied migration files.
+
+## Failure diagnostics
+
+Inspect the runner's handling of HAZARD_BATCH_UNAVAILABLE.
+
+If a small safe improvement is possible, retain the HTTP status/error classification needed for operational diagnosis without exposing secrets, database internals or private hazard data.
+
+Do not change the runner or redeploy it solely for diagnostic enhancements if the SQL-only hotfix solves the confirmed defect.
+
+Do not modify Cron, runner secrets or authentication.
+
+## Manual acceptance targets
+
+After the user applies the hotfix migration:
+
+1. `simulation_hazard_batch()` no longer raises SQLSTATE 42702.
+2. The runner's hazards response contains a normal result instead of HAZARD_BATCH_UNAVAILABLE.
+3. Hazard processed_step progresses beyond 0.
+4. Existing RUNNING scenarios gradually catch up to simulation time.
+5. Hazard history is updated correctly.
+6. Atomic M14.6D water effects remain operational.
+7. APPLY_WATER no longer returns OP_CATCHUP_REQUIRED once its model is caught up and otherwise eligible.
+8. Existing movement, events and Cron behavior are unchanged.
+9. No real incident, real vehicle inventory or hydrant status is affected.
+
+Do not execute these checks yourself.
+
+## Strict constraints
+
+Implementation only.
+
+Do not run tests, builds, lint, typecheck, CI, SQL or browser/runtime verification.
+
+Do not apply migrations.
+
+Do not deploy Web or Edge Functions.
+
+Do not modify Android, KAPT, Gradle or unrelated infrastructure.
+
+Do not create or modify Cron jobs.
+
+Use `[skip ci]` according to repository conventions.
+
+Create exactly ONE PR.
+
+DO NOT MERGE.
+
+Provide the new migration filename, functions corrected, root cause, remaining risks and precise manual deployment instructions.
+
+Clearly state that nothing was tested or deployed.
