@@ -1,0 +1,416 @@
+# GASILKO — PR #82 Final Integration Correction & Security Hardening
+
+Repository: https://github.com/ficlus/Gasilko
+
+Existing pull request: https://github.com/ficlus/Gasilko/pull/82
+
+Existing branch: `codex/m14-7a-8a-android-field-pilot`
+
+**UPDATE THE EXISTING PR #82 ONLY. DO NOT CREATE ANOTHER PR. DO NOT MERGE.**
+
+## 1. Context
+
+PR #82 implements M14.7A/M14.8A Android Incident Commands & Field Pilot.
+
+Preserve the existing solution:
+
+- Canonical M14.5A tasks and assignments.
+- Authenticated incident read projection.
+- Firefighter task inbox.
+- Unit leader crew workspace.
+- Online subordinate task issuance.
+- Offline ACK/START/BLOCKED/RESUME/COMPLETE/UNABLE.
+- Original operation UUID and durable request identity.
+- Existing Room/WorkManager.
+- Existing Firebase/M10 notifications.
+- Real vs Training boundaries.
+- SI/DE localization.
+- No new Android dependencies or Gradle changes.
+
+The PR is intended for a controlled pilot with real human accounts, not unverified emergency deployment.
+
+A source review identified issues requiring correction or precise contract confirmation.
+
+## 2. Priority 1 — Action Definition version identity
+
+Inspect:
+
+`android/app/src/main/java/si/gasilko/app/feature/incidents/IncidentScreen.kt`
+
+Currently the issue-task editor finds a catalog row, immediately extracts its configuration, then attempts to read the action version ID from the configuration:
+
+```kotlin
+val selected = catalog.find {
+    it.text("id") == definition
+}?.obj("configuration")
+```
+
+Later:
+
+```kotlin
+put("action_version_id", selected!!.text("id"))
+```
+
+Review the actual authoritative `operational_action_catalog` response.
+
+Establish whether the immutable action version ID exists on the catalog row, the configuration or another specific field.
+
+Do not assume the configuration contains identity metadata.
+
+Use the correct canonical Action Definition VERSION ID in `incident_issue_task`.
+
+Keep separate variables for:
+
+- selected catalog row;
+- immutable action version ID;
+- editable/display configuration.
+
+Never submit a blank, stale or unrelated version ID.
+
+Validate the immutable action version against the selected configuration and recipient eligibility.
+
+Ensure issued tasks reference the same definition/version displayed in the Android review UI.
+
+## 3. Priority 2 — Offline dependency version correctness
+
+Inspect:
+
+`IncidentRepository.kt`
+
+Especially `request()`, `send()`, `transition()` and the durable queue.
+
+Current dependency preparation derives the next expected version using the parent's originally expected version plus one.
+
+Confirm this against the actual `incident_transition_task_assignment` receipt and version contract.
+
+Do not assume a single increment unless the authoritative RPC explicitly guarantees it for every successful transition and idempotent replay.
+
+Prefer the authoritative confirmed assignment version.
+
+If the existing receipt lacks this value, use an authorized read/reconciliation before preparing the dependent request.
+
+Preserve:
+
+- original operation UUID;
+- immutable request once prepared;
+- canonical expected versions;
+- correct ACK → START → COMPLETE dependencies;
+- safe offline persistence;
+- no out-of-order sends;
+- no silent version rebasing after dispatch.
+
+Do not regenerate an operation UUID for a request with an unknown outcome.
+
+When the parent was definitively rejected, do not submit its dependent operation.
+
+Distinguish definitive rejection, transport ambiguity and authoritative success.
+
+Verify that independent task assignments can progress without being unnecessarily blocked by an unrelated failed assignment.
+
+## 4. Priority 3 — Task timeline privacy
+
+Inspect the new:
+
+`public.incident_field_snapshot`
+
+and underlying `private.task_projection` / task timeline contracts.
+
+The current projection restricts selected events by visible task/assignment, but returns raw `incident_timeline.data`.
+
+Verify whether these JSON events can contain:
+
+- another recipient's personal information;
+- private reason/comment text;
+- hidden task or target information;
+- issuer-only operational metadata;
+- cross-unit information;
+- instructor-only SIM data.
+
+Do not rely solely on event names beginning with `TASK_`.
+
+Apply a safe event-specific participant projection with an allowlist of fields.
+
+Maintain assignment-level scope.
+
+For a multi-recipient task, distinguish shared task events from recipient-private assignment events.
+
+Do not break the commander's existing authorized view.
+
+Avoid replacing sensitive fields with arbitrary placeholders that change canonical event meaning.
+
+Preserve task audit records and append-only history.
+
+## 5. Priority 4 — Snapshot authorization and consistency
+
+Inspect:
+
+- `private.field_unit_visible`
+- `private.field_assignment_visible`
+- `private.field_unit_leader`
+- `public.incident_field_snapshot`
+
+Confirm:
+
+- exact organization membership;
+- effective incident participation;
+- active crew episodes;
+- effective UNIT_LEADER assignment;
+- correct unit-directed versus crew-directed task visibility;
+- revocation behavior;
+- incident lifecycle restrictions;
+- correct profile/account status guards.
+
+Unit leaders must not obtain wider command authority through the read projection.
+
+A responder must not see another crew member's private assignment simply because both belong to one unit.
+
+Preserve legitimately shared unit-directed tasks.
+
+Check whether the current full-organization snapshot can suffer lock contention with active incident mutations.
+
+Retain the existing bounded response design.
+
+Do not add broad public SELECT grants.
+
+## 6. Priority 5 — Correct online command behavior
+
+Review:
+
+- `incident_issue_task`
+- `incident_update_unit_status`
+- `operational_action_catalog`
+
+Compare every Android RPC argument and payload with the authoritative SQL function signatures.
+
+Ensure:
+
+- issue uses incident expected version;
+- assignment transitions use assignment expected version;
+- unit return uses the correct incident and unit version;
+- retries reuse the exact original request;
+- recipients are canonical active crew episodes;
+- unit leader scope is checked by the server;
+- failed issue does not create duplicate tasks;
+- successful command status comes from server confirmation.
+
+An online-only action must not be automatically sent later by a generic offline worker.
+
+If its outcome is unknown, keep the frozen request available for explicit authorized recovery.
+
+Ensure title, notes, required parameters, target and recipient constraints match existing server validators before enabling Review.
+
+## 7. Priority 6 — Room migration and existing sync isolation
+
+Inspect:
+
+- `IncidentFieldCache.kt`
+- `RegistryDatabase.kt`
+- existing PendingHydrantChange entity
+- existing HydrantSyncEngine
+- HydrantSyncScheduler / WorkManager
+
+Ensure the 14→15 migration matches the declared Room entity schema.
+
+Review:
+
+- column types;
+- nullability;
+- primary keys;
+- indices;
+- foreign keys, if appropriate;
+- `@Embedded` field mappings;
+- generated schema expectations.
+
+Do not hand-edit generated Room schema files.
+
+Do not run Gradle.
+
+Document human-generated Room schema export as a required manual step.
+
+Preserve all existing hydrant/inspection/plan queues.
+
+Ensure incident operations are not accidentally processed by hydrant-specific sync logic.
+
+Do not introduce another Worker.
+
+## 8. Priority 7 — FCM and deep links
+
+Review:
+
+- `Notifications.kt`
+- `NotificationSettings.kt`
+- `AuthScreen.kt`
+- `HydrantViewModel.kt`
+- existing M10 notification SQL.
+
+Verify:
+
+- generic lock-screen messages;
+- no full order text in FCM;
+- current recipient authorization;
+- proper suppression after revoked access;
+- correct incident identity on a notification tap;
+- account and organization isolation;
+- duplicate notification handling;
+- no automatic task ACK;
+- working refresh even when notification permission is denied.
+
+Inspect the replacement of the existing M10 notification recipient and delivery-claim functions.
+
+Preserve behavior for HYDRANT, ASSIGNMENT and ACTIVATION.
+
+Do not introduce a new delivery worker, Cron or FCM credentials.
+
+## 9. Priority 8 — UI and offline user feedback
+
+Ensure the Android interface distinguishes:
+
+- issued but not yet acknowledged;
+- locally queued ACK;
+- sending;
+- server-confirmed ACK;
+- unknown outcome;
+- rejected operation;
+- blocked;
+- completed.
+
+Do not display local intent as server-confirmed.
+
+If a task is reassigned, revoked or cancelled while offline, preserve local evidence but prevent an unauthorized replay.
+
+Show clear SI/DE explanations.
+
+Review rapid double taps and repeated confirmation dialogs.
+
+Keep controls enabled only for valid actions.
+
+The incident map should display the actual authorized task target without inventing GPS positions.
+
+## 10. SQL migration handling
+
+PR #82's new migration has not been applied.
+
+Modify the existing unapplied migration where necessary:
+
+`supabase/migrations/20261027100000_incident_android_field_pilot.sql`
+
+Do not create a second corrective migration just to adjust this unapplied implementation.
+
+Do not edit older applied migrations.
+
+Retain restricted grants, safe search paths, canonical domain authorization and existing RLS boundaries.
+
+Review PL/pgSQL identifier/variable ambiguity to avoid previous M14.6D issues.
+
+## 11. Documentation
+
+Update:
+
+`docs/M14.7A-M14.8A-android-field-pilot.md`
+
+Document:
+
+- actual catalog/version identity contract;
+- actual offline dependency and receipt semantics;
+- privacy-filtered timeline shape;
+- authorized incident snapshot;
+- Room v15 migration;
+- real FCM/WorkManager behavior;
+- online-only command safeguards;
+- manual rollout requirements;
+- remaining limitations.
+
+Do not claim successful compilation or runtime operation.
+
+## 12. Manual acceptance targets
+
+Implement for later human validation:
+
+1. Android firefighter can discover an authorized Training incident.
+2. New Web task appears on Android.
+3. Action Definition version identity is correct.
+4. User explicitly acknowledges task.
+5. Web receives authoritative confirmation.
+6. Offline ACK survives app restart.
+7. Dependent START waits for confirmed ACK.
+8. Task completion follows confirmed versions.
+9. A repeated request does not duplicate operations.
+10. A rejected request enters needs-attention state.
+11. Unit leader issues to own eligible crew.
+12. Unit leader cannot issue to another unit.
+13. Task issuance cannot select an invalid action version.
+14. Multi-recipient history remains privacy-scoped.
+15. Old M10 notification categories continue working.
+16. Incident notification does not automatically ACK.
+17. Revoked account access hides protected incident data.
+18. Account and organization switching preserve isolation.
+19. Existing hydrant and inspection queues remain functional.
+20. Android Room v15 upgrade preserves current offline data.
+21. All new SI/DE messages render appropriately.
+22. Real incidents receive no simulated state or position.
+
+These are user-run acceptance goals.
+
+Do NOT execute tests.
+
+## 13. Strict implementation constraints
+
+Implementation only.
+
+Do not add or run tests.
+
+Do not run build.
+
+Do not run Gradle sync.
+
+Do not run lint or typecheck.
+
+Do not run CI.
+
+Do not run emulator.
+
+Do not execute SQL.
+
+Do not apply migrations.
+
+Do not deploy Edge Functions or Web.
+
+Do not install Android APKs.
+
+Do not send push notifications.
+
+Do not alter Android Gradle/KAPT/KSP/version catalog/dependencies.
+
+Do not modify generated Room schemas.
+
+Do not modify local Android settings.
+
+Do not change Cron or secrets.
+
+Do not perform post-implementation validation.
+
+Use `[skip ci]` according to project conventions.
+
+**Push corrective commits to EXISTING PR #82 only.**
+
+DO NOT CREATE ANOTHER PR.
+
+DO NOT MERGE.
+
+## 14. Completion report
+
+Report:
+
+1. Confirmed root causes and actual corrected issues.
+2. Catalog/version contract verified from source.
+3. Offline version/receipt behavior.
+4. Timeline privacy corrections.
+5. SQL projection security.
+6. Android files changed.
+7. Room migration changes, if any.
+8. Notification compatibility.
+9. Manual SQL/Android rollout order.
+10. Remaining unverified risks.
+11. Explicit confirmation that no builds, tests, lint, typecheck, CI, SQL, runtime checks or deployments were performed.
+
+Stop after updating PR #82.
