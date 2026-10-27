@@ -43,14 +43,19 @@ fun AuthScreen(model: AuthViewModel = viewModel()) {
         notificationScope.launch {
             try {
                 val opened=target.account==state.account && model.hydrants?.openNotification(target.organization,target.entity,target.kind)==true
-                if(opened) {
+                if(opened && target.account==state.account && state.route==AuthRoute.ACTIVE &&
+                    si.gasilko.app.core.notifications.NotificationTap.pending.value==target) {
                     fieldOrg=if(target.kind=="INCIDENT")target.organization else null
                     fieldIncident=if(target.kind=="INCIDENT")target.entity else null
-                    requests=false;notifications=false;si.gasilko.app.core.notifications.NotificationTap.clear() }
+                    requests=false;notifications=false;si.gasilko.app.core.notifications.NotificationTap.consume(target) }
                 else unavailable=true
             } catch(e: kotlinx.coroutines.CancellationException) { throw e }
             catch(_: Exception) { unavailable=true }
-            finally { opening=false }
+            finally {
+                opening=false
+                val next=si.gasilko.app.core.notifications.NotificationTap.pending.value
+                if(next!=null && next!=target)openNotification()
+            }
         }
     }
     LaunchedEffect(destination,state.route,state.account) {

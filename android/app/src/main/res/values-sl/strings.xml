@@ -444,4 +444,9 @@
     <string name="field_remaining">Preostalo</string>
     <string name="field_return_unit">Sporoči vračanje enote (spletno)</string>
     <string name="field_online_return">Vračanje bo potrjeno šele po spletnem preverjanju trenutnih pooblastil. Ob ponovitvi se ohrani ista zahteva.</string>
+    <string name="field_draft_invalid">Preverite definicijo, prejemnika, cilj in zahtevane vrednosti (vrsta, razpon in dolžina).</string>
+    <string name="field_recorded_action">Zabeleženo dejanje: %1$s</string>
+    <string name="field_dependency_changed">Dodelitev se je po predhodni potrditvi spremenila ali dostop ni več dovoljen. Naslednje dejanje ni bilo poslano; potreben je pregled.</string>
+    <string name="field_recovery_denied">Ponovitev je bila zavrnjena. Izid prejšnjega pošiljanja ostaja nejasen; preverite operacijo, ne ustvarjajte nove.</string>
+    <string name="field_definition_version">Nespremenljiva definicija: verzija %1$s · %2$s</string>
 </resources>

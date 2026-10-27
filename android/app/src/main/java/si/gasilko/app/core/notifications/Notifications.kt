@@ -15,6 +15,7 @@ import io.github.jan.supabase.postgrest.postgrest
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.serialization.json.*
 import si.gasilko.app.BuildConfig
 import si.gasilko.app.MainActivity
@@ -126,9 +127,10 @@ object NotificationTap {
     }
     fun accept(intent: Intent) { read(listOf("account","organization","entity","entity_type","event").associateWith { intent.getStringExtra("notification_$it").orEmpty() })?.let { mutable.value=it } }
     fun clear() { mutable.value=null }
+    fun consume(destination: NotificationDestination) { mutable.compareAndSet(destination,null) }
     private val hintsMutable=MutableStateFlow(0L)
     val hints=hintsMutable.asStateFlow()
-    fun hint() { hintsMutable.value=hintsMutable.value+1 }
+    fun hint() { hintsMutable.update { it+1 } }
 }
 class GasilkoMessagingService: FirebaseMessagingService() {
     override fun onNewToken(token: String) { NotificationInstallation.enqueue(this) }

@@ -144,7 +144,7 @@ fun IncidentScreen(model: IncidentViewModel,registry: HydrantViewModel,organizat
             val config=task.obj("configuration")
             val operations=data.operations.filter { it.operation.entityId==assignment.text("id") }
             val last=operations.lastOrNull()
-            val pending=last?.takeIf { it.operation.state!="SERVER_CONFIRMED" }
+            val pending=last?.takeIf { it.operation.state!="SERVER_CONFIRMED" || unreconciledReceipt(assignment,it) }
             val effective=pending?.let { parse(it.operation.payload).obj("payload").text("status") } ?: assignment.text("status")
             var desired by remember(assignmentId) { mutableStateOf<String?>(null) }
             var reason by remember(desired) { mutableStateOf("") }
@@ -165,7 +165,10 @@ fun IncidentScreen(model: IncidentViewModel,registry: HydrantViewModel,organizat
                     }
                 }
                 items(operations,key={it.operation.operationId}) { op ->
+                    Text(stringResource(R.string.field_recorded_action,stateName(parse(op.operation.payload).obj("payload").text("status"))))
                     FieldBanner(stateName(op.operation.state),if(op.operation.state=="SERVER_CONFIRMED")FieldTone.SUCCESS else FieldTone.WARNING)
+                    if(op.error=="DEPENDENCY_CHANGED")Text(stringResource(R.string.field_dependency_changed))
+                    if(op.error=="RECOVERY_REJECTED")Text(stringResource(R.string.field_recovery_denied))
                 }
                 if(assignment.flag("can_execute") && pending?.operation?.state!="NEEDS_ATTENTION")item {
                     FlowRow(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
@@ -296,45 +299,74 @@ fun IncidentScreen(model: IncidentViewModel,registry: HydrantViewModel,organizat
     val hydrantData by hydrantFlow.collectAsStateWithLifecycle(initialValue=si.gasilko.app.feature.hydrants.presentation.MapHydrantsState())
     var values by remember(definition) { mutableStateOf<Map<String,String>>(emptyMap()) }
     var review by remember { mutableStateOf<JsonObject?>(null) }
+    var reviewedRow by remember { mutableStateOf<JsonObject?>(null) }
+    var reviewedRecipients by remember { mutableStateOf<List<Pair<String,String>>?>(null) }
+    var reviewedTargets by remember { mutableStateOf<List<Pair<String,String>>?>(null) }
     val operation=remember { UUID.randomUUID().toString() }
     val taskId=remember { UUID.randomUUID().toString() }
     val assignmentId=remember { UUID.randomUUID().toString() }
-    val selected=catalog.find { it.text("id")==definition }?.obj("configuration")
+    val selectedRow=reviewedRow ?: catalog.find { it.text("id")==definition }
+    val actionVersionId=catalogVersion(selectedRow)
+    val selected=selectedRow?.obj("configuration")
+    val recipientOptions=reviewedRecipients ?: incident.rows("units").filter { it.flag("leader") }.flatMap { u ->
+        u.rows("crew").filter { it.flag("can_issue") && it.text("status")=="ACTIVE" }
+            .map { it.text("id") to (u.text("name")+" · "+it.text("name")) }
+    }
     val targets=selected?.get("target_types")?.jsonArray.orEmpty().map { it.jsonPrimitive.content }
     val referencedTargets=incident.rows("assignments").map { it.obj("task") }
         .filter { it.text("target_type")==targetKind && it.text("target_entity_id").isNotEmpty() }
         .distinctBy { it.text("target_entity_id") }
-    val targetOptions=if(targetKind=="HYDRANT")hydrantData.rows.filter { it.active }.map {
+    val liveTargetOptions=if(targetKind=="HYDRANT")hydrantData.rows.filter { it.active }.map {
         it.id to (it.code ?: it.id.take(8))
     } else referencedTargets.map { it.text("target_entity_id") to it.text("target_label_snapshot") }
+    val targetOptions=reviewedTargets ?: liveTargetOptions
     val parameters=selected?.rows("parameter_definitions").orEmpty()
     val params=runCatching { buildJsonObject {
         parameters.forEach { d ->
             val raw=values[d.text("code")].orEmpty()
             if(raw.isNotEmpty())put(d.text("code"),when(d.text("type")) {
-                "INTEGER"->JsonPrimitive(raw.toLong())
-                "DECIMAL"->JsonPrimitive(raw.toDouble().also { require(it.isFinite()) })
+                "INTEGER","DECIMAL"->JsonPrimitive(raw.toBigDecimal())
                 "BOOLEAN"->JsonPrimitive(raw.toBooleanStrict())
                 else->JsonPrimitive(raw)
             })
         }
     } }.getOrNull()
     val p=GeoPoint(latitude.toDoubleOrNull() ?: Double.NaN,longitude.toDoubleOrNull() ?: Double.NaN)
-    val valid=crew.isNotEmpty() && selected!=null && targetKind in targets && (targetKind!="COORDINATE" || p.valid) &&
-        (targetKind in listOf("NONE","COORDINATE") || targetOptions.any { it.first==targetId }) &&
-        params!=null && parameters.none { it.flag("required") && values[it.text("code")].isNullOrBlank() }
+    val draft=buildJsonObject {
+        put("id",taskId);put("action_version_id",actionVersionId.orEmpty());put("title",title);put("notes",notes)
+        put("parameters",params ?: JsonObject(emptyMap()))
+        put("target",buildJsonObject {
+            put("kind",targetKind)
+            if(targetKind=="COORDINATE" && p.valid)put("coordinate",JsonArray(listOf(JsonPrimitive(p.longitude),JsonPrimitive(p.latitude))))
+            if(targetKind in listOf("HYDRANT","INCIDENT_MAP_OBJECT","INCIDENT_SECTOR"))put("entityId",targetId)
+            if(targetKind in listOf("INCIDENT_MAP_OBJECT","INCIDENT_SECTOR"))put("incidentId",incident.text("id"))
+        })
+        put("recipients",JsonArray(listOf(buildJsonObject {
+            put("id",assignmentId);put("type","INCIDENT_CREW_MEMBER");put("recipient_id",crew)
+        })))
+    }
+    val movement=selected?.text("native_behavior") in listOf("MOVE_TO","WITHDRAW_TO")
+    val targetValid=when(targetKind) {
+        "NONE"->!movement
+        "COORDINATE"->p.valid
+        "HYDRANT"->hydrantData.rows.any { h->h.id==targetId && h.active &&
+            (!movement || si.gasilko.app.feature.map.HydrantMapLayers.valid(h)) }
+        "INCIDENT_MAP_OBJECT","INCIDENT_SECTOR"->referencedTargets.any { t->t.text("target_entity_id")==targetId &&
+            (!movement || point(t.obj("target_geometry_snapshot"))!=null) }
+        else->false
+    }
+    val valid=params!=null && targetValid && validIssueDraft(selectedRow,draft,incident)
     BackHandler(onBack=back)
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
         TextButton(onClick=back,enabled=!busy) { Text(stringResource(R.string.h_back)) }
         ScreenHeading(stringResource(R.string.field_issue));FieldBanner(stringResource(R.string.field_online_issue))
         if(error)FieldBanner(stringResource(R.string.field_error),FieldTone.WARNING)
         if(busy)LinearProgressIndicator(Modifier.fillMaxWidth())
-        Selector(stringResource(R.string.field_recipient),crew,incident.rows("units").filter { it.flag("leader") }.flatMap { u->
-            u.rows("crew").filter { it.flag("can_issue") }.map { it.text("id") to (u.text("name")+" · "+it.text("name")) }
-        },!busy && review==null) { crew=it }
-        Selector(stringResource(R.string.field_action),definition,catalog.map { it.text("id") to label(it.obj("configuration")) },!busy && review==null) { definition=it }
+        Selector(stringResource(R.string.field_recipient),crew,recipientOptions,!busy && review==null) { crew=it }
+        Selector(stringResource(R.string.field_action),definition,(reviewedRow?.let { listOf(it) } ?: catalog).map { it.text("id") to label(it.obj("configuration")) },!busy && review==null) { definition=it }
+        actionVersionId?.let { Text(stringResource(R.string.field_definition_version,selected!!.text("version_number"),it),style=MaterialTheme.typography.bodySmall) }
         OutlinedTextField(title,{title=it.take(200)},enabled=review==null,label={Text(stringResource(R.string.field_subject))},modifier=Modifier.fillMaxWidth())
-        OutlinedTextField(notes,{notes=it.take(2000)},enabled=review==null,label={Text(stringResource(R.string.field_instructions))},modifier=Modifier.fillMaxWidth())
+        OutlinedTextField(notes,{notes=it.take(4000)},enabled=review==null,label={Text(stringResource(R.string.field_instructions))},modifier=Modifier.fillMaxWidth())
         Selector(stringResource(R.string.field_target),targetKind,targets.map { it to stringResource(when(it) {
             "NONE"->R.string.field_no_target;"COORDINATE"->R.string.field_coordinate
             "HYDRANT"->R.string.field_target_hydrant;else->R.string.field_target_reference
@@ -356,19 +388,10 @@ fun IncidentScreen(model: IncidentViewModel,registry: HydrantViewModel,organizat
             } else OutlinedTextField(values[code].orEmpty(),{values=values+(code to it.take(2000))},enabled=review==null,
                 label={Text(label(d))},modifier=Modifier.fillMaxWidth())
         }
+        if(selectedRow!=null && !valid)Text(stringResource(R.string.field_draft_invalid))
         if(review==null)Button(enabled=valid && !busy,onClick={
-            review=buildJsonObject {
-                put("id",taskId);put("action_version_id",selected!!.text("id"));put("title",title);put("notes",notes)
-                put("parameters",params!!)
-                put("target",buildJsonObject { put("kind",targetKind)
-                    if(targetKind=="COORDINATE")put("coordinate",JsonArray(listOf(JsonPrimitive(p.longitude),JsonPrimitive(p.latitude))))
-                    if(targetKind in listOf("HYDRANT","INCIDENT_MAP_OBJECT","INCIDENT_SECTOR"))put("entityId",targetId)
-                    if(targetKind in listOf("INCIDENT_MAP_OBJECT","INCIDENT_SECTOR"))put("incidentId",incident.text("id"))
-                })
-                put("recipients",JsonArray(listOf(buildJsonObject {
-                    put("id",assignmentId);put("type","INCIDENT_CREW_MEMBER");put("recipient_id",crew)
-                })))
-            }
+            reviewedRow=selectedRow;reviewedRecipients=recipientOptions.toList();reviewedTargets=targetOptions.toList()
+            review=draft
         }) { Text(stringResource(R.string.field_review)) }
         review?.let { payload ->
             FieldBanner(stringResource(R.string.field_review_frozen))

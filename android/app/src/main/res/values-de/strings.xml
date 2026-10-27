@@ -517,4 +517,9 @@
     <string name="field_remaining">Verbleibend</string>
     <string name="field_return_unit">Rückfahrt der Einheit melden (online)</string>
     <string name="field_online_return">Die Rückfahrt wird erst nach Online-Prüfung Ihrer aktuellen Berechtigung bestätigt. Dieselbe Anfrage bleibt bei einer Wiederholung erhalten.</string>
+    <string name="field_draft_invalid">Definition, Empfänger, Ziel und Pflichtwerte prüfen (Typ, Bereich und Länge).</string>
+    <string name="field_recorded_action">Gespeicherte Aktion: %1$s</string>
+    <string name="field_dependency_changed">Die Zuweisung hat sich nach der vorherigen Bestätigung geändert oder der Zugriff ist nicht mehr erlaubt. Die nächste Aktion wurde nicht gesendet; Überprüfung erforderlich.</string>
+    <string name="field_recovery_denied">Die Wiederholung wurde abgelehnt. Das Ergebnis des früheren Sendeversuchs bleibt unklar; Vorgang prüfen, nicht neu erstellen.</string>
+    <string name="field_definition_version">Unveränderliche Definition: Version %1$s · %2$s</string>
 </resources>

@@ -8,11 +8,14 @@ $$;
 create function private.field_unit_visible(p_person uuid,p_org uuid,p_unit uuid) returns boolean
 language sql volatile security definer set search_path='' as $$
  select exists(select 1 from public.incident_units u
- join public.incident_participants ip on ip.id=u.participation_id and ip.status='ACTIVE'
+ join public.incident_participants ip on ip.id=u.participation_id and ip.incident_id=u.incident_id
+ and ip.organization_id=u.organization_id and ip.status='ACTIVE'
+ join public.incidents i on i.id=u.incident_id and i.status in ('ACTIVE','STABILIZED','CLOSED','CANCELLED')
  join public.organizations o on o.id=u.organization_id and o.active
  join public.user_organizations m on m.organization_id=p_org and m.user_id=p_person
  join public.profiles pr on pr.id=m.user_id and pr.account_status='ACTIVE'
- where u.id=p_unit and u.organization_id=p_org and
+ where u.id=p_unit and u.organization_id=p_org
+ and (i.status in ('CLOSED','CANCELLED') or u.status not in ('RELEASED','UNAVAILABLE')) and
  (private.field_unit_leader(p_person,p_org,u.id) or exists(
  select 1 from public.incident_crew_members c where c.unit_assignment_id=u.id
  and c.membership_organization_id=p_org and c.user_id=p_person and c.status='ACTIVE')));
@@ -22,16 +25,38 @@ language sql volatile security definer set search_path='' as $$
  select exists(select 1 from public.incident_task_assignments a
  left join public.incident_crew_members c on c.id=a.incident_crew_member_id
  where a.id=p_assignment and private.field_unit_visible(p_person,p_org,coalesce(a.incident_unit_id,c.unit_assignment_id))
- and (a.recipient_type='INCIDENT_UNIT' or c.user_id=p_person or private.field_unit_leader(p_person,p_org,c.unit_assignment_id)));
+ and (a.recipient_type='INCIDENT_UNIT' or (c.status='ACTIVE' and c.membership_organization_id=p_org
+ and (c.user_id=p_person or private.field_unit_leader(p_person,p_org,c.unit_assignment_id)))));
 $$;
+-- Explicit participant DTO: adding a canonical column cannot silently expand mobile disclosure.
+create function private.field_task_projection(p_task public.incident_tasks) returns jsonb
+language sql stable security definer set search_path='' as $
+ select jsonb_build_object('id',p_task.id,'incident_id',p_task.incident_id,
+ 'action_definition_version_id',p_task.action_definition_version_id,
+ 'version',p_task.version::text,'changed_revision',p_task.changed_revision::text,
+ 'title',p_task.title,'notes',p_task.notes,'priority',p_task.priority,'status',p_task.status,'outcome',p_task.outcome,
+ 'issuing_organization_id',p_task.issuing_organization_id,'issuer_name',coalesce(pr.display_name,p_task.issued_by::text),
+ 'issued_at',p_task.issued_at,'target_type',p_task.target_type,'target_entity_id',p_task.target_entity_id,
+ 'target_incident_id',p_task.target_incident_id,'target_geometry_snapshot',p_task.target_geometry_snapshot,
+ 'target_label_snapshot',p_task.target_label_snapshot,'parameters',p_task.parameters,
+ 'configuration',jsonb_build_object('id',v.id,'definition_id',v.definition_id,'version_number',v.version_number::text,
+ 'label_sl',v.label_sl,'label_de',v.label_de,'description_sl',v.description_sl,'description_de',v.description_de,
+ 'native_behavior',v.native_behavior,'requires_acknowledgement',v.requires_acknowledgement,
+ 'parameter_definitions',v.parameter_definitions))
+ from public.operational_action_definition_versions v join public.profiles pr on pr.id=p_task.issued_by
+ where v.id=p_task.action_definition_version_id;
+$;
+revoke all on function private.field_task_projection(public.incident_tasks) from public,anon,authenticated,service_role;
 create function public.incident_field_snapshot(p_acting_organization_id uuid) returns jsonb
 language plpgsql volatile security definer set search_path='' as $$
-declare v_actor uuid:=auth.uid();v_i public.incidents;v_rows jsonb:='[]';v_units jsonb;v_tasks jsonb;v_history jsonb;v_result jsonb;v_count integer:=0;
+declare v_actor uuid:=auth.uid();v_i public.incidents;v_rows jsonb:='[]';v_units jsonb;v_tasks jsonb;v_history jsonb;v_result jsonb;v_count integer:=0;v_lock_timeout text:=current_setting('lock_timeout');
 begin
  if v_actor is null or not private.incident_acting_member(p_acting_organization_id) then raise exception 'NOT_AUTHORIZED' using errcode='42501'; end if;
  -- Same organization security lock as canonical mutations. Parent locks pin each
  -- incident projection; no client merging of unrelated pages is supported.
+ perform set_config('lock_timeout','1500ms',true);
  perform private.lock_organization(p_acting_organization_id);
+ if not private.incident_acting_member(p_acting_organization_id) then raise exception 'NOT_AUTHORIZED' using errcode='42501'; end if;
  for v_i in select i.* from public.incidents i where i.status<>'DRAFT'
  and exists(select 1 from public.incident_units u where u.incident_id=i.id
  and private.field_unit_visible(v_actor,p_acting_organization_id,u.id))
@@ -51,7 +76,8 @@ begin
        'can_issue',private.field_unit_leader(v_actor,p_acting_organization_id,u.id)
         and private.task_recipient_eligible(v_i.id,'INCIDENT_CREW_MEMBER',c.id)
         and private.can_issue_task(v_i.id,p_acting_organization_id,'INCIDENT_CREW_MEMBER',c.id)) dto
-      from public.incident_crew_members c join public.profiles pr on pr.id=c.user_id
+      from public.incident_crew_members c join public.profiles pr on pr.id=c.user_id and pr.account_status='ACTIVE'
+      join public.user_organizations cm on cm.user_id=c.user_id and cm.organization_id=c.membership_organization_id
       where c.unit_assignment_id=u.id and c.status='ACTIVE'
       and (c.user_id=v_actor or private.field_unit_leader(v_actor,p_acting_organization_id,u.id))
       order by c.id limit 101) qc),'[]')) dto
@@ -61,13 +87,13 @@ begin
   if jsonb_array_length(v_units)>100 or exists(select 1 from jsonb_array_elements(v_units) x where jsonb_array_length(x->'crew')>100)
    then raise exception 'FIELD_SNAPSHOT_LIMIT'; end if;
   select coalesce(jsonb_agg(q.dto order by q.id),'[]') into v_tasks from (
-   select a.id,jsonb_build_object('id',a.id,'version',a.version::text,'status',a.status,'recipient_type',a.recipient_type,
+   select a.id,jsonb_build_object('id',a.id,'version',a.version::text,'changed_revision',a.changed_revision::text,'status',a.status,'recipient_type',a.recipient_type,
     'recipient_id',coalesce(a.incident_unit_id,a.incident_crew_member_id),'unit_id',coalesce(a.incident_unit_id,c.unit_assignment_id),
     'recipient_name',case when c.id is null then ou.callsign||' · '||ou.name else coalesce(pr.display_name,c.user_id::text) end,
     'mine',c.user_id=v_actor,'can_execute',v_i.status in ('ACTIVE','STABILIZED') and t.status='OPEN'
       and a.status not in ('COMPLETED','UNABLE','CANCELLED')
       and private.can_execute_task(v_i.id,p_acting_organization_id,a.recipient_type,coalesce(a.incident_unit_id,a.incident_crew_member_id)),
-    'task',private.task_projection(t)) dto
+    'task',private.field_task_projection(t)) dto
    from public.incident_task_assignments a join public.incident_tasks t on t.id=a.task_id
    left join public.incident_crew_members c on c.id=a.incident_crew_member_id
    left join public.profiles pr on pr.id=c.user_id
@@ -76,14 +102,30 @@ begin
    where a.incident_id=v_i.id and private.field_assignment_visible(v_actor,p_acting_organization_id,a.id)
    order by a.id limit 101) q;
   if jsonb_array_length(v_tasks)>100 then raise exception 'FIELD_SNAPSHOT_LIMIT'; end if;
-  -- Only assignment/task events for these explicitly scoped episodes, never the
-  -- general timeline (which can include instructor/private operational material).
+  -- Event-specific allowlist. Shared task events never carry recipient-private
+  -- fields. Assignment reasons are only for that recipient or its effective leader.
   select coalesce(jsonb_agg(q.dto order by q.sequence desc),'[]') into v_history from (
-   select e.sequence,jsonb_build_object('sequence',e.sequence::text,'code',e.event_code,'recorded_at',e.recorded_at,'data',e.data) dto
-   from public.incident_timeline e where e.incident_id=v_i.id and e.event_code like 'TASK_%'
-   and exists(select 1 from jsonb_array_elements(v_tasks) a where
-    (e.data->>'task_assignment_id'=a->>'id') or
-    (not(e.data ? 'task_assignment_id') and e.data->>'task_id'=a->'task'->>'id'))
+   select e.sequence,jsonb_build_object('sequence',e.sequence::text,'code',e.event_code,'recorded_at',e.recorded_at,
+    'data',jsonb_strip_nulls(case
+      when e.event_code='TASK_ISSUED' then jsonb_build_object('task_id',e.data->'task_id','action_version_id',e.data->'action_version_id')
+      when e.event_code='TASK_CLOSED' then jsonb_build_object('task_id',e.data->'task_id','outcome',e.data->'outcome')
+      when e.event_code='TASK_CANCELLED' then jsonb_build_object('task_id',e.data->'task_id')
+      else jsonb_build_object('task_id',e.data->'task_id','task_assignment_id',e.data->'task_assignment_id',
+        'from_status',e.data->'from_status','status',e.data->'status',
+        'reason',case when exists(select 1 from public.incident_task_assignments pa
+          left join public.incident_crew_members pc on pc.id=pa.incident_crew_member_id
+          where pa.id::text=e.data->>'task_assignment_id' and pa.incident_id=v_i.id
+          and private.field_assignment_visible(v_actor,p_acting_organization_id,pa.id)
+          and (pc.user_id=v_actor or private.field_unit_leader(v_actor,p_acting_organization_id,
+            coalesce(pa.incident_unit_id,pc.unit_assignment_id)))) then e.data->'reason' end)
+      end)) dto
+   from public.incident_timeline e where e.incident_id=v_i.id and (
+    (e.event_code in ('TASK_ISSUED','TASK_CLOSED','TASK_CANCELLED') and exists(
+      select 1 from jsonb_array_elements(v_tasks) visible where e.data->>'task_id'=visible->'task'->>'id'))
+    or (e.event_code in ('TASK_ASSIGNMENT_ACKNOWLEDGED','TASK_ASSIGNMENT_STARTED','TASK_ASSIGNMENT_BLOCKED',
+      'TASK_ASSIGNMENT_COMPLETED','TASK_ASSIGNMENT_UNABLE','TASK_ASSIGNMENT_CANCELLED') and exists(
+      select 1 from jsonb_array_elements(v_tasks) visible where e.data->>'task_assignment_id'=visible->>'id'
+       and e.data->>'task_id'=visible->'task'->>'id')))
    order by e.sequence desc limit 100) q;
   v_rows:=v_rows||jsonb_build_array(jsonb_build_object('id',v_i.id,'reference',v_i.reference_number,
     'title',v_i.title,'status',v_i.status,'mode',case when exists(select 1 from public.simulation_scenarios s where s.incident_id=v_i.id) then 'TRAINING' else 'REAL' end,'latitude',v_i.latitude,'longitude',v_i.longitude,
@@ -92,8 +134,9 @@ begin
  end loop;
  v_result:=jsonb_build_object('account',v_actor,'organization',p_acting_organization_id,'verified_at',clock_timestamp(),'incidents',v_rows);
  if octet_length(v_result::text)>3145728 then raise exception 'FIELD_SNAPSHOT_LIMIT'; end if;
+ perform set_config('lock_timeout',v_lock_timeout,true);
  return v_result;
-end; $$;
+end; $;
 revoke all on function private.field_unit_leader(uuid,uuid,uuid),private.field_unit_visible(uuid,uuid,uuid),private.field_assignment_visible(uuid,uuid,uuid) from public,anon,authenticated,service_role;
 revoke all on function public.incident_field_snapshot(uuid) from public,anon,authenticated,service_role;
 grant execute on function public.incident_field_snapshot(uuid) to authenticated;
@@ -122,7 +165,9 @@ language sql volatile security definer set search_path='' as $$
  where m.user_id=person and m.organization_id=e.organization_id and p.account_status='ACTIVE' and o.active
  and coalesce((select enabled from private.notification_preferences where user_id=person and category=e.category),e.category<>'HYDRANT')
  and ((e.category='INCIDENT_TASK' and exists(select 1 from unnest(e.teams) a(id)
-  where private.field_assignment_visible(person,e.organization_id,a.id)))
+  join public.incident_task_assignments scoped on scoped.id=a.id
+  where e.entity_type='INCIDENT' and scoped.incident_id=e.entity_id
+  and private.field_assignment_visible(person,e.organization_id,a.id)))
  or (e.category='HYDRANT' and m.role in ('MANAGER','ADMIN')) or
  (e.category in ('ASSIGNMENT','ACTIVATION') and exists(select 1 from public.inspection_team_members tm
  join public.inspection_teams t on t.id=tm.team_id and t.organization_id=tm.organization_id
