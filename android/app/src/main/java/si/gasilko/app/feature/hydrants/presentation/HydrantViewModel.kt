@@ -45,7 +45,7 @@ class HydrantViewModel(private val repository: HydrantRepository, private val in
         val stamp=generation
         val organizations=repository.organizations()
         val org=organizations.find { it.id==organization && it.active } ?: return false
-        hydrate { if(kind=="PLAN")repository.refreshPlans(org.id) else repository.refresh(org.id) }
+        if(kind!="INCIDENT")hydrate { if(kind=="PLAN")repository.refreshPlans(org.id) else repository.refresh(org.id) }
         val query=HydrantQuery(organization=org.id).normalized(org.role)
         val hydrant=if(kind=="HYDRANT")repository.get(org.id,entity) else null
         val plan=if(kind=="PLAN")repository.observePlans(org.id).first().let { data ->

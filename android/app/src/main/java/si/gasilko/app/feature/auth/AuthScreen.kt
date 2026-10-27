@@ -28,6 +28,10 @@ fun AuthScreen(model: AuthViewModel = viewModel()) {
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { model.refresh() }
     var requests by remember { mutableStateOf(false) }
     var notifications by remember(state.account) { mutableStateOf(false) }
+    val registryState by (model.hydrants?.state?.collectAsStateWithLifecycle()
+        ?: remember { mutableStateOf(si.gasilko.app.feature.hydrants.presentation.RegistryState()) })
+    var fieldOrg by remember(state.account) { mutableStateOf<String?>(null) }
+    var fieldIncident by remember(state.account) { mutableStateOf<String?>(null) }
     val destination by si.gasilko.app.core.notifications.NotificationTap.pending.collectAsStateWithLifecycle()
     var unavailable by remember(destination) { mutableStateOf(false) }
     var opening by remember(destination) { mutableStateOf(false) }
@@ -39,7 +43,10 @@ fun AuthScreen(model: AuthViewModel = viewModel()) {
         notificationScope.launch {
             try {
                 val opened=target.account==state.account && model.hydrants?.openNotification(target.organization,target.entity,target.kind)==true
-                if(opened) { requests=false;notifications=false;si.gasilko.app.core.notifications.NotificationTap.clear() }
+                if(opened) {
+                    fieldOrg=if(target.kind=="INCIDENT")target.organization else null
+                    fieldIncident=if(target.kind=="INCIDENT")target.entity else null
+                    requests=false;notifications=false;si.gasilko.app.core.notifications.NotificationTap.clear() }
                 else unavailable=true
             } catch(e: kotlinx.coroutines.CancellationException) { throw e }
             catch(_: Exception) { unavailable=true }
@@ -63,6 +70,9 @@ fun AuthScreen(model: AuthViewModel = viewModel()) {
     }
     LaunchedEffect(state.route) { if(state.route==AuthRoute.UNAUTHENTICATED || state.route==AuthRoute.ACTIVE) requests=false }
     Column {
+    if(state.route==AuthRoute.ACTIVE && registryState.organization?.active==true)TextButton(onClick={
+        fieldOrg=registryState.organization!!.id;fieldIncident=null;notifications=false;requests=false
+    }) { Text(stringResource(R.string.field_title)) }
     if(state.route==AuthRoute.ACTIVE && model.notifications!=null)TextButton(onClick={notifications=true}) {
         Text(stringResource(R.string.notifications_title))
     }
@@ -80,6 +90,16 @@ fun AuthScreen(model: AuthViewModel = viewModel()) {
     Box(Modifier.weight(1f)) {
     if(notifications && state.route==AuthRoute.ACTIVE && model.notifications!=null) key(state.account) {
         si.gasilko.app.core.notifications.NotificationSettings(model.notifications) { notifications=false }
+    }
+    else if(fieldOrg!=null && state.route==AuthRoute.ACTIVE && state.account!=null &&
+        registryState.organization?.id==fieldOrg) key(state.account,fieldOrg) {
+        val fieldScope=rememberCoroutineScope()
+        val repository=remember { model.incidents(state.account!!) }
+        val fieldModel=remember { repository?.let {
+            si.gasilko.app.feature.incidents.IncidentViewModel(it,fieldOrg!!,fieldScope)
+        } }
+        if(fieldModel!=null)si.gasilko.app.feature.incidents.IncidentScreen(fieldModel,model.hydrants!!,
+            registryState.organization!!.name,fieldIncident) { fieldOrg=null;fieldIncident=null }
     }
     else if(requests && state.route in listOf(AuthRoute.ACTIVE,AuthRoute.PENDING_APPROVAL)) AccessScreen(model.access,{requests=false},{requests=false;model.signOut()},model::refresh)
     else if(state.route == AuthRoute.ACTIVE && model.hydrants != null) registryScreens.SaveableStateProvider(state.account ?: "registry") {

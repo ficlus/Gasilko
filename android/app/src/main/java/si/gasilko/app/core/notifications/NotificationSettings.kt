@@ -50,7 +50,7 @@ fun NotificationSettings(repository: NotificationRepository, back: ()->Unit) {
         if(!NotificationInstallation.firebase(context))FieldBanner(stringResource(R.string.notifications_configuration),FieldTone.WARNING)
         if(busy)LinearProgressIndicator(Modifier.fillMaxWidth())
         listOf("ASSIGNMENT" to R.string.notifications_assignment,"ACTIVATION" to R.string.notifications_activation,
-            "HYDRANT" to R.string.notifications_hydrant).forEach { (key,label)->
+            "HYDRANT" to R.string.notifications_hydrant,"INCIDENT_TASK" to R.string.field_notifications).forEach { (key,label)->
             Row(Modifier.fillMaxWidth(),verticalAlignment=androidx.compose.ui.Alignment.CenterVertically) {
                 Text(stringResource(label),Modifier.weight(1f))
                 Switch(checked=values?.get(key)==true,enabled=values!=null && !busy,

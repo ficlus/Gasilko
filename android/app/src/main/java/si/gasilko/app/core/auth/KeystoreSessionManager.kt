@@ -43,10 +43,18 @@ class KeystoreSessionManager(context: Context) : SessionManager, CodeVerifierCac
         cipher.doFinal(bytes.copyOfRange(12, bytes.size)).toString(Charsets.UTF_8)
     } }
     override suspend fun saveSession(session: UserSession) = saveValue("session", json.encodeToString(UserSession.serializer(), session))
+    suspend fun saveIncidentLease(account: String,org: String,value: String) = saveValue("incident_lease/$account/$org",value)
+    suspend fun loadIncidentLease(account: String,org: String): String? =
+        if(prefs.contains("incident_lease/$account/$org")) loadValue("incident_lease/$account/$org") else null
+    suspend fun clearIncidentLease(account: String,org: String) = withContext(Dispatchers.IO) { lock.withLock {
+        check(prefs.edit().remove("incident_lease/$account/$org").commit())
+    } }
     suspend fun saveAuthorization(value: String) = saveValue("authorization", value)
     suspend fun loadAuthorization(): String? = if(prefs.contains("authorization")) loadValue("authorization") else null
     suspend fun clearAuthorization() = withContext(Dispatchers.IO) { lock.withLock {
-        check(prefs.edit().remove("authorization").commit())
+        val edit=prefs.edit().remove("authorization")
+        prefs.all.keys.filter { it.startsWith("incident_lease/") }.forEach { edit.remove(it) }
+        check(edit.commit())
     } }
     override suspend fun loadSession(): UserSession = json.decodeFromString(UserSession.serializer(), loadValue("session"))
     override suspend fun saveCodeVerifier(codeVerifier: String) = saveValue("pkce", codeVerifier)

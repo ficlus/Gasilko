@@ -53,15 +53,15 @@ interface RegistryDao {
         before: Long, after: Long, time: Long): Int
     // Payload/history stay immutable; only the sync engine records acknowledgement or conflict.
     @Insert suspend fun enqueue(change: PendingHydrantChange): Long
-    @Query("SELECT * FROM pending_hydrant_changes WHERE account = :account AND organization = :organization ORDER BY sequence")
+    @Query("SELECT * FROM pending_hydrant_changes WHERE operation <> 'INCIDENT_TASK' AND account = :account AND organization = :organization ORDER BY sequence")
     suspend fun pendingChanges(account: String, organization: String): List<PendingHydrantChange>
-    @Query("SELECT DISTINCT entityId FROM pending_hydrant_changes WHERE account = :account AND organization = :organization AND state NOT IN ('SYNCED','RESOLVED')")
+    @Query("SELECT DISTINCT entityId FROM pending_hydrant_changes WHERE operation <> 'INCIDENT_TASK' AND account = :account AND organization = :organization AND state NOT IN ('SYNCED','RESOLVED')")
     suspend fun pendingHydrantIds(account: String, organization: String): List<String>
-    @Query("SELECT * FROM pending_hydrant_changes WHERE account = :account AND organization = :organization AND state NOT IN ('SYNCED','RESOLVED') ORDER BY COALESCE(orderSequence, sequence), sequence LIMIT 1")
+    @Query("SELECT * FROM pending_hydrant_changes WHERE operation <> 'INCIDENT_TASK' AND account = :account AND organization = :organization AND state NOT IN ('SYNCED','RESOLVED') ORDER BY COALESCE(orderSequence, sequence), sequence LIMIT 1")
     suspend fun nextChange(account: String, organization: String): PendingHydrantChange?
-    @Query("SELECT * FROM pending_hydrant_changes WHERE account = :account AND organization = :organization AND entityId = :id AND state NOT IN ('SYNCED','RESOLVED') ORDER BY COALESCE(orderSequence, sequence), sequence")
+    @Query("SELECT * FROM pending_hydrant_changes WHERE operation <> 'INCIDENT_TASK' AND account = :account AND organization = :organization AND entityId = :id AND state NOT IN ('SYNCED','RESOLVED') ORDER BY COALESCE(orderSequence, sequence), sequence")
     suspend fun remainingChanges(account: String, organization: String, id: String): List<PendingHydrantChange>
-    @Query("SELECT acknowledgedVersion FROM pending_hydrant_changes WHERE account = :account AND organization = :organization AND entityId = :id AND operation NOT IN ('UPLOAD_PHOTO','SKIP_PLAN_ITEM') AND COALESCE(orderSequence, sequence) < :before AND state = 'SYNCED' ORDER BY COALESCE(orderSequence, sequence) DESC, sequence DESC LIMIT 1")
+    @Query("SELECT acknowledgedVersion FROM pending_hydrant_changes WHERE operation <> 'INCIDENT_TASK' AND account = :account AND organization = :organization AND entityId = :id AND operation NOT IN ('UPLOAD_PHOTO','SKIP_PLAN_ITEM') AND COALESCE(orderSequence, sequence) < :before AND state = 'SYNCED' ORDER BY COALESCE(orderSequence, sequence) DESC, sequence DESC LIMIT 1")
     suspend fun acknowledgedVersion(account: String, organization: String, id: String, before: Long): Long?
     @Query("UPDATE pending_hydrant_changes SET state = 'SYNCED', acknowledgedVersion = :version WHERE account = :account AND organization = :organization AND sequence = :sequence AND state = 'PENDING'")
     suspend fun acknowledge(account: String, organization: String, sequence: Long, version: Long?): Int
@@ -127,13 +127,24 @@ data class HydrantConflictEntity(
     val resolutionServerState: String? = null, val resolutionVersion: Long? = null, val replacementSequence: Long? = null,
 )
 
-@Database(entities = [OrganizationEntity::class, TypeEntity::class, HydrantEntity::class, PendingHydrantChange::class, HydrantConflictEntity::class, InspectionEntity::class, PhotoEntity::class, TeamEntity::class, TeamMemberEntity::class, TeamPersonEntity::class, PlanEntity::class, PlanTeamEntity::class, PlanItemEntity::class, PlanCoverage::class, PlanRouteEntity::class, PlanReassignmentRecord::class], version = 14, exportSchema = true)
+@Database(entities = [OrganizationEntity::class, TypeEntity::class, HydrantEntity::class, PendingHydrantChange::class, HydrantConflictEntity::class, InspectionEntity::class, PhotoEntity::class, TeamEntity::class, TeamMemberEntity::class, TeamPersonEntity::class, PlanEntity::class, PlanTeamEntity::class, PlanItemEntity::class, PlanCoverage::class, PlanRouteEntity::class, PlanReassignmentRecord::class, IncidentFieldCache::class, IncidentDispatch::class], version = 15, exportSchema = true)
 abstract class RegistryDatabase : RoomDatabase() {
     abstract fun registry(): RegistryDao
     abstract fun photos(): PhotoDao
     abstract fun teams(): TeamDao
     abstract fun plans(): PlanDao
+    abstract fun incidents(): IncidentFieldDao
     companion object {
+        val MIGRATION_14_15 = object : Migration(14,15) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""CREATE TABLE IF NOT EXISTS incident_field_cache (
+                    account TEXT NOT NULL,organization TEXT NOT NULL,payload TEXT NOT NULL,
+                    verifiedAt INTEGER NOT NULL,elapsed INTEGER NOT NULL,boot INTEGER NOT NULL,
+                    PRIMARY KEY(account,organization))""")
+                db.execSQL("""CREATE TABLE IF NOT EXISTS incident_operation_dispatch (
+                    sequence INTEGER NOT NULL PRIMARY KEY,parent INTEGER,request TEXT,result TEXT,error TEXT)""")
+            }
+        }
         val MIGRATION_13_14 = object : Migration(13,14) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE inspection_plan_items ADD COLUMN assignmentVersion INTEGER NOT NULL DEFAULT 0")
@@ -261,7 +272,7 @@ abstract class RegistryDatabase : RoomDatabase() {
         @Volatile private var instance: RegistryDatabase? = null
         fun open(context: Context): RegistryDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(context.applicationContext, RegistryDatabase::class.java,
-                "hydrant-registry.db").addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14).build().also { instance = it }
+                "hydrant-registry.db").addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15).build().also { instance = it }
         }
     }
 }

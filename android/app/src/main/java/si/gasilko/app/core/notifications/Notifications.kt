@@ -59,7 +59,7 @@ object NotificationInstallation {
     fun channels(c: Context) {
         val manager=c.getSystemService(NotificationManager::class.java)
         listOf("ASSIGNMENT" to R.string.notifications_assignment,"ACTIVATION" to R.string.notifications_activation,
-            "HYDRANT" to R.string.notifications_hydrant).forEach { (id,label)->
+            "HYDRANT" to R.string.notifications_hydrant,"INCIDENT_TASK" to R.string.field_notifications).forEach { (id,label)->
             manager.createNotificationChannel(NotificationChannel(id,c.getString(label),NotificationManager.IMPORTANCE_DEFAULT).apply {
                 lockscreenVisibility=Notification.VISIBILITY_PRIVATE
                 description=c.getString(R.string.notifications_privacy)
@@ -121,18 +121,25 @@ object NotificationTap {
     val pending=mutable.asStateFlow()
     fun read(data: Map<String,String>): NotificationDestination? {
         fun id(key: String)=data[key]?.takeIf { runCatching { UUID.fromString(it).toString()==it }.getOrDefault(false) }
-        val kind=data["entity_type"]?.takeIf { it in listOf("PLAN","HYDRANT") } ?: return null
+        val kind=data["entity_type"]?.takeIf { it in listOf("PLAN","HYDRANT","INCIDENT") } ?: return null
         return NotificationDestination(id("account")?:return null,id("organization")?:return null,id("entity")?:return null,kind,id("event")?:return null)
     }
     fun accept(intent: Intent) { read(listOf("account","organization","entity","entity_type","event").associateWith { intent.getStringExtra("notification_$it").orEmpty() })?.let { mutable.value=it } }
     fun clear() { mutable.value=null }
+    private val hintsMutable=MutableStateFlow(0L)
+    val hints=hintsMutable.asStateFlow()
+    fun hint() { hintsMutable.value=hintsMutable.value+1 }
 }
 class GasilkoMessagingService: FirebaseMessagingService() {
     override fun onNewToken(token: String) { NotificationInstallation.enqueue(this) }
     override fun onMessageReceived(message: RemoteMessage) {
         val destination=NotificationTap.read(message.data) ?: return
         if(NotificationInstallation.account(this)!=destination.account)return
-        val category=message.data["category"]?.takeIf { it in listOf("ASSIGNMENT","ACTIVATION","HYDRANT") } ?: return
+        val category=message.data["category"]?.takeIf { it in listOf("ASSIGNMENT","ACTIVATION","HYDRANT","INCIDENT_TASK") } ?: return
+        if(destination.kind=="INCIDENT") {
+            NotificationTap.hint()
+            si.gasilko.app.core.sync.HydrantSyncScheduler(this).enqueue(destination.account,destination.organization)
+        }
         val manager=getSystemService(NotificationManager::class.java)
         if(!manager.areNotificationsEnabled())return
         if(Build.VERSION.SDK_INT>=33 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)!=android.content.pm.PackageManager.PERMISSION_GRANTED)return
@@ -144,6 +151,7 @@ class GasilkoMessagingService: FirebaseMessagingService() {
             "PLAN_ASSIGNED","PLAN_REASSIGNED"->R.string.notifications_assignment
             "PLAN_ACTIVATED"->R.string.notifications_activation
             "HYDRANT_NEEDS_ATTENTION","HYDRANT_NOT_WORKING"->R.string.notifications_hydrant
+            "INCIDENT_TASK_CHANGED"->R.string.field_notifications
             else->R.string.notifications_title
         }
         val notification=Notification.Builder(this,category).setSmallIcon(R.drawable.ic_field_refresh)
