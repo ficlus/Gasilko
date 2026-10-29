@@ -1,0 +1,1286 @@
+# GASILKO — M14.7B1
+# Consistent Incident Snapshots, Incremental Change Feed & Android Reconciliation
+
+Repository: https://github.com/ficlus/Gasilko
+
+Previous milestone: M14.7A/M14.8A — Android Incident Commands & Field Pilot, PR #82.
+
+**Implement ONE complete milestone in ONE new PR. Do not merge.**
+
+This milestone must follow the existing Gasilko architecture and M14 development specifications.
+
+Implementation only. No tests, builds, lint, typecheck, CI, SQL execution or deployments.
+
+---
+
+## 0. Mandatory prerequisite: verify PR #82
+
+Before creating a branch:
+
+1. Inspect the current GitHub `main`.
+2. Verify that PR #82 has actually been merged or its complete implementation is already present on `main`.
+3. Verify that its Android field pilot, Room v15 migration, incident field projection, task workflows and notification integration are included.
+4. Inspect the latest migration timestamp and current Android database version.
+5. Look for an existing implementation or open PR covering M14.7B1.
+
+If PR #82 is not actually merged and its implementation is not present on `main`, STOP before making changes.
+
+Report that the dependency remains unresolved.
+
+Do not create a speculative branch based on an unmerged PR.
+
+Do not duplicate an active Codex task.
+
+If all prerequisites are satisfied, continue from the current authoritative `main`.
+
+## 1. Background
+
+Gasilko already contains an incident operations platform with:
+
+- M14.1 incident lifecycle;
+- M14.2 command hierarchy and roles;
+- M14.3 Common Operational Picture;
+- M14.4 operational units, vehicles, crew and resources;
+- M14.5A task assignments and acknowledgements;
+- M14.5B RTS command interaction;
+- M14.6 mobilization and SIM capabilities;
+- M14.7A notification integration;
+- M14.8A Android field pilot.
+
+The Android pilot introduced authorized incident snapshots, Room caching, offline task operations, WorkManager synchronization and foreground refresh.
+
+However, the pilot does not yet implement the full authoritative M14.7 snapshot/change synchronization protocol.
+
+Its bounded full-snapshot refresh is an appropriate initial fallback, but long-term incident operations require:
+
+- consistent server revisions;
+- complete multi-page snapshots;
+- incremental change delivery;
+- reliable deletion and access-revocation handling;
+- efficient Android synchronization;
+- lossless recovery after missed notifications;
+- bounded database and network workloads.
+
+The system must preserve the existing canonical incident aggregate.
+
+There must be no new parallel incident database or synchronization engine.
+
+## 2. Authoritative specifications
+
+Read before implementation:
+
+- `AGENTS.md`
+- `docs/SPEC.md`
+- `docs/SPEC-M14-INCIDENT-OPERATIONS.md`
+- `docs/M14.7A-M14.8A-android-field-pilot.md`
+- actual current Android incident implementation
+- actual Room database/DAO migrations
+- existing Supabase incident migrations
+- M14.1 operation receipts and incident timeline
+- M14.3 COP reads
+- M14.4 resource/crew reads
+- M14.5A task assignment reads
+- M14.6 mobilization reads
+- existing Web incident state and refresh logic
+- M10 notification integration.
+
+Pay special attention to the M14 SPEC section:
+
+**Concurrency, Realtime and Offline Synchronization**
+
+Preserve its defined snapshot, revision, timeline, audience and offline semantics.
+
+Do not assume an API exists because it is mentioned in the SPEC.
+
+Inspect the real code.
+
+---
+
+# PART A — ARCHITECTURE
+
+## 3. Desired synchronization architecture
+
+Implement:
+
+```text
+AUTHENTICATED ANDROID / WEB
+             |
+             v
+Incident Snapshot Manifest
+             |
+             v
+Version-Pinned Snapshot Pages
+             |
+             v
+Atomic Local Snapshot Commit
+             |
+             v
+Incremental Change Feed
+             |
+             v
+Authorized Entity Refresh
+             |
+             v
+Atomic Room Reconciliation
+             |
+             v
+Consistent Operational State
+```
+
+Realtime and FCM remain change hints.
+
+PostgreSQL remains the authoritative source.
+
+Room remains the Android operational read model.
+
+## 4. Do not create duplicate systems
+
+Reuse:
+
+- existing incident revision;
+- existing timeline sequence;
+- existing incident receipt and audit helpers;
+- existing actor/organization authorization;
+- existing Android Room;
+- existing Android WorkManager;
+- existing incident repository;
+- existing Supabase client;
+- existing FCM notification hints.
+
+Do not create:
+
+- another incident aggregate;
+- another canonical task table;
+- another offline queue;
+- another background sync worker;
+- another notification delivery system;
+- another incident command engine;
+- another scheduler or Cron.
+
+M14.7B1 is a synchronization-protocol milestone.
+
+Do not implement chat, attachments, GPS tracking or new command features.
+
+---
+
+# PART B — AUTHORITATIVE CHANGE FEED
+
+## 5. Incident change descriptors
+
+Implement an append-only, bounded change descriptor store consistent with M14 SPEC.
+
+Preferred logical identity:
+
+```text
+incident_id
+revision
+ordinal
+entity_kind
+entity_id / typed_subject
+operation
+entity_version
+audience_scope
+recorded_at
+```
+
+Conceptual key:
+
+```sql
+PRIMARY KEY (incident_id, revision, ordinal)
+```
+
+Adapt to the actual current schema.
+
+Use a new forward-only SQL migration.
+
+Do not modify previously applied migrations.
+
+## 6. Descriptor semantics
+
+Support at least:
+
+- UPSERT
+- REVOKE
+- SCOPE_RESET when necessary.
+
+An UPSERT means the client must obtain the current authorized version of an entity.
+
+A REVOKE means an entity is no longer visible in that client's authorized projection.
+
+Do not expose private old values through the descriptor.
+
+A descriptor should normally contain only:
+
+- incident;
+- revision;
+- entity type;
+- stable permitted identifier;
+- version;
+- operation;
+- scope metadata required for authorization.
+
+No full task text or private incident details.
+
+## 7. Entity coverage
+
+Inspect actual canonical domain entities.
+
+Include relevant operational state, such as:
+
+- incident core;
+- incident participation;
+- effective command assignments;
+- deployed units;
+- active crew episodes;
+- incident resources;
+- operational tasks;
+- recipient assignment episodes;
+- sectors;
+- map objects;
+- canonical hydrant links;
+- mobilizations and turnout;
+- appropriate incident lifecycle changes.
+
+Keep SIM-private data separate.
+
+Do not expose instructor-only hazard models to REAL incident participants.
+
+For any entity type that cannot yet be safely projected incrementally, return a conservative authoritative snapshot-reset requirement rather than silently skipping it.
+
+## 8. Change production
+
+Changes must become durable in the same authoritative transaction that commits the canonical incident mutation.
+
+Inspect existing trusted incident event/receipt helpers and reuse their transaction boundary.
+
+Prefer a single shared private change-appending mechanism over adding unrelated logic to every new RPC.
+
+Where appropriate, integrate with the existing sequenced incident timeline writer.
+
+But do not assume each timeline event maps to exactly one entity change.
+
+One incident revision may contain multiple descriptors.
+
+For example:
+
+```text
+Revision 140
+  ordinal 1: UNIT UPSERT
+  ordinal 2: CREW_MEMBER UPSERT
+  ordinal 3: TASK_ASSIGNMENT REVOKE
+```
+
+The descriptor order must be deterministic.
+
+An accepted mutation must not partially commit its change descriptors.
+
+Exact operation replay must not append duplicate descriptors.
+
+## 9. Producer completeness
+
+Review all registered incident mutations that can change a supported snapshot entity.
+
+Ensure the change feed covers them.
+
+If some older mutation paths cannot safely emit precise descriptors without disproportionate rewrites, use an explicit coarse incident/scope invalidation descriptor.
+
+Such invalidation must trigger a correct fresh snapshot.
+
+Never claim incremental completeness while silently missing whole mutation classes.
+
+Document precisely which entity changes are supported incrementally and which require refresh.
+
+## 10. Revision invariants
+
+Preserve the existing distinction between:
+
+- incident core version;
+- incident aggregate revision;
+- individual entity version;
+- timeline sequence;
+- operation UUID.
+
+Do not use them interchangeably.
+
+The incident revision is the primary snapshot/change boundary.
+
+Timeline sequence is independently tracked for historical events.
+
+Do not generate incident revisions in Android.
+
+Do not create a new independent client-authoritative revision counter.
+
+---
+
+# PART C — CONSISTENT SNAPSHOT MANIFESTS
+
+## 11. Snapshot manifest
+
+Implement an authenticated, authorized server-side snapshot manifest.
+
+The manifest represents one consistent logical incident state.
+
+Conceptual response:
+
+```json
+{
+  "manifest_id": "uuid",
+  "incident_id": "uuid",
+  "snapshot_revision": "140",
+  "timeline_sequence": "780",
+  "schema_version": 1,
+  "expires_at": "server timestamp",
+  "scope_fingerprint": "opaque value",
+  "collections": {
+    "incident": 1,
+    "units": 7,
+    "crew": 24,
+    "tasks": 13,
+    "assignments": 29,
+    "map_objects": 18
+  }
+}
+```
+
+This is a proposed contract.
+
+Adapt actual names and fields to the existing source.
+
+Do not expose a scope fingerprint that reveals membership identities.
+
+## 12. Five-minute lifetime
+
+The M14 SPEC requires approximately five minutes of manifest validity.
+
+Bind a manifest to:
+
+- authenticated actor;
+- exact acting organization;
+- incident;
+- current authorized visibility scope;
+- revision and sequence;
+- server creation time;
+- expiry.
+
+A manifest is not a grant of lasting authorization.
+
+Recheck current authorization on EVERY page request.
+
+If the user's access is revoked, invalidate the manifest immediately.
+
+Do not serve stored private pages merely because the manifest has not expired.
+
+## 13. Actual consistency guarantee
+
+A manifest must represent a real, internally consistent server state.
+
+Do NOT simply create a manifest containing revision R and later paginate ordinary mutable tables, since those pages could then represent R, R+1 and R+2.
+
+Select a correct implementation strategy based on actual PostgreSQL contracts.
+
+A recommended approach is to materialize a bounded, immutable, actor-scoped snapshot representation under a consistent database transaction/snapshot, then paginate those captured records.
+
+If using immutable entity-version history instead, prove from the actual source that it can reconstruct the exact pinned revision.
+
+Do not assume the existing mutable current tables can reconstruct historical revisions.
+
+Do not hold a database transaction open across separate HTTP page requests.
+
+## 14. Snapshot storage model
+
+If private materialization is necessary, provide narrowly scoped storage, conceptually:
+
+```text
+private.incident_snapshot_manifests
+  manifest_id UUID PK
+  actor_id UUID
+  acting_organization_id UUID
+  incident_id UUID
+  pinned_revision BIGINT
+  pinned_timeline_sequence BIGINT
+  scope_fingerprint
+  schema_version INTEGER
+  created_at TIMESTAMPTZ
+  expires_at TIMESTAMPTZ
+  state
+
+private.incident_snapshot_items
+  manifest_id UUID
+  collection_kind TEXT
+  ordinal BIGINT
+  entity_id UUID
+  entity_version BIGINT
+  payload JSONB
+```
+
+These names are illustrative, not an instruction to duplicate an existing table.
+
+Prefer existing private infrastructure if available.
+
+Use composite FKs, restrictive permissions and bounded payloads.
+
+No direct public/client SELECT on private snapshot storage.
+
+Snapshot content is temporary operational cache, not immutable incident history.
+
+## 15. Size and memory bounds
+
+Define explicit limits on:
+
+- snapshot creation work;
+- simultaneous manifests per actor/incident;
+- total materialized bytes;
+- pages per collection;
+- page size;
+- manifest lifetime;
+- total global cache;
+- cleanup per request.
+
+Do not silently truncate active units, tasks or crew.
+
+If the snapshot exceeds bounds:
+
+- return an explicit safe error;
+- preserve existing Android state appropriately;
+- permit a later retry or narrower authorized view;
+- do not report a partial snapshot as complete.
+
+The existing Android pilot's 3 MiB projection limit must be considered when choosing the protocol.
+
+## 16. Snapshot pagination
+
+Use stable keyset ordering.
+
+Example:
+
+```text
+GET COLLECTION PAGE
+manifest_id
+collection_kind
+after_ordinal
+limit
+```
+
+Response:
+
+```json
+{
+  "manifest_id": "uuid",
+  "snapshot_revision": "140",
+  "collection": "assignments",
+  "items": [],
+  "next_cursor": null,
+  "complete": true
+}
+```
+
+The actual implementation should use authorized Supabase RPC signatures, not invent arbitrary HTTP paths.
+
+Every page must retain the same manifest identity.
+
+Do not mix pages from different revisions.
+
+Do not use OFFSET against mutable canonical tables.
+
+## 17. Expired and invalidated manifests
+
+Handle:
+
+- expiration;
+- actor sign-out;
+- account switch;
+- acting-organization switch;
+- incident access revocation;
+- schema incompatibility;
+- missing stored page;
+- corrupted/truncated manifest;
+- backend restart;
+- concurrent newer incident revisions.
+
+Return clear codes, such as:
+
+- MANIFEST_EXPIRED
+- MANIFEST_SCOPE_CHANGED
+- MANIFEST_NOT_FOUND
+- SNAPSHOT_TOO_LARGE
+- RESET_REQUIRED.
+
+These are suggested codes.
+
+Follow existing project error conventions.
+
+On expiration, restart the snapshot from scratch.
+
+Do not reuse pages belonging to a different manifest.
+
+## 18. Cleanup without a second scheduler
+
+Prefer bounded, opportunistic expired-manifest cleanup or an existing supported maintenance mechanism.
+
+Do not introduce a new Cron solely for snapshot cleanup.
+
+Keep cleanup concurrency-safe and bounded.
+
+Never delete live manifests.
+
+Never delete authoritative incident history.
+
+---
+
+# PART D — CHANGE FEED READ API
+
+## 19. Incremental change RPC
+
+Expose a narrow authenticated read RPC.
+
+Conceptual interface:
+
+```text
+incident_change_feed(
+  incident_id,
+  acting_organization_id,
+  after_revision,
+  after_ordinal,
+  limit
+)
+```
+
+Inspect the existing API conventions.
+
+Derive actor identity from auth.uid().
+
+Do not trust client-provided actor IDs.
+
+Use opaque/bounded cursors if appropriate.
+
+## 20. Keyset pagination
+
+Order by:
+
+```sql
+ORDER BY revision, ordinal
+```
+
+Use strict lexicographic cursor comparison:
+
+```text
+revision > after_revision
+
+OR
+
+revision = after_revision
+AND ordinal > after_ordinal
+```
+
+Never use OFFSET.
+
+Preserve stable order and exact descriptor identity.
+
+Allow duplicated deliveries to be harmless.
+
+Reject negative, malformed or future cursor values appropriately.
+
+## 21. Cursor validation
+
+The response must distinguish:
+
+- up-to-date;
+- more changes available;
+- cursor expired;
+- access scope changed;
+- missing/gapped history;
+- snapshot reset required.
+
+An expired or invalid cursor must NOT return an empty list that looks like success.
+
+Suggested response:
+
+```json
+{
+  "incident_id": "uuid",
+  "from_revision": "140",
+  "to_revision": "148",
+  "changes": [],
+  "next_cursor": {
+    "revision": "148",
+    "ordinal": 3
+  },
+  "has_more": false,
+  "reset_required": false
+}
+```
+
+Use string-safe representation for BIGINT across Android, Kotlin, JavaScript and JSON.
+
+## 22. Thirty-day retention
+
+The M14 SPEC defines a 30-day change retention window.
+
+Store authoritative retention boundaries.
+
+A client older than the retained horizon must receive RESET_REQUIRED.
+
+Never guess that an old cursor is complete because no rows were found.
+
+Cleanup may remove temporary change descriptors older than retention, but must not remove canonical timeline, audit or operation receipts.
+
+Do not add another Cron.
+
+## 23. Authorization and visibility
+
+Change feed reads must revalidate:
+
+- ACTIVE profile;
+- exact organization membership;
+- active or historically permitted participation;
+- incident read authority;
+- effective role and unit scope;
+- current recipient/crew visibility.
+
+The response must not leak another user's assignment identifiers, private messages, hidden objects or organization membership.
+
+Do not broadcast raw descriptors globally and filter them only on Android.
+
+When a recipient loses access, the client must receive an authorized scope invalidation or be denied further reads and required to purge the protected projection.
+
+## 24. Scope narrowing and revocation
+
+Handle:
+
+- responder removed from unit;
+- Unit Leader replaced;
+- command role ended;
+- organization participation ended;
+- task reassigned;
+- incident access revoked;
+- account suspended.
+
+A current authorization check alone is not sufficient to calculate all previously visible entities that must be removed.
+
+Design an explicit, safe scope-transition protocol.
+
+For example:
+
+- current scope fingerprint changes;
+- feed returns RESET_REQUIRED;
+- client discards obsolete authorized projection after protecting its pending evidence;
+- client fetches a new snapshot where still authorized.
+
+Never resurrect previously revoked data from an older pending response.
+
+## 25. Entity materialization
+
+A change descriptor does not replace a canonical DTO.
+
+After receiving UPSERT descriptors, clients must obtain current authorized entity data.
+
+Implement or reuse bounded actor-scoped entity read projections.
+
+Group requests by entity type and incident.
+
+Avoid one network request per task, crew member or map object.
+
+If an entity no longer exists in the current authorized scope, interpret the authoritative result as revoked/unavailable according to the protocol.
+
+Do not infer physical deletion from a transient HTTP error.
+
+## 26. Historical timeline
+
+Preserve the independent `timeline_sequence` cursor.
+
+Timeline changes remain subject to the actual event-privacy rules implemented for Android pilot PR #82.
+
+Do not expose raw private event JSON.
+
+Do not assume timeline sequence equals incident revision.
+
+Keep paginated historical reads bounded.
+
+---
+
+# PART E — ANDROID ROOM RECONCILIATION
+
+## 27. Extend current Android IncidentRepository
+
+Inspect:
+
+- `IncidentRepository.kt`
+- `IncidentFieldCache.kt`
+- `IncidentViewModel.kt`
+- `IncidentScreen.kt`
+- `RegistryDatabase.kt`
+- existing DAOs
+- current Room migration 14→15
+- existing pending operation queue
+- existing WorkManager sync integration.
+
+Integrate the new protocol into the CURRENT repository.
+
+Do not implement an independent IncidentSyncRepository with unrelated state and authority.
+
+Focused helpers are acceptable.
+
+## 28. Room schema
+
+If new cache/sync metadata requires Room schema changes, create the next valid forward-only migration after the current database version.
+
+Conceptual cache state:
+
+```text
+incident_id
+account_id
+acting_organization_id
+snapshot_manifest_id
+snapshot_revision
+snapshot_timeline_sequence
+last_applied_change_revision
+last_applied_change_ordinal
+scope_fingerprint
+snapshot_generation
+last_successful_sync_at
+lease_expires_at
+sync_state
+```
+
+Use current Room entity conventions.
+
+Keep account and organization scope in keys.
+
+Do not rename or overwrite existing hydrant entities.
+
+Do not change permanent canonical records for a temporary sync cursor.
+
+## 29. Atomic snapshot replacement
+
+The client must:
+
+1. Request a new manifest.
+2. Fetch all required pages.
+3. Verify same manifest, revision and scope.
+4. Stage the complete authorized snapshot.
+5. Commit all incident projection changes atomically in Room.
+6. Commit its manifest/revision/timeline cursors in that same Room transaction.
+7. Then fetch incremental changes after the pinned revision.
+
+If the app crashes halfway through downloading pages, the previous committed snapshot remains intact.
+
+A partial new snapshot must not replace the old one.
+
+If access is revoked, protected previously cached data must be hidden immediately.
+
+## 30. Preserve offline pending operations
+
+A full snapshot replacement must NOT delete:
+
+- unsent ACK;
+- pending START;
+- pending BLOCKED;
+- pending COMPLETE;
+- immutable operation UUID;
+- original offline payload;
+- conflict evidence;
+- queued dependencies;
+- records requiring attention.
+
+Keep canonical server projection separate from local pending intent.
+
+The UI must not display an offline ACK as server-confirmed merely because a snapshot was refreshed.
+
+## 31. Atomic incremental application
+
+For each change page:
+
+1. Verify actor/org/incident scope.
+2. Validate cursor continuity and schema.
+3. Fetch required authorized DTOs in bounded batches.
+4. Apply UPSERT/REVOKE against the correct scoped Room tables.
+5. Preserve pending local evidence.
+6. Update the durable cursor only after successful transaction commit.
+
+A crash between entity application and cursor update must not create permanently inconsistent state.
+
+Use one Room transaction for the page and cursor.
+
+Never advance a cursor before data is durable.
+
+## 32. Out-of-order and duplicate changes
+
+Handle:
+
+- duplicate page delivery;
+- duplicate change descriptors;
+- repeated same-version entity;
+- older version after newer version;
+- partial fetch;
+- retry after network loss;
+- concurrent refresh requests;
+- app process restart;
+- server schema upgrade.
+
+Only apply newer authoritative entity versions.
+
+Scope revocations take precedence over stale cached data.
+
+An unknown critical change type must trigger safe refresh/reset rather than be silently ignored.
+
+## 33. Refresh coordination
+
+Existing Android pilot already supports:
+
+- app opening;
+- app returning to foreground;
+- notification hints;
+- active-screen bounded polling.
+
+Unify them through a single refresh coordinator.
+
+Avoid five simultaneous refresh requests from five signals.
+
+Use coalescing or mutex patterns already in the app.
+
+If a new revision hint arrives during an active refresh, ensure a subsequent refresh runs when necessary.
+
+Do not drop newer hints while marking the cache synchronized at an older revision.
+
+No second WorkManager engine.
+
+## 34. Incident lease
+
+Preserve the existing maximum 24-hour incident read lease.
+
+Snapshot manifests do not extend authorization automatically.
+
+Use the earliest applicable expiry between:
+
+- current incident read lease;
+- existing account/org authorization;
+- session invalidation;
+- server access revocation.
+
+Show the existing two-hour warning.
+
+After expiry:
+
+- hide protected incident state;
+- require online verification;
+- preserve pending operation evidence safely.
+
+Do not conflate the incident lease with the separate longer-lived registry authorization policy.
+
+## 35. Account and organization switching
+
+On scope switch:
+
+- cancel in-flight refresh;
+- invalidate response generation;
+- hide previous protected incident data;
+- prevent previous-account requests from committing to the newly active Room scope;
+- stop old-scope subscriptions/hints;
+- keep original-account pending evidence isolated.
+
+The same incident viewed under two organizations may yield different authorized projections.
+
+Their cache must not be merged indiscriminately.
+
+---
+
+# PART F — WEB AND NOTIFICATION INTEGRATION
+
+## 36. Web incident refresh
+
+Inspect existing Web incident state and data-fetching logic.
+
+Reuse the new manifest/change API where it meaningfully reduces redundant reads.
+
+Do not rewrite all Web screens.
+
+The Web client must remain compatible with existing authorized read endpoints.
+
+Do not weaken real-time commander visibility while replacing polling.
+
+If the first version of the incremental protocol is Android-focused, document Web adoption as a clearly bounded next step, but deliver at least source-level integration for the existing Web incident refresh where feasible without destabilizing command operations.
+
+## 37. FCM as a hint
+
+Reuse existing M10/Android incident notification integration.
+
+The notification should trigger:
+
+```text
+HINT RECEIVED
+     |
+SCHEDULE RECONCILIATION
+     |
+READ SERVER CHANGE FEED
+     |
+UPDATE ROOM
+     |
+RENDER CURRENT STATE
+```
+
+No notification callback may acknowledge a task or mutate a command state.
+
+No full task text in push payloads.
+
+No direct Room overwrite from FCM payload data.
+
+## 38. Private Realtime dependency
+
+M14.7B1 establishes authoritative snapshot/change foundations.
+
+Do not accidentally implement an insecure public realtime channel.
+
+If the existing dependency set supports authenticated private channels without changes, integration may be prepared behind the existing scope and permissions.
+
+However, full private Realtime transport is scheduled for M14.7B2.
+
+Do not add Android Gradle dependencies.
+
+Do not claim Realtime is complete in M14.7B1.
+
+---
+
+# PART G — SECURITY, PERFORMANCE AND OPERATIONS
+
+## 39. Security-definer RPC rules
+
+All new public RPCs must use:
+
+- caller-bound authentication;
+- exact incident and organization authorization;
+- safe search_path;
+- strict schema qualification;
+- bounded inputs;
+- restricted grants;
+- no anonymous execution;
+- no direct private-table access;
+- safe sanitized error responses.
+
+Review PL/pgSQL variable names against SQL aliases.
+
+Gasilko previously experienced confirmed production ambiguity errors in `simulation_hazard_batch()`.
+
+Do not repeat that defect.
+
+## 40. Locking and concurrency
+
+Preserve established incident command lock order and authorization revalidation.
+
+Never hold locks while making external API calls.
+
+Snapshot creation must not block operational commands for an unbounded period.
+
+Retain consistent concurrency semantics between:
+
+- snapshot building;
+- new task issue;
+- task ACK;
+- unit release;
+- command transfer;
+- organization revocation;
+- incident closure.
+
+Do not introduce long-running cross-request database transactions.
+
+## 41. Indexes
+
+Provide bounded, appropriate indexes for:
+
+- incident/revision/ordinal;
+- manifest expiry;
+- manifest owner/scope;
+- manifest item pagination;
+- active snapshot lookup;
+- cleanup.
+
+Do not create unnecessary indexes on large JSONB payloads.
+
+Use existing incident indexes where sufficient.
+
+## 42. Failure classification
+
+Distinguish:
+
+- transient network failure;
+- expired manifest;
+- expired change cursor;
+- scope revocation;
+- schema incompatibility;
+- stale data;
+- oversized snapshot;
+- missing materialized page;
+- PostgreSQL lock timeout;
+- unexpected internal error.
+
+Do not convert all failures into a generic "refresh successful" outcome.
+
+Localized UI messages must accurately reflect whether state is current, stale or unavailable.
+
+## 43. Diagnostics
+
+Add minimal safe diagnostics for:
+
+- snapshot creation duration;
+- page counts and bytes;
+- change page duration;
+- reset-required reasons;
+- manifest expiry;
+- cursor lag;
+- refresh failures.
+
+Do not log task content, private notes, personnel details, raw authorization tokens or hidden incident data.
+
+No new monitoring vendor.
+
+## 44. Performance bounds
+
+Design for realistic concurrent operations:
+
+- multiple active incidents;
+- multiple responding Android users;
+- dozens of units and crew;
+- many task assignments;
+- repeated notification hints;
+- poor mobile connections.
+
+Avoid:
+
+- unbounded snapshot materialization;
+- N+1 entity reads;
+- unlimited change pages;
+- full refresh on every five-second signal;
+- unnecessary MapLibre recreation;
+- excessive Room write churn;
+- long-held locks.
+
+Document selected concrete limits and the reasons for them.
+
+---
+
+# PART H — MANUAL ACCEPTANCE
+
+## 45. Required acceptance scenarios
+
+Implement so the human owner can later verify:
+
+1. Existing Android pilot still opens authorized incidents.
+2. A consistent manifest pins one revision and timeline sequence.
+3. All snapshot pages use the same manifest.
+4. An incident mutation during pagination does not mix revisions.
+5. Expired manifest requires a fresh snapshot.
+6. Account scope mismatch denies manifest access.
+7. Organization scope mismatch denies manifest access.
+8. Access revocation prevents reading cached manifest pages.
+9. Snapshot completes atomically in Room.
+10. Process death during page download preserves the previous snapshot.
+11. Partial snapshot cannot be presented as complete.
+12. Task issue creates an incremental change.
+13. Task ACK creates an incremental change.
+14. Task completion creates an incremental change.
+15. Unit status change creates an incremental change.
+16. Crew join/leave produces correct visibility changes.
+17. Command role changes update or revoke scope correctly.
+18. COP map changes are reflected.
+19. Multi-entity incident revision emits ordered descriptors.
+20. Duplicate replay does not duplicate descriptors.
+21. Change cursor ordering is correct.
+22. A missing/expired cursor produces RESET_REQUIRED.
+23. Scope change produces a new authorized projection.
+24. Reassigned task does not remain visible to the old recipient.
+25. Another unit's private task data is not exposed.
+26. Old FCM hints do not overwrite newer Room state.
+27. Duplicate FCM hints are harmless.
+28. Missing FCM delivery is recovered by foreground refresh.
+29. Offline ACK evidence survives snapshot replacement.
+30. Dependent offline START remains correctly ordered.
+31. Room cursor advances only after data commit.
+32. Crash during incremental apply does not lose changes.
+33. Stale entity versions cannot overwrite newer state.
+34. Unknown critical descriptor triggers safe reset.
+35. Incident lease continues to be enforced.
+36. Account switch isolates caches and pending operations.
+37. Organization switch isolates authorized incident data.
+38. Android Web task states converge after refresh.
+39. Existing hydrant and inspection sync remain unaffected.
+40. Existing Android notifications remain functional.
+41. No new generic FCM worker is introduced.
+42. No insecure public Realtime subscription is introduced.
+43. No REAL incident receives SIM-generated positions or effects.
+44. Existing SI/DE presentation remains correct.
+45. No SQL was executed or services deployed by Codex.
+
+These are human-run acceptance targets.
+
+Do not add or run automated tests.
+
+---
+
+# PART I — DELIVERABLES
+
+## 46. SQL migration
+
+Add one or more forward-only migrations newer than current main.
+
+Include:
+
+- complete change descriptor model;
+- trusted change append integration;
+- authorized change-feed RPC;
+- consistent snapshot manifest;
+- scoped snapshot page RPC;
+- authorized entity materialization;
+- bounded expiration/retention management;
+- required indexes and restricted grants.
+
+Do not modify historical applied migrations.
+
+If an existing schema element can be reused, reuse it.
+
+## 47. Android changes
+
+Integrate with the existing Android incident field architecture:
+
+- snapshot manifest acquisition;
+- page download;
+- staged snapshot;
+- atomic Room replacement;
+- change-page reconciliation;
+- durable cursor;
+- scope invalidation;
+- existing WorkManager integration;
+- clear freshness status;
+- SI/DE errors.
+
+Use the actual project package paths and existing architecture.
+
+No new dependencies or Gradle modifications.
+
+## 48. Web integration
+
+Make focused integration changes where needed to consume revision-aware incident refresh without rewriting existing Web command surfaces.
+
+Maintain older read API compatibility for consumers not yet migrated.
+
+## 49. Documentation
+
+Create:
+
+`docs/M14.7B1-incident-snapshots-change-feed.md`
+
+Document:
+
+- actual schema and function names;
+- snapshot consistency strategy;
+- revision/sequence semantics;
+- manifest storage and TTL;
+- page protocol;
+- change descriptor coverage;
+- retention/reset rules;
+- authorization/scope invalidation;
+- Android Room transaction sequencing;
+- Web/FCM integration;
+- performance bounds;
+- manual migration order;
+- manual acceptance checklist;
+- known limitations.
+
+Update the relevant M14 SPEC implementation progress.
+
+Do not rewrite earlier milestone history.
+
+## 50. Important implementation boundaries
+
+M14.7B1 does not implement:
+
+- private Realtime transport (M14.7B2);
+- chat and scoped communication (M14.7C);
+- private attachments (M14.7D);
+- expanded Android unit leader controls (M14.8B);
+- Android incident navigation (M14.8C);
+- operational GPS tracking;
+- 112/CAD integration;
+- new SIM physics;
+- incident report generation.
+
+Prepare safe integration contracts but do not prematurely build these modules.
+
+---
+
+# PART J — STRICT CODEX EXECUTION RULES
+
+## 51. Implementation only
+
+Codex may inspect source and implement changes.
+
+Codex must NOT:
+
+- add tests;
+- run tests;
+- run builds;
+- run Gradle sync;
+- run lint;
+- run typecheck;
+- run CI;
+- run emulator;
+- perform browser/runtime verification;
+- execute SQL;
+- apply Supabase migrations;
+- deploy Web;
+- deploy Edge Functions;
+- install Android APKs;
+- send real notifications;
+- modify Cron or secrets;
+- change Android Gradle/KAPT/KSP;
+- modify generated Room schema JSON manually;
+- perform post-implementation validation.
+
+Preserve all local developer configuration.
+
+Do not change unrelated hydrant, inspection or organization behavior.
+
+Use `[skip ci]` according to the existing repository conventions.
+
+## 52. GitHub workflow
+
+Create exactly ONE new PR for M14.7B1.
+
+Suggested PR title:
+
+`M14.7B1 — Consistent Incident Snapshots & Incremental Change Feed`
+
+Do not create multiple PRs for SQL, Android and Web.
+
+All required implementation pieces belong together in this milestone.
+
+Do not merge.
+
+Do not deploy.
+
+## 53. Completion report
+
+Provide:
+
+1. PR URL and branch.
+2. Confirmed main/base commit.
+3. Confirmation that PR #82 is actually present on main.
+4. Actual tables and migrations added.
+5. Exact RPC names and signatures.
+6. Snapshot consistency mechanism.
+7. Manifest expiry and cleanup.
+8. Change feed producer coverage.
+9. Retention and reset semantics.
+10. Authorization and scope protection.
+11. Android Room changes and migration version.
+12. Android reconciliation algorithm.
+13. Offline queue preservation.
+14. Web refresh changes.
+15. FCM/Realtime boundary.
+16. SI/DE localization.
+17. Performance limits.
+18. Required manual rollout order.
+19. Known remaining limitations.
+20. Explicit confirmation that no tests, builds, lint, typecheck, CI, SQL, runtime verification or deployments were performed.
+
+**STOP after creating ONE PR.**
+
+**DO NOT MERGE.**
