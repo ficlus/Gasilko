@@ -30,7 +30,7 @@ language sql volatile security definer set search_path='' as $$
 $$;
 -- Explicit participant DTO: adding a canonical column cannot silently expand mobile disclosure.
 create function private.field_task_projection(p_task public.incident_tasks) returns jsonb
-language sql stable security definer set search_path='' as $
+language sql stable security definer set search_path='' as $field_task_projection$
  select jsonb_build_object('id',p_task.id,'incident_id',p_task.incident_id,
  'action_definition_version_id',p_task.action_definition_version_id,
  'version',p_task.version::text,'changed_revision',p_task.changed_revision::text,
@@ -45,10 +45,10 @@ language sql stable security definer set search_path='' as $
  'parameter_definitions',v.parameter_definitions))
  from public.operational_action_definition_versions v join public.profiles pr on pr.id=p_task.issued_by
  where v.id=p_task.action_definition_version_id;
-$;
+$field_task_projection$;
 revoke all on function private.field_task_projection(public.incident_tasks) from public,anon,authenticated,service_role;
 create function public.incident_field_snapshot(p_acting_organization_id uuid) returns jsonb
-language plpgsql volatile security definer set search_path='' as $$
+language plpgsql volatile security definer set search_path='' as $incident_field_snapshot$
 declare v_actor uuid:=auth.uid();v_i public.incidents;v_rows jsonb:='[]';v_units jsonb;v_tasks jsonb;v_history jsonb;v_result jsonb;v_count integer:=0;v_lock_timeout text:=current_setting('lock_timeout');
 begin
  if v_actor is null or not private.incident_acting_member(p_acting_organization_id) then raise exception 'NOT_AUTHORIZED' using errcode='42501'; end if;
@@ -136,7 +136,8 @@ begin
  if octet_length(v_result::text)>3145728 then raise exception 'FIELD_SNAPSHOT_LIMIT'; end if;
  perform set_config('lock_timeout',v_lock_timeout,true);
  return v_result;
-end; $;
+end;
+$incident_field_snapshot$;
 revoke all on function private.field_unit_leader(uuid,uuid,uuid),private.field_unit_visible(uuid,uuid,uuid),private.field_assignment_visible(uuid,uuid,uuid) from public,anon,authenticated,service_role;
 revoke all on function public.incident_field_snapshot(uuid) from public,anon,authenticated,service_role;
 grant execute on function public.incident_field_snapshot(uuid) to authenticated;

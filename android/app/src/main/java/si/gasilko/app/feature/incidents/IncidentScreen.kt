@@ -61,19 +61,19 @@ private fun point(geometry: JsonObject): GeoPoint? {
 }
 @Composable
 @OptIn(ExperimentalLayoutApi::class)
-fun IncidentScreen(model: IncidentViewModel,registry: HydrantViewModel,organizationName: String,initialIncident: String?,back: ()->Unit) {
+fun IncidentScreen(model: IncidentViewModel,registry: HydrantViewModel,organizationName: String,initialIncident: String?,navigationEvent: Long,back: ()->Unit) {
     val data by model.state.collectAsStateWithLifecycle()
     val busy by model.busy.collectAsStateWithLifecycle()
     val error by model.error.collectAsStateWithLifecycle()
     val stale by model.stale.collectAsStateWithLifecycle()
     val lifecycle=LocalLifecycleOwner.current.lifecycle
     LaunchedEffect(model,lifecycle) { lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) { model.foreground() } }
-    var incidentId by remember(model) { mutableStateOf(initialIncident) }
-    var assignmentId by remember(model) { mutableStateOf<String?>(null) }
-    var filter by remember(model) { mutableIntStateOf(0) }
-    var unitTab by remember(model,incidentId) { mutableStateOf(false) }
-    var issue by remember(model,incidentId) { mutableStateOf(false) }
-    var target by remember(model,incidentId,assignmentId) { mutableStateOf<GeoPoint?>(null) }
+    var incidentId by remember(model,navigationEvent) { mutableStateOf(initialIncident) }
+    var assignmentId by remember(model,navigationEvent) { mutableStateOf<String?>(null) }
+    var filter by remember(model,navigationEvent) { mutableIntStateOf(0) }
+    var unitTab by remember(model,navigationEvent,incidentId) { mutableStateOf(false) }
+    var issue by remember(model,navigationEvent,incidentId) { mutableStateOf(false) }
+    var target by remember(model,navigationEvent,incidentId,assignmentId) { mutableStateOf<GeoPoint?>(null) }
     val incident=data.incidents.find { it.text("id")==incidentId }
     val assignment=incident?.rows("assignments")?.find { it.text("id")==assignmentId }
     fun close() { when { target!=null->target=null;issue->issue=false;assignmentId!=null->assignmentId=null;incidentId!=null->incidentId=null;else->back() } }
@@ -96,7 +96,9 @@ fun IncidentScreen(model: IncidentViewModel,registry: HydrantViewModel,organizat
         return
     }
     if(issue && incident!=null && incident.rows("units").any { it.flag("leader") }) {
-        IssueTask(model,registry,incident,busy) { issue=false }
+        key(model,navigationEvent,incidentId) {
+            IssueTask(model,registry,incident,busy) { issue=false }
+        }
         return
     }
     Column(Modifier.fillMaxSize().padding(horizontal=16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
@@ -146,7 +148,7 @@ fun IncidentScreen(model: IncidentViewModel,registry: HydrantViewModel,organizat
             val last=operations.lastOrNull()
             val pending=last?.takeIf { it.operation.state!="SERVER_CONFIRMED" || unreconciledReceipt(assignment,it) }
             val effective=pending?.let { parse(it.operation.payload).obj("payload").text("status") } ?: assignment.text("status")
-            var desired by remember(assignmentId) { mutableStateOf<String?>(null) }
+            var desired by remember(model,navigationEvent,incidentId,assignmentId) { mutableStateOf<String?>(null) }
             var reason by remember(desired) { mutableStateOf("") }
             LazyColumn(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(12.dp)) {
                 item { Text(incident.text("title"));Text(label(config),style=MaterialTheme.typography.headlineSmall)

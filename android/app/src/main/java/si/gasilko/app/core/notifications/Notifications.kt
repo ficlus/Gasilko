@@ -116,7 +116,7 @@ class NotificationRegistrationWorker(c: Context,p: WorkerParameters): CoroutineW
         finally { gateway.close();scope.cancel() }
     }
 }
-data class NotificationDestination(val account: String,val organization: String,val entity: String,val kind: String,val event: String)
+data class NotificationDestination(val account: String,val organization: String,val entity: String,val kind: String,val event: String,val tapId: String? = null)
 object NotificationTap {
     private val mutable=MutableStateFlow<NotificationDestination?>(null)
     val pending=mutable.asStateFlow()
@@ -125,7 +125,7 @@ object NotificationTap {
         val kind=data["entity_type"]?.takeIf { it in listOf("PLAN","HYDRANT","INCIDENT") } ?: return null
         return NotificationDestination(id("account")?:return null,id("organization")?:return null,id("entity")?:return null,kind,id("event")?:return null)
     }
-    fun accept(intent: Intent) { read(listOf("account","organization","entity","entity_type","event").associateWith { intent.getStringExtra("notification_$it").orEmpty() })?.let { mutable.value=it } }
+    fun accept(intent: Intent) { read(listOf("account","organization","entity","entity_type","event").associateWith { intent.getStringExtra("notification_$it").orEmpty() })?.let { mutable.value=it.copy(tapId=UUID.randomUUID().toString()) } }
     fun clear() { mutable.value=null }
     fun consume(destination: NotificationDestination) { mutable.compareAndSet(destination,null) }
     private val hintsMutable=MutableStateFlow(0L)
