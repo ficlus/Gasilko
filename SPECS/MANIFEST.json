@@ -1,0 +1,214 @@
+{
+  "packet": "Gasilko V2 Full Implementation Specifications",
+  "created": "2026-10-28",
+  "prompt_count": 34,
+  "total_prompt_words": 146896,
+  "auto_dispatch_approved": false,
+  "source_status": "PR #82 open as checked 2026-10-28; reverify",
+  "prompts": [
+    {
+      "id": "00",
+      "file": "prompts/00_pr-82-sql-syntax-and-android-pilot-final-integration.md",
+      "words": 4594,
+      "sha256": "7d91f414a153126ed040a1db3207773876f536263c7c2b9a968180679c19f386"
+    },
+    {
+      "id": "01",
+      "file": "prompts/01_post-merge-android-field-pilot-findings-repair.md",
+      "words": 4383,
+      "sha256": "9c38a3b170baf0a22a743680c8e0cf6c6e87eac40059efe63d02a9a55656f055"
+    },
+    {
+      "id": "02",
+      "file": "prompts/02_m14-7b1-pinned-incident-snapshots-and-durable-change-feed.md",
+      "words": 4633,
+      "sha256": "e9db9db35205a1ebbdfdd5d1eb76fb6c39f69df81015fe452727fbc43c1a0445"
+    },
+    {
+      "id": "03",
+      "file": "prompts/03_m14-7b2-secure-private-realtime-hints-and-reconnect.md",
+      "words": 4412,
+      "sha256": "ea16844e0eea56f5a7d15ce8cfc690d983fee6f19d3d9194b66cf9095329eb94"
+    },
+    {
+      "id": "04",
+      "file": "prompts/04_m14-7c-operational-scoped-messages.md",
+      "words": 4309,
+      "sha256": "d0923c6f700731ccefaaa43e92ab507df7729f2fe2a0628bac49427f7200669d"
+    },
+    {
+      "id": "05",
+      "file": "prompts/05_m14-7d-private-incident-attachments-and-evidence.md",
+      "words": 4320,
+      "sha256": "570f1595585785f4c1555007aa25b1ac92d3096a754c26aacd71d5da57708fe3"
+    },
+    {
+      "id": "06",
+      "file": "prompts/06_m14-8b-android-unit-leadership-and-resource-status.md",
+      "words": 4351,
+      "sha256": "69c829229a8e39592197d0805a771a92e7e5148dc2d0e8be5d5db1797f0c726c"
+    },
+    {
+      "id": "07",
+      "file": "prompts/07_m14-8c1-android-incident-map-and-task-navigation.md",
+      "words": 4358,
+      "sha256": "10893260050b5b3c73320558bdfa5aeff09d8e5e570f4826f9d2b6bfed47a637"
+    },
+    {
+      "id": "08",
+      "file": "prompts/08_m14-8c2-consented-current-real-unit-location-sharing.md",
+      "words": 4307,
+      "sha256": "280a287e1f126f74d6b5c375cb4832dee672cbc60fba5d78bb50011b6d5fc3c2"
+    },
+    {
+      "id": "09",
+      "file": "prompts/09_m14-8d1-field-offline-reliability-and-conflict-ux.md",
+      "words": 4387,
+      "sha256": "75c6fbc466668d9f22d4fd0ce0d315e57a1975a5fa5e37585d6ef273551cb128"
+    },
+    {
+      "id": "10",
+      "file": "prompts/10_m14-8d2-reliability-metrics-review-queue-and-readiness-dashboard.md",
+      "words": 4324,
+      "sha256": "c55ec11618994170271c776443fb5602c3941cba88168f7f2853d68b730e2650"
+    },
+    {
+      "id": "11",
+      "file": "prompts/11_m14-10a-authoritative-incident-closure-dispositions-and-immutable-se.md",
+      "words": 4398,
+      "sha256": "abd4749ed694841ab6d22bb569670e6454268871f1923b7b2f63d932e962c56c"
+    },
+    {
+      "id": "12",
+      "file": "prompts/12_m14-10b-sealed-pdf-csv-xlsx-incident-reports.md",
+      "words": 4270,
+      "sha256": "43e14ec5034587190cdaeabff36672db4c97ebd51f3dd87e61f692ea3016b731"
+    },
+    {
+      "id": "13",
+      "file": "prompts/13_m14-10c-after-action-review-amendments-and-lessons-learned.md",
+      "words": 4199,
+      "sha256": "71ec1deb0ee045bee83c9df1074d48b22a06a5ab2a55162c629416b4c040a85d"
+    },
+    {
+      "id": "14",
+      "file": "prompts/14_m14-6e-bounded-virtual-unit-behavior-and-assignment-reporting.md",
+      "words": 4304,
+      "sha256": "76397767c82ebfd224644eb1d1f2000a12e7f590753ee1d86a66a126796f9643"
+    },
+    {
+      "id": "15",
+      "file": "prompts/15_m14-6f-exercise-director-and-safe-instructor-interventions.md",
+      "words": 4228,
+      "sha256": "ca3385ed95e94c8cf7572334e96da7b3804bd23be8a082a8c7124dc7ae0c61d6"
+    },
+    {
+      "id": "16",
+      "file": "prompts/16_m14-6g-deterministic-sim-replay-and-exercise-timeline.md",
+      "words": 4267,
+      "sha256": "d5793bcdc5b14062334f6c023de6143161dcb97346f57b02ab96311d5d2d2b44"
+    },
+    {
+      "id": "17",
+      "file": "prompts/17_m14-6h-optional-sim-water-network-source-adapters.md",
+      "words": 4338,
+      "sha256": "4f0e512d48eb6e3d2ece2d1b5c94fba6109f54159d5912dfd6b672fada1d382d"
+    },
+    {
+      "id": "18",
+      "file": "prompts/18_m14-6i-many-unit-routing-performance-and-queue-fairness.md",
+      "words": 4246,
+      "sha256": "7b1480a87541cb6e02559f0690044b23b244bc2791d158c8e99328b171bf8a36"
+    },
+    {
+      "id": "19",
+      "file": "prompts/19_m14-6j-sim-hazard-runner-diagnostic-health-and-backlog.md",
+      "words": 4312,
+      "sha256": "184c21ec4f14df3e371d9bc3268b89c2e9be457fbc412ae62f0dafb9d42d3df3"
+    },
+    {
+      "id": "20",
+      "file": "prompts/20_m14-9-official-cad-112-provider-adapter-conditional.md",
+      "words": 4415,
+      "sha256": "e5e13003cb910ab1268aa298f126e38eeca80527049dd71ddc5b0dc4e2ef4a50"
+    },
+    {
+      "id": "21",
+      "file": "prompts/21_hydrant-registry-data-quality-dedup-and-field-inspection-review.md",
+      "words": 4234,
+      "sha256": "40cd093302b58f96c9cb9f96f1dbc3cd1e74cfe212f01bac7ddce9ceda05bfbd"
+    },
+    {
+      "id": "22",
+      "file": "prompts/22_offline-maps-gis-attribution-and-navigation-reliability.md",
+      "words": 4264,
+      "sha256": "360abe92f8a30b46de6b4cab874a1006f77c09a7482a28c60fa425889ed1523f"
+    },
+    {
+      "id": "23",
+      "file": "prompts/23_qr-photos-and-inspection-offline-reliability.md",
+      "words": 4300,
+      "sha256": "97974c33629a10effad533f3d1b6a3c1f6169cb5552684224973ac228d3156ce"
+    },
+    {
+      "id": "24",
+      "file": "prompts/24_m10-notification-reliability-and-incident-category-regression.md",
+      "words": 4215,
+      "sha256": "a9c367c87414c74573a48ff63774f1db7790c3032e4490b4cbe6e0c90b0a38cf"
+    },
+    {
+      "id": "25",
+      "file": "prompts/25_multi-organization-onboarding-and-permission-clarity.md",
+      "words": 4210,
+      "sha256": "95a9cddf9343b47e4e3f4260e6deabdacc4d64f0a09da2a45e0ed1819d3999af"
+    },
+    {
+      "id": "26",
+      "file": "prompts/26_unified-field-web-android-ux-and-accessibility.md",
+      "words": 4229,
+      "sha256": "2d95997eeff7539d3677c96766f30bd4a11d1d6b6878715497f097bc4978719b"
+    },
+    {
+      "id": "27",
+      "file": "prompts/27_m11-platform-pilot-support-and-issue-remediation.md",
+      "words": 4241,
+      "sha256": "98eaa5f37458c837b95c5e945c0240a11f30016824d63403fbadc6fa962b8f4a"
+    },
+    {
+      "id": "28",
+      "file": "prompts/28_m12-pre-release-security-backup-and-operational-hardening.md",
+      "words": 4330,
+      "sha256": "a8030b4abb9d863a5259721649655dcdbc5e14e2db71af5418fe362758f01a05"
+    },
+    {
+      "id": "29",
+      "file": "prompts/29_gasilko-developer-agent-orchestration-and-durable-roadmap-queue.md",
+      "words": 4410,
+      "sha256": "0de990431efada82b5fa13ae05db5fa8a28f51063b80e5f18a4baf03d9054531"
+    },
+    {
+      "id": "30",
+      "file": "prompts/30_uas-drone-observation-layer-optional-future-concept.md",
+      "words": 4319,
+      "sha256": "491fb28c8a2ee15d4efb708d0dac8ca28ebd8db4f4d5d0429785703d1bd58912"
+    },
+    {
+      "id": "31",
+      "file": "prompts/31_ar-field-annotation-projection-optional-future-concept.md",
+      "words": 4223,
+      "sha256": "7ffc6a97b2d73587a211c5e1a08b9619ff8819896c3e89b46dda38c57bfcc381"
+    },
+    {
+      "id": "32",
+      "file": "prompts/32_cross-agency-incident-interoperability-and-tactical-cop-review.md",
+      "words": 4294,
+      "sha256": "2239e49aed751b26cb491af152a6171cb7f45d457a036fac1c25d891a88931ed"
+    },
+    {
+      "id": "33",
+      "file": "prompts/33_hydrant-to-incident-tactical-map-and-water-source-references.md",
+      "words": 4272,
+      "sha256": "cf9ee80abd17af0573336488587528c8b487d0a174bb2a0410305c0e61165f37"
+    }
+  ]
+}
