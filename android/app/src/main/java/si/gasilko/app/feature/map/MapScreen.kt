@@ -67,7 +67,7 @@ fun MapScreen(onBack: () -> Unit, hydrants: List<Hydrant>, onOpenHydrant: ((Stri
     onSelectStart: ((Double,Double)->Unit)? = null, initialStart: GeoPoint? = null,
     navigationMode: Boolean=false, animatedRouteArrows: Boolean=true, navigationContent: @Composable ()->Unit={},
     onLocationUpdate: (Location?)->Unit={}, followUser: Boolean=false, onUserPan: ()->Unit={},
-    onRecenter: ()->Unit={}, requestLocationKey: String?=null) {
+    onRecenter: ()->Unit={}, requestLocationKey: String?=null, targetPoint: GeoPoint?=null) {
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val userPan by rememberUpdatedState(onUserPan)
     var lastFollowed by remember { mutableLongStateOf(0L) }
@@ -75,7 +75,7 @@ fun MapScreen(onBack: () -> Unit, hydrants: List<Hydrant>, onOpenHydrant: ((Stri
         route?.let { routeMapData(it,completedHydrants,routeHydrantIds,completedRouteNumbers,hydrants) }
     }
     val selectingStart by rememberUpdatedState(onSelectStart!=null)
-    var startPoint by remember { mutableStateOf(initialStart?.takeIf { it.valid }) }
+    var startPoint by remember { mutableStateOf((initialStart ?: targetPoint)?.takeIf { it.valid }) }
     val currentRoute by rememberUpdatedState(routeData)
     val animateRoute by rememberUpdatedState(navigationMode && animatedRouteArrows)
     val routeStops=remember(route) { route?.orderedStops().orEmpty().associateBy { it.hydrantId } }
@@ -87,7 +87,7 @@ fun MapScreen(onBack: () -> Unit, hydrants: List<Hydrant>, onOpenHydrant: ((Stri
     var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
     var location by remember { mutableStateOf<Location?>(null) }
     var centerRequested by rememberSaveable { mutableStateOf(false) }
-    var focus by remember { mutableStateOf(initialStart?.takeIf { it.valid }) }
+    var focus by remember { mutableStateOf((initialStart ?: targetPoint)?.takeIf { it.valid }) }
     // Keep the camera outside the native-view retry key.
     val saved = rememberSaveable(saver=Saver<SavedMap, Bundle>(
         save={it.snapshot()}, restore={SavedMap(it)})) { SavedMap() }

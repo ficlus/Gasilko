@@ -2964,3 +2964,21 @@ CI/runtime/manual verification or post-implementation validation was performed.
 No tests or dependencies were added. Human ACK/execution, real GPS, physical
 vehicle control, notifications, full scripting and tactical physics remain
 outside this milestone.
+
+
+### M14.7A / M14.8A — controlled Android field pilot source implementation
+
+The integrated field pilot extends the canonical task/assignment and M10 delivery
+paths with an actor-bound bounded snapshot, Room v15 cache and existing-queue
+dispatch metadata. Android adds Intervencije, Moji ukazi, scoped unit/crew status,
+explicit task transitions, reviewed online subordinate issuance and permitted
+online unit return. Incident read leases expire after 24 hours with a two-hour
+warning; organization authorization remains unchanged. Human actions are never
+inferred from notification delivery, navigation or simulation.
+
+See [M14.7A–M14.8A field pilot](M14.7A-M14.8A-android-field-pilot.md) for exact RPCs,
+limits, migration, retries, rollout and the unexecuted acceptance checklist.
+PRIVATE Realtime/change feeds remain deferred: the current dependency set uses
+foreground coalesced polling/resume/FCM hints. This is source implementation,
+not verified readiness for emergency operations; no tests/builds/SQL/deployments
+were performed.

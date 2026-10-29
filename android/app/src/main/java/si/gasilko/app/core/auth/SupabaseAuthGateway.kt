@@ -66,11 +66,20 @@ class SupabaseAuthGateway(private val client: SupabaseClient, scope: CoroutineSc
             else -> if (e.statusCode == 401 || e.statusCode == 403) AuthMessage.EXPIRED else AuthMessage.ERROR
         })
     } catch (_: Exception) { throw AuthFailure(AuthMessage.ERROR) }
-    override suspend fun startGoogle() = request { notifications(notificationContext).detach();invalidateAuthorization(); client.auth.awaitInitialization(); client.auth.signInWith(Google); Unit }
-    override suspend fun completeGoogle(code: String) = request { client.auth.awaitInitialization(); client.auth.exchangeCodeForSession(code); Unit }
+    private suspend fun <T> identityRequest(block: suspend ()->T): T =
+        si.gasilko.app.feature.incidents.incidentIdentityAccess.withLock { request(block) }
+    override suspend fun startGoogle() = identityRequest { notifications(notificationContext).detach();invalidateAuthorization(); client.auth.awaitInitialization(); client.auth.signInWith(Google); Unit }
+    override suspend fun completeGoogle(code: String) = identityRequest { client.auth.awaitInitialization(); client.auth.exchangeCodeForSession(code); Unit }
     fun accessGateway() = si.gasilko.app.core.access.SupabaseAccessGateway(client)
     fun notifications(context: Context) =
         si.gasilko.app.core.notifications.NotificationRepository(client, context.applicationContext)
+    fun incidentRepository(context: Context,expected: String) =
+        si.gasilko.app.feature.incidents.IncidentRepository(context.applicationContext,client,expected) { org ->
+            if(accountId()!=expected)throw AuthFailure(AuthMessage.EXPIRED)
+            val snapshot=offline.read(expected)
+            if(snapshot.first.none { it.id==org && it.active })throw AuthFailure(AuthMessage.OFFLINE_EXPIRED)
+            snapshot.second
+        }
     fun hydrantRepository(context: Context): si.gasilko.app.feature.hydrants.domain.HydrantRepository {
         val scheduler = si.gasilko.app.core.sync.HydrantSyncScheduler(context)
         val transport = si.gasilko.app.feature.hydrants.data.SupabaseRegistryTransport(client)
@@ -109,15 +118,17 @@ class SupabaseAuthGateway(private val client: SupabaseClient, scope: CoroutineSc
         checkContext()
         if(request { verifyOnline() } != "ACTIVE")
             throw si.gasilko.app.feature.hydrants.domain.RegistryFailure(si.gasilko.app.feature.hydrants.domain.RegistryError.FORBIDDEN)
+        val incidentRetry=incidentRepository(context,account).synchronize(organization)
         si.gasilko.app.feature.hydrants.data.HydrantSyncEngine(
             si.gasilko.app.core.database.RegistryDatabase.open(context),
             si.gasilko.app.feature.hydrants.data.OnlineHydrantRepository(transport), account, checkContext, PhotoFiles(context)).sync(organization)
+        if(incidentRetry)throw RegistryFailure(RegistryError.NETWORK)
     }
-    override suspend fun signIn(email: String, password: String) = request {
+    override suspend fun signIn(email: String, password: String) = identityRequest {
         invalidateAuthorization()
         client.auth.signInWith(Email) { this.email = email; this.password = password }; Unit
     }
-    override suspend fun signUp(email: String, password: String, displayName: String, language: String): Boolean = request {
+    override suspend fun signUp(email: String, password: String, displayName: String, language: String): Boolean = identityRequest {
         invalidateAuthorization()
         client.auth.signUpWith(Email) { this.email = email; this.password = password
             data = buildJsonObject { put("display_name", displayName); put("preferred_language", language) }
@@ -152,7 +163,7 @@ class SupabaseAuthGateway(private val client: SupabaseClient, scope: CoroutineSc
             throw AuthFailure(AuthMessage.ERROR)
         }
     }
-    override suspend fun signOut() = request {
+    override suspend fun signOut() = identityRequest {
         invalidateAuthorization()
         if (client.auth.sessionStatus.value is SessionStatus.RefreshFailure) throw AuthFailure(AuthMessage.ERROR)
         client.auth.signOut(); Unit
