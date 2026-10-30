@@ -173,6 +173,18 @@ internal class IncidentReconciliation(
                         number(row.text("version")) >= (versions[row.text("id")] ?: 0L)
                     })
                 }
+                if(pair.first.text("status") in listOf("ACTIVE","STABILIZED")) {
+                    val messages=call("incident_message_page",args(id) {
+                        put("p_expected_revision",pair.second.revision)
+                        old?.obj("message_page")?.text("scope_fingerprint")?.takeIf { it.isNotEmpty() }?.let {
+                            put("p_scope_fingerprint",it)
+                        }
+                    })
+                    identity(messages,id)
+                    checkProtocol(messages.text("revision")==pair.second.revision.toString() &&
+                        messages["messages"] is JsonArray && messages.rows("messages").size<=30)
+                    pair=JsonObject(pair.first+("message_page" to messages)) to pair.second
+                }
                 result+=pair.first;cursors+=pair.second
             } catch(e: CancellationException) { throw e }
             catch(e: Exception) {
@@ -189,6 +201,17 @@ internal class IncidentReconciliation(
             if(fresh==null || fresh.text("scope_fingerprint")!=cursor.fingerprint) {
                 revokeIncident(cursor.incident);fail("MANIFEST_SCOPE_CHANGED")
             }
+        }
+        // Message visibility can depend on command scopes outside the field unit.
+        for(row in result)if(row["message_page"] is JsonObject) {
+            val check=try { call("incident_message_page",args(row.text("id")) {
+                put("p_expected_revision",row.text("revision"));put("p_limit",1)
+                put("p_scope_fingerprint",row.obj("message_page").text("scope_fingerprint"))
+            }) } catch(e: CancellationException) { throw e } catch(e: Exception) {
+                if(e.message.orEmpty().let { "NOT_AUTHORIZED" in it || "SCOPE_CHANGED" in it })revokeIncident(row.text("id"))
+                throw e
+            }
+            identity(check,row.text("id"))
         }
         val caughtUp=ids==finalIds && cursors.all { c ->
             final.find { it.text("id")==c.incident }?.text("revision")==c.revision.toString()

@@ -456,4 +456,26 @@
     <string name="field_sync_busy">Strežnik je zaseden. Prejšnji posnetek je ohranjen; kmalu poskusite znova.</string>
     <string name="field_sync_network">Povezava ni na voljo. Prikazani so prej preverjeni podatki, kjer dovoljenje še velja.</string>
     <string name="field_sync_server">Osveževanje ni uspelo. Podatki so lahko zastareli; poskusite znova.</string>
+    <string name="mc_title">Sporočila</string>
+    <string name="mc_warning">Sporočila niso povelja. Za naloge in potrditve uporabi ukaze intervencije.</string>
+    <string name="mc_body">Sporočilo</string>
+    <string name="mc_scope">Obseg prejemnikov</string>
+    <string name="mc_confirm">Potrjujem izbrani obseg prejemnikov</string>
+    <string name="mc_send">Pošlji</string>
+    <string name="mc_sent">Poslano</string>
+    <string name="mc_pending">Pošiljanje / izid še ni potrjen</string>
+    <string name="mc_draft">Osnutek</string>
+    <string name="mc_correct">Popravi</string>
+    <string name="mc_corrected">Popravljeno</string>
+    <string name="mc_history">Zgodovina</string>
+    <string name="mc_older">Starejša sporočila</string>
+    <string name="mc_empty">Ni sporočil</string>
+    <string name="mc_error">Osveževanje ali shranjevanje ni uspelo. Podatki so lahko zastareli; poskusite znova.</string>
+    <string name="mc_disabled">Pošiljanje v tem obsegu ali stanju intervencije ni na voljo.</string>
+    <string name="mc_incident">Intervencija</string>
+    <string name="mc_organization">Organizacija</string>
+    <string name="mc_unit">Enota</string>
+    <string name="mc_remaining">Preostali znaki: %1$d</string>
+    <string name="mc_attention">Potrebna je obravnava; prvotna vsebina je ohranjena</string>
+    <string name="mc_resume">Nadaljuj osnutek</string>
 </resources>

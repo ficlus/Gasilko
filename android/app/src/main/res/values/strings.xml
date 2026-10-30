@@ -529,4 +529,26 @@
     <string name="field_sync_busy">The server is busy. The previous snapshot is retained; retry shortly.</string>
     <string name="field_sync_network">Connection unavailable. Showing previously verified data where authorization is still valid.</string>
     <string name="field_sync_server">Refresh failed. Data may be stale; try again.</string>
+    <string name="mc_title">Messages</string>
+    <string name="mc_warning">Messages are not commands. Use incident tasks for orders and acknowledgements.</string>
+    <string name="mc_body">Message</string>
+    <string name="mc_scope">Recipient scope</string>
+    <string name="mc_confirm">I confirm this recipient scope</string>
+    <string name="mc_send">Send</string>
+    <string name="mc_sent">Sent</string>
+    <string name="mc_pending">Sending / outcome not yet confirmed</string>
+    <string name="mc_draft">Draft</string>
+    <string name="mc_correct">Correct</string>
+    <string name="mc_corrected">Corrected</string>
+    <string name="mc_history">History</string>
+    <string name="mc_older">Older messages</string>
+    <string name="mc_empty">No messages</string>
+    <string name="mc_error">Refresh or save failed. Data may be stale; retry.</string>
+    <string name="mc_disabled">Sending is unavailable in this scope or incident state.</string>
+    <string name="mc_incident">Incident</string>
+    <string name="mc_organization">Organization</string>
+    <string name="mc_unit">Unit</string>
+    <string name="mc_remaining">Remaining characters: %1$d</string>
+    <string name="mc_attention">Needs attention; original intent retained</string>
+    <string name="mc_resume">Resume draft</string>
 </resources>

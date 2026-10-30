@@ -1,4 +1,5 @@
 'use client';
+import {IncidentMessages} from './IncidentMessages';
 import {mapMetric} from '../../lib/operational/mapDiagnostics';
 import type {Initialization} from '../../lib/operational/templates';
 import {SimulationHome} from './SimulationHome';
@@ -269,6 +270,7 @@ export function IncidentArea({locale,account,destination,initialOrg}:{locale:Loc
    </>}
    secondary={<IncidentTimeline locale={locale} account={account} org={org} incident={detail.id} revision={refresh} read={rpc}/>}>
    <IncidentCop key={`cop/${account}/${org}/${detail.id}`} locale={locale} account={account} org={org} incidentId={detail.id} refresh={refresh} feedback={copFeedback} disabled={loading||busy||!!pending} read={rpc} onAction={ask}/>
+   <IncidentMessages key={`messages/${account}/${org}/${detail.id}`} locale={locale} account={account} org={org} incidentId={detail.id} read={rpc} operational={['ACTIVE','STABILIZED'].includes(detail.status)}/>
    <IncidentTasks submission={pending?.action==='issue_task'?(busy?'sending':'pending'):confirmation?.action==='issue_task'&&error?'rejected':'idle'} key={`tasks/${account}/${org}/${detail.id}`} locale={locale} account={account} org={org} incidentId={detail.id} version={detail.version} incidentReference={detail.reference_number} organizationName={entry?.organizations.find(o=>o.id===org)?.name??org} operational={['ACTIVE','STABILIZED'].includes(detail.status)} refresh={refresh} feedback={taskFeedback} disabled={loading||busy||!!pending} read={rpc} onAction={ask}/>
    <div id="sim-resources"><IncidentResources crewOutcomes={crewOutcomes} key={`resources/${account}/${org}/${detail.id}`} locale={locale} account={account} org={org} incidentId={detail.id} refresh={refresh} feedback={resourceFeedback} disabled={loading||busy||!!pending} read={rpc} onAction={ask}/></div>
   </IncidentLayout>}
