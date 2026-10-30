@@ -1,0 +1,835 @@
+GASILKO — CODEX FULL IMPLEMENTATION PROMPT
+M14.8B — Android Unit Leader Command, Crew Operations & Scoped Resource Status
+Prepared: 2026-10-30
+Repository: https://github.com/ficlus/Gasilko
+Target: ONE new pull request after prerequisites are merged
+Status: IMPLEMENTATION INSTRUCTIONS, NOT A PRODUCTION-READINESS CERTIFICATE
+
+======================================================================
+0. MANDATORY HUMAN-OWNER EXECUTION CONTRACT
+======================================================================
+
+You are Codex, working in the existing Gasilko repository. Implement M14.8B as a focused, integrated milestone. THIS IS NOT AN INSTRUCTION TO MERGE, DEPLOY OR ACTIVATE REAL EMERGENCY OPERATIONS.
+
+MANDATORY:
+- Create ONE new PR for M14.8B, and only one. All subsequent corrections go into that SAME PR.
+- Do not merge any PR; only the human owner merges.
+- Do not execute SQL, apply migrations, deploy Supabase/Edge/Web, change secrets or Cron, install APKs, send actual alerts, or perform production operations.
+- Do not ADD, MODIFY or RUN tests. Do not build, lint, typecheck, run CI, Gradle sync, emulator, browser runtime checks, SQL validation commands, Supabase local or other post-implementation runtime verification.
+- Do not alter Android Gradle/KAPT/KSP/BOM/plugin declarations, generated Room schemas, package lockfiles, pnpm-lock.yaml or local development-specific configuration.
+- Do not execute or trigger CI intentionally. Preserve existing [skip ci] convention for commits, as appropriate.
+- Do not reset --hard, clean away uncommitted work, overwrite user modifications or blindly reapply old stashes. Use safe git inspection and non-destructive branch operations.
+- Reuse existing Kotlin Compose → ViewModel → IncidentRepository → Room/WorkManager → authenticated Supabase RPC architecture. Never move authoritative writes into UI or add a parallel queue, worker, incident database, command engine, or task engine.
+- No new dependencies unless separately approved by the human owner. Android WebSocket realtime-kt is NOT approved and is NOT part of M14.8B.
+- Follow the user-owner's stricter "no tests/builds/SQL" instruction even if AGENTS.md generally requests tests. Do not silently rewrite AGENTS.md.
+- Maintain full separation of REAL incidents and TRAINING/SIM. This task does not dispatch or automatically command real crews and does not replace radio/ZA-RE/112/CAD.
+- Do not invent API signatures or capabilities. Inspect source and adjust this implementation brief to the real contracts. Report any material conflict instead of silently weakening safety.
+
+======================================================================
+1. STARTUP PRECONDITIONS: DO NOT DEVELOP ON AN UNMERGED DEPENDENCY
+======================================================================
+
+The last owner update: PR #86, M14.7D private evidence, is OPEN and Codex is correcting it. Do not presume that PR #86 is merged because its prompt was delivered or because its branch contains working code.
+
+Before editing:
+1. Inspect latest GitHub main, branch ancestry, relevant open PRs and HEAD. Record actual main SHA.
+2. Verify PRs #82, #83, #84 and #85 are incorporated into main (either merged as PRs or same authoritative changes present). These correspond to Android pilot, B1 snapshot/feed, B2 Web-first private realtime and C scoped messages.
+3. Verify PR #86 corrections are complete and PR #86 is MERGED into main, OR explicitly determine that the human owner approved an independent M14.8B implementation from main without D's changes. Default is STOP until #86 is merged; do NOT branch from PR #86's feature branch.
+4. Check whether an active M14.8B task, branch, or PR already exists. If yes, work there only with owner direction, never make a duplicate.
+5. Inspect migration ordering, Room schema version and authoritative field read protocol currently on main. Room was version 16 after B1, but recheck instead of hard-coding.
+6. Compare source with this prompt. If some feature is already implemented, extend/reuse it, not duplicate it.
+7. Read AGENTS.md, docs/SPEC.md, docs/SPEC-M14-INCIDENT-OPERATIONS.md, docs/M14.7A-M14.8A-android-field-pilot.md, docs/M14.7B1-incident-snapshots-change-feed.md, docs/M14.7B2-secure-private-realtime.md, docs/M14.7C-operational-scoped-messages.md and the merged M14.7D evidence doc when available.
+8. Inspect the actual current files and migrations; source wins over outdated historical descriptive text.
+
+If prerequisite #86 is not merged and no independent authorization exists, STOP WITHOUT EDITING OR OPENING A PR. Report exact unmet dependency and retain this prompt for after merge. The human owner may choose to proceed independently, but do not assume permission.
+
+======================================================================
+2. SOURCE-ANCHORED CURRENT BASELINE (VERIFY AT HEAD)
+======================================================================
+
+The current (pre-#86-merge) main contains the following known interfaces; they are orientation points, not license to rely on stale line numbers:
+
+Android:
+- android/app/src/main/java/si/gasilko/app/feature/incidents/IncidentRepository.kt
+- android/app/src/main/java/si/gasilko/app/feature/incidents/IncidentViewModel.kt
+- android/app/src/main/java/si/gasilko/app/feature/incidents/IncidentScreen.kt
+- android/app/src/main/java/si/gasilko/app/feature/incidents/IncidentCommandDraft.kt
+- android/app/src/main/java/si/gasilko/app/feature/incidents/IncidentReconciliation.kt
+- android/app/src/main/java/si/gasilko/app/core/database/IncidentFieldCache.kt
+- android/app/src/main/java/si/gasilko/app/core/database/RegistryDatabase.kt
+- existing HydrantSyncScheduler / HydrantSyncWorker / pending_hydrant_changes / incident_operation_dispatch.
+- current Auth/Keystore identity scope and existing M10 notification triggers.
+- current generic MapScreen (M14.8C navigation enhancements are a different milestone).
+- M14.7C message panel and, if merged, M14.7D evidence panel.
+
+Server:
+- private.field_unit_leader, private.field_unit_visible, private.field_assignment_visible, public.incident_field_snapshot from 20261027100000_incident_android_field_pilot.sql.
+- Actual task command APIs incident_issue_task and incident_transition_task_assignment.
+- Existing unit command incident_update_unit_status: expected version is INCIDENT VERSION; its payload includes unit deployment id, unit version and next status.
+- Existing M14.4 incident_units, incident_crew_members, incident_role_assignments with an effective UNIT_LEADER role bound to incident deployment.
+- Existing incident resource allocation transition RPCs (inspect names, do not guess).
+- B1 incident_field_directory / incident_snapshot_manifest / incident_snapshot_page / incident_change_feed / incident_field_entities / incident_field_timeline, with scope fingerprint and Room 16 cursor reconciliation.
+- B2 Web-only private Broadcast hints; Android has an unavailable hint source and continues with FCM and bounded polling.
+- Existing M14.7C message read/write + M14.7D evidence, no need to rebuild them.
+
+Already implemented in Android pilot:
+- view own unit/crew, unit leader flag, can_return and leader_name;
+- view own and scoped unit task assignments;
+- own task ACK/start/block/resume/complete/unable using durable offline queue;
+- a restricted one-recipient online unit-leader task issuance wizard with frozen action catalog version;
+- online ON_SCENE -> RETURNING where existing server guards allow;
+- 24-hour incident read lease, existing account/org isolation, 2-hour warning;
+- Room 15->16 B1 cache/cursor and snapshot/change reconciliation;
+- persistent operation UUID/receipt/dependency semantics and M10/FCM refresh hints;
+- protected scoped incident messages and evidence after their respective merges.
+
+THIS MILESTONE MUST EXTEND THESE CAPABILITIES, NOT REIMPLEMENT THEM.
+
+======================================================================
+3. PRODUCT OUTCOME AND EXPLICIT DELIVERABLES
+======================================================================
+
+Give an actual, authenticated field UNIT_LEADER a coherent operational command surface for their OWN currently deployed unit, not an incident-wide commander view.
+
+The user should be able to:
+A. Clearly identify their currently effective unit-leader assignment and command scope.
+B. See current unit deployment, crew episodes, own-unit tasks, statuses, resource allocations actually attached to that unit and refresh freshness.
+C. Report authorized unit status transitions with the correct online/offline classification and explicit receipt semantics.
+D. Review eligible current crew and issue subordinate crew tasks via the existing M14.5A catalog/command engine; improve existing wizard where needed.
+E. See each crew member's task progress without impersonating the recipient.
+F. Perform only source-authorized crew operations and source-authorized transitions on already attached resources; no arbitrary resource reservations, no inventory control, no cross-unit authority.
+G. Identify pending, server-confirmed, stale, unknown-outcome and conflict states without fabricating server state.
+H. Retain pending task/status evidence across network interruption, process death, app restart and account switching.
+I. Preserve task/crew/command visibility after scoped message/evidence access is revoked, except when incident authority itself is revoked.
+J. Use localized Slovenian/German/default strings, accessible controls and consistent Android field UI.
+
+The goal is scoped unit leadership, NOT full incident command, REAL dispatch automation, unit deployment creation, vehicle fleet management, general administrative management, global COP editing, GPS fleet tracking or cross-agency command.
+
+======================================================================
+4. AUTHORITY MODEL — DO NOT GRANT FROM LABELS OR UI
+======================================================================
+
+Effective UNIT_LEADER is not:
+- descriptive crew role 'LEADER';
+- organization ADMIN/MANAGER;
+- the user's presence on the same unit;
+- a pending role nomination;
+- a locally cached previous grant;
+- an incident's label or its TRAINING classification;
+- a sector polygon containing a unit;
+- a role from another acting organization.
+
+It is a current, effective incident_role_assignments role='UNIT_LEADER' bound to the exact incident unit deployment, accepted/effective/non-revoked, with current ACTIVE profile, active exact organization membership, ACTIVE incident participation and valid ACTIVE crew episode as required by canonical schema.
+
+All server writes recheck authorization under the existing lock/receipt path at time of execution. Client-side capabilities are UX hints only. Distinguish:
+- own crew member: read/execute own assignment;
+- actual effective unit leader: own-unit crew/assignment supervision, eligible crew issue, narrow own-unit status and resource transitions;
+- agency commander / sector commander / IC: their separate existing server scopes, not automatically granted by Unit Leader UI;
+- ordinary org admin: no incident command rights merely by admin status;
+- operator/deputy: only explicit capabilities, not a blanket command grant.
+
+When the role ends, crew leaves, unit releases, organization becomes inactive, user signs out or acting organization changes, stop offering commands immediately. Already queued offline intentions remain as protected evidence; server may reject them. Never elevate based on cached role after reconnect.
+
+If a person leads multiple live unit deployments, the UI must clearly choose the exact unit and bind every draft/receipt to it. Never combine subordinate crew of several units as a single implicit authority. If server permits only one effective deployment, respect that invariant.
+
+======================================================================
+5. REQUIRED SERVER CAPABILITY INVENTORY
+======================================================================
+
+Before creating SQL, produce a compact matrix in the milestone doc from real current migrations:
+
+Capability | Actual RPC name/signature | Required role/scope | Expected version source | Offline classification | Receipt shape
+- Read own unit deployment and current leader episode
+- Read crew, including episode IDs/roles/statuses and possible relevant version
+- Read own-unit task assignments and individual crew recipients
+- Issue a task to one active subordinate crew episode
+- Transition own executable assignment
+- Update own unit deployment status (per actual allowed transition)
+- Join/leave/change crew membership, if existing command permits Unit Leader
+- Return/release own unit, if existing command permits
+- Read resource allocations attached to own unit
+- Transition existing attached resource allocation, if existing command permits
+- Read bounded command history/receipts relevant to own-unit operations.
+
+For a capability not yet supported by a canonical server RPC, choose the SAFE option: use read-only display and document it, or implement the smallest forward-only extension reusing canonical command/authorization helpers if owner-approved scope clearly requires it. Do not invent an API by guessing.
+
+Do not create a second task, incident-unit, inventory, crew membership, authorization or audit table. Explicitly document where a server API is unavailable and do not show a clickable command that will always fail.
+
+======================================================================
+6. PROPOSED READ MODEL AND DTO EXTENSION
+======================================================================
+
+Reuse current actor-scoped field projection/B1 manifest and existing incident row. A unit-focused DTO should be a bounded explicitly projected subset, conceptually:
+
+{
+  "incident_id": "<UUID>",
+  "incident_revision": "<decimal BIGINT string>",
+  "unit_assignment_id": "<UUID>",
+  "owner_organization_id": "<UUID>",
+  "unit_version": "<decimal BIGINT string>",
+  "deployment_status": "ON_SCENE",
+  "unit_name": "...",
+  "current_leader": {
+    "assignment_id": "<UUID>",
+    "is_current_actor": true,
+    "effective": true
+  },
+  "capabilities": {
+    "issue_to_own_crew": true,
+    "change_unit_status": true,
+    "transition_attached_resources": false,
+    "manage_crew": false
+  },
+  "crew": [
+    {
+      "episode_id": "<UUID>",
+      "user_id": "<UUID, only if authorized>",
+      "name": "...",
+      "crew_role": "RESPONDER",
+      "status": "ACTIVE",
+      "version": "<decimal string>",
+      "eligible_for_task": true
+    }
+  ],
+  "task_assignments": [
+    {
+      "assignment_id": "<UUID>",
+      "task_id": "<UUID>",
+      "recipient_episode_id": "<UUID>",
+      "version": "<decimal string>",
+      "status": "ISSUED"
+    }
+  ],
+  "resource_allocations": [],
+  "last_authoritative_sync": "<server or local verification timestamp>"
+}
+
+THIS IS AN ILLUSTRATIVE SHAPE, NOT A REQUIRED NEW TABLE OR NEW HTTP ENDPOINT. In particular current canonical unit projection lacks some proposed details. Extend the existing private field projector or authorized B1 entity read ONLY when needed. Derive owner organization, row/version/authority server-side. Recheck that users without effective leadership cannot read other crew members' private assignment reasons or unrelated attached resources.
+
+Prefer a single explicitly scoped DTO block within the existing B1 manifest field collection over a parallel, unversioned "unit leader snapshot". Keep a consistent pinned revision across core, unit, crew, tasks and resource status. Add safe fields to existing schemas with backwards-compatible defaults; older clients must not crash. Stringify BIGINT versions to protect JS/Kotlin boundaries.
+
+If read model size would exceed B1 per-user limits, page relevant child collections with stable server-enforced keyset cursors; never silently truncate live safety-relevant crew/tasks. Existing 3 MiB projection limit and 25 rows/page must remain accounted for. No unbounded JSON aggregation or N+1 query per crew member.
+
+
+======================================================================
+7. UNIT LEADER FIELD DASHBOARD / NAVIGATION
+======================================================================
+
+Implement a dedicated "My unit / Command" section inside the EXISTING IncidentScreen navigation, using IncidentViewModel and IncidentRepository. Do not create a parallel app entry/auth shell.
+
+At minimum:
+
+Header: incident reference/title, explicit REAL vs TRAINING badge from existing server classification, unit callsign/name, canonical deployment status, leader identity, last authoritative verified time, offline/stale badge and incident lease warning.
+
+Status panel: canonical current state, permissible next actions only, observed-time note where supported, awaiting command/audit receipt, and visible server-confirmed vs local-pending distinction. A role that is not effective sees a read-only panel; never render sensitive controls based solely on a cached "leader" flag beyond its lease.
+
+Crew panel: ACTIVE crew member episodes, roles, online eligibility, own-unit task counts and task-status indicators. Status chips map existing assignment state machine (ISSUED, ACKNOWLEDGED, IN_PROGRESS, BLOCKED, COMPLETED, UNABLE, CANCELLED). They must not represent per-person turnout availability or physical GPS as task ACK, and must not combine separate assignment UUIDs into a falsely completed parent task.
+
+Tasks panel: filters ALL OWN-UNIT, NEEDS ATTENTION, IN PROGRESS, BLOCKED, TERMINAL and optionally by individual crew episode; summaries of assigned target, immutable action definition, recipient, issuer and latest confirmed status. Reuse existing detailed task view rather than duplicate it.
+
+Attached resources panel: display only live allocations bound to the same canonical unit deployment, current stage and quantities if legitimately visible. Separate display of reserved vs deployed vs consumed vs returned. Show actions only when an actual server capability permits exact allocation transitions for the current leader.
+
+Command context: display effective leader role and upstream command relationship if available from authorized projection. A parent assignment DOES NOT confer wider authority. If safe command tree data isn't in the current field projection, show minimal server-authorized leader/role information only, no extra cross-agency personnel directory.
+
+Clear state handling: loading, empty crew, no task, no resource, no permission, stale, offline, disabled due to lease expiry, conflict/attention and server error. Review dialogs must identify unit/recipient/action/target/source-version and whether the action is ONLINE REQUIRED.
+
+Large tap targets (~48-56 dp or existing component standard), screen-reader labels, scrolling on small devices, no gesture-only issuance, no color-only statuses, consistent back navigation. SI/DE/default localization in resource strings, not hard-coded dynamic UI strings.
+
+======================================================================
+8. UNIT STATUS FINITE-STATE MACHINE — USE ACTUAL SOURCE
+======================================================================
+
+The authoritative M14 spec describes a broad future unit lifecycle:
+AVAILABLE → REQUESTED → DISPATCHED/UNAVAILABLE → EN_ROUTE → ON_SCENE → ASSIGNED → ON_SCENE → RETURNING → RELEASED; select nonterminal → UNAVAILABLE with reason.
+
+BUT the actual M14.4 implementation is narrower and includes manual ON_SCENE recording plus scoped return transitions. The Android pilot currently exposes only ON_SCENE → RETURNING online through incident_update_unit_status.
+
+DO NOT implement an action simply because a broad future status appears in the SPEC. Determine the CURRENT allowed transitions in canonical SQL and guards, including whether the M14.6 mobilization path has operational dispatch status or only simulation infrastructure.
+
+For EVERY proposed unit action:
+- source state, destination state and actor role;
+- incident/participation/unit/crew eligibility;
+- task/resource/blocking conditions;
+- expected incident version, expected unit version and any other named expected versions;
+- required reason/observed timestamp/confirmation;
+- immutable operation UUID, receipt and audit/timeline behavior;
+- online/offline classification;
+- whether changing status implies any task acknowledgement (default: NO);
+- how conflicting state after refresh is displayed.
+
+Hard rule: no locally invented DISPATCHED, EN_ROUTE, ARRIVED or RELEASED state; no automatic physical arrival from location; no release while unfinished tasks, open resources or active leader role violate existing guards. Never bypass server guard via direct table write or new broad wrapper.
+
+Implement any source-supported newly surfaced status actions in this milestone. If a status transition is currently absent, document as NOT SUPPORTED instead of creating shadow status fields.
+
+======================================================================
+9. OFFLINE ELIGIBILITY MATRIX (M14.8 RULES)
+======================================================================
+
+This distinction is fundamental:
+
+SAFE_OFFLINE_QUEUE:
+- Existing own task ACK, start, block, resume, complete, unable, only via original recipient execution authority.
+- Own unit departure/arrival/status OBSERVATIONS if, and only if, actual canonical command and time/version semantics can safely reconcile the observation. It is not an offline command granting authority or changing unit ownership.
+- Already-supported evidence/notes, with immutable parent dependencies and target scope.
+
+ONLINE_REQUIRED:
+- Task issuance to other people; new authority/delegation; crew membership/role modifications where they alter authority; task reassignment/cancellation requiring command scope; unit deployment/release/ownership; resource reservations/consumption where authoritative online inventory coordination is required; sector changes; command transfer and role assignment.
+- Any operation the canonical RPC requires current interactive authority, scope and incident/entity version to perform.
+
+ONLINE_PREFERRED:
+- Lower-risk field observation or non-command annotation only when existing domain contract supports it. Never present as confirmed COP or command.
+
+The existing Android pilot classifies ON_SCENE → RETURNING as ONLINE ONLY and does not background dispatch. Preserve this unless the actual canonical domain plus source-level review explicitly supports an offline observation with exact immutable payload and safe later reconciliation. Do not force every unit button through the durable offline queue just to satisfy an "offline-first" slogan.
+
+If eligible status observation is added to the existing durable queue:
+1. Freeze account, exact acting organization, incident id, unit deployment id, operation UUID, frozen source status, desired status, expected unit + incident versions, observation timestamp and optional bounded reason at original user confirmation.
+2. The Room write and dispatch metadata insertion must be one transaction.
+3. Never infer server acceptance from local queue state.
+4. On reconnect, serial dispatcher must reauthorize current actor/scope/episode/state; stale/revoked → NEEDS_ATTENTION with preserved evidence, not silent rebase.
+5. The immutable prepared server request is persisted once; retried identically. No new UUID after lost response.
+6. Do not allow queue interaction to block unrelated hydrant operations.
+7. Never use replayed cached leader authority to authorize an ONLINE_REQUIRED action.
+
+If no safe new queueable status exists, explain this and deliver robust ONLINE_REQUIRED status UX. Do not create an unusable fake queue path.
+
+======================================================================
+10. FULL TASK ASSIGNMENT SUPERVISION
+======================================================================
+
+Extend the existing unit leader issue flow instead of creating another command catalog or task table.
+
+Maintain existing M14.5A identities:
+- incident_tasks.id = aggregate task UUID;
+- incident_task_assignments.id = immutable recipient episode UUID, the true inbox/execution identity;
+- action_definition_version UUID is immutable and frozen, not a mutable definition id;
+- crew episode UUID, not profile UUID, is the subordinate recipient id for INCIDENT_CREW_MEMBER;
+- operation UUID is distinct from task/recipient UUID and unique for idempotent command receipts.
+
+The unit leader may:
+- view the authorized tasks of current unit and relevant crew;
+- issue an authorized catalog action to one eligible ACTIVE subordinate crew member in the own deployment (as the existing pilot supports);
+- view independent per-recipient assignment status and reasons where leader visibility allows;
+- navigate to the exact assignment details and target;
+- retry a previously issued UNKNOWN_OUTCOME request with EXACT original UUID, expected versions and payload after deliberate user action, never as a background auto-resend;
+- see command acceptance only when canonical operation receipt is confirmed.
+
+The unit leader must NOT:
+- mark a crew member's individual assignment ACK/COMPLETE by merely opening or viewing it;
+- impersonate an executor from the commander screen;
+- issue tasks to another unit, external org, inactive former crew episode, historical leader, or self-selected arbitrary user id;
+- silently substitute updated action version/target/recipient into an existing command;
+- treat issue request persistence as server acceptance;
+- cancel/reassign/close incident-wide tasks outside actual current issuer authority.
+
+For existing task transition buttons, preserve direct execution permissions and the independent assignment state machine. Leader execution for UNIT-recipient tasks, where canonical can_execute_task explicitly allows, is separate from crew member assignment completion. When not allowed, show status only.
+
+======================================================================
+11. TASK ISSUE FORM — FREEZE, REVIEW AND APPLY
+======================================================================
+
+Review the existing IssueTask and IncidentCommandDraft.kt. They already validate catalog configuration version and one recipient.
+
+Improve as needed:
+1. Select exact current incident and the leader's current unit deployment.
+2. Select eligible current crew episode from server-authorized field data; show only same-unit active episodes.
+3. Select an active operational_action_definition and its immutable current version (`configuration.id`, not merely definition id). Validate definition_id, version_number, active_for_new_commands and recipient_types.
+4. Select target from existing domain: NONE / COORDINATE / HYDRANT / INCIDENT_MAP_OBJECT / INCIDENT_SECTOR, only if versioned definition permits it; use current MapLibre/Room target sources and exact incident-scoped references. No arbitrary GPS telemetry and no new navigation engine.
+5. Enter title, notes, parameters, and required/optional values with correct bounded typed validation and localization.
+6. Review on a dedicated confirmation step: incident, own unit, recipient by name and episode, immutable action/version, selected target, parameter summary, expected incident version and requested operation UUID.
+7. Freeze the exact payload and UUID before first submission. Prevent two simultaneous taps from producing two independent commands.
+8. Refresh/validate current catalog and eligible crew before initial issuance; if versions/eligibility changed, require new explicit user review; no automatic rebase.
+9. Send ONLINE REQUIRED via existing IncidentRepository.issue() and canonical incident_issue_task RPC.
+10. On receipt compare operation id, incident id, task id and known response identity, then refresh B1 field projection. Do not treat receipt as arbitrary inferred current assignment state.
+11. On timeout use existing outcome-unknown receipt recovery. Do not automatically issue a duplicate with another UUID.
+12. Preserve frozen draft through transient UI/navigation errors for the active identity; clear sensitive draft when account/org/incident scope changes or source role revoked.
+13. Do not persist arbitrary new command as queued/authorized offline if authority cannot be verified. If a local proposal is retained, it must be explicitly "NOT SENT / NOT AN ORDER".
+14. If catalog > first existing page, optionally add authorized bounded additional-page selection using the same existing catalog RPC rather than incorrectly showing a fake complete list.
+15. Existing target validity for non-point references is rechecked in canonical server RPC; do not bypass server or claim validation solely from UI.
+
+No speculative schema additions for a generic task planner. No new command capabilities JSON that lets caller grant themselves power.
+
+======================================================================
+12. CREW ROSTER: EXACT EPISODES AND MUTATION GATES
+======================================================================
+
+Current crew relationship is incident_crew_members (check actual field names) with exact unit_assignment_id, membership_organization_id, user_id, crew_role, status, joined/left actors/times and version/changed_revision.
+
+Display ACTIVE crew separately from historical LEFT episodes. Never re-use a historic episode UUID for a new join. Name/current membership does not equal command authority.
+
+Determine source-level support for:
+- leader seeing the full own-unit roster;
+- joining a currently authorized organizational member to their own existing incident unit;
+- ending an active crew episode;
+- changing a descriptive crew_role;
+- ending the effective leader's own episode;
+- whether role grant/revocation belongs exclusively to IC/Agency command.
+
+If canonical permission allows a unit leader to manage exact crew episodes, implement proper ONLINE REQUIRED review + existing RPC + frozen UUID/expected version + authoritative receipt refresh. If not, display roster as READ ONLY, explain who may manage it, and document that this is an existing server security boundary. NEVER add an unreviewed permissive SQL wrapper merely to make a screen button work.
+
+Crew removal/reassignment effects:
+- A task's old recipient episode stays immutable, never auto-transfers to the new crew.
+- Existing pending child commands to the old episode must become ineligible and require attention after server rejection.
+- Current leader replacement must invalidate earlier supervisor controls immediately.
+- Current read projection must not leak historical private task reasons to someone whose leader role ended.
+- Do not delete historical crew/task/receipt/audit evidence.
+- Do not automatically end a leader role because the UI says crew is leaving; leave canonical server precondition to require explicit management.
+- If a legitimate crew member belongs to another unit, do not offer an action to pull them to this unit by UI-only roster edit.
+
+This screen is NOT an organization roster editor or personnel directory.
+
+======================================================================
+13. UNIT-BOUND RESOURCES AND INVENTORY BOUNDARY
+======================================================================
+
+Inspect canonical M14.4 incident_resource_allocations and existing resource commands/projections. The role matrix allows Unit Leader to manage their OWN already-attached resource allocation transitions where explicitly authorized; it does NOT authorize new reservation, ownership changes, stock quantities or movement of resources from other units.
+
+Display:
+- allocation UUID, resource display label, unit of measure, allocated quantity (with units), canonical stage/status, owner, associated deployment and relevant version;
+- whether allocation is attached to currently selected own unit;
+- eligible next status only if existing canonical RPC and active authority permit it;
+- safety warnings for CONSUMED (inventory decreases) and terminal transitions that cannot be undone;
+- server-confirmed vs pending/unknown receipt distinctly.
+
+Conceptual existing lifecycle from M14 spec:
+RESERVED → DEPLOYED → RETURNED, RESERVED → CANCELLED, DEPLOYED → CONSUMED.
+Do not assume source actually implements all transitions. Inspect actual status constraints and RPC.
+
+All resource transitions should remain ONLINE REQUIRED unless an existing safety-reviewed canonical protocol explicitly permits otherwise. In particular CONSUMED must use server locked stock/inventory version, immutable operation receipt, audit, and exact replay protection so lost responses cannot consume twice. No offline optimistic inventory decrement. No new generic "resource consumed" local toggle.
+
+When currently not supported in actor-scoped field read, add a tightly restricted same-unit projection compatible with B1. Never expand ordinary responder visibility to organization-wide stock, other unit allocations, personnel or source warehouse data.
+
+Unit release must still fail when attached active allocations, unfinished tasks, crew or effective leader episodes violate existing server guards. Show the actual server rejection, not an automatic cleanup option.
+
+======================================================================
+14. MULTI-UNIT, COMMAND HANDOVER AND SESSION SAFETY
+======================================================================
+
+Examples to handle:
+- User leads Unit A, views Unit B via another context: actions must remain bound to A, never to selected arbitrary card.
+- User leads A and B validly: explicit selected unit id in UI and frozen command; no mixing crew between A/B.
+- Leader A loses role to leader B while reviewing an issue draft: refuse commit, hide sensitive recipient list, retain only safely protected local historical evidence.
+- Active crew member transfers to different episode mid-review: stale, require reselect; no task to new episode without explicit new command.
+- Account changes during camera/file picker, background network response, or status request: generation/identity guard rejects late result.
+- Organization changes while a Room reconciliation stages its result: previous account/org scoped state cannot commit to new visible state.
+- Incident exits ACTIVE/STABILIZED during command review: show historical read-only state, never send.
+- The same person is an ordinary responder and leader: explicit role scopes do not combine across organizations.
+- A suspended account or deactivated org loses effective rights immediately on online check, even if UI cache still has leader=true.
+
+Server authorization is mandatory on each command and each scoped sensitive read. The client should clear/hide unauthorized displays promptly and preserve pending evidence according to current cache policy.
+
+======================================================================
+15. UNIT HISTORY, AUDIT AND PRIVACY
+======================================================================
+
+Use existing canonical incident timeline/typed privacy-filtered field history and private audit, not a new generic activity feed.
+
+Show a bounded history relevant to the selected unit and visible assignments:
+- unit status changes (where authorized);
+- task issued/acknowledged/started/blocked/completed/unable;
+- resource allocation transitions only when actor may read them;
+- crew join/leave only to authorized leaders;
+- current vs historical role labels clearly distinguished.
+
+Never expose raw incident_timeline JSON, hidden task reasons, another org's crew, private M14.7C message text, M14.7D attachment content or SIM instructor hazard details through unit activity. Where field history lacks a category, either implement an event-specific allowlist with authorization and B1 reconciliation or omit with documented limitation. No accidental broad "timeline read" from a generic convenience RPC.
+
+Every actual mutation must retain canonical operation_receipt, audit and event provenance. Do not make a "unit leader activity" table as a substitute.
+
+======================================================================
+16. B1/B2/FCM SYNC INTEGRATION
+======================================================================
+
+All new scoped unit/crew/resource read fields MUST be reconciled consistently through the existing B1 manifest/change protocol or a narrowly scoped authorized extension.
+
+Use the established flow:
+- FCM or foreground polling hint arrives;
+- fetch authorized B1 change feed / manifest;
+- stage complete compatible field projection;
+- atomically commit current generation/cursor in Room;
+- render authoritative state.
+
+Do not directly change room status based on an FCM payload or Web Broadcast hint. No new Android websocket dependency; the existing B2 Android hint seam remains unsupported until owner approves realtime-kt. Do not create separate polling loops for each crew or allocation card.
+
+If canonical new unit/crew/resource mutations are currently mapped by B1 to SCOPE_RESET rather than typed deltas, honor that; full snapshot must include the new authorized fields, otherwise require scoped refresh. Implement a complete data-change producer or explicit reset; never silently leave stale resource/crew views until manual restart.
+
+B1 scope invalidation vs protocol reset must preserve the corrected behavior from PR #83:
+- normal cursor expiry/retention/history gap/revision reset keeps still-authorized offline snapshot until replacement commits;
+- real scope narrowing, permission denial or account change promptly hides disallowed protected data;
+- pending task/evidence operations survive either condition and cannot upload in wrong account.
+
+Maintain B1 five-minute manifest expiry, 30-day change retention and separate 24-hour incident read lease. These are three different concepts. Realtime/push are only hints.
+
+
+======================================================================
+17. ROOM/DURABLE QUEUE / MIGRATION POLICY
+======================================================================
+
+The baseline Room version on main is expected to be 16, but verify current RegistryDatabase version and prior migrations at implementation time. PR #86 may add private evidence staging using existing queue while keeping Room 16.
+
+Prefer NO ROOM MIGRATION if existing incident_field_cache, account/org keyed JSON projection, incident_operation_dispatch, and pending_hydrant_changes can represent this milestone safely.
+
+If a genuinely necessary new structured durable field cannot be represented by the current protocol:
+- add only the next forward-only Room migration (e.g. 16→17 iff main is still 16), without destructive fallback;
+- create exact SQL/Room indices, DAOs, and migration implementation;
+- preserve all hydrant, inspection, evidence, draft and existing operation rows;
+- do not change generated Room schema export JSON manually;
+- document human Android Studio/export and build steps after PR merge;
+- do not claim that the generated export or build was verified.
+
+For UNIT STATUS offline-safely-queueable observations (only when server semantics permit), reuse existing pending_hydrant_changes discriminator and matching incident_operation_dispatch and account/org isolation, not a new PendingUnitCommand table. The existing scheduler/worker must dispatch according to explicit operation classification, frozen request and parent dependencies.
+
+For ONLINE REQUIRED issue/unit/resource/crew commands, preserve existing direct authenticated RPC discipline, and use durable operation receipt lookup/replay where source actually supports it. If needed, persist a safe unknown-outcome command record using existing dispatch metadata and manual retry semantics, but NEVER let background worker autoissue a second authority-changing command.
+
+Do not allow a nonconfirmed draft to appear as an authoritative resource/task status. Keep local command proposals and server state visually separate.
+
+No database migration is mandatory merely to rename an Android UI screen. Avoid SQL changes unless the actor-scoped view lacks required safe fields or a necessary narrow command truly doesn't exist. Migrations must be forward-only, strictly privilege constrained, and newer than whatever is on current main.
+
+======================================================================
+18. RPC ERROR / RECOVERY CONTRACT
+======================================================================
+
+For each command and read, classify actual SQL/PostgREST error code or structured response into:
+
+- NOT_AUTHORIZED / current participation lost: hide sensitive affected scope; retain original operation evidence, disable actions.
+- SCOPE_CHANGED / ROLE_CHANGED: invalidate affected leader/crew/resource view; reauthenticate/refetch current B1 snapshot, never rely on a previously allowed role.
+- STALE_VERSION / STALE_INCIDENT: preserve frozen draft, show current server status and require user to review NEW request if retry with original payload cannot succeed.
+- INVALID_UNIT_STATUS / INVALID_TRANSITION: no optimistic state change, explain canonical state/guard.
+- PRECONDITION_FAILED / LIVE_CREW / LIVE_RESOURCES / LIVE_TASKS / ACTIVE_UNIT_LEADER: show server failure and human action required; no automatic release cleanup.
+- INVALID_TASK_RECIPIENT / INVALID_ACTION_DEFINITION / TASK_LIMIT_REACHED: preserve draft but require explicit re-selection; no substitution.
+- OPERATION_REUSED: a reused UUID with different intent is a hard conflict; retain original frozen request.
+- HTTP timeout / connection drop after submission: outcome unknown; reconcile same immutable operation/receipt, avoid duplicate.
+- HTTP 429 / 5xx / transient network: bounded retry where safe, never infinite.
+- expired B1 manifest/cursor: fresh complete snapshot; preserve authorized cached projection when appropriate.
+- revoked private messaging/evidence scope: clear only revoked content, not valid unit/task cache.
+- incident lease expiry or account logout: hide protected projection; preserve locally protected unsent evidence.
+- capacity/oversize: fail explicitly, avoid silent truncation.
+- unknown error: safe error display without leaking raw SQL, tokens or personal identifiers.
+
+Do not swallow errors in UI with a generic success boolean. The owner needs to distinguish pending vs confirmed vs attention. A failed privileged write may never be "repaired" by changing an expected version under the same operation UUID.
+
+======================================================================
+19. DETERMINISTIC TRANSACTION AND RACE REVIEW
+======================================================================
+
+Preserve the existing canonical transaction order and locks. In M14.4/M14.5 existing command code already handles receipts, organization locks, actor/current role, incident, versioned units/allocations and audit. Reuse those exact helpers.
+
+For each introduced server mutation (only if unavoidable):
+1. Parse bounded named inputs (UUIDs, decimal-string BIGINT safely).
+2. Derive actor from auth.uid(); validate ACTIVE profile, exact active org membership, incident participation.
+3. Identify current role/crew/unit/target scope from canonical rows; no caller capabilities JSON.
+4. Check existing receipt for this operation UUID; validate exact normalized actor/org/incident/payload equality before replay.
+5. Acquire the actual established lock order: operation receipt scope, sorted organization/security locks, current actor/crew/role records, incident, appropriate stock/inventory, deployment/allocation rows as per M14.4.
+6. Recheck current live scope AFTER locks.
+7. Validate incident lifecycle, target episodes, expected incident/entity versions and allowed state transition.
+8. Apply exactly one canonical domain effect and recompute aggregate revision according to existing implementation.
+9. Append canonical event(s), audit and immutable receipt in same transaction.
+10. Return current authorized receipt and/or typed DTO; avoid new round trip when same transaction can return it.
+
+On error PostgreSQL rolls back all changes and associated B1/B2 invalidations. No external HTTP/Storage requests while holding database locks. No broad dynamic SQL execution or SQL injection surface. SECURITY DEFINER functions use safe search_path, fully qualified objects, least EXECUTE grants and denial of direct table DML. Avoid ambiguous PL/pgSQL names (Gasilko has experienced real 42702 ambiguity in simulation_hazard_batch).
+
+If reusing an existing command, DO NOT rewrite its concurrency path to simplify Android; adapt Android envelope to the actual server contract.
+
+======================================================================
+20. RESOURCE-SPECIFIC INVARIANTS
+======================================================================
+
+Resources are not fungible UI counters. An allocation episode binds canonical resource stock, incident, participant/owner and optional unit deployment; quantity and ownership are immutable for the episode. The status lifecycle is versioned, and a terminal episode never reopens.
+
+A Unit Leader may work only on an allocation already attached to OWN effective deployment, if the actual canonical guard grants that transition. No new reservation/stock consumption through client direct update. Even if a leader is allowed to mark DEPLOYED/RETURNED, quantities are never silently edited or moved to another unit.
+
+For a CONSUMED command, show quantity, unit, resource label and impacted allocation in confirmation. After submission, canonical server decrements inventory exactly once, not Android. Never queue "consume" offline based on stale stock or decrement the display as confirmed before receipt.
+
+If adding an authorized read projection:
+- join through exact incident, participation, organization and unit deployment FKs;
+- return bounded current + authorized history only;
+- include precise version and status, not complete warehouse inventory;
+- exclude unrelated org resources and storage/audit metadata;
+- avoid broad SELECT grants;
+- keep actor scoped to current effective unit leader (and preserve any narrower responder read requirements);
+- preserve older Android clients by making DTO extension additive.
+
+======================================================================
+21. UX STATE MACHINE / REPRESENTATION IN UI
+======================================================================
+
+Describe and implement a clear per-operation UI state machine:
+
+IDLE -> REVIEWING -> SUBMITTING -> RECEIPT_CONFIRMED -> RECONCILING -> CURRENT
+
+Alternative:
+IDLE -> REVIEWING -> WAITING_FOR_NETWORK (offline eligible only; local observation, NOT ACCEPTED)
+SUBMITTING -> OUTCOME_UNKNOWN (lost response; frozen retry)
+SUBMITTING -> REJECTED (definitive denial/version conflict)
+RECONCILING -> STALE_VIEW (receipt confirmed but fresh DTO not yet available)
+ANY -> SCOPE_REVOKED (hide private view)
+ANY -> AUTH_LEASE_EXPIRED (hide private view, retain pending evidence)
+
+The Review dialog must show:
+- exact current incident reference and REAL/TRAINING status;
+- selected own unit and current canonical status;
+- target crew member / resource allocation when applicable;
+- action and target;
+- any required reason and selected observation time;
+- expected versions displayed or at least bound to frozen payload;
+- if offline-eligible, an explicit banner "QUEUED / NOT YET ACCEPTED";
+- cancel and explicit confirm actions.
+
+Use existing field UI styling components (OperationalCard, FieldBanner, StatusBadge, SectionHeading, existing localized resource patterns). Do not create unrelated theme/component system.
+
+Do not use live recipient name from a newly switched incident after dialog opened. Bind command to frozen account+org+incident+unit+recipient+generation. If subject changed, close/revalidate dialog before any submit.
+
+For accessibility, buttons have explicit verbs and targets, text contrast, labels and large touch areas. Screen orientation/lifecycle changes must not create another operation UUID after first submit. State should be resilient to ordinary recomposition and process interruptions for queued operations; online sensitive unsent drafts must not bleed across account scope.
+
+======================================================================
+22. OWN-UNIT CREW TASK PROGRESS ALGORITHM
+======================================================================
+
+Implement the overview deterministically using current authorized B1 task assignments:
+
+1. Filter unit rows by selected effective deployment UUID, not by callsign/name.
+2. Filter crew episodes to current authorized ACTIVE episodes for this deployment.
+3. Resolve assignments for crew member episode IDs or own unit recipient assignments only.
+4. Group by recipient episode ID and assignment status.
+5. Do not change task aggregate outcome based on a count of one child; parent closes only when canonical assignments are all terminal.
+6. Present BLOCKED/UNABLE distinct from COMPLETED, with private reasons only if authorized.
+7. Mark local pending assignment transitions visually, but show canonical status separately.
+8. If a subordinate crew episode ended, retain only historical authorized evidence; do not count former crew as currently present.
+9. No side effect from browsing or opening a task; task acceptance requires its explicit command.
+10. Apply version-aware B1 reconciliation when changes arrive; duplicate/out-of-order hints cannot regress display.
+
+Do not include hidden nonunit recipients just because they share a task parent. In particular, when a task has recipients in two different units, Unit Leader A must not see Unit B's private assignment details, reason, messages or history.
+
+======================================================================
+23. CREW RESPONSIBILITY VS INDIVIDUAL EXECUTION
+======================================================================
+
+Separate these surfaces in code and UI:
+- "My tasks": executor's own assignment operations.
+- "Unit tasks": supervisory read-only list of all appropriately authorized own-unit assignments.
+- "Issue order": unit leader command action, ONLINE_REQUIRED.
+- "Unit status": allowed operational deployment transition/observation.
+- "Roster": current membership episodes, not organizational member administration.
+- "Resources": attached allocations and only permitted transitions.
+
+An effective leader may have their own assigned tasks, but should not accidentally issue a new command while intending to ACK a received order, or vice versa.
+
+Do not use "recipient can_execute" as a generic issuer authorization, or "can_issue" to impersonate recipient execution. Keep those separate and source-derived.
+
+======================================================================
+24. AUTHORIZATION MATRIX (SERVER ASSERTIONS)
+======================================================================
+
+Document an explicit matrix and enforce through existing RPC guards:
+
+Actor                                            Read own unit  Issue own crew  Change own unit  Manage attached allocation  Other unit
+Current effective UNIT_LEADER, owning org        YES            Conditional     Conditional      Conditional                 DENY
+Same unit ordinary responder                     Scoped only    DENY            DENY unless own observation existing   DENY  DENY
+Former/superseded UNIT_LEADER                    Historical only DENY           DENY             DENY                        DENY
+Crew LEADER label without effective assignment   Scoped only    DENY            DENY             DENY                        DENY
+Org ADMIN or MANAGER alone                       Not by title   DENY            DENY             DENY                        DENY
+Unit Leader from organization B                  Exact own scope only; cannot operate org A unit
+IC / agency / sector commander                   Separate existing authority; do not imply privileges via this UI
+Suspended / no exact membership / nonparticipant DENY           DENY            DENY             DENY                        DENY
+Anonymous                                        DENY           DENY            DENY             DENY                        DENY
+
+The word "Conditional" means only if the existing canonical server guard grants the specific operation for the exact target/current state. No arbitrary "role == UNIT_LEADER then canAll" shortcut.
+
+======================================================================
+25. FILE CHANGE BOUNDARIES AND IMPLEMENTATION PHASES
+======================================================================
+
+Prefer one coherent series of source edits on one feature branch. Suggested order:
+
+Phase 1 — Inventory:
+- Study current main and applicable docs/migrations.
+- Record exact RPCs, actual DTO fields, current UI limitations.
+- Identify which unit leader capabilities are ALREADY present from PR #82.
+- Confirm no duplicate M14.8B PR.
+- Identify any actually missing server projections/capabilities.
+
+Phase 2 — Narrow server read extension (only if needed):
+- Create forward-only migration newer than current main, extending current actor-scoped field projection/B1 field entities.
+- Add only bounded, authorized own-unit resource/leader/crew fields.
+- Preserve current pagination, scope fingerprint semantics and field privacy allowlist.
+- No new broad SELECT grants or aggregate tables.
+
+Phase 3 — Android repository:
+- Typed mapping/helper(s) for effective unit leader, crew episodes, tasks and resource allocations based on actual DTO.
+- Extend current IncidentRepository actions and capability guards; reuse current auth mutex and existing scope checks.
+- Maintain original operation and receipt semantics.
+- Do not change existing hydrant/inspection paths.
+
+Phase 4 — Compose/ViewModel:
+- Add integrated Unit Leader dashboard and screens/components under IncidentScreen.
+- Improve roster/task chips and existing issue wizard.
+- Add status/resource actions ONLY where source-authorized.
+- Add review/confirm/unknown/conflict/attention UI.
+- Keep existing responder task screen, messages, evidence and MapLibre entry points.
+
+Phase 5 — B1 synchronization:
+- Ensure new DTO fields are present in pinned manifest pages and complete replacement.
+- Ensure changes in crew/unit/resource/leader produce correct B1 delta or reset.
+- Preserve offline data, 24h lease, scoped revocation and account/org generation guards.
+- Reuse existing FCM hints, WorkManager, no Android realtime-kt.
+
+Phase 6 — Localization & docs:
+- Add SI/DE/default localized strings and accessibility labels.
+- Create docs/M14.8B-android-unit-leader-command.md with exact contract matrix, UI state machine, manual rollout/acceptance and exclusions.
+- Update M14 SPEC implementation status without rewriting historical milestone claims.
+- Update other docs only if a real contract changed.
+
+Every phase is implementation-only; do not run tests/builds/SQL/CI after changes. Do not add optional dependency upgrades.
+
+======================================================================
+26. MANUAL ACCEPTANCE SCENARIOS FOR THE HUMAN OWNER
+======================================================================
+
+Implement the code so the following can be manually verified by the owner AFTER approved merge/migration/build, using a safely controlled TRAINING incident:
+
+A. Eligibility and permissions
+01. ACTIVE user and exact org participant with effective UNIT_LEADER sees own command panel.
+02. Same user with only descriptive crew LEADER sees no leadership issuance controls.
+03. Ordinary ADMIN/MANAGER without incident role cannot issue commands.
+04. Unit Leader A cannot read Unit B's private assignment reasons.
+05. Unit Leader A cannot issue to Unit B's crew episode.
+06. Historical superseded Unit Leader loses current controls.
+07. Pending/unaccepted role grant never shows controls.
+08. User suspended after cache download loses command authority online.
+09. Incident org participation RELEASED or org inactive denies writes.
+10. Current active responder can still ACK their own assignment after private message access revoked.
+
+B. Unit scope and status
+11. Own-unit status and version displayed from server read.
+12. Only actual permitted status transitions are offered.
+13. ON_SCENE -> RETURNING uses existing unit/incident expected version and online guard.
+14. Unfinished tasks or active resource guards prevent invalid release.
+15. Two concurrent status edits give a clean version/conflict outcome.
+16. A lost response does not create another unit status operation.
+17. Same UUID/same payload replays receipt without duplicate event.
+18. Same UUID/different payload returns OPERATION_REUSED or equivalent.
+19. Wrong incident/unit/organization tuple is rejected.
+20. Multiple led units never mix their crew/tasks/receipts.
+21. No arbitrary GPS/position/arrival inference from browsing map.
+
+C. Crew and tasks
+22. ACTIVE own crew roster displays correct episode identity.
+23. Historical LEFT crew not shown as current active member.
+24. Leader's own task status distinct from team supervision.
+25. Each assignment UUID has independent acknowledged/completed state.
+26. Task parent does not falsely complete on one child's terminal outcome.
+27. Blocked/Unable require the configured reason and show private reason only to authorized actor.
+28. Task issue to one active own crew episode succeeds only after explicit online review.
+29. Latest catalog immutable version is correctly frozen; mutable definition ID is not substituted.
+30. Catalog version changes during draft require re-review, not silent upgrade.
+31. Crew leaves during draft -> stale/eligibility failure, no new task.
+32. Leader role revoked during draft -> no submission; private scope hidden.
+33. Touching task target/map never acknowledges task.
+34. B1 refresh after issue shows receipt-confirmed vs later canonical state separately.
+35. Existing offline ACK is not lost when leadership panel refreshes.
+36. Dependent pending START remains ordered after ACK server receipt.
+37. Offline command issue remains prohibited and clearly explained.
+
+D. Resources
+38. Attached own-unit allocations displayed correctly if authorized.
+39. Other organization's unassigned inventory remains private.
+40. Allocation transition allowed only by actual server permission.
+41. CONSUMED confirmation identifies exact quantity/unit/allocation.
+42. Duplicate/lost response cannot consume inventory twice.
+43. Offline mode cannot optimistically consume stock.
+44. Terminal allocation state cannot be reopened.
+45. Returning unit with live allocations fails with clear, non-destructive warning.
+
+E. Offline/synchronization/security
+46. B1 manifest pages and field cache remain coherent under a concurrent task/unit mutation.
+47. B1 cursor expiration triggers refresh without destroying still-authorized pending ACK.
+48. Scoped permission loss hides affected private data without wiping valid field tasks.
+49. Incident lease 24h expiry hides protected view, retains original unsent evidence.
+50. Two-hour incident lease warning remains independent of registry auth warnings.
+51. FCM miss/duplicate/out-of-order event eventually reconciles through B1 polling/foreground refresh.
+52. Android WebSocket is not claimed to exist.
+53. App process death during queued operation does not lose UUID/payload.
+54. Account switch prevents old in-flight request commit to new account/org.
+55. Recovered account cannot dispatch another account's pending operations.
+56. TRAINING scenario effects/positions do not bleed into REAL.
+57. Existing hydrant browsing, hydrant sync, inspections, M14.7C messages and M14.7D evidence unaffected.
+
+F. UI/usability
+58. SI and DE text for state, errors, confirmations, quantities and roles.
+59. Accessible touch target, screen-reader labels and no gesture-only command.
+60. Empty roster, no resources, stale, offline, attention, revoked and unauthorized screens accurate.
+61. Rotation/recomposition does not cause duplicate issue or status operations.
+62. Human can identify which actions are actual server commands vs local observations.
+
+These are HUMAN-EXECUTED acceptance scenarios. DO NOT add test files or run tests.
+
+======================================================================
+27. MINIMAL HUMAN ROLLOUT CHECKLIST (DOCUMENT ONLY)
+======================================================================
+
+At handoff, provide instructions in PR docs (do not execute them):
+1. Human review of PR and final source-level signoff.
+2. Human merge PR to main.
+3. Apply any new forward-only SQL migration in correct sequence, AFTER all prerequisite M14.7C/D migrations were manually applied (Git merge != applied SQL).
+4. Review current RLS/EXECUTE grants and required Supabase settings.
+5. If Room database version changed, human Android Studio build / schema export and migration review. Codex must not edit generated schema files.
+6. Human distribute/install Android in controlled environment.
+7. Human use authorized TRAINING incident and real user accounts for all scope, offline/conflict and role-transition scenarios.
+8. Preserve official radio communications and human incident command procedures.
+9. Do not call system operationally safe until human testing and rollout criteria pass; source-only PR is NOT VERIFIED.
+
+No developer-generated screenshots, builds, SQL executions, simulated server commands or actual deployments in this PR.
+
+======================================================================
+28. DESIGN NOTES / DECISIONS THAT MUST STAY EXPLICIT
+======================================================================
+
+1. M14.8A already issues one-to-one crew commands; M14.8B is the complete own-unit leadership UI and narrower operational management, not a rewrite.
+2. Canonical M14.4 server checks are more authoritative than the broad future vocabulary in the original M14 SPEC.
+3. ONLINE_REQUIRED for authority changes. Existing offline personal task transitions remain unchanged.
+4. Immutable operation receipts and expected versions guard both lost responses and races.
+5. Privacy and safety require current server authorization; cached membership is never a command grant.
+6. B1 field projection is bounded and actor-scoped, not the commander's full COP.
+7. M14.7C private messages and M14.7D attachments have their own narrower audience; don't leak through unit leader read DTO.
+8. Android private Realtime WebSocket remains unimplemented because realtime-kt is not owner-approved.
+9. GPS location sharing is a separately consented M14.8C2 milestone. No location tracking in M14.8B.
+10. M14.8C incident map/navigation is separate; reuse existing target map only.
+11. No new M10 notification pipeline, new WorkManager worker, or new Cron.
+12. No incident lifecycle close, command transfer, formal 112/CAD integration, SIM instructor command or automatic actual dispatch.
+
+======================================================================
+29. REQUIRED COMPLETION REPORT
+======================================================================
+
+After implementation, create ONE PR named, for example:
+"M14.8B — Android Unit Leader Command & Scoped Resource Status"
+
+STOP. DO NOT MERGE.
+
+The PR report MUST include:
+01. PR URL, branch and commit SHA.
+02. Exact main baseline SHA and proof #86 dependency satisfied.
+03. Source inventory: existing functionality reused vs genuinely new.
+04. Actual RPC signatures and currently permissible unit status transitions.
+05. Whether crew membership mutations are permitted to Unit Leader by existing canonical server authority; if not, explain read-only handling.
+06. Resource transition permission matrix and exact affected allocation scope.
+07. Whether a forward-only SQL migration was necessary; its file name; NOT APPLIED.
+08. Room DB version and whether migrated; generated schema files untouched.
+09. Kotlin/Compose files and added UI entry points.
+10. B1 field DTO changes, manifest/cursor semantics, reset coverage.
+11. Offline vs online classification for each action and reasons.
+12. Exact immutable UUID/receipt/expected-version behavior and unknown outcome recovery.
+13. Account/org/incident/leader generation protections.
+14. SI/DE/default localization and accessibility.
+15. Manual rollout and the 62 unexecuted acceptance scenarios.
+16. Known limitations and follow-up features.
+17. Confirmation that no tests added/modified/run; no builds, Gradle sync, lint/typecheck, CI, SQL, migrations, runtime verification, push, deployment or merge were performed.
+18. Any actual technical blocker requiring owner approval.
+
+Report honestly if some proposed command is not authorized by existing server. An explicit read-only surface plus accurately documented limitation is preferable to invented authority or fake implementation.
+
+======================================================================
+30. FINAL COMMAND
+======================================================================
+
+Implement exactly the scoped M14.8B milestone only after confirming merged prerequisites. Prefer minimal safe canonical extensions and a first-class Android Unit Leader experience. Preserve the operating command hierarchy, database authority, idempotency, audit, B1 sync, Room account isolation, existing offline queue and all previous user data.
+
+DO NOT TEST. DO NOT BUILD. DO NOT EXECUTE SQL. DO NOT DEPLOY. DO NOT MERGE. ONE PR ONLY.
