@@ -1,0 +1,358 @@
+GASILKO — CODEX IMPLEMENTATION PROMPT
+M14.7B2 — SECURE PRIVATE REALTIME HINTS, RECONNECT & B1 RECONCILIATION
+Prepared 2026-10-30 | Language: English | Deliverable: ONE new pull request | Human-only merge
+
+Repository: https://github.com/ficlus/Gasilko
+Authoritative specifications: docs/SPEC.md; docs/SPEC-M14-INCIDENT-OPERATIONS.md; AGENTS.md
+Upstream: M14.7A/M14.8A Android field pilot (PR #82) and M14.7B1 snapshot/change feed (PR #83).
+M14.7B1 migration (inspect actual HEAD): supabase/migrations/20261030100000_incident_snapshot_protocol.sql
+M14.7B1 documentation: docs/M14.7B1-incident-snapshots-change-feed.md
+
+TASK SUMMARY
+Implement private, authorization-scoped Supabase Realtime Broadcast as a LOW-TRUST REFRESH HINT transport for Gasilko incident operations. Web and, where ALREADY COMPILE-AVAILABLE WITHOUT ALTERING GRADLE, Android should subscribe to authorized incident/org scopes, coalesce hints into their EXISTING read/reconciliation pipelines, recover lost and reordered hints, and fail safely to existing bounded polling, FCM and foreground/resume. No Realtime payload becomes authoritative incident state or command acknowledgement.
+
+This is an implementation prompt, not permission to run or deploy. Do not weaken read security in order to make Realtime work. Do not claim actual WebSocket integration where an Android compile dependency is absent.
+
+==============================================================================
+0. MANDATORY PREREQUISITES AND BASE BRANCH GATE
+==============================================================================
+
+0.1 Fetch/inspect the actual repository's current authoritative `main` using the permitted code-inspection workflow. Verify the complete PR #82 Android pilot AND PR #83/M14.7B1 functionality are present on current `main`, including `incident_change_feed`, `incident_snapshot_manifest`, `incident_sync_head`, Room schema migration 15->16 and actual Android reconciliation. DO NOT rely solely on GitHub PR's displayed "Open/Merged" badge: verify merged commit/ancestry and source tree content. If PR #83 is still unmerged and its complete implementation is not yet present in main, STOP: do not open a dependent B2 PR, do not branch from the unmerged PR. Report exactly the missing dependency and wait for the owner's manual merge. An already-existing B2 PR/task also blocks a duplicate new PR.
+0.2 Check current `AGENTS.md` and canonical specs. This task's owner-specific prohibitions on test/build/Gradle/SQL/deployment take priority as instructions for this particular run; disclose policy conflicts in handoff, do not quietly rewrite repo-wide agent rules.
+0.3 Inventory actual source paths, public/private RPC signatures, SQL authorization helpers, Supabase client construction, FCM listeners, Room cursor transaction handling, Web `IncidentLiveProvider` and any existing realtime usage. Reject double implementations.
+0.4 Prepare a concise source inventory in PR documentation (what existed, what's extended, what is untouched). Only implement M14.7B2 after prerequisites are proven.
+0.5 Base on latest main, preserve local developer changes. Never `git reset --hard`, delete untracked local files, overwrite local Gradle/KAPT preferences or blindly apply a stash.
+
+1. OWNER'S NON-NEGOTIABLE EXECUTION RULES
+-----------------------------------------
+- EXACTLY ONE new PR for this new milestone. One branch; corrections must update that SAME PR. Never merge, auto-approve, deploy or apply database migrations.
+- Implementation and source inspection only. Do NOT add or run tests (unit, integration, e2e, Android instrumentation); do NOT build, compile, run app, perform Gradle sync, lint, typecheck, CI, emulator, browser/runtime validation, SQL, migrations, Supabase CLI deployment or smoke checks.
+- Do NOT modify Android Gradle files, KAPT/KSP/plugin configuration, dependency declarations, pnpm lockfile, generated Room schema files, generated code, private developer configuration, secrets, Cron jobs or infrastructure settings.
+- Do NOT change real incident command semantics, field task action versions, operation UUIDs, receipts, immutable timeline, existing M10/FCM transport or queue semantics.
+- No unauthorized notifications, actual emergency dispatch, external 112/CAD integrations, GPS tracking, private chat, attachments, SIM behavior rewrite, new payment/monitoring vendor.
+- Use `[skip ci]` according to repository convention. No claim of having verified functionality. Human alone merges and manually performs any migrations/build/rollout.
+
+2. EXISTING SOURCE BASELINE TO INSPECT — DO NOT ASSUME UNCHANGED
+----------------------------------------------------------------
+As of the source inspection made while preparing this task:
+- Android `android/app/build.gradle.kts` used Supabase BOM 3.6.0 with `auth-kt`, `postgrest-kt`, `storage-kt`; NO explicit `realtime-kt` dependency. It used `ktor-client-okhttp` but that alone does NOT prove a supported Supabase Realtime API is available. Verify actual current source and compile dependencies by inspection only, without Gradle execution.
+- Android field flow is in `android/app/src/main/java/si/gasilko/app/feature/incidents/IncidentRepository.kt`, `IncidentReconciliation.kt`, `IncidentViewModel.kt`, `IncidentScreen.kt`, existing Room cache/DAO and WorkManager/FCM handlers.
+- Android `IncidentRepository` already has `incidentIdentityAccess` mutex and scope/lease checks. B1 changes require durable, transactionally applied `(revision, ordinal)` cursor with Room projection; no second queue.
+- Web has `web/features/incidents/IncidentLiveProvider.tsx` with status CONNECTING/LIVE/REFRESHING/OFFLINE/STALE/ACCESS_LOST, event refresh and fast SIM lanes. It uses `web/lib/supabase/browser.ts` (`createBrowserClient` from @supabase/ssr).
+- B1 provides `public.incident_sync_head`, `incident_field_directory`, `incident_snapshot_manifest`, `incident_snapshot_page`, `incident_change_feed`, `incident_field_entities`, `incident_field_timeline` (actual signatures and grants must be read from HEAD).
+- B1 captures revision descriptors using canonical incident timeline and fallback invalidation. Retention is 30 days; pinned manifests have approximately 5-minute TTL. Its private materialization is actor/acting-org/incident-scoped.
+- The authoritative M14 spec requires only `{incident_id,revision,timeline_sequence}` in private incident channel hints, no global public subscription, with read authority checked again on EVERY API fetch or command.
+Check ALL these assertions against actual HEAD and update code to true contracts, not historical guesses.
+
+3. DELIVERABLES — COMPLETE, HONEST M14.7B2
+------------------------------------------
+A. Narrow forward-only SQL migration for Realtime Broadcast authorization and emission, only where necessary.
+B. Private scoped Web subscription integrated into existing `IncidentLiveProvider` without a new autonomous data store or secondary poller; reconnect/backoff/dedupe/teardown; existing B1 watermarks remain source of truth.
+C. Android: actual supported private subscription with existing declared APIs ONLY IF proven compile-available by static source inspection; otherwise a clear transport boundary + bounded safe existing B1/FCM/polling fallback and an explicit OWNER DEPENDENCY BLOCKER to add supported Supabase realtime-kt in a later approved task. Do not write a fake event receiver or custom unauthenticated Phoenix socket to simulate completion.
+D. SI/DE/default UX for connecting/updated/stale/offline, minimal privacy-safe diagnostics where relevant.
+E. `docs/M14.7B2-secure-private-realtime.md` with actual contracts, rollout, negative/manual scenarios, limitations and precise compile-dependency status; update M14 SPEC milestone progress accurately.
+F. One PR with a plain-language NOT TESTED/NOT DEPLOYED report, exact migration filename and owner instructions.
+
+4. NON-NEGOTIABLE TRUST BOUNDARIES
+----------------------------------
+Realtime is an untrusted availability/performance hint, NOT a domain transaction.
+Only canonical RPC/authorized read returns define incident/unit/task status.
+No FCM/Realtime message may complete, ACK, START, BLOCK, RESUME, reassign, move, open/close or cancel a task.
+No push hint may grant authority or extend the 24-hour Android incident lease.
+No client UI should take a hint's task text, personnel identity, geometry or version as a server-confirmed state.
+Version and timeline sequence are monotonically interpreted as requested target watermarks, NOT automatically durably applied cursors.
+No public `postgres_changes` subscription, global `public.incidents` subscription with client-side filtering, anonymous broadcast channel or `INSERT`/`broadcast` permission for ordinary incident clients.
+Server verification on subsequent reads remains mandatory even if the socket is currently "subscribed".
+
+5. CHANNEL TOPIC AND MESSAGE CONTRACT
+-------------------------------------
+Preferred logical topic: `incident:<incident-uuid>:org:<acting-organization-uuid>`.
+If a more restrictive canonical topic already exists, reuse it and document why.
+This is an AUTHORIZATION-SCOPED topic, not a room name chosen from a display label.
+Use an exact anchored parser; validate UUIDs/format before casting. Treat malformed/too-long topics as denied.
+Never interpret a partial parse, wildcard, null `auth.uid()` or user-supplied organization assertion as authorization.
+Do not include actor user ID, unit IDs, task IDs, title, body text, notes, map points, GPS, attachments or raw old/new JSON in the topic/payload.
+
+Event name (suggested): `incident_changed`.
+Canonical minimal payload:
+  {
+    "incident_id": "<uuid>",
+    "revision": "<decimal BIGINT string>",
+    "timeline_sequence": "<decimal BIGINT string>"
+  }
+Optionally a non-sensitive protocol version field if needed for backward compatibility.
+Do not include role/scopes, raw operation UUID, broadcast timestamps that claim stronger order, or secret scope fingerprints.
+Keep payload bounded (for example <=512 bytes) and verify this contract in producer/client code. Use decimal STRINGS for BIGINT across Kotlin/TypeScript/JSON.
+Only broadcast when a canonical transaction commits; a rolled-back mutation must not result in a durable broadcast.
+Prefer a single canonical server-side producer at the established incident revision/timeline commit boundary. No client-emitted authoritative notifications.
+Document that Supabase Broadcast is NOT durable; event loss is expected and safe because B1/foreground polling catches up.
+
+6. CURRENT-ACCESS SUPABASE REALTIME RLS
+----------------------------------------
+Implement only the necessary SELECT policy on `realtime.messages` for authenticated subscribers to the EXACT incident/org topic, restricted to `extension = 'broadcast'`. DO NOT grant authenticated users generic INSERT to broadcast or Presence; ordinary clients must not be able to generate incident server hints. No public topics.
+Use `realtime.topic()` per Supabase authorization docs; scope using `auth.uid()` and current existing incident READ authority (ACTIVE profile, exact active acting-org membership, actual incident participation/role or permitted field unit/crew scope as appropriate). Do not infer incident command from org ADMIN.
+Inspect existing Web commander read and Android field read helpers; they may have different legitimate audience sets. The subscription gate should match the union of VERIFIED current read audiences in this exact acting organization, not the union of all users who happen to know the incident UUID.
+Prefer a small, readonly `private` SECURITY DEFINER helper reusing trusted checks. `SET search_path = ''`; qualify all schemas; grant only what the Realtime policy evaluator needs. Beware SQL function execution privileges inside an RLS policy: revoke broad access, make policy evaluation work with the actual authenticated role without exposing private data. Never use `USING(true)`, role-only shortcuts or org membership alone.
+Avoid invoking a full multi-megabyte snapshot just to authorize a WebSocket join. Use indexed authoritative membership/participation/role checks; performance matters on reconnect.
+Do NOT add `ALTER TABLE realtime.messages ENABLE ROW LEVEL SECURITY`. Supabase documentation says it is already enabled and attempting this fails owner permission checks. A forward migration may CREATE POLICY on realtime.messages when supported; do not create/drop arbitrary objects inside realtime schema.
+Security-definer helper must reject invalid JWT context, invalid topic, inactive actor, revoked membership, ended participation, closed/forbidden incident where current SPEC disallows read. Use `COALESCE`/strict null handling without raising parser exceptions for malformed topics. Never log full JWT.
+Consider index availability for exact member/org/participant read lookups; add only needed indexes to CANONICAL public tables if proven absent, in a forward-only migration.
+Document the IMPORTANT Supabase limitation: Realtime policy is cached after join until token refresh/reconnect. A changed membership does NOT force instantaneous server-side socket disconnect. Therefore messages must remain metadata-only and client reconcilers must fail closed upon authoritative read denial; reauth/unsubscribe on known local scope switch and auth changes. Do NOT claim cryptographically guaranteed immediate revocation before token refresh. If this cannot meet the owner's security acceptance, STOP and report the residual limitation.
+
+7. DATABASE-SIDE BROADCAST PRODUCTION
+------------------------------------
+First inspect the real incident timeline insertion, incident revision/timeline_sequence changes and existing B1 descriptor triggers to identify ONE safe producer that covers command commits.
+Preferred: a compact trusted AFTER trigger at a canonical incident aggregate change boundary (or the actual shared trusted timeline writer), using realtime.send(payload, event, topic, private => true) with correct SQL signature for the project's Supabase capability.
+For every relevant authorized organization, derive allowed ACTING-org topics from CANONICAL incident participation and existing incident roles/units, NOT broad organization hierarchy. Inspect existing records to avoid over-fanout or leaking metadata to orgs that never participated. Cross-org command/participation changes require that old unauthorized org is not given new sensitive content.
+If precise org audience cannot be derived cheaply for certain event families, prefer a more tightly scoped safe producer and the existing polling fallback. Document coverage; never emit a global incident topic.
+Do not issue network HTTP requests or Edge Functions while database locks are held. Database Broadcast inserted in same transaction is permitted if supported; verify exactly what realtime.send does in project environment. Ensure rollback cannot publish an authoritative commit that never occurred.
+Avoid duplicate trigger fanout on both timeline and incident revisions unless explicitly deduped. Multiple hints for one committed revision are functionally safe but should not create load storms. Add no separate dispatch queue, Cron or second notification system. No publication of canonical incident rows or raw audit payloads.
+Broadcast failures must not silently corrupt/roll back a critical life-safety command if the transport is optional. Inspect failure semantics; choose an error-isolated, bounded approach that preserves command authority. If mandatory broadcast injection would make commits fail when Realtime is unavailable and no safe mechanism exists, STOP rather than introducing such coupling. Document loss and fallback.
+Diligently handle initial creation/DRAFT->ACTIVE, changes to org participation, command transfer, task issue/status, unit/crew update and incident closure according to existing mode/visibility. Log only safe counts/correlation metadata, no raw content.
+Be conscious that realtime.send's internal partition may not exist until a Realtime WebSocket has connected, and may warn/no-send. Missing hints must always be safe; no app behavior may assume all writes broadcast.
+
+8. SQL MIGRATION QUALITY
+------------------------
+New timestamp strictly greater than current main's applied migrations; forward-only, no history edits.
+Fully qualified names, quoted identifiers where needed, `SECURITY DEFINER SET search_path=''`, restricted grants and owner-safe policy statements.
+Avoid PL/pgSQL variable-vs-column ambiguity (prior Gasilko 42702 issue). Use explicit table aliases, correct paired dollar quotes and typed declarations. No arbitrary dynamic SQL.
+No RLS policy granting generic read to all authenticated, no publishable/service secret in source.
+Give a short policy matrix in milestone doc:
+  actor/scope           can receive incident/org hint?    can send?
+  authorized commander yes if current read permission      no
+  authorized responder yes if current field scope          no
+  other org            no                               no
+  inactive/revoked     no on next policy evaluation        no
+  anon                 no                               no
+Explain cached-policy revocation limitation and why minimal payload matters.
+
+9. WEB INTEGRATION — EXISTING PROVIDER ONLY
+--------------------------------------------
+Inspect `IncidentLiveProvider.tsx`, its call sites and `web/lib/supabase/browser.ts` to reuse SSR browser auth, selected account/org/incident and existing `read()`/`onInvalidate`/`onAccessLost` logic.
+One SUBSCRIPTION per active visible, authorized incident/acting-org scope, with cleanup on scope change, sign out, access loss, component unmount and hidden/offline state as appropriate.
+Use a channel created with `{ config: { private: true } }` via the ACTUAL installed @supabase/supabase-js API. If necessary, set/refresh the Realtime auth token from the existing managed session using the correct supported API. Never copy a token into logs or localStorage as a workaround.
+Attach `on('broadcast', {event:'incident_changed'}, handler)` and observe subscription states (SUBSCRIBED, TIMED_OUT, CHANNEL_ERROR, CLOSED) with the actual library API. Never subscribe to a public fallback channel after private join denial.
+Upon every successful subscription/reconnection, FIRST schedule an authorized read of B1 `incident_sync_head` / existing authorized timeline so that hints missed before, during and after join cannot cause permanent gaps.
+When a new hint arrives:
+  1) Verify scope identity, payload shape, UUIDs, string BIGINT parse and bounded length.
+  2) Compare hinted revision/timeline sequence to last AUTHORITATIVELY CONFIRMED values.
+  3) Coalesce multiple hints into one existing refresh request; do not call one RPC per hint.
+  4) Fetch existing authoritative head/changed data with current session and acting organization.
+  5) Only after read success set lastSuccess/confirmed revision/cursor and mark visible UI current.
+  6) If newer hint arrived during in-flight read, ensure another refresh runs until caught up (or fallback polling does).
+  7) On 401/403/current NOT_AUTHORIZED, tear down channel, hide protected incident view via current onAccessLost, never retry on a public topic.
+  8) On transient transport errors retain authorized stale state, bounded backoff, do not pretend LIVE merely because socket is open.
+Preserve the existing faster SIM lane for agent positions, but do NOT broadcast instructor-only or virtual positions to REAL users. Avoid poller per unit/task; preserve one provider lifecycle.
+Bound notifications, no toast for each hint. Timeline notifications must be derived from authorized timeline events, not private event metadata.
+Expose a non-alarming connection status with SI/DE/default labels: live (when both transport and fresh authoritative read), refreshing, temporarily offline, stale, access lost. If private socket feature is unavailable, the existing polling is legitimate fallback; avoid unending spinner.
+Use existing TypeScript components/helpers, not a new unmaintained singleton with leaked channels. Ensure React Strict Mode double-effect mount/unmount does not leave duplicate subscriptions.
+
+10. ANDROID INTEGRATION — STRICT NO-GRADLE GATE
+-----------------------------------------------
+First STATICALLY inspect current Android Supabase client `install(...)` plugins, declared libraries and existing concrete WebSocket/Realtime facilities. Do not run Gradle, compile, dependency resolution, use external network, edit build files or add dependencies.
+
+If a fully supported, already-compile-available Supabase private Realtime implementation exists:
+- Integrate private subscription behind a scoped transport interface invoked by the existing IncidentRepository/refresh coordinator.
+- Subscribe only for foreground-selected incidents whose current account/org authorization and 24-hour incident read lease permit viewing. No always-on background socket, no notification-delivery duplication.
+- On subscription, resume, reconnect or JWT refresh, request authoritative B1 directory/feed/snapshot reconciliation; never apply payload to Room directly.
+- Coalesce hints under existing `incidentIdentityAccess` and repository refresh mutex. Avoid deadlocks and lock inversion with credential/account switches.
+- On sign out, account/org change, incident deselection, suspension/revocation or lease expiry, remove subscriptions and invalidate in-flight generation. New account responses must not commit to old Room scope.
+- Duplicate/out-of-order/malformed hints are ignored or cause a safe read, never decrement Room cursor.
+- FCM remains alternate hint; WorkManager remains sole existing durable background queue; foreground polling/resume remain safety fallback.
+- Handle network/battery lifecycle conservatively; no WakeLock, foreground service or new long-running worker.
+- UI exposes current/stale/offline with proper SI/DE strings only after actual verification.
+
+If `realtime-kt` (or the necessary supported transport) is NOT already declared/compile-available:
+- DO NOT modify Gradle or invent an unsupported lightweight raw WebSocket protocol.
+- Implement only the safe platform-independent integration seam if it meaningfully fits the existing repository, e.g. `IncidentRealtimeHintSource` listener abstraction with a disabled/unsupported implementation; ensure it is NOT presented as a working Android socket.
+- Preserve existing Android B1 + FCM + foreground/resume/polling behavior without degradation. No duplicate WorkManager, no Room schema change just for ephemeral socket.
+- Clearly mark Android private Realtime transport BLOCKED BY EXPLICIT OWNER APPROVAL FOR SUPPORTED DEPENDENCY. Document the minimal requested future Gradle amendment `implementation("io.github.jan-tennert.supabase:realtime-kt")` aligned with the existing Supabase BOM, only as a PROPOSAL, not an actual code change.
+- Do not falsely claim full cross-device Web+Android realtime readiness. If owner expects full Android B2 as a hard gate, report this prerequisite and stop rather than ship a misleading "complete" PR.
+Android FCM remains only a hint, not command authorization. Preserve offline ACK/START/BLOCKED/COMPLETE/UNABLE operation identity, parent dependency and receipts.
+
+11. BROADCAST RECONNECT, RACES AND RESILIENCE
+--------------------------------------------
+Use one bounded lifecycle controller per active incident scope; no unbounded subscription pool.
+Recommended state machine:
+  DISABLED / UNSUPPORTED
+  -> CONNECTING -> SUBSCRIBED_UNVERIFIED -> CATCHING_UP -> LIVE
+  -> STALE / OFFLINE / RETRY_WAIT -> CONNECTING
+  -> ACCESS_LOST -> TERMINATED.
+`SUBSCRIBED_UNVERIFIED` is NOT "live". `LIVE` is contingent on a successful authorized read.
+Backoff with jitter and cap, e.g. first 1s, 2s, 4s, 8s, max 30s; reset only after stable success. Do not run timers after cleanup. Keep existing bounded safety poll cadence, tune it conservatively to avoid increased load.
+Race examples to handle:
+  - Event commits between initial read and subscribe.
+  - Subscription callback fires after account/org switch.
+  - Reconnection occurs after 30-day cursor gap: B1 RESET_REQUIRED must fetch a fresh manifest.
+  - Newer revision arrives during older B1 read; schedule a second pass.
+  - Server sends two events for same revision/sequence; one reconcile.
+  - Timeline sequence advances without aggregate revision, and vice versa.
+  - One org loses access while old WebSocket is temporarily still authenticated: metadata-only cached subscription; ALL detail reads deny and client removes scope.
+  - JWT rotates while connected; auth propagation re-evaluates read permissions at supported refresh.
+  - Device sleeps/backgrounds; no assumed persistent socket.
+  - Supabase broadcast partition unavailable; absence of hints does NOT imply absence of changes.
+  - Many SIM ticks occur; no unbounded per-tick refresh on all devices.
+No infinite retry on permanent auth failure. No event-loop reentry or timer accumulation. When reconnected always catch up from authoritative B1 server state, not from last socket message.
+
+12. OFFLINE AND AUTHORITATIVE ROOM GUARANTEES
+---------------------------------------------
+No directly writing Realtime payload into Room canonical caches. A hint only requests the existing B1 reconciliation.
+The existing B1 staged snapshot and change application must remain atomic with cursors. Ordinary sync resets preserve the previous authorized snapshot until replacement; confirmed scope revocation hides protected data. Do not revert the corrected #83 behavior.
+Cursor storage and Room version remain unchanged unless actual code makes an additive migration indispensable; changing Room for socket state is usually unnecessary.
+Any network timeout preserves prior cached status as STALE and pending evidence. Do not indicate confirmed server success for unsent offline operations based on receiving a hint. Sync worker remains distinct from UI refresh but uses existing established coordination.
+No bypass of 24-hour read lease, two-hour warning, keystore session, actor identity mutex, selected organization isolation or sign-out cleanup. No read of other users' private task history.
+
+13. AUTHORIZATION / PRIVACY RISK REVIEW
+---------------------------------------
+Before implementation finalization, explicitly inspect:
+- Users in same organization who are NOT incident participants.
+- Active commanders whose read scope differs from unit-responder field scope.
+- Cross-agency incident with multiple participating orgs: exact acting-org topic.
+- Inactive profile, removed membership, ended commander role, crew leaving deployment.
+- Incident CANCELLED/CLOSED handling and historic read permissions (use current SPEC).
+- Account switch while a subscribed callback is in flight.
+- Forged private client broadcasts (must not grant incident changes or fake UI success even if transport is spoofed).
+- Special TRAINING/SIM data that may have restricted instructor audience.
+- SQL policy helper `SECURITY DEFINER`, auth.uid evaluation, search_path and grants.
+- Broadcast topic validation against malformed UUID/colon strings and huge input.
+- Cached socket RLS semantics: immediate revocation cannot be guaranteed by RLS alone.
+- Subject-derived metadata and timeline publication; no user-specific content may enter private hints.
+
+14. PERFORMANCE, BOUNDS AND OPERATIONS
+--------------------------------------
+Reuse B1 limits: 5-minute manifest TTL, 30-day feed boundary, max 25 snapshot items/page, 100 descriptors/page, 3 MiB projection. These are existing limits, not new realtime payload promises.
+Minimal hint payload only; no N+1 per-recipient read or one-socket-per-unit.
+No per-task SQL trigger broadcasts. Prefer one per incident revision/timeline boundary and exact eligible organizations, bounded.
+Bound subscriptions per account/browser to one active incident (or exactly the current provider instances after inspecting actual structure). Bound reconnect attempts, backlog, timer count and event coalescing.
+No secrets or raw JWT in logs; use safe local diagnostic counters/subscription state when available and log only incident correlation IDs after considering privacy.
+No SLA or measured latency claim. Human pilot later checks real operational behavior and failure modes.
+
+15. WEB UI / SI–DE PRESENTATION
+-------------------------------
+Use current design system and existing incident panels. Do not add a new dashboard.
+Labels: "V živo" / "Live" / "Live"; "Osvežujem" / "Aktualisierung läuft" / "Refreshing"; "Brez povezave" / "Offline" / "Offline"; "Podatki so lahko zastareli" / "Daten möglicherweise veraltet" / "Data may be stale"; "Dostop preklican" / "Zugriff entzogen" / "Access lost". Adapt translations to existing exact locale mechanism, don't scatter raw text.
+Do not show fake green "live" when the socket is subscribed but the last B1 read failed, or when disconnected after a long interval.
+No intrusive toast storm for high-frequency SIM/position metadata. Event toasts remain based on privacy-filtered authorized timeline, not untrusted socket event.
+
+16. SOURCE-LEVEL ERROR AND RESET CONTRACT
+------------------------------------------
+Classify:
+- PRIVATE_JOIN_DENIED / NO_CURRENT_AUTHORITY -> ACCESS_LOST or fallback based on actual confirmed 403; no public subscription.
+- SOCKET_TIMEOUT / NETWORK_UNAVAILABLE -> stale/fallback, retry with backoff.
+- TOKEN_EXPIRED -> refresh managed auth, resubscribe with current token, then authoritative catch-up; never log token.
+- B1_CURSOR_EXPIRED/HISTORY_GAP/RESET_REQUIRED -> clean authorized full snapshot using existing B1 safe semantics.
+- B1_MANIFEST_SCOPE_CHANGED/NOT_AUTHORIZED -> immediate protected cache hide, local pending evidence preserved, unsubscribe.
+- MALFORMED_HINT/UNKNOWN_EVENT -> don't trust content; bounded safe refresh if necessary; never crash.
+- UNSUPPORTED_ANDROID_TRANSPORT -> explicit documented integration gap, existing FCM/resume polling still works.
+- TRANSIENT_POSTGRES/REALTIME_UNAVAILABLE -> canonical command transaction must not be materially corrupted or left reported as ACKed based on hint.
+
+17. IMPLEMENTATION STEPS (ORDER)
+--------------------------------
+I. Inventory current main, PR dependencies, source code, permitted libraries and existing transports. Stop on unmerged upstream or duplicate B2.
+II. Define exact topic/event protocol and server authoritative read audience; write policy matrix and failure conditions.
+III. Implement ONLY the minimal forward-only SQL migration (safe Realtime SELECT policy, narrow authorization helper, optional canonical broadcast producer), inspect transaction-boundary implications. No SQL execution.
+IV. Integrate Web private channel in existing IncidentLiveProvider with lifecycle, auth, de-duplication, catchup and coherent status. Do not replace core polling/command engine.
+V. Inspect Android available transport, implement fully only if supported without Gradle changes; otherwise safe no-op seam and explicit dependency report, preserving FCM/B1. Do not manufacture success.
+VI. Add localized status strings, documentation and manual operator rollout order.
+VII. Update M14 SPEC implementation-progress note truthfully, preserve history.
+VIII. Open ONE PR against authoritative main and report exact head/changed files, dependencies, unsupported pieces, migration and human manual checks. STOP without executing anything.
+
+18. REQUIRED HUMAN-RUN ACCEPTANCE SCENARIOS (DOCUMENT, DO NOT PERFORM)
+---------------------------------------------------------------------
+Write concrete expected results in milestone docs. At minimum:
+ 1. Two authorized Web clients of same incident/org both get a hint after server task update and converge via authoritative head.
+ 2. Authorized Android subscribed device receives a hint and reconciles through B1 (only if actual transport exists).
+ 3. An anonymous user cannot join the private topic.
+ 4. An ACTIVE member of org who is NOT incident-authorized cannot subscribe.
+ 5. User in another organization cannot join by guessing incident/org UUIDs.
+ 6. Commander and responder each can subscribe only when canonical read scope allows.
+ 7. Profile suspended/revoked before join is denied.
+ 8. User removed while channel active: on next authoritative fetch detail is denied and local protected content hidden; note cached WebSocket policy limitation.
+ 9. Changing selected org or account closes the old subscription before showing new protected data.
+10. SIGN OUT removes channels and stops callbacks/timers.
+11. Browser Strict Mode double effect does not duplicate channels.
+12. Missed event while offline catches up on reconnect.
+13. Event between first read and subscribe is caught in subscribe-time watermark read.
+14. Duplicate/out-of-order hints do not duplicate history or regress cursor.
+15. New hint arrives during in-flight refresh; follow-up sync catches up.
+16. Rapid task ACK/START/COMPLETE bursts are coalesced; no direct command from hint.
+17. Stale authoritative read while socket connected is not shown as LIVE.
+18. Invalid hint payload/malformed BIGINT cannot crash client or overwrite Room.
+19. An expired/gapped B1 cursor causes authorized full snapshot (no pending operation loss).
+20. Expired 24-hour Android lease denies reading even while socket alive.
+21. Offline operation UUID and dependencies survive hint-triggered reconciliation.
+22. Realtime unavailable still allows bounded polling/resume/FCM to converge.
+23. JWT rotation/resubscribe catches up, no leaked old-scope event handling.
+24. Web SIM fast lane still operates separately without publishing instructor/private position data to responder topics.
+25. No REAL incident affected by simulated agent/hazard events.
+26. Rapid lifecycle changes (active->closed) cause correct topic eligibility and UI state.
+27. SQL rollback of a command must not produce a trusted committed hint.
+28. Missing Supabase Realtime DB partition does not break user-facing canonical command or corrupt B1.
+29. No client has INSERT/publish permission for arbitrary incident_changed events; forged payload cannot induce a domain mutation.
+30. New SQL policy works without ALTER TABLE realtime.messages ENABLE RLS (Supabase already owns/enables it).
+31. Older Android client without private websocket retains existing B1/FCM/foreground behavior.
+32. Default, Slovenian, German connection text accurately communicates stale/offline/denied states.
+
+19. MANUAL ROLLOUT AND COMPATIBILITY
+------------------------------------
+OWNER ONLY:
+1. Review latest PR diff; confirm exact prerequisites #82/#83 and database migration history.
+2. If approved, manually MERGE one PR (Codex must never do this).
+3. Manually apply only unapplied forward SQL migration(s), in dependency order, through the established SQL editor/process. Git merging does NOT apply SQL.
+4. Manually review Supabase Realtime project settings; private RLS must be enforceable. If disabling public access changes legacy unrelated channels, assess impact rather than blindly toggling settings.
+5. Human deploys compatible Web app only when SQL policies/producer exist.
+6. Human exports Android Room schema/builds/releases if actual Android source changes require it. Any dependency approval is separate.
+7. Run manual TRAINING incident pilot: one Web commander and two authorized phones, role changes, revoked memberships, reconnect and radio fallback. Never use REAL dispatch as a test.
+8. If Realtime is down, restore bounded polling, investigate policy/producer without deleting canonical incident data.
+9. Production readiness is not asserted by PR source review or HTTP status alone.
+Document exact migration name, compatibility, rollback/forward-fix plan and absence of runtime evidence.
+
+20. DOCUMENTATION AND OUTPUT CONTRACT
+--------------------------------------
+Create `docs/M14.7B2-secure-private-realtime.md` with:
+- actual current source and dependency inventory;
+- exact public SQL policy/authorization helper names/signatures, relevant grants;
+- topic grammar and parsed authorization flow;
+- producer trigger and exact transaction semantics, audience derivation;
+- JSON schema and max payload, revision/timeline string rules;
+- Web channel lifecycle, reconnect, teardown, B1 catchup and status;
+- Android compile-available support yes/no, exact reason and any future owner-approved dependency;
+- FCM/WorkManager fallback, lease and Room safeguards;
+- security matrix, cached RLS revocation limitations;
+- supported and unsupported behavior and manual acceptance matrix;
+- SQL migration/runbook and owner-only rollout.
+Update `docs/SPEC-M14-INCIDENT-OPERATIONS.md` milestone note to state only what the code ACTUALLY implements; no false validation.
+Report in final Codex response:
+(1) PR URL and head SHA;
+(2) main base SHA and upstream verification;
+(3) file inventory;
+(4) SQL policy/helper names and sender trigger exact logic;
+(5) Web supported path and auth lifecycle;
+(6) Android SDK/module status and exact limitation/owner authorization needed;
+(7) fallback handling and revocation limitation;
+(8) migrations and manual rollout sequence;
+(9) at least 15 key manual scenarios;
+(10) no tests/build/lint/typecheck/SQL/CI/runtime/deploy executed;
+(11) explicit NOT VERIFIED IN PRODUCTION / NOT MERGED.
+STOP after creating the single PR.
+
+==============================================================================
+AUTHORITATIVE ONLINE REFERENCES — CHECK CURRENT DOCS, DO NOT GUESS API
+==============================================================================
+Supabase Realtime authorization / realtime.messages RLS:
+https://supabase.com/docs/guides/realtime/authorization
+
+Supabase Broadcast and database `realtime.send`:
+https://supabase.com/docs/guides/realtime/broadcast
+
+Supabase database change delivery and Broadcast vs Postgres Changes:
+https://supabase.com/docs/guides/realtime/subscribing-to-database-changes
+
+Supabase JS Realtime setAuth:
+https://supabase.com/docs/reference/javascript/setauth
+
+Supabase Kotlin module installation (`realtime-kt` is a separate module):
+https://supabase.com/docs/reference/kotlin/installing
+
+Do not mistake examples using broad `USING(true)` for acceptable incident privacy RLS.
+Do not mistake this prompt for permission to modify Gradle, enable a Supabase dashboard setting, run SQL, or merge. 
