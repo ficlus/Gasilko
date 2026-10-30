@@ -187,7 +187,7 @@ export function IncidentLiveProvider({account,org,incidentId,read,onInvalidate,o
    }
   }
   const visible=()=>{if(deniedScope.current)return;if(document.visibilityState==='visible'){backoff=8000;dirty=false;void connect();hintRefresh();}else{clearTimeout(timer);closeChannel();controller?.abort();setStatus('STALE');}};
-  const online=()=>{backoff=8000;void connect();hintRefresh();};
+  const online=()=>{backoff=8000;dirty=false;void connect();hintRefresh();};
   const offline=()=>{if(deniedScope.current)return;clearTimeout(timer);closeChannel();controller?.abort();setStatus('OFFLINE');};
   void connect();void refresh();document.addEventListener('visibilitychange',visible);window.addEventListener('online',online);window.addEventListener('offline',offline);
   return()=>{disposed=true;closeChannel();clearTimeout(authTimer);auth?.data.subscription.unsubscribe();clearTimeout(timer);controller?.abort();document.removeEventListener('visibilitychange',visible);window.removeEventListener('online',online);window.removeEventListener('offline',offline);};

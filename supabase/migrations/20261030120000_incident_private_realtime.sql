@@ -38,10 +38,13 @@ create function private.incident_realtime_emit() returns trigger
 language plpgsql security definer set search_path='' set lock_timeout='100ms' as $emit_hint$
 declare v_i record;v_org record;v_payload jsonb;v_count integer:=0;
 begin
- -- Deferred: emit only the final sequence of this transaction, not every event.
+ -- Deferred: both counters identify the final aggregate state. With canonical
+ -- monotonic counters only the last advancing update can match; revision-only
+ -- writes are covered without a second producer or transaction marker.
  select i.id,i.revision,i.timeline_sequence,i.status,i.created_organization_id into v_i
  from public.incidents i where i.id=new.id;
- if not found or v_i.timeline_sequence<>new.timeline_sequence then return new;end if;
+ if not found or v_i.revision<>new.revision
+ or v_i.timeline_sequence<>new.timeline_sequence then return new;end if;
  v_payload:=jsonb_build_object('incident_id',v_i.id,'revision',v_i.revision::text,'timeline_sequence',v_i.timeline_sequence::text);
  if octet_length(v_payload::text)>512 then return new;end if;
  for v_org in select o.id from public.organizations o where o.active and (
@@ -64,5 +67,5 @@ end;
 $emit_hint$;
 revoke all on function private.incident_realtime_emit() from public,anon,authenticated,service_role;
 create constraint trigger incident_private_hint after update on public.incidents
- deferrable initially deferred for each row when(old.timeline_sequence is distinct from new.timeline_sequence)
+ deferrable initially deferred for each row when(new.revision>old.revision or new.timeline_sequence>old.timeline_sequence)
  execute function private.incident_realtime_emit();

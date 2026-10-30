@@ -3015,3 +3015,13 @@ transport requires separate owner dependency approval. Room 16, B1 atomic
 reconciliation, offline queue and lease behavior are preserved.
 See [B2 contracts and manual scenarios](M14.7B2-secure-private-realtime.md).
 No tests/builds/SQL/runtime/deployments were performed; readiness is unverified.
+
+
+M14.7B2 follow-up: the single optional deferred producer covers positive revision
+advancement as well as timeline sequence advancement. It compares both counters
+against the final row, coalescing canonical monotonic multi-update transactions
+under normal deferred execution. B1 revision-only fallback remains independent.
+Forced immediate constraints may create duplicate transactional hints; transport
+delivery is not exactly-once. Web deduplicates/coalesces and rechecks authority.
+An online dirty-flag scheduling fix preserves catch-up after offline hints.
+No Android WebSocket dependency or runtime verification is added.
