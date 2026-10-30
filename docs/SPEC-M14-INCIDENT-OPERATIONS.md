@@ -3089,3 +3089,25 @@ unit observation API is invented.
 See [M14.8B capability matrix, implementation and unexecuted62 acceptance checks](M14.8B-android-unit-leader-command.md).
 Migration `20261030180000_android_unit_leadership.sql` is authored, NOT APPLIED.
 Implementation only; no tests/build/CI/SQL/runtime/deployment/merge performed.
+
+
+### M14.8C1 — Android incident map and target navigation (source implementation)
+
+Extends the existing MapView/lifecycle with actor-scoped field map layers, immutable
+assignment targets, exact referenced context, collision-only grouping and a
+bounded selection card/list. Registry/incident permissions remain separate;
+units without genuine authorized positions are listed without invented markers.
+Room16 and existing B1/WorkManager/queues remain; no GPS upload or map-triggered
+task/incident/unit mutation.
+
+Forward migration `20261030200000_incident_field_map.sql` enriches the private
+field projector and existing directory with bounded context and a separate
+NAV session DATA watermark. The authorization fingerprint/retention semantics
+are unchanged. Known route-only denial clears routes, not tasks/cursors/evidence.
+Existing permitted manual-origin stored routes are read-only; route creation,
+maneuvers and protected SIM routes are not implemented. Point targets support
+explicit coordinate-only external handoff; areas never gain a synthetic destination.
+
+See [M14.8C1 contracts, limitations, rollout and70 unexecuted human checks](M14.8C1-android-incident-map-task-navigation.md).
+Missing backend capability gates the new map. Owner deferred SQL82–87 and this
+migration; no tests/build/CI/SQL/runtime/deployment/merge performed.

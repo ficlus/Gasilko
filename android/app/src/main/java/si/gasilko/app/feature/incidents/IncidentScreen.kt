@@ -3,6 +3,9 @@ package si.gasilko.app.feature.incidents
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -20,7 +23,6 @@ import kotlinx.serialization.json.*
 import si.gasilko.app.R
 import si.gasilko.app.core.ui.*
 import si.gasilko.app.feature.hydrants.presentation.HydrantViewModel
-import si.gasilko.app.feature.map.MapScreen
 import si.gasilko.app.feature.map.domain.GeoPoint
 import java.util.UUID
 import java.text.DateFormat
@@ -87,10 +89,13 @@ fun IncidentScreen(model: IncidentViewModel,registry: HydrantViewModel,organizat
     var commandUnit by remember(model,navigationEvent,incidentId) { mutableStateOf<String?>(null) }
     var messages by remember(model,navigationEvent,incidentId) { mutableStateOf(false) }
     var evidence by remember(model,navigationEvent,incidentId) { mutableStateOf<EvidenceTarget?>(null) }
-    var target by remember(model,navigationEvent,incidentId,assignmentId) { mutableStateOf<GeoPoint?>(null) }
+    var incidentMap by remember(model,navigationEvent,incidentId) { mutableStateOf(false) }
+    var mapAssignment by remember(model,navigationEvent,incidentId) { mutableStateOf<String?>(null) }
+    val mapStates=rememberSaveableStateHolder()
+    val assignmentScroll=rememberSaveable(model,incidentId,assignmentId,saver=LazyListState.Saver){LazyListState()}
     val incident=data.incidents.find { it.text("id")==incidentId }
     val assignment=incident?.rows("assignments")?.find { it.text("id")==assignmentId }
-    fun close() { when { evidence!=null->evidence=null;messages->messages=false;target!=null->target=null;issue->issue=false;assignmentId!=null->assignmentId=null;commandUnit!=null->commandUnit=null;incidentId!=null->incidentId=null;else->back() } }
+    fun close() { when { evidence!=null->evidence=null;messages->messages=false;incidentMap->incidentMap=false;issue->issue=false;assignmentId!=null->assignmentId=null;commandUnit!=null->commandUnit=null;incidentId!=null->incidentId=null;else->back() } }
     BackHandler(onBack=::close)
     if(data.locked) {
         Column(Modifier.fillMaxSize().padding(16.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
@@ -112,12 +117,11 @@ fun IncidentScreen(model: IncidentViewModel,registry: HydrantViewModel,organizat
         }
         return
     }
-    if(target!=null && incident!=null && (assignmentId==null || assignment!=null)) {
-        val query=remember(model.organization) { si.gasilko.app.feature.hydrants.domain.HydrantQuery(organization=model.organization) }
-        val flow=remember(query,registry) { registry.mapHydrants(query) }
-        val hydrants by flow.collectAsStateWithLifecycle(initialValue=si.gasilko.app.feature.hydrants.presentation.MapHydrantsState())
-        MapScreen(onBack={target=null},hydrants=hydrants.rows,onOpenHydrant=null,targetPoint=target,
-            dataLoading=hydrants.loading,dataError=hydrants.error,creationEnabled=false)
+    if(incidentMap && incident!=null) {
+        key(model,incidentId) { mapStates.SaveableStateProvider("map/"+model.repository.account+"/"+model.organization+"/"+incident.text("id")) {
+            IncidentMapScreen(model,registry,incident.text("id"),mapAssignment,
+                {id->assignmentId=id;incidentMap=false},{incidentMap=false})
+        } }
         return
     }
     val selectedUnit=incident?.rows("units")?.find { it.text("id")==commandUnit }
@@ -128,8 +132,11 @@ fun IncidentScreen(model: IncidentViewModel,registry: HydrantViewModel,organizat
         return
     }
     if(commandUnit!=null && incident!=null && assignment==null) {
-        UnitLeadershipScreen(model,incident.text("id"),commandUnit!!,{assignmentId=it},
-            {issue=true;model.loadCatalog()},{commandUnit=null;assignmentId=null;issue=false})
+        mapStates.SaveableStateProvider("unit/"+model.repository.account+"/"+model.organization+"/"+incident.text("id")+"/"+commandUnit) {
+            UnitLeadershipScreen(model,incident.text("id"),commandUnit!!,{assignmentId=it},
+                {issue=true;model.loadCatalog()},{id->mapAssignment=id;incidentMap=true},
+                {commandUnit=null;assignmentId=null;issue=false})
+        }
         return
     }
     Column(Modifier.fillMaxSize().padding(horizontal=16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
@@ -181,7 +188,7 @@ fun IncidentScreen(model: IncidentViewModel,registry: HydrantViewModel,organizat
             val effective=pending?.let { parse(it.operation.payload).obj("payload").text("status") } ?: assignment.text("status")
             var desired by remember(model,navigationEvent,incidentId,assignmentId) { mutableStateOf<String?>(null) }
             var reason by remember(desired) { mutableStateOf("") }
-            LazyColumn(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(12.dp)) {
+            LazyColumn(Modifier.weight(1f),state=assignmentScroll,verticalArrangement=Arrangement.spacedBy(12.dp)) {
                 item { Text(incident.text("title"));Text(label(config),style=MaterialTheme.typography.headlineSmall)
                     Text(task.text("title"));Text(task.text("notes"))
                     TextButton(onClick={evidence=EvidenceTarget("TASK",task.text("id"))}) { Text(stringResource(R.string.ev_title)) }
@@ -194,9 +201,7 @@ fun IncidentScreen(model: IncidentViewModel,registry: HydrantViewModel,organizat
                         Text(label(d)+": "+(task.obj("parameters")[d.text("code")]?.toString().orEmpty()))
                     }
                     Text(task.text("target_label_snapshot"))
-                    point(task.obj("target_geometry_snapshot"))?.let { p ->
-                        OutlinedButton(onClick={target=p}) { Text(stringResource(R.string.field_map)) }
-                    }
+                    OutlinedButton(onClick={mapAssignment=assignment.text("id");incidentMap=true}) { Text(stringResource(R.string.im_show_target)) }
                 }
                 items(operations,key={it.operation.operationId}) { op ->
                     Text(stringResource(R.string.field_recorded_action,stateName(parse(op.operation.payload).obj("payload").text("status"))))
@@ -236,8 +241,7 @@ fun IncidentScreen(model: IncidentViewModel,registry: HydrantViewModel,organizat
             FlowRow(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
                 FilterChip(selected=!unitTab,onClick={unitTab=false},label={Text(stringResource(R.string.field_orders))})
                 FilterChip(selected=unitTab,onClick={unitTab=true},label={Text(stringResource(R.string.field_unit))})
-                val lat=incident.text("latitude").toDoubleOrNull();val lon=incident.text("longitude").toDoubleOrNull()
-                if(lat!=null && lon!=null)TextButton(onClick={target=GeoPoint(lat,lon)}) { Text(stringResource(R.string.field_map)) }
+                TextButton(onClick={mapAssignment=null;incidentMap=true}) { Text(stringResource(R.string.field_map)) }
             }
             LazyColumn(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(12.dp),contentPadding=PaddingValues(bottom=24.dp)) {
                 if(unitTab) {

@@ -12,7 +12,8 @@ internal data class ReconciledField(val incidents: List<JsonObject>,val cursors:
 internal class IncidentReconciliation(
     private val account: String,private val org: String,
     private val call: suspend (String,JsonObject)->JsonObject,
-    private val revokeIncident: suspend (String)->Unit
+    private val revokeIncident: suspend (String)->Unit,
+    private val hideMapRoutes: suspend (String)->Unit = {}
 ) {
     private fun fail(code: String): Nothing=throw FieldProtocolFailure(code)
     private fun checkProtocol(value: Boolean) { if(!value)fail("PROTOCOL") }
@@ -181,17 +182,38 @@ internal class IncidentReconciliation(
         for(entry in entries) {
             val id=entry.text("id");val old=previous.find { it.text("id")==id }
             val cursor=saved.find { it.incident==id && it.account==account && it.organization==org }
-            val compatible=old!=null && old.text("leadership_schema")=="1" && !old.flag("leader_reset") && cursor!=null && cursor.schemaVersion==1 &&
+            val compatible=old!=null && old.text("leadership_schema")=="1" && old.obj("field_map").text("schema")=="1" && !old.flag("leader_reset") && cursor!=null && cursor.schemaVersion==1 &&
                 old.text("revision")==cursor.revision.toString() && entry.text("scope_fingerprint")==cursor.fingerprint
             // Missing/old protocol metadata is a data reset, not evidence of access loss.
             if(old!=null && cursor!=null && entry.text("scope_fingerprint")!=cursor.fingerprint)
                 revokeIncident(id)
+            if(entry["map_routes_allowed"]!=null && !entry.flag("map_routes_allowed") &&
+                old?.obj("field_map")?.rows("routes")?.isNotEmpty()==true)hideMapRoutes(id)
             try {
                 var pair=if(compatible)changes(id,old!!,cursor!!) else null
                 if(pair==null) {
                     pair=snapshot(id)
                     // Catch mutations after the pinned snapshot; bounded retries, no endless loop.
                     pair=changes(id,pair.first,pair.second) ?: snapshot(id)
+                }
+                // NAV session versions can advance without an incident timeline event.
+                // Reuse authoritative collection replacement only when its separate
+                // data watermark changes; never reinterpret it as scope revocation.
+                if(entry.text("map_source").length==32 && pair.first.obj("field_map").text("source")!=entry.text("map_source")) {
+                    val current=pair.second
+                    val mapRead=call("incident_field_entities",args(id) {
+                        put("p_scope_fingerprint",current.fingerprint);put("p_expected_revision",current.revision)
+                    })
+                    identity(mapRead,id)
+                    checkProtocol(mapRead.text("scope_fingerprint")==current.fingerprint &&
+                        number(mapRead.text("revision"))==current.revision)
+                    val row=mapRead.obj("payload")
+                    payload(row,id,current.revision,current.timelineSequence)
+                    pair=if(pair.first["attachment_pages"] is JsonObject)
+                        JsonObject(row+("attachment_pages" to pair.first.getValue("attachment_pages"))) to current else row to current
+                }
+                if(entry["map_routes_allowed"]!=null && !entry.flag("map_routes_allowed")) {
+                    pair=JsonObject(pair.first+("field_map" to JsonObject(pair.first.obj("field_map")+("routes" to JsonArray(emptyList()))))) to pair.second
                 }
                 if(cursor!=null)checkProtocol(pair.second.revision>=cursor.revision)
                 if(old!=null)for(kind in listOf("units","assignments")) {
@@ -235,6 +257,12 @@ internal class IncidentReconciliation(
                 revokeIncident(cursor.incident);fail("MANIFEST_SCOPE_CHANGED")
             }
         }
+        for(entry in final)if(entry["map_routes_allowed"]!=null && !entry.flag("map_routes_allowed")) {
+            val index=result.indexOfFirst {it.text("id")==entry.text("id")}
+            if(index>=0 && result[index].obj("field_map").rows("routes").isNotEmpty()) {
+                hideMapRoutes(entry.text("id"));fail("STALE")
+            }
+        }
         // Message visibility can depend on command scopes outside the field unit.
         for(index in result.indices) {
             val row=result[index]
@@ -248,7 +276,10 @@ internal class IncidentReconciliation(
         }
         if(result.sumOf { it.toString().toByteArray(Charsets.UTF_8).size.toLong() }>3_145_728)fail("SNAPSHOT_TOO_LARGE")
         val caughtUp=ids==finalIds && cursors.all { c ->
-            final.find { it.text("id")==c.incident }?.text("revision")==c.revision.toString()
+            final.find { it.text("id")==c.incident }?.let { head->
+                head.text("revision")==c.revision.toString() &&
+                (head.text("map_source").isEmpty() || result.find {it.text("id")==c.incident}?.obj("field_map")?.text("source")==head.text("map_source"))
+            }==true
         }
         return ReconciledField(result,cursors,caughtUp)
     }

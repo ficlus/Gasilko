@@ -114,6 +114,49 @@ class IncidentRepository(private val context: Context,private val client: Supaba
         dao.removeCursor(account,org,id)
         }
     }
+    /** Explicit external export gate: local lease/current projection, no RPC or mutation. */
+    suspend fun verifyMapHandoff(org: String,incident: String,kind: String,id: String,geometry: JsonObject,
+        revision: String,version: String)=hydrantRemoteAccess.withLock {
+        incidentIdentityAccess.withLock {
+            scope(org);currentCoroutineContext().ensureActive()
+            db.withTransaction {
+                val row=dao.snapshot(account,org)
+                require(lease(org,row)>0) { "NOT_AUTHORIZED" }
+                val i=parse(row!!.payload).rows("incidents").single {it.text("id")==incident}
+                require(!i.flag("leader_reset") && i.obj("field_map").text("schema")=="1" && i.text("revision")==revision)
+                require(mapPoint(geometry)!=null && id.startsWith(kind+"/"))
+                val uuid=id.removePrefix(kind+"/");require(canonicalUuid(uuid))
+                if(kind=="TASK_TARGET") {
+                    val t=i.rows("assignments").single {it.text("id")==uuid}.obj("task")
+                    require(t.obj("target_geometry_snapshot")==geometry && t.text("version")==version)
+                } else if(kind in listOf("REGISTRY_HYDRANT","INCIDENT_LINKED_HYDRANT")) {
+                    val hydrant=if(kind=="REGISTRY_HYDRANT")uuid else i.obj("field_map").rows("features")
+                        .single {it.text("kind")==kind && it.text("id")==uuid}.text("hydrant_id")
+                    val h=db.registry().get(account,org,hydrant)?.value ?: error("NOT_AUTHORIZED")
+                    require(h.active && h.version.toString()==version)
+                    val current=buildJsonObject {put("type","Point");put("coordinates",buildJsonArray {add(h.longitude!!);add(h.latitude!!)})}
+                    require(current==geometry)
+                } else {
+                    require(kind in listOf("INCIDENT_SECTOR","INCIDENT_MAP_OBJECT"))
+                    val f=i.obj("field_map").rows("features").single {it.text("kind")==kind && it.text("id")==uuid}
+                    require(f.obj("geometry")==geometry && f.text("version")==version)
+                }
+                scope(org);currentCoroutineContext().ensureActive()
+            }
+        }
+    }
+    /** Map-only route permission loss never erases field tasks/cursors/receipts. */
+    private suspend fun hideMapRoutes(org: String,id: String)=incidentIdentityAccess.withLock {
+        scope(org);currentCoroutineContext().ensureActive()
+        db.withTransaction {
+            val row=dao.snapshot(account,org) ?: return@withTransaction
+            val root=parse(row.payload)
+            dao.save(row.copy(payload=JsonObject(root+("incidents" to JsonArray(root.rows("incidents").map {i->
+                if(i.text("id")!=id)i else JsonObject(i+("field_map" to JsonObject(i.obj("field_map")+mapOf(
+                    "routes" to JsonArray(emptyList()),"routes_denied" to JsonPrimitive(true)))))
+            }))).toString()))
+        }
+    }
     private suspend fun invalidateMessages(org: String,id: String,reason: String) = incidentIdentityAccess.withLock {
         scope(org);currentCoroutineContext().ensureActive()
         val key="$account/$org/$id"
@@ -138,7 +181,7 @@ class IncidentRepository(private val context: Context,private val client: Supaba
             val reconciler=IncidentReconciliation(account,org,
                 { name,request -> if(name=="incident_message_page")messageRead(org,request.text("p_incident_id"),name,request)
                     else rpc(name,request).also { scope(org) } },
-                { id -> revokeIncident(org,id) })
+                { id -> revokeIncident(org,id) },{id->hideMapRoutes(org,id)})
             val staged=reconciler.reconcile(previous?.let { parse(it.payload).rows("incidents") }.orEmpty(),dao.cursors(account,org))
             scope(org)
             val payload=buildJsonObject {

@@ -4,6 +4,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
@@ -94,7 +95,7 @@ internal fun LeaderReview(model: IncidentViewModel,incident: JsonObject,unit: Js
 }
 @Composable
 internal fun UnitLeadershipScreen(model: IncidentViewModel,incidentId: String,unitId: String,
-    openAssignment: (String)->Unit,issue: ()->Unit,back: ()->Unit) {
+    openAssignment: (String)->Unit,issue: ()->Unit,openMap: (String?)->Unit,back: ()->Unit) {
     val data by model.state.collectAsStateWithLifecycle()
     val i=data.incidents.find { it.text("id")==incidentId }
     val unit=i?.rows("units")?.find { it.text("id")==unitId }
@@ -102,12 +103,12 @@ internal fun UnitLeadershipScreen(model: IncidentViewModel,incidentId: String,un
         Column(Modifier.padding(16.dp)) { TextButton(onClick=back){Text(stringResource(R.string.h_back))};FieldBanner(stringResource(R.string.field_locked),FieldTone.WARNING) }
         return
     }
-    key(model,incidentId,unitId,leaderStamp(unit)) { UnitLeadershipContent(model,data,i,unit,openAssignment,issue,back) }
+    key(model,incidentId,unitId,leaderStamp(unit)) { UnitLeadershipContent(model,data,i,unit,openAssignment,issue,openMap,back) }
 }
 @Composable
 @OptIn(ExperimentalLayoutApi::class)
 private fun UnitLeadershipContent(model: IncidentViewModel,data: IncidentFieldState,incident: JsonObject,unit: JsonObject,
-    openAssignment: (String)->Unit,issue: ()->Unit,back: ()->Unit) {
+    openAssignment: (String)->Unit,issue: ()->Unit,openMap: (String?)->Unit,back: ()->Unit) {
     val busy by model.busy.collectAsStateWithLifecycle()
     val stale by model.stale.collectAsStateWithLifecycle()
     val syncFailure by model.syncFailure.collectAsStateWithLifecycle()
@@ -123,6 +124,7 @@ private fun UnitLeadershipContent(model: IncidentViewModel,data: IncidentFieldSt
     var review by remember { mutableStateOf<String?>(null) }
     val alive=remember { booleanArrayOf(true) }
     DisposableEffect(Unit) { onDispose { alive[0]=false } }
+    val listState=rememberLazyListState()
     val tasks=unitAssignments(incident,unit.text("id"))
     val ops=data.operations.filter { op->val body=parse(op.operation.payload)
         body.text("incident")==incident.text("id") && body.text("rpc") in leaderRpcs &&
@@ -154,7 +156,8 @@ private fun UnitLeadershipContent(model: IncidentViewModel,data: IncidentFieldSt
         if(busy)LinearProgressIndicator(Modifier.fillMaxWidth())
         error?.let { FieldBanner(leaderErrorText(it),FieldTone.WARNING) }
         TextButton(onClick=model::sync,enabled=!busy){Text(stringResource(R.string.h_sync_now))}
-        LazyColumn(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(12.dp)) {
+        TextButton(onClick={openMap(null)}){Text(stringResource(R.string.field_map))}
+        LazyColumn(Modifier.weight(1f),state=listState,verticalArrangement=Arrangement.spacedBy(12.dp)) {
             item { OperationalCard {
                 SectionHeading(stringResource(R.string.ul_status))
                 Text(leaderStatus(unit.text("status")));Text(unit.text("status_changed_at"))
@@ -220,6 +223,7 @@ private fun UnitLeadershipContent(model: IncidentViewModel,data: IncidentFieldSt
                 Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
                     Text(label(a.obj("task").obj("configuration")));Text(a.obj("task").text("title"));Text(a.text("recipient_name"))
                     Text(a.obj("task").text("target_label_snapshot"));Text(a.obj("task").text("issuer_name"))
+                    TextButton(onClick={openMap(a.text("id"))}){Text(stringResource(R.string.im_show_target))}
                     StatusBadge(leaderStatus(a.text("status")),FieldTone.INFO)
                     if(a.text("status")=="BLOCKED")Text(a.text("blocked_reason"))
                     if(a.text("status")=="UNABLE")Text(a.text("unable_reason"))
