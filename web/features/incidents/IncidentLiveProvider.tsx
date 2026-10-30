@@ -1,11 +1,13 @@
 'use client';
 import {createContext,useCallback,useContext,useEffect,useRef,useState,type ReactNode} from 'react';
+import {browserClient} from '../../lib/supabase/browser';
+import type {RealtimeChannel} from '@supabase/supabase-js';
 import type {Incident,Timeline} from '../../lib/incidents/model';
 import type {TaskRead} from '../../lib/operational/tasks';
 
 export type IncidentLiveDomain='INCIDENT'|'COP'|'TASKS'|'RESOURCES'|'NAVIGATION'|'SIMULATION'|'AGENTS'|'TIMELINE';
 export type IncidentLiveNotification={id:string;eventCode:string;priority:'INFO'|'WARNING'|'CRITICAL';createdAt:string;entity?:{kind:'MAP_OBJECT'|'TASK'|'INCIDENT_UNIT';id:string};};
-type Status='CONNECTING'|'LIVE'|'REFRESHING'|'OFFLINE'|'STALE'|'ACCESS_LOST';
+type Status='CONNECTING'|'LIVE'|'REFRESHING'|'OFFLINE'|'STALE'|'ACCESS_LOST'|'POLLING';
 type FastRefresh=(signal:AbortSignal)=>Promise<void>;
 type Live={bindFastRefresh:(refresh:FastRefresh)=>()=>void;status:Status;lastSuccess:number|null;notifications:IncidentLiveNotification[];unread:number;lowPriorityToasts:boolean;requestRefresh:()=>void;markSeen:()=>void;dismiss:(id:string)=>void;setLowPriorityToasts:(value:boolean)=>void;};
 const Context=createContext<Live|null>(null);
@@ -62,6 +64,66 @@ export function IncidentLiveProvider({account,org,incidentId,read,onInvalidate,o
   const nextScope=account+':'+org+':'+incidentId;
   if(scope.current!==nextScope){deniedScope.current=false;scope.current=nextScope;revision.current=null;cursor.current=null;simCursor.current=null;successful.current=false;setNotifications([]);setUnread(0);setLastSuccess(null);}
   let disposed=false,denied=false,inFlight=false,backoff=8000,timer:ReturnType<typeof setTimeout>|undefined,controller:AbortController|null=null;
+  const client=browserClient();
+  let channel:RealtimeChannel|null=null,joined=false,joinGeneration=0,retry=1000,dirty=false;
+  let reconnectTimer:ReturnType<typeof setTimeout>|undefined,authTimer:ReturnType<typeof setTimeout>|undefined;
+  let hintedRevision=0n,hintedSequence=0n,confirmedRevision=0n,confirmedSequence=0n;
+  const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+  const decimal=(v:unknown):v is string=>typeof v==='string'&&/^(0|[1-9][0-9]{0,18})$/.test(v)&&BigInt(v)<=9223372036854775807n;
+  function closeChannel(){
+   joinGeneration++;joined=false;clearTimeout(reconnectTimer);
+   const old=channel;channel=null;if(old&&client)void client.removeChannel(old).catch(()=>{});
+  }
+  function hintRefresh(){
+   if(disposed||deniedScope.current||denied)return;
+   const queued=dirty;dirty=true;if(!inFlight&&!queued)schedule(750);
+  }
+  async function connect(){
+   closeChannel();const generation=joinGeneration;
+   if(!client||disposed||deniedScope.current||denied||document.visibilityState!=='visible'||!navigator.onLine)return;
+   try{
+    const {data,error}=await client.auth.getSession();
+    if(disposed||generation!==joinGeneration)return;
+    if(error||!data.session){setStatus('STALE');schedule(0);return;}
+    if(data.session.user.id!==account){denyAccess();return;}
+    await client.realtime.setAuth(data.session.access_token);
+    if(disposed||generation!==joinGeneration)return;
+    if(!uuid.test(incidentId)||!uuid.test(org))return;
+    channel=client.channel('incident:'+incidentId+':org:'+org,{config:{private:true}});
+    channel.on('broadcast',{event:'incident_changed'},({payload})=>{
+     if(disposed||generation!==joinGeneration||deniedScope.current)return;
+     if(!payload||typeof payload!=='object'||Array.isArray(payload)||Object.keys(payload).sort().join(',')!=='incident_id,revision,timeline_sequence')return;
+     if(JSON.stringify(payload).length>512||payload.incident_id!==incidentId||!decimal(payload.revision)||!decimal(payload.timeline_sequence))return;
+     const r=BigInt(payload.revision),t=BigInt(payload.timeline_sequence);
+     if(r<=confirmedRevision&&t<=confirmedSequence)return;
+     if(r<=hintedRevision&&t<=hintedSequence)return;
+     hintedRevision=r>hintedRevision?r:hintedRevision;hintedSequence=t>hintedSequence?t:hintedSequence;
+     hintRefresh();
+    }).subscribe(state=>{
+     if(disposed||generation!==joinGeneration||deniedScope.current)return;
+     if(state==='SUBSCRIBED'){joined=true;setStatus('REFRESHING');hintRefresh();}
+     else if(state==='CHANNEL_ERROR'||state==='TIMED_OUT'||state==='CLOSED'){
+      closeChannel();setStatus(navigator.onLine?'STALE':'OFFLINE');hintRefresh();
+      if(document.visibilityState==='visible'&&navigator.onLine){
+       const wait=Math.min(30000,retry+Math.floor(Math.random()*Math.min(retry,1000)));retry=Math.min(30000,retry*2);
+       reconnectTimer=setTimeout(()=>void connect(),wait);
+      }
+     }
+    });
+   }catch{if(!disposed&&generation===joinGeneration){setStatus('STALE');hintRefresh();
+    reconnectTimer=setTimeout(()=>void connect(),Math.min(30000,retry));retry=Math.min(30000,retry*2);}}
+  }
+  function denyAccess(){
+   deniedScope.current=true;denied=true;closeChannel();clearTimeout(authTimer);
+   controller?.abort();setStatus('ACCESS_LOST');setNotifications([]);setUnread(0);latest.current.onAccessLost();
+  }
+  const auth=client?.auth.onAuthStateChange((event,session)=>{
+   if(disposed)return;
+   if(event==='SIGNED_OUT'||(session&&session.user.id!==account)){denyAccess();return;}
+   if(event==='TOKEN_REFRESHED'||event==='SIGNED_IN'){
+    closeChannel();clearTimeout(authTimer);authTimer=setTimeout(()=>{void connect();hintRefresh();},0);
+   }
+  });
   const schedule=(ms:number)=>{clearTimeout(timer);if(!disposed&&!denied)timer=setTimeout(()=>void refresh(),ms);};
   async function deriveNotifications(signal:AbortSignal){
    // Start at the initial authorized snapshot, then consume bounded forward pages.
@@ -82,13 +144,16 @@ export function IncidentLiveProvider({account,org,incidentId,read,onInvalidate,o
    clearTimeout(timer);
    if(disposed||deniedScope.current||denied||inFlight||document.visibilityState!=='visible')return;
    if(!navigator.onLine){setStatus('OFFLINE');return;}
-   inFlight=true;controller=new AbortController();const signal=controller.signal;
+   dirty=false;inFlight=true;controller=new AbortController();const signal=controller.signal;
    const timeout=setTimeout(()=>controller?.abort(),15000);
    setStatus(successful.current?'REFRESHING':'CONNECTING');
    try{
     const snapshot=await read<Pick<Incident,'id'|'version'|'revision'|'timeline_sequence'|'training'>&{scope_fingerprint:string}|null>('incident_sync_head',{p_acting_organization_id:org,p_incident_id:incidentId},signal,account);
     if(disposed||deniedScope.current||signal.aborted)return;
     if(!snapshot)throw new Error('NOT_AUTHORIZED');
+    if(!decimal(snapshot.revision)||!decimal(snapshot.timeline_sequence))throw new Error('SCHEMA_MISMATCH');
+    if(BigInt(snapshot.revision)<confirmedRevision||BigInt(snapshot.timeline_sequence)<confirmedSequence)throw new Error('STALE');
+    confirmedRevision=BigInt(snapshot.revision);confirmedSequence=BigInt(snapshot.timeline_sequence);
     const next=[snapshot.version,snapshot.revision,snapshot.timeline_sequence,snapshot.scope_fingerprint].join(':');
     const changed=revision.current!==null&&revision.current!==next;revision.current=next;
     if(cursor.current===null)cursor.current=String(snapshot.timeline_sequence);
@@ -107,23 +172,26 @@ export function IncidentLiveProvider({account,org,incidentId,read,onInvalidate,o
      }
     }
     if(disposed||deniedScope.current||signal.aborted)return;
-    successful.current=true;setStatus('LIVE');backoff=8000;
+    successful.current=true;
+    const caughtUp=confirmedRevision>=hintedRevision&&confirmedSequence>=hintedSequence;
+    setStatus(caughtUp?(joined?'LIVE':'POLLING'):'STALE');backoff=8000;
+    if(joined&&caughtUp)retry=1000;
    }catch(error){
     if(disposed||deniedScope.current)return;
     const code=error instanceof Error?error.message:'SERVER';
-    if(code==='NOT_AUTHORIZED'||code==='EXPIRED'){deniedScope.current=true;denied=true;setStatus('ACCESS_LOST');setNotifications([]);setUnread(0);latest.current.onAccessLost();return;}
+    if(code==='NOT_AUTHORIZED'||code==='EXPIRED'){denyAccess();return;}
     setStatus(navigator.onLine?'STALE':'OFFLINE');backoff=Math.min(30000,backoff*2);
    }finally{
     clearTimeout(timeout);inFlight=false;
-    if(!disposed&&!deniedScope.current&&!denied){if(signal.aborted)setStatus(navigator.onLine?'STALE':'OFFLINE');if(document.visibilityState==='visible'&&navigator.onLine)schedule(backoff);}
+    if(!disposed&&!deniedScope.current&&!denied){if(signal.aborted)setStatus(navigator.onLine?'STALE':'OFFLINE');if(document.visibilityState==='visible'&&navigator.onLine)schedule(dirty?1500:backoff);}
    }
   }
-  const visible=()=>{if(deniedScope.current)return;if(document.visibilityState==='visible'){backoff=8000;void refresh();}else{clearTimeout(timer);controller?.abort();setStatus('STALE');}};
-  const online=()=>{backoff=8000;void refresh();};
-  const offline=()=>{if(deniedScope.current)return;clearTimeout(timer);controller?.abort();setStatus('OFFLINE');};
-  void refresh();document.addEventListener('visibilitychange',visible);window.addEventListener('online',online);window.addEventListener('offline',offline);
-  return()=>{disposed=true;clearTimeout(timer);controller?.abort();document.removeEventListener('visibilitychange',visible);window.removeEventListener('online',online);window.removeEventListener('offline',offline);};
- },[account,org,incidentId,read,epoch]);
+  const visible=()=>{if(deniedScope.current)return;if(document.visibilityState==='visible'){backoff=8000;dirty=false;void connect();hintRefresh();}else{clearTimeout(timer);closeChannel();controller?.abort();setStatus('STALE');}};
+  const online=()=>{backoff=8000;void connect();hintRefresh();};
+  const offline=()=>{if(deniedScope.current)return;clearTimeout(timer);closeChannel();controller?.abort();setStatus('OFFLINE');};
+  void connect();void refresh();document.addEventListener('visibilitychange',visible);window.addEventListener('online',online);window.addEventListener('offline',offline);
+  return()=>{disposed=true;closeChannel();clearTimeout(authTimer);auth?.data.subscription.unsubscribe();clearTimeout(timer);controller?.abort();document.removeEventListener('visibilitychange',visible);window.removeEventListener('online',online);window.removeEventListener('offline',offline);};
+ },[account,org,incidentId,read,epoch,status==='ACCESS_LOST']);
  const value:Live={bindFastRefresh,status,lastSuccess,notifications,unread,lowPriorityToasts,requestRefresh:()=>setEpoch(value=>value+1),markSeen:()=>setUnread(0),dismiss:id=>setNotifications(current=>current.filter(note=>note.id!==id)),setLowPriorityToasts};
  return <Context.Provider value={value}>{children}</Context.Provider>;
 }
