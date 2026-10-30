@@ -3069,3 +3069,23 @@ not survive tab closure; standard upload retries restart the same immutable
 object transfer. No tests/build/SQL/runtime/deployment/merge performed. No new
 Gradle/npm dependency, Room schema version, worker, Cron, notification channel or
 command authority.
+
+### M14.8B — Android own-unit command and scoped resources (source implementation)
+
+The existing IncidentScreen now provides an exact own-unit leadership dashboard,
+current/LEFT crew episodes, per-assignment supervision, online crew join/eligible
+leave, existing unit RETURNING and attached resource transitions. All writes
+reuse canonical M14.4/M14.5 RPCs; reviewed proposals/unknown receipts reuse Room16
+dispatch and remain excluded from background command issuance.
+
+A narrow private B1 projector extension carries current effective leader/version,
+scoped crew/resource capabilities and recipient-private reasons under existing
+snapshot revision/scope. No broad inventory/other-unit read, new role grant,
+queue, worker, Android WebSocket dependency or Room migration.
+Current leader's terminal unit transitions remain blocked by existing active
+command/resource/task guards. SIM stock mutation remains prohibited; no offline
+unit observation API is invented.
+
+See [M14.8B capability matrix, implementation and unexecuted62 acceptance checks](M14.8B-android-unit-leader-command.md).
+Migration `20261030180000_android_unit_leadership.sql` is authored, NOT APPLIED.
+Implementation only; no tests/build/CI/SQL/runtime/deployment/merge performed.

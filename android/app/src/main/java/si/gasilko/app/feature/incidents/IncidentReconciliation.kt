@@ -25,11 +25,20 @@ internal class IncidentReconciliation(
             row.text("schema_version")=="1" && (id==null || row.text("incident_id")==id))
     }
     private fun payload(row: JsonObject,id: String,revision: Long,sequence: Long) {
+        checkProtocol(row.text("leadership_schema")=="1")
         checkProtocol(row.text("id")==id && number(row.text("revision"))==revision &&
             number(row.text("timeline_sequence"))==sequence &&
             row["units"] is JsonArray && row["assignments"] is JsonArray && row["history"] is JsonArray)
         checkProtocol(row.rows("units").size<=100 && row.rows("assignments").size<=1000 && row.rows("history").size<=100)
         checkProtocol(row.toString().toByteArray(Charsets.UTF_8).size<=3_145_728)
+        for(u in row.rows("units")) {
+            checkProtocol(u.text("organization_id")==org && u.rows("crew").size<=100 &&
+                u.rows("crew_history").size<=30 && u.rows("resources").size<=230)
+            if(u.flag("leader"))checkProtocol(canonicalUuid(u.obj("leader_assignment").text("id")) &&
+                number(u.obj("leader_assignment").text("version"))>0)
+            for(r in u.rows("resources"))checkProtocol(r.text("unit_assignment_id")==u.text("id") &&
+                r.text("organization_id")==org && canonicalUuid(r.text("id")) && number(r.text("version"))>0)
+        }
         for(kind in listOf("units","assignments")) {
             val rows=row.rows(kind)
             checkProtocol(rows.size==(row[kind] as JsonArray).size && rows.all { canonicalUuid(it.text("id")) && number(it.text("version"))>0 } &&
@@ -172,7 +181,7 @@ internal class IncidentReconciliation(
         for(entry in entries) {
             val id=entry.text("id");val old=previous.find { it.text("id")==id }
             val cursor=saved.find { it.incident==id && it.account==account && it.organization==org }
-            val compatible=old!=null && cursor!=null && cursor.schemaVersion==1 &&
+            val compatible=old!=null && old.text("leadership_schema")=="1" && !old.flag("leader_reset") && cursor!=null && cursor.schemaVersion==1 &&
                 old.text("revision")==cursor.revision.toString() && entry.text("scope_fingerprint")==cursor.fingerprint
             // Missing/old protocol metadata is a data reset, not evidence of access loss.
             if(old!=null && cursor!=null && entry.text("scope_fingerprint")!=cursor.fingerprint)

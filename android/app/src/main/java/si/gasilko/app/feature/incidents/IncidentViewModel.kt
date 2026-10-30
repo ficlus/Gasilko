@@ -11,6 +11,8 @@ class IncidentViewModel(val repository: IncidentRepository,val organization: Str
     val state=repository.observe(organization).stateIn(scope,SharingStarted.WhileSubscribed(5_000),IncidentFieldState())
     private val working=MutableStateFlow(false)
     val busy=working.asStateFlow()
+    private val commandFailure=MutableStateFlow<String?>(null)
+    val commandError=commandFailure.asStateFlow()
     private val failed=MutableStateFlow(false)
     val error=failed.asStateFlow()
     private val offline=MutableStateFlow(false)
@@ -30,10 +32,10 @@ class IncidentViewModel(val repository: IncidentRepository,val organization: Str
     }
     private fun action(block: suspend ()->Unit) {
         if(working.value)return
-        working.value=true;failed.value=false
+        working.value=true;failed.value=false;commandFailure.value=null
         scope.launch {
             try { block() } catch(e: CancellationException) { throw e }
-            catch(_: Exception) { failed.value=true }
+            catch(e: Exception) { failed.value=true;commandFailure.value=leaderError(e.message) }
             finally { working.value=false }
         }
     }
@@ -47,5 +49,17 @@ class IncidentViewModel(val repository: IncidentRepository,val organization: Str
     fun loadCatalog()=action { definitions.value=repository.catalog(organization) }
     fun issue(incident: String,operation: String,payload: JsonObject,done: ()->Unit)=action {
         if(repository.issue(organization,incident,operation,payload))done() else failed.value=true
+    }
+
+    fun prepareLeader(incident: String,unit: String,rpc: String,operation: String,payload: JsonObject,candidateQuery: String="",done: (String)->Unit)=action {
+        done(repository.prepareLeader(organization,incident,unit,rpc,operation,payload,candidateQuery))
+    }
+    fun confirmLeader(incident: String,unit: String,operation: String,done: ()->Unit={})=action {
+        val result=repository.confirmLeader(organization,incident,unit,operation)
+        if(result.operation.state=="SERVER_CONFIRMED")done()
+        else { failed.value=true;commandFailure.value=result.error ?: result.operation.state }
+    }
+    fun searchCrew(incident: String,unit: String,query: String,done: (List<JsonObject>)->Unit)=action {
+        done(repository.crewCandidates(organization,incident,unit,query))
     }
 }
