@@ -54,6 +54,18 @@ internal fun IncidentMessagesScreen(model: IncidentViewModel,incident: JsonObjec
             catch(_: Exception) { error=true } finally { busy=false } }
     }
     BackHandler(onBack=back)
+    if(incident["message_page"] !is JsonObject || (target.isNotEmpty() && !available && body.isNotEmpty())) {
+        Column(Modifier.fillMaxSize().padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
+            TextButton(onClick=back) { Text(stringResource(R.string.h_back)) }
+            ScreenHeading(stringResource(R.string.mc_title))
+            FieldBanner(stringResource(R.string.mc_message_hidden),FieldTone.WARNING)
+            if(incident["message_page"] is JsonObject)TextButton(onClick={
+                operation=UUID.randomUUID().toString();target=JsonObject(emptyMap());body="";parent=null;history=null;confirm=false
+            }) { Text(stringResource(R.string.mc_new_draft)) }
+            TextButton(onClick=model::sync) { Text(stringResource(R.string.h_sync_now)) }
+        }
+        return
+    }
     Column(Modifier.fillMaxSize().padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
         TextButton(onClick=back) { Text(stringResource(R.string.h_back)) }
         ScreenHeading(stringResource(R.string.mc_title));Text(incident.text("reference")+" · "+incident.text("title"))

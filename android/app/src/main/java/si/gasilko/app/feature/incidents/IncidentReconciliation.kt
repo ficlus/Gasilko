@@ -44,6 +44,24 @@ internal class IncidentReconciliation(
             rows.all { canonicalUuid(it.text("id")) && it.text("scope_fingerprint").length==32 })
         return rows
     }
+    private suspend fun messageHead(id: String,revision: String,fingerprint: String?,limit: Int=30): JsonObject? {
+        for(attempt in 0..1) {
+            try {
+                val page=call("incident_message_page",args(id) {
+                    put("p_expected_revision",revision);put("p_limit",if(attempt==0)limit else 30)
+                    if(attempt==0 && !fingerprint.isNullOrEmpty())put("p_scope_fingerprint",fingerprint)
+                })
+                identity(page,id)
+                checkProtocol(page.text("revision")==revision && page["messages"] is JsonArray &&
+                    page.rows("messages").size<=(if(attempt==0)limit else 30))
+                return if(attempt==0)page else JsonObject(page+("_scope_refreshed" to JsonPrimitive(true)))
+            } catch(e: MessageAccessFailure) {
+                if(e.reason=="SCOPE_CHANGED" && attempt==0)continue
+                return null // Message-only denial: the field projection is still independently authorized.
+            }
+        }
+        return null
+    }
     private suspend fun snapshot(id: String): Pair<JsonObject,IncidentSyncCursor> {
         // One bounded restart for manifest expiry; never mix pages from attempts.
         for(attempt in 0..1) {
@@ -174,25 +192,23 @@ internal class IncidentReconciliation(
                     })
                 }
                 if(pair.first.text("status") in listOf("ACTIVE","STABILIZED")) {
-                    val messages=call("incident_message_page",args(id) {
-                        put("p_expected_revision",pair.second.revision)
-                        old?.obj("message_page")?.text("scope_fingerprint")?.takeIf { it.isNotEmpty() }?.let {
-                            put("p_scope_fingerprint",it)
-                        }
-                    })
-                    identity(messages,id)
-                    checkProtocol(messages.text("revision")==pair.second.revision.toString() &&
-                        messages["messages"] is JsonArray && messages.rows("messages").size<=30)
+                    val messages=messageHead(id,pair.second.revision.toString(),
+                        old?.obj("message_page")?.text("scope_fingerprint"))
+                    if(messages==null) {
+                        pair=JsonObject((pair.first-"message_page")+("message_access" to JsonPrimitive("DENIED"))) to pair.second
+                    } else {
                     val prior=old?.obj("message_page")
                     val kept=if(prior!=null && prior.text("revision")==messages.text("revision") &&
                         prior.text("scope_fingerprint")==messages.text("scope_fingerprint") &&
+                        prior.text("_cache_generation")==messages.text("_cache_generation") &&
                         prior.rows("messages").size>messages.rows("messages").size) {
                         JsonObject(messages+mapOf("messages" to JsonArray(prior.rows("messages").map { before ->
                             messages.rows("messages").find { it.text("id")==before.text("id") } ?: before
                         }),"has_more" to (prior["has_more"] ?: JsonPrimitive(false)),
                         "next_sent_at" to (prior["next_sent_at"] ?: JsonNull),"next_id" to (prior["next_id"] ?: JsonNull)))
                     } else messages
-                    pair=JsonObject(pair.first+("message_page" to kept)) to pair.second
+                    pair=JsonObject((pair.first-"message_access")+("message_page" to kept)) to pair.second
+                    }
                 }
                 result+=pair.first;cursors+=pair.second
             } catch(e: CancellationException) { throw e }
@@ -201,7 +217,6 @@ internal class IncidentReconciliation(
                 throw e
             }
         }
-        if(result.sumOf { it.toString().toByteArray(Charsets.UTF_8).size.toLong() }>3_145_728)fail("SNAPSHOT_TOO_LARGE")
         // Revalidate the complete scope immediately before the repository transaction.
         val final=directory()
         val finalIds=final.map { it.text("id") }.toSet()
@@ -212,16 +227,17 @@ internal class IncidentReconciliation(
             }
         }
         // Message visibility can depend on command scopes outside the field unit.
-        for(row in result)if(row["message_page"] is JsonObject) {
-            val check=try { call("incident_message_page",args(row.text("id")) {
-                put("p_expected_revision",row.text("revision"));put("p_limit",1)
-                put("p_scope_fingerprint",row.obj("message_page").text("scope_fingerprint"))
-            }) } catch(e: CancellationException) { throw e } catch(e: Exception) {
-                if(e.message.orEmpty().let { "NOT_AUTHORIZED" in it || "SCOPE_CHANGED" in it })revokeIncident(row.text("id"))
-                throw e
+        for(index in result.indices) {
+            val row=result[index]
+            if(row["message_page"] !is JsonObject)continue
+            val checked=messageHead(row.text("id"),row.text("revision"),row.obj("message_page").text("scope_fingerprint"),1)
+            result[index]=when {
+                checked==null -> JsonObject((row-"message_page")+("message_access" to JsonPrimitive("DENIED")))
+                checked.flag("_scope_refreshed") -> JsonObject((row-"message_access")+("message_page" to checked))
+                else -> row
             }
-            identity(check,row.text("id"))
         }
+        if(result.sumOf { it.toString().toByteArray(Charsets.UTF_8).size.toLong() }>3_145_728)fail("SNAPSHOT_TOO_LARGE")
         val caughtUp=ids==finalIds && cursors.all { c ->
             final.find { it.text("id")==c.incident }?.text("revision")==c.revision.toString()
         }

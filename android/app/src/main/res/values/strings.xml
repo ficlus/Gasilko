@@ -551,4 +551,6 @@
     <string name="mc_remaining">Remaining characters: %1$d</string>
     <string name="mc_attention">Needs attention; original intent retained</string>
     <string name="mc_resume">Resume draft</string>
+    <string name="mc_message_hidden">Private messages are unavailable or being reauthorized. Your authorized field tasks remain available.</string>
+    <string name="mc_new_draft">New draft</string>
 </resources>

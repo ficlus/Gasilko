@@ -27,6 +27,8 @@ internal fun JsonObject.rows(key: String)=(get(key) as? JsonArray)?.mapNotNull {
 internal fun parse(value: String)=Json.parseToJsonElement(value).jsonObject
 /** Serialize credential-changing UI actions with authenticated field requests. */
 internal val incidentIdentityAccess=kotlinx.coroutines.sync.Mutex()
+internal class MessageAccessFailure(val reason: String): IllegalStateException("MESSAGE_UNAVAILABLE")
+private val messageGenerations=mutableMapOf<String,Long>() // guarded by incidentIdentityAccess
 private val activeDispatches=MutableStateFlow<Set<String>>(emptySet())
 internal val terminal=setOf("COMPLETED","UNABLE","CANCELLED")
 internal fun transitions(status: String,ack: Boolean)=when(status) {
@@ -102,12 +104,29 @@ class IncidentRepository(private val context: Context,private val client: Supaba
         }
         dao.removeCursor(account,org,id)
     }
+    private suspend fun invalidateMessages(org: String,id: String,reason: String) = incidentIdentityAccess.withLock {
+        scope(org);currentCoroutineContext().ensureActive()
+        val key="$account/$org/$id"
+        messageGenerations[key]=(messageGenerations[key] ?: 0L)+1
+        var hadPage=false
+        db.withTransaction {
+            dao.snapshot(account,org)?.let { row ->
+                val root=parse(row.payload)
+                hadPage=root.rows("incidents").any { it.text("id")==id && it["message_page"] is JsonObject }
+                dao.save(row.copy(payload=JsonObject(root+("incidents" to JsonArray(root.rows("incidents").map {
+                    if(it.text("id")==id)JsonObject((it-"message_page")+("message_access" to JsonPrimitive(reason))) else it
+                }))).toString()))
+            }
+        }
+        hadPage
+    }
     private suspend fun refreshLocked(org: String) {
         scope(org)
         try {
             val previous=dao.snapshot(account,org)
             val reconciler=IncidentReconciliation(account,org,
-                { name,request -> rpc(name,request).also { scope(org) } },
+                { name,request -> if(name=="incident_message_page")messageRead(org,request.text("p_incident_id"),name,request)
+                    else rpc(name,request).also { scope(org) } },
                 { id -> revokeIncident(org,id) })
             val staged=reconciler.reconcile(previous?.let { parse(it.payload).rows("incidents") }.orEmpty(),dao.cursors(account,org))
             scope(org)
@@ -118,6 +137,10 @@ class IncidentRepository(private val context: Context,private val client: Supaba
             // Account changes cannot cross this final authorization + atomic cache/cursor commit.
             incidentIdentityAccess.withLock {
                 scope(org);currentCoroutineContext().ensureActive()
+                for(i in staged.incidents)if(i["message_page"] is JsonObject) {
+                    check(i.obj("message_page").text("_cache_generation")==
+                        (messageGenerations["$account/$org/"+i.text("id")] ?: 0L).toString()) { "STALE" }
+                }
                 // Saving lease first fails closed if Room commit is interrupted.
                 secure.saveIncidentLease(account,org,buildJsonObject {
                     put("wall",row.verifiedAt);put("elapsed",row.elapsed);put("boot",row.boot)
@@ -368,11 +391,25 @@ class IncidentRepository(private val context: Context,private val client: Supaba
             }
         }
     private suspend fun messageRead(org: String,incident: String,name: String,args: JsonObject): JsonObject {
-        try { return rpc(name,args).also { scope(org) } }
-        catch(e: CancellationException) { throw e }
+        val key="$account/$org/$incident"
+        val generation=incidentIdentityAccess.withLock { scope(org);messageGenerations[key] ?: 0L }
+        try {
+            val value=rpc(name,args)
+            return incidentIdentityAccess.withLock {
+                scope(org);currentCoroutineContext().ensureActive()
+                if((messageGenerations[key] ?: 0L)!=generation)throw FieldProtocolFailure("STALE")
+                JsonObject(value+("_cache_generation" to JsonPrimitive(generation.toString())))
+            }
+        } catch(e: CancellationException) { throw e }
         catch(e: Exception) {
-            if(e.message.orEmpty().let { "NOT_AUTHORIZED" in it || "SCOPE_CHANGED" in it } ||
-                (e is RestException && e.statusCode in listOf(401,403)))revokeIncident(org,incident)
+            if(e is RestException && e.statusCode==401) { revoke(org);throw e }
+            val changed="SCOPE_CHANGED" in e.message.orEmpty()
+            val denied="NOT_AUTHORIZED" in e.message.orEmpty() || (e is RestException && e.statusCode==403)
+            if(changed || denied) {
+                if(invalidateMessages(org,incident,if(changed)"SCOPE_CHANGED" else "DENIED"))
+                    si.gasilko.app.core.notifications.NotificationTap.hint()
+                throw MessageAccessFailure(if(changed)"SCOPE_CHANGED" else "DENIED")
+            }
             throw e
         }
     }
@@ -402,6 +439,7 @@ class IncidentRepository(private val context: Context,private val client: Supaba
         val updated=JsonObject(next+("messages" to JsonArray(combined))+("has_more" to JsonPrimitive(combined.size<100 && next.flag("has_more"))))
         incidentIdentityAccess.withLock {
             scope(org)
+            check(next.text("_cache_generation")==(messageGenerations["$account/$org/$incident"] ?: 0L).toString()) { "STALE" }
             db.withTransaction {
                 dao.save(row.copy(payload=JsonObject(root+("incidents" to JsonArray(root.rows("incidents").map {
                     if(it.text("id")==incident)JsonObject(it+("message_page" to updated)) else it

@@ -101,7 +101,9 @@ fun IncidentScreen(model: IncidentViewModel,registry: HydrantViewModel,organizat
         return
     }
     if(messages && incident!=null) {
-        IncidentMessagesScreen(model,incident) { messages=false }
+        key(model,incident.text("id"),incident.text("message_access"),incident.obj("message_page").text("_cache_generation")) {
+            IncidentMessagesScreen(model,incident) { messages=false }
+        }
         return
     }
     if(target!=null && incident!=null && (assignmentId==null || assignment!=null)) {

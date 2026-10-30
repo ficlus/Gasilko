@@ -478,4 +478,6 @@
     <string name="mc_remaining">Preostali znaki: %1$d</string>
     <string name="mc_attention">Potrebna je obravnava; prvotna vsebina je ohranjena</string>
     <string name="mc_resume">Nadaljuj osnutek</string>
+    <string name="mc_message_hidden">Zasebna sporočila niso na voljo ali se dostop ponovno preverja. Dovoljene terenske naloge ostajajo na voljo.</string>
+    <string name="mc_new_draft">Nov osnutek</string>
 </resources>

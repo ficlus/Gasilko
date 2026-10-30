@@ -20,25 +20,40 @@ export function IncidentMessages({locale,account,org,incidentId,read,operational
  useEffect(()=>{alive.current=true;return()=>{alive.current=false;generation.current++;sending.current?.abort();};},[account,org,incidentId]);
  useEffect(()=>{
   if(!operational){setPage(null);return;}
-  const stamp=++generation.current;const ac=new AbortController();setError(false);
-  read<Page>('incident_message_page',{p_acting_organization_id:org,p_incident_id:incidentId,p_scope_fingerprint:scope.current},ac.signal,account).then(value=>{
-   if(ac.signal.aborted||stamp!==generation.current)return;
-   if(value.account!==account||value.organization!==org||value.incident_id!==incidentId||value.schema_version!==1)throw new Error('SCHEMA_MISMATCH');
-   scope.current=value.scope_fingerprint;setPage(current=>
-    current&&current.revision===value.revision&&current.scope_fingerprint===value.scope_fingerprint&&current.messages.length>value.messages.length
-     ? {...value,messages:current.messages.map(m=>value.messages.find(fresh=>fresh.id===m.id)??m),
-        has_more:current.has_more,next_sent_at:current.next_sent_at,next_id:current.next_id}
-     :value);setDenied(false);
-  }).catch(err=>{
-   if(ac.signal.aborted||stamp!==generation.current)return;setError(true);
-   if(err instanceof Error&&['NOT_AUTHORIZED','EXPIRED','SCOPE_CHANGED'].includes(err.message)){setPage(null);setHistory(null);scope.current=null;setDenied(true);}
-  });
+  let stamp=++generation.current;const ac=new AbortController();setError(false);
+  async function loadHead(){
+   let fingerprint=scope.current;
+   for(let attempt=0;attempt<2;attempt++){
+    try{
+     const value=await read<Page>('incident_message_page',{p_acting_organization_id:org,p_incident_id:incidentId,
+      p_scope_fingerprint:fingerprint},ac.signal,account);
+     if(ac.signal.aborted||stamp!==generation.current)return;
+     if(value.account!==account||value.organization!==org||value.incident_id!==incidentId||value.schema_version!==1)throw new Error('SCHEMA_MISMATCH');
+     scope.current=value.scope_fingerprint;setPage(current=>
+      current&&current.revision===value.revision&&current.scope_fingerprint===value.scope_fingerprint&&current.messages.length>value.messages.length
+       ? {...value,messages:current.messages.map(m=>value.messages.find(fresh=>fresh.id===m.id)??m),
+          has_more:current.has_more,next_sent_at:current.next_sent_at,next_id:current.next_id}
+       :value);setDenied(false);setError(false);return;
+    }catch(err){
+     if(ac.signal.aborted||stamp!==generation.current)return;
+     const code=err instanceof Error?err.message:'SERVER';
+     if(['NOT_AUTHORIZED','EXPIRED','SCOPE_CHANGED'].includes(code)){
+      setPage(null);setHistory(null);scope.current=null;setDenied(true);
+      stamp=++generation.current; // invalidate old history/pagination responses too
+     }
+     if(code==='SCOPE_CHANGED'&&attempt===0){fingerprint=null;continue;}
+     setError(true);return;
+    }
+   }
+  }
+  void loadHead();
   return()=>ac.abort();
  },[account,org,incidentId,read,operational,live?.lastSuccess,epoch]);
  function failure(err:unknown){
   setError(true);
   if(err instanceof Error&&['NOT_AUTHORIZED','EXPIRED','SCOPE_CHANGED'].includes(err.message)){
-   setPage(null);setHistory(null);scope.current=null;setDenied(true);
+   setPage(null);setHistory(null);scope.current=null;setDenied(true);generation.current++;
+   if(err.message==='SCOPE_CHANGED')setEpoch(x=>x+1);
   }
  }
  async function send(){
@@ -87,7 +102,8 @@ export function IncidentMessages({locale,account,org,incidentId,read,operational
   if(!option||frozen)return;setParent(m);setBody(m.body);setSelected(option.kind+':'+option.id);setConfirmed(false);setSent(false);
  }
  if(!operational)return <section className="admin-card"><h2>{t('title')}</h2><p>{t('disabled')}</p></section>;
- if(denied||(body&&selected&&!target))return <section className="admin-card"><h2>{t('title')}</h2><p role="alert">{t('denied')}</p></section>;
+ const composerAllowed=!body||!selected||!!target;
+ if(denied)return <section className="admin-card"><h2>{t('title')}</h2><p role="alert">{t('denied')}</p></section>;
  return <section className="admin-card" aria-label={t('title')}>
   <h2>{t('title')}</h2><p role="note">{t('warning')}</p>
   {!operational&&<p>{t('disabled')}</p>}
@@ -95,14 +111,14 @@ export function IncidentMessages({locale,account,org,incidentId,read,operational
   <p role="status">{busy?t('pending'):sent?t('sent'):frozen?t('pending'):t('draft')}</p>
   {frozen&&<p>{t('frozen')}</p>}
   {frozen&&rejected&&<button type="button" disabled={busy} onClick={()=>{frozenRef.current=null;setFrozen(null);setRejected(false);setConfirmed(false);}}>{t('newDraft')}</button>}
-  <label>{t('scope')}<select value={selected} disabled={!!frozen||busy||!!parent} onChange={ev=>{setSelected(ev.target.value);setConfirmed(false);}}>
+  {composerAllowed?<><label>{t('scope')}<select value={selected} disabled={!!frozen||busy||!!parent} onChange={ev=>{setSelected(ev.target.value);setConfirmed(false);}}>
    <option value="">—</option>{page?.targets.map(x=><option key={x.kind+':'+x.id} value={x.kind+':'+x.id}>{t(x.kind)} · {x.label}</option>)}
   </select></label>
   <label>{t('body')}<textarea value={body} disabled={!!frozen||busy||!operational} onChange={ev=>setBody(Array.from(ev.target.value).slice(0,4000).join(''))}/></label>
   <p>{t('remaining')}: {4000-Array.from(body).length}</p>
   {target&&<p>{t(target.kind)} · {target.label}</p>}
   <label><input type="checkbox" checked={confirmed} disabled={!!frozen||busy} onChange={ev=>setConfirmed(ev.target.checked)}/>{t('confirm')}</label>
-  <button type="button" disabled={busy||!operational||denied||(!frozen&&(!confirmed||!target||!body.trim()))} onClick={()=>void send()}>{t(frozen?'retry':'send')}</button>
+  <button type="button" disabled={busy||!operational||denied||(!frozen&&(!confirmed||!target||!body.trim()))} onClick={()=>void send()}>{t(frozen?'retry':'send')}</button></>:<p role="status">{t('denied')}</p>}
   <ol>{page?.messages.map(m=><li key={m.id}><p>{m.sender_name} · {m.sent_at} · {t(m.audience_kind)}</p>
    <p style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere'}}>{m.body}</p>{m.supersedes_id&&<strong>{t('corrected')}</strong>}
    <button type="button" onClick={()=>void showHistory(m.id)}>{t('history')}</button>
