@@ -304,17 +304,22 @@ class IncidentRepository(private val context: Context,private val client: Supaba
             db.withTransaction {
                 dao.state(account,org,op.operation.sequence,if(rejected)"NEEDS_ATTENTION" else "OUTCOME_UNKNOWN")
                 dao.outcome(op.operation.sequence,null,if(rejected) {
-                    if(op.operation.state in listOf("SENDING","OUTCOME_UNKNOWN"))"RECOVERY_REJECTED" else "SERVER_REJECTED"
+                    if(payload(op).text("unit").isNotEmpty())leaderError(e.message) else if(op.operation.state in listOf("SENDING","OUTCOME_UNKNOWN"))"RECOVERY_REJECTED" else "SERVER_REJECTED"
                 } else "TRANSPORT_UNCERTAIN")
             }
-            if(e is RestException && (e.statusCode==401 || e.statusCode==403))revoke(org)
+            if(e is RestException && e.statusCode==401)revoke(org)
+            else if(e is RestException && e.statusCode==403) {
+                val unit=payload(op).text("unit")
+                if(unit.isNotEmpty())invalidateLeader(org,payload(op).text("incident"),unit) else revoke(org)
+            }
             return rejected
         } finally { activeDispatches.update { it-dispatchKey } }
         // A receipt proves this operation committed, not a fabricated current assignment
         // state/version. Cache reconciliation failures must never turn success into rejection.
         if(result.text("operation_id")!=op.operation.operationId || result.text("incident_id")!=payload(op).text("incident") ||
             (payload(op).text("rpc")=="incident_transition_task_assignment" && result.text("task_id")!=payload(op).text("task")) ||
-            (payload(op).text("rpc")=="incident_message_send" && result.text("message_id")!=op.operation.entityId)) {
+            (payload(op).text("rpc")=="incident_message_send" && result.text("message_id")!=op.operation.entityId) ||
+            (payload(op).text("rpc")=="incident_issue_task" && result.text("task_id")!=op.operation.entityId)) {
             dao.state(account,org,op.operation.sequence,"OUTCOME_UNKNOWN")
             dao.outcome(op.operation.sequence,null,"RECEIPT_UNCERTAIN")
             return false
@@ -477,10 +482,14 @@ class IncidentRepository(private val context: Context,private val client: Supaba
     }
     fun syncNow(org: String)=scheduler.enqueue(account,org)
     suspend fun catalog(org: String): List<JsonObject> {
-        scope(org)
-        val result=rpc("operational_action_catalog",buildJsonObject { put("p_organization_id",org) })
-        scope(org)
-        return result.rows("rows").filter { catalogVersion(it)!=null }
+        val rows=mutableListOf<JsonObject>()
+        for(page in 0..4) {
+            scope(org)
+            val result=rpc("operational_action_catalog",buildJsonObject { put("p_organization_id",org);put("p_page",page) })
+            scope(org);rows+=result.rows("rows").filter { catalogVersion(it)!=null }
+            if(!result.flag("more"))return rows.distinctBy { it.text("id") }
+        }
+        throw FieldProtocolFailure("CATALOG_LIMIT")
     }
     /** Prepared immutable online proposal. Reconfirming an uncertain issue reuses this row. */
     suspend fun issue(org: String,incident: String,operation: String,requestPayload: JsonObject): Boolean=hydrantRemoteAccess.withLock {
@@ -745,5 +754,129 @@ class IncidentRepository(private val context: Context,private val client: Supaba
         val op=dao.operations(account,org).single { it.operation.operationId==operation }
         require(payload(op).text("rpc")=="incident_attachment_prepare")
         if(op.operation.state!="SERVER_CONFIRMED")dao.state(account,org,op.operation.sequence,"DRAFT")
+    }
+
+    /** Fresh online review, frozen once in existing dispatch tables; DRAFT is NOT an order.
+     * The worker allowlist deliberately excludes these authority-changing RPCs. */
+    suspend fun prepareLeader(org: String,incident: String,unit: String,rpcName: String,operation: String,proposed: JsonObject,candidateQuery: String=""): String=hydrantRemoteAccess.withLock {
+        scope(org);require(rpcName in leaderRpcs && canonicalUuid(operation))
+        val existing=dao.operations(account,org).find { it.operation.operationId==operation }
+        if(existing!=null) {
+            require(payload(existing).text("unit")==unit && payload(existing).text("incident")==incident &&
+                payload(existing).text("rpc")==rpcName && payload(existing).obj("payload")==proposed)
+            return@withLock operation
+        }
+        refreshLocked(org)
+        val i=parse(dao.snapshot(account,org)!!.payload).rows("incidents").single { it.text("id")==incident }
+        val u=i.rows("units").single { it.text("id")==unit }
+        validateLeaderPayload(i,u,rpcName,proposed)
+        val ownIncident=JsonObject(i+("units" to JsonArray(listOf(u))))
+        val catalogRow=if(rpcName=="incident_issue_task")catalog(org).singleOrNull { catalogVersion(it)==proposed.text("action_version_id") } else null
+        if(rpcName=="incident_issue_task")require(validIssueDraft(catalogRow,proposed,ownIncident)) { "STALE_VERSION" }
+        val person=if(rpcName=="incident_add_crew_member")crewCandidatesLocked(org,incident,unit,candidateQuery).firstOrNull { it.text("id")==proposed.text("user_id") } else null
+        if(rpcName=="incident_add_crew_member")require(person!=null) { "INVALID_CREW_MEMBER" }
+        // Server rechecks exact membership at commit.
+        val recipient=u.rows("crew").find { it.text("id")==proposed.rows("recipients").firstOrNull()?.text("recipient_id") ||
+            it.text("id")==proposed.text("id") }
+        val allocation=u.rows("resources").find { it.text("id")==proposed.text("id") }
+        val intent=buildJsonObject {
+            put("rpc",rpcName);put("incident",incident);put("unit",unit);put("leader",leaderStamp(u))
+            put("expected",i.text("version"));put("unit_version",u.text("version"));put("payload",proposed)
+            put("review",buildJsonObject {
+                put("reference",i.text("reference"));put("mode",i.text("mode"));put("unit",u.text("name"));put("source_status",u.text("status"))
+                put("subject",recipient?.text("name") ?: person?.text("name") ?: allocation?.text("name") ?: proposed.text("user_id"))
+                put("quantity",allocation?.text("quantity").orEmpty());put("measure",allocation?.text("unit_of_measure_code").orEmpty())
+                put("measure_label",allocation?.obj("measure") ?: JsonObject(emptyMap()))
+                put("action",catalogRow?.obj("configuration") ?: JsonObject(emptyMap()))
+            })
+        }
+        val request=buildJsonObject {
+            put("p_operation",operation);put("p_acting_organization_id",org);put("p_incident_id",incident)
+            put("p_expected_version",JsonPrimitive(BigInteger(i.text("version")).longValueExact()));put("p_payload",proposed)
+        }
+        incidentIdentityAccess.withLock {
+            scope(org);currentCoroutineContext().ensureActive()
+            db.withTransaction {
+                val seq=db.registry().enqueue(PendingHydrantChange(operationId=operation,account=account,organization=org,
+                    entityId=proposed.text("id"),operation="INCIDENT_TASK",payload=intent.toString(),baseVersion=null,
+                    createdAt=System.currentTimeMillis(),state="DRAFT"))
+                dao.dispatch(IncidentDispatch(seq,null,request.toString()))
+            }
+        }
+        operation
+    }
+    private suspend fun crewCandidatesLocked(org: String,incident: String,unit: String,query: String): List<JsonObject> {
+        try {
+            return incidentIdentityAccess.withLock {
+                scope(org);require(query.length<=100)
+                val args=buildJsonObject { put("p_acting_organization_id",org);put("p_incident_id",incident);put("p_unit_assignment_id",unit);put("p_query",query) }
+                client.postgrest.rpc("incident_crew_candidates",args).decodeAs<JsonArray>().map { it.jsonObject }.also { scope(org);currentCoroutineContext().ensureActive() }
+            }
+        } catch(e: RestException) {
+            if(e.statusCode==401)revoke(org) else if(e.statusCode==403)invalidateLeader(org,incident,unit)
+            throw e
+        }
+    }
+    suspend fun crewCandidates(org: String,incident: String,unit: String,query: String): List<JsonObject> = hydrantRemoteAccess.withLock {
+        refreshLocked(org)
+        val i=parse(dao.snapshot(account,org)!!.payload).rows("incidents").single { it.text("id")==incident }
+        val u=i.rows("units").single { it.text("id")==unit }
+        require(isCurrentLeader(i,u) && u.flag("can_manage_crew")) { "NOT_AUTHORIZED" }
+        crewCandidatesLocked(org,incident,unit,query)
+    }
+    /** Explicit interactive submit/replay. Never called by synchronize(). */
+    suspend fun confirmLeader(org: String,incident: String,unit: String,operation: String): FieldOperation=hydrantRemoteAccess.withLock {
+        scope(org)
+        val op=dao.operations(account,org).single { it.operation.operationId==operation }
+        val intent=payload(op)
+        require(intent.text("unit")==unit && intent.text("incident")==incident && intent.text("rpc") in leaderRpcs)
+        require(op.operation.state in listOf("DRAFT","LOCAL_PENDING","SENDING","OUTCOME_UNKNOWN","SERVER_CONFIRMED")) { "STALE_VERSION" }
+        refreshLocked(org)
+        val i=parse(dao.snapshot(account,org)!!.payload).rows("incidents").single { it.text("id")==incident }
+        val u=i.rows("units").single { it.text("id")==unit }
+        require(isCurrentLeader(i,u) && leaderStamp(u)==intent.text("leader")) { "NOT_AUTHORIZED" }
+        if(op.operation.state=="SERVER_CONFIRMED")return@withLock op
+        if(op.operation.state=="DRAFT") {
+            val ownIncident=JsonObject(i+("units" to JsonArray(listOf(u))))
+            try {
+                require(i.text("version")==intent.text("expected") && u.text("version")==intent.text("unit_version")) { "STALE_VERSION" }
+                validateLeaderPayload(i,u,intent.text("rpc"),intent.obj("payload"))
+                if(intent.text("rpc")=="incident_issue_task") {
+                    val row=catalog(org).singleOrNull { catalogVersion(it)==intent.obj("payload").text("action_version_id") }
+                    require(validIssueDraft(row,intent.obj("payload"),ownIncident)) { "STALE_VERSION" }
+                }
+            } catch(e: IllegalArgumentException) {
+                attention(org,op,"STALE_VERSION");throw e
+            }
+        }
+        // Unknown outcomes intentionally replay the original expected version, even
+        // if this very command advanced it. Existing SQL checks receipt before version.
+        val sent=send(org,op,op.request ?: error("PROTOCOL"))
+        if(sent)try { refreshLocked(org) } catch(e: CancellationException){throw e} catch(_: Exception) { /* Receipt remains confirmed; view is stale. */ }
+        dao.operations(account,org).single { it.operation.operationId==operation }
+    }
+    private suspend fun invalidateLeader(org: String,incident: String,unit: String)=incidentIdentityAccess.withLock {
+        scope(org)
+        val key="$account/$org/$incident"
+        evidenceGenerations[key]=(evidenceGenerations[key] ?: 0L)+1
+        db.withTransaction {
+            val row=dao.snapshot(account,org) ?: return@withTransaction
+            val root=parse(row.payload)
+            dao.save(row.copy(payload=JsonObject(root+("incidents" to JsonArray(root.rows("incidents").map { i->
+                if(i.text("id")!=incident)i else JsonObject(i+mapOf(
+                    "leader_reset" to JsonPrimitive(true),
+                    "units" to JsonArray(i.rows("units").map { u->if(u.text("id")!=unit)u else JsonObject(
+                        (u-"leader_assignment"-"resources"-"crew_history")+mapOf("leader" to JsonPrimitive(false),"can_return" to JsonPrimitive(false),
+                         "can_manage_crew" to JsonPrimitive(false),"status_actions" to JsonArray(emptyList()),
+                         "crew" to JsonArray(u.rows("crew").filter { it.text("user_id")==account }.map { JsonObject(it+("can_issue" to JsonPrimitive(false))) }))) }),
+                    "assignments" to JsonArray(i.rows("assignments").filter { it.text("unit_id")!=unit || it.flag("mine") || it.text("recipient_type")=="INCIDENT_UNIT" }
+                        .map { a->if(a.text("unit_id")==unit && !a.flag("mine"))JsonObject(a-"blocked_reason"-"unable_reason") else a }),
+                    "attachment_pages" to JsonObject(i.obj("attachment_pages").filterKeys { key->
+                        !i.rows("assignments").any { a->a.text("unit_id")==unit && key=="TASK:"+a.obj("task").text("id") }
+                    }),
+                    "history" to JsonArray(emptyList())
+                ))
+            }))).toString()))
+        }
     }
 }

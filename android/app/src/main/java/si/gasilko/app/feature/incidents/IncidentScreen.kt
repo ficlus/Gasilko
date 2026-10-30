@@ -26,11 +26,11 @@ import java.util.UUID
 import java.text.DateFormat
 import java.util.Date
 
-@Composable private fun label(row: JsonObject): String {
+@Composable internal fun label(row: JsonObject): String {
     val de=LocalConfiguration.current.locales[0].language=="de"
     return row.text(if(de)"label_de" else "label_sl")
 }
-@Composable private fun stateName(value: String)=stringResource(when(value) {
+@Composable internal fun stateName(value: String)=stringResource(when(value) {
     "ISSUED"->R.string.field_issued
     "ACKNOWLEDGED"->R.string.field_acknowledged
     "IN_PROGRESS"->R.string.field_in_progress
@@ -84,12 +84,13 @@ fun IncidentScreen(model: IncidentViewModel,registry: HydrantViewModel,organizat
     var filter by remember(model,navigationEvent) { mutableIntStateOf(0) }
     var unitTab by remember(model,navigationEvent,incidentId) { mutableStateOf(false) }
     var issue by remember(model,navigationEvent,incidentId) { mutableStateOf(false) }
+    var commandUnit by remember(model,navigationEvent,incidentId) { mutableStateOf<String?>(null) }
     var messages by remember(model,navigationEvent,incidentId) { mutableStateOf(false) }
     var evidence by remember(model,navigationEvent,incidentId) { mutableStateOf<EvidenceTarget?>(null) }
     var target by remember(model,navigationEvent,incidentId,assignmentId) { mutableStateOf<GeoPoint?>(null) }
     val incident=data.incidents.find { it.text("id")==incidentId }
     val assignment=incident?.rows("assignments")?.find { it.text("id")==assignmentId }
-    fun close() { when { evidence!=null->evidence=null;messages->messages=false;target!=null->target=null;issue->issue=false;assignmentId!=null->assignmentId=null;incidentId!=null->incidentId=null;else->back() } }
+    fun close() { when { evidence!=null->evidence=null;messages->messages=false;target!=null->target=null;issue->issue=false;assignmentId!=null->assignmentId=null;commandUnit!=null->commandUnit=null;incidentId!=null->incidentId=null;else->back() } }
     BackHandler(onBack=::close)
     if(data.locked) {
         Column(Modifier.fillMaxSize().padding(16.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
@@ -119,10 +120,16 @@ fun IncidentScreen(model: IncidentViewModel,registry: HydrantViewModel,organizat
             dataLoading=hydrants.loading,dataError=hydrants.error,creationEnabled=false)
         return
     }
-    if(issue && incident!=null && incident.rows("units").any { it.flag("leader") }) {
-        key(model,navigationEvent,incidentId) {
-            IssueTask(model,registry,incident,busy) { issue=false }
+    val selectedUnit=incident?.rows("units")?.find { it.text("id")==commandUnit }
+    if(issue && incident!=null && selectedUnit!=null && isCurrentLeader(incident,selectedUnit)) {
+        key(model,navigationEvent,incidentId,commandUnit,leaderStamp(selectedUnit)) {
+            IssueTask(model,registry,incident,selectedUnit,busy) { issue=false }
         }
+        return
+    }
+    if(commandUnit!=null && incident!=null && assignment==null) {
+        UnitLeadershipScreen(model,incident.text("id"),commandUnit!!,{assignmentId=it},
+            {issue=true;model.loadCatalog()},{commandUnit=null;assignmentId=null;issue=false})
         return
     }
     Column(Modifier.fillMaxSize().padding(horizontal=16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
@@ -238,29 +245,11 @@ fun IncidentScreen(model: IncidentViewModel,registry: HydrantViewModel,organizat
                         OperationalCard {
                             SectionHeading(unit.text("name"));Text(unit.text("status"));Text(unit.text("leader_name"))
                             unit.rows("crew").forEach { c->Text(c.text("name")+" · "+c.text("role")) }
-                            var returnConfirm by remember(unit.text("id")) { mutableStateOf(false) }
-                            val pendingReturn=data.operations.lastOrNull { it.operation.entityId==unit.text("id") &&
-                                parse(it.operation.payload).text("rpc")=="incident_update_unit_status" }
-                            val returnId=remember(unit.text("id"),pendingReturn?.operation?.operationId) {
-                                pendingReturn?.operation?.operationId ?: UUID.randomUUID().toString()
-                            }
-                            if(unit.flag("can_return") || pendingReturn?.operation?.state in listOf("SENDING","OUTCOME_UNKNOWN","LOCAL_PENDING")) {
-                                OutlinedButton(onClick={returnConfirm=true},enabled=!busy && pendingReturn?.operation?.state!="NEEDS_ATTENTION") {
-                                    Text(stringResource(R.string.field_return_unit))
-                                }
-                                if(returnConfirm)AlertDialog(onDismissRequest={returnConfirm=false},
-                                    title={Text(stringResource(R.string.field_return_unit))},
-                                    text={Text(stringResource(R.string.field_online_return))},
-                                    confirmButton={TextButton(onClick={
-                                        model.returnUnit(incident.text("id"),unit.text("id"),returnId);returnConfirm=false
-                                    }) { Text(stringResource(R.string.field_confirm)) }},
-                                    dismissButton={TextButton(onClick={returnConfirm=false}) { Text(stringResource(R.string.h_back)) }})
-                            }
-                            pendingReturn?.let { Text(stateName(it.operation.state)) }
+                            OutlinedButton(onClick={commandUnit=unit.text("id")}) { Text(stringResource(R.string.ul_title)) }
                             val tasks=incident.rows("assignments").filter { it.text("unit_id")==unit.text("id") }
                             Text(stringResource(R.string.field_outstanding,tasks.count { it.text("status") !in terminal }))
                             if(unit.flag("leader") && unit.rows("crew").any { it.flag("can_issue") })
-                                Button(onClick={issue=true;model.loadCatalog()},enabled=!busy) { Text(stringResource(R.string.field_issue)) }
+                                Button(onClick={commandUnit=unit.text("id");issue=true;model.loadCatalog()},enabled=!busy) { Text(stringResource(R.string.field_issue)) }
                         }
                     }
                 }
@@ -285,24 +274,14 @@ fun IncidentScreen(model: IncidentViewModel,registry: HydrantViewModel,organizat
                         }
                     }
                 }
-                // An uncertain online issue is never automatically resent in background.
-                items(data.operations.filter { op->parse(op.operation.payload).text("incident")==incident.text("id") &&
-                    parse(op.operation.payload).text("rpc")=="incident_issue_task" && op.operation.state!="SERVER_CONFIRMED"
-                },key={it.operation.operationId}) { op ->
-                    FieldBanner(stateName(op.operation.state),FieldTone.WARNING)
-                    Text(parse(op.operation.payload).obj("payload").text("title"))
-                    Text(parse(op.operation.payload).obj("payload").text("notes"))
-                    Text(op.operation.operationId,style=MaterialTheme.typography.bodySmall)
-                    if(op.operation.state!="NEEDS_ATTENTION")TextButton(enabled=!busy,onClick={
-                        model.issue(incident.text("id"),op.operation.operationId,parse(op.operation.payload).obj("payload")) {}
-                    }) { Text(stringResource(R.string.field_retry_issue)) }
-                }
+                // Scoped manual proposals/receipts and same-ID retries are shown in My unit.
+
             }
         }
     }
 }
 
-@Composable private fun Selector(title: String,value: String,options: List<Pair<String,String>>,enabled: Boolean=true,select: (String)->Unit) {
+@Composable internal fun Selector(title: String,value: String,options: List<Pair<String,String>>,enabled: Boolean=true,select: (String)->Unit) {
     var expanded by remember { mutableStateOf(false) }
     Box {
         OutlinedButton(onClick={expanded=true},enabled=enabled,modifier=Modifier.fillMaxWidth()) { Text(title+": "+(options.find { it.first==value }?.second.orEmpty())) }
@@ -312,9 +291,32 @@ fun IncidentScreen(model: IncidentViewModel,registry: HydrantViewModel,organizat
     }
 }
 
-@Composable private fun IssueTask(model: IncidentViewModel,registry: HydrantViewModel,incident: JsonObject,busy: Boolean,back: ()->Unit) {
+@Composable private fun IssueTask(model: IncidentViewModel,registry: HydrantViewModel,incident: JsonObject,unit: JsonObject,busy: Boolean,back: ()->Unit) {
     val catalog by model.catalog.collectAsStateWithLifecycle()
+    val fieldState by model.state.collectAsStateWithLifecycle()
+    val stale by model.stale.collectAsStateWithLifecycle()
+    val commandError by model.commandError.collectAsStateWithLifecycle()
+    var reviewOperation by remember { mutableStateOf<String?>(null) }
+    val alive=remember { booleanArrayOf(true) }
+    DisposableEffect(Unit) { onDispose {alive[0]=false} }
     val error by model.error.collectAsStateWithLifecycle()
+    val pendingProposal=fieldState.operations.lastOrNull { op->
+        val body=parse(op.operation.payload)
+        body.text("rpc")=="incident_issue_task" && body.text("incident")==incident.text("id") &&
+            body.text("unit")==unit.text("id") && body.text("leader")==leaderStamp(unit) &&
+            op.operation.state in listOf("DRAFT","LOCAL_PENDING","SENDING","OUTCOME_UNKNOWN")
+    }
+    var resumedOperation by remember { mutableStateOf(pendingProposal?.operation?.operationId) }
+    val durableReview=fieldState.operations.find { it.operation.operationId==resumedOperation } ?: pendingProposal
+    if(durableReview!=null) {
+        SideEffect {resumedOperation=durableReview.operation.operationId}
+        Column(Modifier.padding(16.dp)) {
+            TextButton(onClick=back,enabled=!busy){Text(stringResource(R.string.h_back))}
+            FieldBanner(stringResource(R.string.field_review_frozen))
+        }
+        LeaderReview(model,incident,unit,durableReview,busy,stale,back)
+        return // Never allocate replacement task/operation UUIDs on resumed submission.
+    }
     var crew by remember { mutableStateOf("") }
     var definition by remember { mutableStateOf("") }
     var title by remember { mutableStateOf("") }
@@ -337,7 +339,7 @@ fun IncidentScreen(model: IncidentViewModel,registry: HydrantViewModel,organizat
     val selectedRow=reviewedRow ?: catalog.find { it.text("id")==definition }
     val actionVersionId=catalogVersion(selectedRow)
     val selected=selectedRow?.obj("configuration")
-    val recipientOptions=reviewedRecipients ?: incident.rows("units").filter { it.flag("leader") }.flatMap { u ->
+    val recipientOptions=reviewedRecipients ?: listOf(unit).flatMap { u ->
         u.rows("crew").filter { it.flag("can_issue") && it.text("status")=="ACTIVE" }
             .map { it.text("id") to (u.text("name")+" · "+it.text("name")) }
     }
@@ -384,17 +386,20 @@ fun IncidentScreen(model: IncidentViewModel,registry: HydrantViewModel,organizat
             (!movement || point(t.obj("target_geometry_snapshot"))!=null) }
         else->false
     }
-    val valid=params!=null && targetValid && validIssueDraft(selectedRow,draft,incident)
+    val ownIncident=JsonObject(incident+("units" to JsonArray(listOf(unit))))
+    val valid=params!=null && targetValid && validIssueDraft(selectedRow,draft,ownIncident)
     BackHandler(onBack=back)
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
         TextButton(onClick=back,enabled=!busy) { Text(stringResource(R.string.h_back)) }
-        ScreenHeading(stringResource(R.string.field_issue));FieldBanner(stringResource(R.string.field_online_issue))
+        ScreenHeading(stringResource(R.string.field_issue));Text(unit.text("name"));FieldBanner(stringResource(R.string.field_online_issue))
+        commandError?.let {FieldBanner(leaderErrorText(it),FieldTone.WARNING)}
+        if(stale)FieldBanner(stringResource(R.string.field_stale),FieldTone.WARNING)
         if(error)FieldBanner(stringResource(R.string.field_error),FieldTone.WARNING)
         if(busy)LinearProgressIndicator(Modifier.fillMaxWidth())
         Selector(stringResource(R.string.field_recipient),crew,recipientOptions,!busy && review==null) { crew=it }
         Selector(stringResource(R.string.field_action),definition,(reviewedRow?.let { listOf(it) } ?: catalog).map { it.text("id") to label(it.obj("configuration")) },!busy && review==null) { definition=it }
         actionVersionId?.let { Text(stringResource(R.string.field_definition_version,selected!!.text("version_number"),it),style=MaterialTheme.typography.bodySmall) }
-        OutlinedTextField(title,{title=it.take(200)},enabled=review==null,label={Text(stringResource(R.string.field_subject))},modifier=Modifier.fillMaxWidth())
+        OutlinedTextField(title,{title=it.take(200)},enabled=review==null && !busy,label={Text(stringResource(R.string.field_subject))},modifier=Modifier.fillMaxWidth())
         OutlinedTextField(notes,{notes=it.take(4000)},enabled=review==null,label={Text(stringResource(R.string.field_instructions))},modifier=Modifier.fillMaxWidth())
         Selector(stringResource(R.string.field_target),targetKind,targets.map { it to stringResource(when(it) {
             "NONE"->R.string.field_no_target;"COORDINATE"->R.string.field_coordinate
@@ -414,17 +419,25 @@ fun IncidentScreen(model: IncidentViewModel,registry: HydrantViewModel,organizat
                 val options=if(d.text("type")=="BOOLEAN")listOf("true" to stringResource(R.string.field_yes),"false" to stringResource(R.string.field_no))
                     else d.rows("options").map { it.text("code") to label(it) }
                 Selector(label(d),values[code].orEmpty(),options,!busy && review==null) { values=values+(code to it) }
-            } else OutlinedTextField(values[code].orEmpty(),{values=values+(code to it.take(2000))},enabled=review==null,
+            } else OutlinedTextField(values[code].orEmpty(),{values=values+(code to it.take(2000))},enabled=review==null && !busy,
                 label={Text(label(d))},modifier=Modifier.fillMaxWidth())
         }
         if(selectedRow!=null && !valid)Text(stringResource(R.string.field_draft_invalid))
-        if(review==null)Button(enabled=valid && !busy,onClick={
-            reviewedRow=selectedRow;reviewedRecipients=recipientOptions.toList();reviewedTargets=targetOptions.toList()
-            review=draft
+        if(review==null)Button(enabled=valid && !busy && !stale,onClick={
+            val original=draft
+            model.prepareLeader(incident.text("id"),unit.text("id"),"incident_issue_task",operation,original) { id->
+                if(alive[0]) {
+                    reviewedRow=selectedRow;reviewedRecipients=recipientOptions.toList();reviewedTargets=targetOptions.toList()
+                    review=original;reviewOperation=id
+                }
+            }
         }) { Text(stringResource(R.string.field_review)) }
-        review?.let { payload ->
+        review?.let {
             FieldBanner(stringResource(R.string.field_review_frozen))
-            Button(enabled=!busy,onClick={model.issue(incident.text("id"),operation,payload,back)}) { Text(stringResource(R.string.field_confirm_issue)) }
+            TextButton(enabled=!busy,onClick={reviewOperation=operation}){Text(stringResource(R.string.ul_review))}
         }
     }
+    reviewOperation?.let { id->fieldState.operations.find { it.operation.operationId==id }?.let { op->
+        LeaderReview(model,incident,unit,op,busy,stale) {reviewOperation=null;if(op.operation.state=="SERVER_CONFIRMED")back()}
+    } }
 }
