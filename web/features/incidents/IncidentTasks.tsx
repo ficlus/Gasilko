@@ -1,4 +1,5 @@
 'use client';
+import {IncidentEvidence} from './IncidentEvidence';
 import {useEffect,useRef,useState,type FormEvent} from 'react';
 import {useIncidentNavigation} from './IncidentNavigationProvider';
 import {navigationText} from '../../lib/operational/navigationMessages';
@@ -324,6 +325,7 @@ export function IncidentTasks({submission='idle',locale,account,org,incidentId,v
     {detail.target_geometry_snapshot&&<details><summary>{t('target')}</summary><pre style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere'}}>{JSON.stringify(detail.target_geometry_snapshot)}</pre></details>}
     <dl>{detail.configuration.parameter_definitions.map(p=><div key={p.code}><dt>{parameterLabel(p,locale)}</dt><dd>{parameterValueLabel(p,detail.parameters[p.code],locale)}</dd></div>)}</dl>
     {stale&&<><p role="alert">{t('stale')}</p><button disabled={disabled} onClick={()=>{setStale(false);setError('');}}>{t('reedit')}</button></>}
+    <IncidentEvidence key={`evidence/${account}/${org}/${incidentId}/${detail.id}`} locale={locale} account={account} org={org} incidentId={incidentId} kind="TASK" target={detail.id} read={read}/>
     {detail.assignments.map(a=><article key={a.id} className="web-row"><strong>{a.recipient_name}</strong>{a.recipient_type==='INCIDENT_UNIT'&&['MOVE_TO','WITHDRAW_TO'].includes(detail.configuration.native_behavior)&&<button disabled={locked} onClick={()=>navigation?.select(a.id)}>{nt('open')}</button>}<p>{t(a.recipient_type)} · {t(a.status)}</p>
      {a.blocked_reason&&<p>{t('BLOCKED')}: {a.blocked_reason}</p>}{a.unable_reason&&<p>{t('UNABLE')}: {a.unable_reason}</p>}
      <small>{[a.acknowledged_at,a.started_at,a.blocked_at,a.completed_at,a.unable_at,a.cancelled_at].filter(Boolean).map(v=>new Date(v!).toLocaleString(locale)).join(' · ')}</small>

@@ -35,6 +35,7 @@ internal fun IncidentMessagesScreen(model: IncidentViewModel,incident: JsonObjec
     var confirm by remember(model,id) { mutableStateOf(false) }
     var busy by remember(model,id) { mutableStateOf(false) }
     var error by remember(model,id) { mutableStateOf(false) }
+    var evidence by remember(model,id) { mutableStateOf<String?>(null) }
     var history by remember(model,id) { mutableStateOf<List<JsonObject>?>(null) }
     val available=targets.any { it==target }
     val frozen=operations.any { it.operation.operationId==operation && it.operation.state!="DRAFT" }
@@ -52,6 +53,10 @@ internal fun IncidentMessagesScreen(model: IncidentViewModel,incident: JsonObjec
         busy=true;error=false
         scope.launch { try { block() } catch(e: CancellationException) { throw e }
             catch(_: Exception) { error=true } finally { busy=false } }
+    }
+    if(evidence!=null) {
+        key(model,id,evidence) { IncidentEvidenceScreen(model,id,EvidenceTarget("MESSAGE",evidence)) { evidence=null } }
+        return
     }
     BackHandler(onBack=back)
     if(incident["message_page"] !is JsonObject || (target.isNotEmpty() && !available && body.isNotEmpty())) {
@@ -116,6 +121,7 @@ internal fun IncidentMessagesScreen(model: IncidentViewModel,incident: JsonObjec
                         else -> R.string.mc_pending
                     }))
                     if(allowed && page.rows("messages").none { it.text("id")==op.operation.entityId })Text(request.text("body"))
+                    if(allowed)TextButton(onClick={evidence=op.operation.entityId}) { Text(stringResource(R.string.ev_title)) }
                     if(allowed && op.operation.state=="DRAFT")TextButton(enabled=!busy,onClick={
                         operation=op.operation.operationId;target=value.obj("draft_target");body=request.text("body")
                         parent=value["draft_parent"] as? JsonObject;confirm=false
@@ -127,6 +133,7 @@ internal fun IncidentMessagesScreen(model: IncidentViewModel,incident: JsonObjec
                 OperationalCard {
                     Text(message.text("sender_name")+" · "+message.text("sent_at"))
                     Text(audienceName(message.text("audience_kind")));Text(message.text("body"))
+                    TextButton(onClick={evidence=message.text("id")}) { Text(stringResource(R.string.ev_title)) }
                     if(message.text("supersedes_id").isNotEmpty())Text(stringResource(R.string.mc_corrected))
                     TextButton(enabled=!busy,onClick={perform {
                         history=model.repository.messageHistory(model.organization,id,message.text("id")).rows("messages")
@@ -154,6 +161,7 @@ internal fun IncidentMessagesScreen(model: IncidentViewModel,incident: JsonObjec
             AlertDialog(onDismissRequest={history=null},title={Text(stringResource(R.string.mc_history))},
                 text={LazyColumn { items(rows,key={it.text("id")}) { old ->
                     Text(old.text("sent_at"));Text(old.text("body"))
+                    TextButton(onClick={history=null;evidence=old.text("id")}) { Text(stringResource(R.string.ev_title)) }
                     if(old.text("supersedes_id").isNotEmpty())TextButton(enabled=!busy,onClick={perform {
                         history=model.repository.messageHistory(model.organization,id,old.text("supersedes_id")).rows("messages")
                     }}) { Text(stringResource(R.string.mc_older)) }

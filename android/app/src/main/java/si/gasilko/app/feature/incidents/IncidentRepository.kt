@@ -8,6 +8,7 @@ import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.exceptions.RestException
 import io.github.jan.supabase.postgrest.postgrest
+import io.github.jan.supabase.storage.storage
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.sync.withLock
@@ -28,6 +29,7 @@ internal fun parse(value: String)=Json.parseToJsonElement(value).jsonObject
 /** Serialize credential-changing UI actions with authenticated field requests. */
 internal val incidentIdentityAccess=kotlinx.coroutines.sync.Mutex()
 internal class MessageAccessFailure(val reason: String): IllegalStateException("MESSAGE_UNAVAILABLE")
+private val evidenceGenerations=mutableMapOf<String,Long>() // guarded by incidentIdentityAccess
 private val messageGenerations=mutableMapOf<String,Long>() // guarded by incidentIdentityAccess
 private val activeDispatches=MutableStateFlow<Set<String>>(emptySet())
 internal val terminal=setOf("COMPLETED","UNABLE","CANCELLED")
@@ -84,7 +86,11 @@ class IncidentRepository(private val context: Context,private val client: Supaba
             } catch(e: CancellationException) { throw e } catch(_: Exception) { IncidentFieldState() }
         }
     }
-    private suspend fun revoke(org: String) {
+    private suspend fun revoke(org: String)=incidentIdentityAccess.withLock {
+        for(i in dao.snapshot(account,org)?.let { parse(it.payload).rows("incidents") }.orEmpty()) {
+            val key="$account/$org/"+i.text("id")
+            evidenceGenerations[key]=(evidenceGenerations[key] ?: 0L)+1
+        }
         secure.clearIncidentLease(account,org)
         db.withTransaction {
             dao.revoke(account,org);dao.clearCursors(account,org)
@@ -96,25 +102,30 @@ class IncidentRepository(private val context: Context,private val client: Supaba
         client.postgrest.rpc(name,request).decodeAs<JsonObject>()
     }
     suspend fun refresh(org: String)=hydrantRemoteAccess.withLock { refreshLocked(org) }
-    private suspend fun revokeIncident(org: String,id: String)=db.withTransaction {
+    private suspend fun revokeIncident(org: String,id: String)=incidentIdentityAccess.withLock {
+        val key="$account/$org/$id"
+        evidenceGenerations[key]=(evidenceGenerations[key] ?: 0L)+1
+        db.withTransaction {
         dao.snapshot(account,org)?.let { row ->
             val value=parse(row.payload)
             dao.save(row.copy(payload=JsonObject(value+("incidents" to JsonArray(
                 value.rows("incidents").filterNot { it.text("id")==id }))).toString()))
         }
         dao.removeCursor(account,org,id)
+        }
     }
     private suspend fun invalidateMessages(org: String,id: String,reason: String) = incidentIdentityAccess.withLock {
         scope(org);currentCoroutineContext().ensureActive()
         val key="$account/$org/$id"
         messageGenerations[key]=(messageGenerations[key] ?: 0L)+1
+        evidenceGenerations[key]=(evidenceGenerations[key] ?: 0L)+1
         var hadPage=false
         db.withTransaction {
             dao.snapshot(account,org)?.let { row ->
                 val root=parse(row.payload)
                 hadPage=root.rows("incidents").any { it.text("id")==id && it["message_page"] is JsonObject }
                 dao.save(row.copy(payload=JsonObject(root+("incidents" to JsonArray(root.rows("incidents").map {
-                    if(it.text("id")==id)JsonObject((it-"message_page")+("message_access" to JsonPrimitive(reason))) else it
+                    if(it.text("id")==id)JsonObject((it-"message_page")+("attachment_pages" to JsonObject(it.obj("attachment_pages").filterKeys { key -> !key.startsWith("MESSAGE:") }))+("message_access" to JsonPrimitive(reason))) else it
                 }))).toString()))
             }
         }
@@ -146,7 +157,19 @@ class IncidentRepository(private val context: Context,private val client: Supaba
                     put("wall",row.verifiedAt);put("elapsed",row.elapsed);put("boot",row.boot)
                 }.toString())
                 db.withTransaction {
-                    scope(org);dao.save(row);dao.clearCursors(account,org);dao.saveCursors(staged.cursors)
+                    scope(org)
+                    val safe=parse(row.payload)
+                    val guarded=JsonObject(safe+("incidents" to JsonArray(safe.rows("incidents").map { i->
+                        val generation=(evidenceGenerations["$account/$org/"+i.text("id")] ?: 0L).toString()
+                        val pages=i.obj("attachment_pages").filter { (key,page)->
+                            val value=page as? JsonObject
+                            value?.text("_generation")==generation &&
+                                (key.startsWith("MESSAGE:").not() || i["message_page"] is JsonObject)
+                        }
+                        if(i.text("status") in listOf("ACTIVE","STABILIZED"))JsonObject(i+("attachment_pages" to JsonObject(pages)))
+                        else JsonObject(i-"attachment_pages")
+                    })))
+                    dao.save(row.copy(payload=guarded.toString()));dao.clearCursors(account,org);dao.saveCursors(staged.cursors)
                 }
             }
             if(!staged.caughtUp)throw FieldProtocolFailure("STALE")
@@ -242,6 +265,11 @@ class IncidentRepository(private val context: Context,private val client: Supaba
         if(dao.snapshot(account,org)==null && dao.operations(account,org).isEmpty())return@withLock false
         var retry=false
         for(op in dao.operations(account,org)) {
+            if(payload(op).text("rpc")=="incident_attachment_prepare") {
+                if(op.operation.state !in listOf("SERVER_CONFIRMED","NEEDS_ATTENTION","DRAFT"))
+                    if(!syncAttachment(org,op))retry=true
+                continue
+            }
             if(op.operation.state in listOf("SERVER_CONFIRMED","NEEDS_ATTENTION") ||
                 payload(op).text("rpc") !in listOf("incident_transition_task_assignment","incident_message_send"))continue
             val parent=op.parent?.let { id -> dao.operations(account,org).find { it.operation.sequence==id } }
@@ -481,5 +509,241 @@ class IncidentRepository(private val context: Context,private val client: Supaba
         val sent=send(org,op,request(org,op)!!)
         if(sent)refreshLocked(org)
         dao.operations(account,org).single { it.operation.operationId==operation }.operation.state=="SERVER_CONFIRMED"
+    }
+
+    private val evidenceFiles=IncidentEvidenceFiles(context)
+    /** Original queue/dispatch tables: attachment bytes never enter Room JSON. */
+    suspend fun stageAttachment(org: String,incident: String,kind: String,target: String?,uri: android.net.Uri,
+        originAccount: String,checkAcquisition: ()->Unit)=hydrantRemoteAccess.withLock {
+        scope(org);checkAcquisition();currentCoroutineContext().ensureActive()
+        require(originAccount==account)
+        val acquisitionGeneration=incidentIdentityAccess.withLock {
+            scope(org);checkAcquisition()
+            evidenceGenerations["$account/$org/$incident"] ?: 0L
+        }
+        val cache=dao.snapshot(account,org)
+        require(lease(org,cache)>0)
+        val i=parse(cache!!.payload).rows("incidents").single { it.text("id")==incident }
+        require(i.text("status") in listOf("ACTIVE","STABILIZED"))
+        require(kind in listOf("INCIDENT","TASK","MESSAGE"))
+        if(kind=="INCIDENT")require(target==null)
+        if(kind=="TASK")require(i.rows("assignments").any { it.obj("task").text("id")==target })
+        val parent=if(kind=="MESSAGE")dao.operations(account,org).lastOrNull {
+            it.operation.entityId==target && payload(it).text("incident")==incident &&
+            payload(it).text("rpc") in listOf("incident_message_draft","incident_message_send")
+        } else null
+        if(kind=="MESSAGE")require(parent!=null || i.obj("message_page").rows("messages").any { it.text("id")==target })
+        val pending=dao.operations(account,org).filter { payload(it).text("rpc")=="incident_attachment_prepare" && it.operation.state!="SERVER_CONFIRMED" }
+        require(pending.size<32 && pending.sumOf { payload(it).obj("metadata").text("size").toLongOrNull() ?: 0L }<134217728)
+        val id=UUID.randomUUID().toString();val operation=UUID.randomUUID().toString()
+        val metadata=evidenceFiles.stage(account,org,incident,id,uri,checkAcquisition)
+        scope(org);checkAcquisition();currentCoroutineContext().ensureActive()
+        val intent=buildJsonObject {
+            put("rpc","incident_attachment_prepare");put("incident",incident);put("kind",kind)
+            put("target",target?.let(::JsonPrimitive) ?: JsonNull);put("metadata",metadata)
+            put("finalize",UUID.randomUUID().toString())
+        }
+        incidentIdentityAccess.withLock {
+            scope(org);checkAcquisition();currentCoroutineContext().ensureActive()
+            check((evidenceGenerations["$account/$org/$incident"] ?: 0L)==acquisitionGeneration)
+            require(lease(org,dao.snapshot(account,org))>0)
+            db.withTransaction {
+                checkAcquisition();currentCoroutineContext().ensureActive()
+                val seq=db.registry().enqueue(PendingHydrantChange(operationId=operation,account=account,organization=org,
+                    entityId=id,operation="INCIDENT_TASK",payload=intent.toString(),baseVersion=null,
+                    createdAt=System.currentTimeMillis(),state="LOCAL_PENDING"))
+                dao.dispatch(IncidentDispatch(seq,parent?.operation?.sequence,null))
+                checkAcquisition();currentCoroutineContext().ensureActive()
+            }
+        }
+        scheduler.enqueue(account,org)
+    }
+    private suspend fun syncAttachment(org: String,op: FieldOperation): Boolean {
+        val body=payload(op);val incident=body.text("incident")
+        suspend fun paused()=dao.operations(account,org).find { it.operation.sequence==op.operation.sequence }?.operation?.state=="DRAFT"
+        if(paused())return true
+        val parent=op.parent?.let { seq->dao.operations(account,org).find { it.operation.sequence==seq } }
+        if(op.parent!=null && parent==null){attention(org,op,"DEPENDENCY_MISSING");return true}
+        if(parent!=null && parent.operation.state!="SERVER_CONFIRMED") {
+            if(parent.operation.state=="NEEDS_ATTENTION")attention(org,op,"DEPENDENCY_REJECTED")
+            return true // DRAFT/unsent parent waits; it is not automatically sent by an attachment.
+        }
+        val dispatchKey="$account/$org/${op.operation.operationId}"
+        activeDispatches.update { it+dispatchKey }
+        try {
+            val args=buildJsonObject {
+                put("p_operation",op.operation.operationId);put("p_acting_organization_id",org);put("p_incident_id",incident)
+                put("p_attachment_id",op.operation.entityId);put("p_target_kind",body.text("kind"))
+                put("p_target_id",body["target"] ?: JsonNull);put("p_metadata",body.obj("metadata"))
+            }
+            op.request?.let { require(parse(it)==args) }
+            dao.prepare(op.operation.sequence,args.toString())
+            val dispatching=incidentIdentityAccess.withLock {
+                scope(org)
+                if(paused())false else { dao.state(account,org,op.operation.sequence,"SENDING");true }
+            }
+            if(!dispatching)return true
+            val reservation=rpc("incident_attachment_prepare",args)
+            require(reservation.text("id")==op.operation.entityId && reservation.text("incident_id")==incident &&
+                reservation.text("creator_user_id")==account && reservation.text("acting_organization_id")==org)
+            if(reservation.text("status")=="REJECTED"){attention(org,op,"ATTACHMENT_REJECTED");return true}
+            val request=buildJsonObject {
+                put("action","verify");put("organization",org);put("incident",incident)
+                put("attachment",op.operation.entityId);put("operation",body.text("finalize"))
+            }
+            var result: JsonObject?=if(reservation.text("status")=="READY")reservation else null
+            if(result==null) {
+                try { result=parse(String(evidenceRequest(client,request),Charsets.UTF_8)).obj("data") }
+                catch(e: EvidenceFailure) { if(e.code!="ATTACHMENT_NOT_UPLOADED")throw e }
+            }
+            if(result==null && paused())return true
+            if(result==null) {
+                val metadata=body.obj("metadata")
+                val bytes=evidenceFiles.read(account,org,incident,op.operation.entityId,metadata)
+                val path=incident+"/"+op.operation.entityId+"/original."+evidenceExtension(metadata.text("mime"))
+                require(reservation.text("bucket")=="incident-evidence" && reservation.text("path")==path)
+                incidentIdentityAccess.withLock {
+                    scope(org);currentCoroutineContext().ensureActive()
+                    if(paused())return true
+                    try {
+                        client.storage.from("incident-evidence").upload(path,bytes) { upsert=false;contentType=io.ktor.http.ContentType.parse(metadata.text("mime")) }
+                    } catch(e: CancellationException){throw e}
+                    catch(_: Exception) {
+                        // Lost ACK / existing path: validator must establish actual bytes; never upsert.
+                    }
+                }
+                scope(org)
+                if(paused())return true
+                result=parse(String(evidenceRequest(client,request),Charsets.UTF_8)).obj("data")
+            }
+            val confirmed=result ?: error("ATTACHMENT_NOT_READY")
+            if(confirmed.text("status")!="READY"){attention(org,op,"ATTACHMENT_REJECTED");return true}
+            require(confirmed.text("id")==op.operation.entityId && confirmed.text("incident_id")==incident &&
+                confirmed.text("operation_id")==op.operation.operationId && confirmed.text("creator_user_id")==account && confirmed.text("acting_organization_id")==org &&
+                confirmed.text("sha256")==body.obj("metadata").text("sha256") && confirmed.text("size")==body.obj("metadata").text("size"))
+            incidentIdentityAccess.withLock {
+                scope(org);currentCoroutineContext().ensureActive()
+                db.withTransaction {
+                    dao.outcome(op.operation.sequence,confirmed.toString(),null)
+                    dao.state(account,org,op.operation.sequence,"SERVER_CONFIRMED")
+                }
+            }
+            return true
+        } catch(e: CancellationException){throw e}
+        catch(e: Exception) {
+            scope(org)
+            val status=when(e){is EvidenceFailure->e.status;is RestException->e.statusCode;else->0}
+            if(status==401){revoke(org);attention(org,op,"SESSION_REQUIRED");return true}
+            val rejected=(status in 400..499 && status !in listOf(408,409,429)) || e is IllegalArgumentException || e is IllegalStateException
+            var retryExhausted=false
+            incidentIdentityAccess.withLock {
+                scope(org);currentCoroutineContext().ensureActive()
+                if(status==403) {
+                    evidenceGenerations["$account/$org/$incident"]=(evidenceGenerations["$account/$org/$incident"] ?: 0L)+1
+                    saveEvidencePage(org,incident,body.text("kind")+":"+body.text("target"),buildJsonObject { put("denied",true) })
+                }
+                if(paused())return true
+                if(rejected)attention(org,op,when {
+                    status==403 -> "ATTACHMENT_REVOKED"
+                    e.message?.startsWith("ATTACHMENT_LOCAL")==true -> e.message!!
+                    else -> "ATTACHMENT_REJECTED"
+                }) else db.withTransaction {
+                    val previous=dao.operations(account,org).single { it.operation.sequence==op.operation.sequence }.error.orEmpty()
+                    val attempts=(previous.removePrefix("EVIDENCE_RETRY_").toIntOrNull() ?: 0)+1
+                    retryExhausted=attempts>=5
+                    dao.state(account,org,op.operation.sequence,if(retryExhausted)"NEEDS_ATTENTION" else "OUTCOME_UNKNOWN")
+                    dao.outcome(op.operation.sequence,null,"EVIDENCE_RETRY_"+attempts)
+                }
+            }
+            return rejected || retryExhausted
+        } finally { activeDispatches.update { it-dispatchKey } }
+    }
+    /** Metadata is cached only in the existing leased field projection. No durable URL. */
+    suspend fun attachmentPage(org: String,incident: String,kind: String,target: String?,older: Boolean=false)=hydrantRemoteAccess.withLock {
+        scope(org)
+        val key=kind+":"+target.orEmpty()
+        val row=dao.snapshot(account,org) ?: return@withLock
+        require(lease(org,row)>0)
+        val current=parse(row.payload).rows("incidents").single { it.text("id")==incident }
+        val previous=current.obj("attachment_pages").obj(key)
+        val generation=incidentIdentityAccess.withLock { evidenceGenerations["$account/$org/$incident"] ?: 0L }
+        try {
+            val page=rpc("incident_attachment_page",buildJsonObject {
+                put("p_acting_organization_id",org);put("p_incident_id",incident);put("p_target_kind",kind)
+                put("p_target_id",target?.let(::JsonPrimitive) ?: JsonNull)
+                if(older && previous.flag("has_more")) {
+                    put("p_before_created_at",previous.text("next_created_at"));put("p_before_id",previous.text("next_id"))
+                }
+            })
+            require(page.text("account")==account && page.text("organization")==org && page.text("incident_id")==incident)
+            incidentIdentityAccess.withLock {
+                scope(org);currentCoroutineContext().ensureActive()
+                check((evidenceGenerations["$account/$org/$incident"] ?: 0L)==generation)
+                val cached=if(older && page.text("scope_fingerprint")==previous.text("scope_fingerprint"))
+                    JsonObject(page+("items" to JsonArray((previous.rows("items")+page.rows("items")).distinctBy { it.text("id") }.take(100)))+
+                    ("has_more" to JsonPrimitive(page.flag("has_more") && previous.rows("items").size+page.rows("items").size<100))) else page
+                saveEvidencePage(org,incident,key,cached)
+            }
+        } catch(e: CancellationException){throw e}
+        catch(e: Exception) {
+            if(e is RestException && e.statusCode==401)revoke(org)
+            else if(e is RestException && e.statusCode==403)incidentIdentityAccess.withLock {
+                scope(org);evidenceGenerations["$account/$org/$incident"]=(evidenceGenerations["$account/$org/$incident"] ?: 0L)+1
+                saveEvidencePage(org,incident,key,buildJsonObject { put("denied",true) })
+            }
+            throw e
+        }
+    }
+    private suspend fun saveEvidencePage(org: String,incident: String,key: String,page: JsonObject)=db.withTransaction {
+        val row=dao.snapshot(account,org) ?: return@withTransaction
+        val root=parse(row.payload)
+        val guardedPage=JsonObject(page+("_generation" to JsonPrimitive((evidenceGenerations["$account/$org/$incident"] ?: 0L).toString())))
+        dao.save(row.copy(payload=JsonObject(root+("incidents" to JsonArray(root.rows("incidents").map { i ->
+            if(i.text("id")==incident)JsonObject(i+("attachment_pages" to JsonObject((i.obj("attachment_pages").filterKeys { it!=key }.entries.toList().takeLast(7).associate { it.toPair() })+(key to guardedPage)))) else i
+        }))).toString()))
+    }
+    suspend fun attachmentDownload(org: String,incident: String,id: String,kind: String,target: String?): ByteArray {
+        scope(org);require(lease(org,dao.snapshot(account,org))>0)
+        val generation=incidentIdentityAccess.withLock { evidenceGenerations["$account/$org/$incident"] ?: 0L }
+        try {
+            val bytes=evidenceRequest(client,buildJsonObject { put("action","download");put("organization",org);put("incident",incident);put("attachment",id) })
+            return incidentIdentityAccess.withLock {
+                scope(org);currentCoroutineContext().ensureActive()
+                require(lease(org,dao.snapshot(account,org))>0 && parse(dao.snapshot(account,org)!!.payload).rows("incidents").any { it.text("id")==incident })
+                check((evidenceGenerations["$account/$org/$incident"] ?: 0L)==generation)
+                bytes
+            }
+        } catch(e: CancellationException){throw e}
+        catch(e: EvidenceFailure) {
+            if(e.status==401)revoke(org)
+            else if(e.status==403)incidentIdentityAccess.withLock {
+                scope(org)
+                // Target-specific denial hides evidence only, never tasks/cursor/lease.
+                evidenceGenerations["$account/$org/$incident"]=(evidenceGenerations["$account/$org/$incident"] ?: 0L)+1
+                saveEvidencePage(org,incident,kind+":"+target.orEmpty(),buildJsonObject { put("denied",true) })
+            }
+            throw e
+        }
+    }
+
+    suspend fun retryAttachment(org: String,operation: String)=hydrantRemoteAccess.withLock {
+        scope(org);require(lease(org,dao.snapshot(account,org))>0)
+        val op=dao.operations(account,org).single { it.operation.operationId==operation }
+        require(payload(op).text("rpc")=="incident_attachment_prepare")
+        require(op.operation.state in listOf("NEEDS_ATTENTION","OUTCOME_UNKNOWN","DRAFT"))
+        incidentIdentityAccess.withLock {
+            scope(org);currentCoroutineContext().ensureActive()
+            dao.state(account,org,op.operation.sequence,"LOCAL_PENDING")
+            if(op.operation.state=="NEEDS_ATTENTION")dao.outcome(op.operation.sequence,op.result,"EVIDENCE_RETRY_0")
+        } // Keep original payload, request, UUID, evidence file and prior result; reset only explicit retry budget.
+        scheduler.enqueue(account,org)
+    }
+
+    /** Pause future phases/retries only; an already committed READY result remains authoritative. */
+    suspend fun pauseAttachment(org: String,operation: String)=incidentIdentityAccess.withLock {
+        scope(org);currentCoroutineContext().ensureActive()
+        val op=dao.operations(account,org).single { it.operation.operationId==operation }
+        require(payload(op).text("rpc")=="incident_attachment_prepare")
+        if(op.operation.state!="SERVER_CONFIRMED")dao.state(account,org,op.operation.sequence,"DRAFT")
     }
 }

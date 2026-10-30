@@ -1,4 +1,6 @@
 'use client';
+import {IncidentEvidence} from './IncidentEvidence';
+import {evidenceText} from '../../lib/incidents/evidenceText';
 import {useEffect,useRef,useState} from 'react';
 import type {Locale} from '../../lib/i18n';
 import type {TaskRead} from '../../lib/operational/tasks';
@@ -9,6 +11,7 @@ type Message={id:string;incident_id:string;sender_user_id:string;sender_name:str
 type Target={kind:Kind;id:string;label:string};
 type Page={schema_version:number;account:string;organization:string;incident_id:string;revision:string;scope_fingerprint:string;messages:Message[];targets:Target[];has_more:boolean;next_sent_at:string|null;next_id:string|null};
 export function IncidentMessages({locale,account,org,incidentId,read,operational}:{locale:Locale;account:string;org:string;incidentId:string;read:TaskRead;operational:boolean}){
+ const et=evidenceText(locale),[evidence,setEvidence]=useState<string|null>(null);
  const t=messageText(locale),live=useIncidentLive(),[page,setPage]=useState<Page|null>(null),[error,setError]=useState(false),[denied,setDenied]=useState(false);
  const [body,setBody]=useState(''),[selected,setSelected]=useState(''),[confirmed,setConfirmed]=useState(false),[parent,setParent]=useState<Message|null>(null);
  const [rejected,setRejected]=useState(false);
@@ -120,13 +123,14 @@ export function IncidentMessages({locale,account,org,incidentId,read,operational
   <label><input type="checkbox" checked={confirmed} disabled={!!frozen||busy} onChange={ev=>setConfirmed(ev.target.checked)}/>{t('confirm')}</label>
   <button type="button" disabled={busy||!operational||denied||(!frozen&&(!confirmed||!target||!body.trim()))} onClick={()=>void send()}>{t(frozen?'retry':'send')}</button></>:<p role="status">{t('denied')}</p>}
   <ol>{page?.messages.map(m=><li key={m.id}><p>{m.sender_name} · {m.sent_at} · {t(m.audience_kind)}</p>
-   <p style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere'}}>{m.body}</p>{m.supersedes_id&&<strong>{t('corrected')}</strong>}
+   <p style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere'}}>{m.body}</p><button type="button" onClick={()=>setEvidence(m.id)}>{et('title')}</button>{m.supersedes_id&&<strong>{t('corrected')}</strong>}
    <button type="button" onClick={()=>void showHistory(m.id)}>{t('history')}</button>
    {m.can_correct&&m.sender_user_id===account&&<button type="button" disabled={!!frozen||busy} onClick={()=>correct(m)}>{t('correct')}</button>}
   </li>)}</ol>
   {page&&!page.messages.length&&<p>{t('empty')}</p>}
   {page?.has_more&&<button type="button" disabled={busy} onClick={()=>void older()}>{t('older')}</button>}
-  {history&&<section aria-label={t('history')}><h3>{t('history')}</h3>{history.map(m=><article key={m.id}><p>{m.sent_at}</p><p style={{whiteSpace:'pre-wrap'}}>{m.body}</p>
+  {evidence&&<><button type="button" onClick={()=>setEvidence(null)}>{et('close')}</button><IncidentEvidence key={`evidence/${account}/${org}/${incidentId}/${evidence}`} locale={locale} account={account} org={org} incidentId={incidentId} kind="MESSAGE" target={evidence} read={read}/></>}
+  {history&&<section aria-label={t('history')}><h3>{t('history')}</h3>{history.map(m=><article key={m.id}><p>{m.sent_at}</p><p style={{whiteSpace:'pre-wrap'}}>{m.body}</p><button type="button" onClick={()=>{setHistory(null);setEvidence(m.id);}}>{et('title')}</button>
    {m.supersedes_id&&<button type="button" onClick={()=>void showHistory(m.supersedes_id!)}>{t('older')}</button>}</article>)}<button type="button" onClick={()=>setHistory(null)}>{t('close')}</button></section>}
  </section>;
 }

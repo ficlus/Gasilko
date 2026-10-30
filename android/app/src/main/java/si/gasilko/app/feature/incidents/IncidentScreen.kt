@@ -85,10 +85,11 @@ fun IncidentScreen(model: IncidentViewModel,registry: HydrantViewModel,organizat
     var unitTab by remember(model,navigationEvent,incidentId) { mutableStateOf(false) }
     var issue by remember(model,navigationEvent,incidentId) { mutableStateOf(false) }
     var messages by remember(model,navigationEvent,incidentId) { mutableStateOf(false) }
+    var evidence by remember(model,navigationEvent,incidentId) { mutableStateOf<EvidenceTarget?>(null) }
     var target by remember(model,navigationEvent,incidentId,assignmentId) { mutableStateOf<GeoPoint?>(null) }
     val incident=data.incidents.find { it.text("id")==incidentId }
     val assignment=incident?.rows("assignments")?.find { it.text("id")==assignmentId }
-    fun close() { when { messages->messages=false;target!=null->target=null;issue->issue=false;assignmentId!=null->assignmentId=null;incidentId!=null->incidentId=null;else->back() } }
+    fun close() { when { evidence!=null->evidence=null;messages->messages=false;target!=null->target=null;issue->issue=false;assignmentId!=null->assignmentId=null;incidentId!=null->incidentId=null;else->back() } }
     BackHandler(onBack=::close)
     if(data.locked) {
         Column(Modifier.fillMaxSize().padding(16.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
@@ -98,6 +99,10 @@ fun IncidentScreen(model: IncidentViewModel,registry: HydrantViewModel,organizat
             TextButton(onClick=back) { Text(stringResource(R.string.h_back)) }
             TextButton(onClick=model::sync) { Text(stringResource(R.string.h_sync_now)) }
         }
+        return
+    }
+    if(evidence!=null && incident!=null) {
+        key(model,incidentId,evidence) { IncidentEvidenceScreen(model,incident.text("id"),evidence!!) { evidence=null } }
         return
     }
     if(messages && incident!=null) {
@@ -172,6 +177,7 @@ fun IncidentScreen(model: IncidentViewModel,registry: HydrantViewModel,organizat
             LazyColumn(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(12.dp)) {
                 item { Text(incident.text("title"));Text(label(config),style=MaterialTheme.typography.headlineSmall)
                     Text(task.text("title"));Text(task.text("notes"))
+                    TextButton(onClick={evidence=EvidenceTarget("TASK",task.text("id"))}) { Text(stringResource(R.string.ev_title)) }
                     Text(config.text(if(LocalConfiguration.current.locales[0].language=="de")"description_de" else "description_sl"))
                     Text(assignment.text("id"),style=MaterialTheme.typography.bodySmall)
                     Text(assignment.text("recipient_name"));Text(task.text("issuer_name"));Text(task.text("issued_at"))
@@ -219,6 +225,7 @@ fun IncidentScreen(model: IncidentViewModel,registry: HydrantViewModel,organizat
         } else {
             Text(incident.text("reference")+" · "+incident.text("title"),style=MaterialTheme.typography.titleLarge)
             TextButton(onClick={messages=true}) { Text(stringResource(R.string.mc_title)) }
+            TextButton(onClick={evidence=EvidenceTarget("INCIDENT",null)}) { Text(stringResource(R.string.ev_title)) }
             FlowRow(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
                 FilterChip(selected=!unitTab,onClick={unitTab=false},label={Text(stringResource(R.string.field_orders))})
                 FilterChip(selected=unitTab,onClick={unitTab=true},label={Text(stringResource(R.string.field_unit))})
