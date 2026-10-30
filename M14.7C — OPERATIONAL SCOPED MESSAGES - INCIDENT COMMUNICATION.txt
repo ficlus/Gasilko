@@ -1,0 +1,1130 @@
+GASILKO — CODEX IMPLEMENTATION PROMPT
+M14.7C — OPERATIONAL SCOPED MESSAGES - INCIDENT COMMUNICATION
+Full implementation specification (prepared 2026-10-30)
+Implementation: ONE new PR | Review/corrections: SAME PR | Merge/deploy/SQL: HUMAN ONLY
+
+Repository: https://github.com/ficlus/Gasilko
+Primary authority:
+  docs/SPEC.md
+  docs/SPEC-M14-INCIDENT-OPERATIONS.md
+  AGENTS.md
+  Current source code, migrations and merged PR history
+Upstream delivery:
+  PR #82 — M14.7A/M14.8A Android incident field pilot
+  PR #83 — M14.7B1 snapshots/change feed
+  M14.7B2 — Secure Private Realtime (MUST be fully merged and available in main)
+Future milestone deliberately OUT OF SCOPE:
+  M14.7D — private incident attachments/evidence
+
+OBJECTIVE
+Implement secure, concise, persistent, audience-scoped operational messages for
+real firefighter incident collaboration, shared between the authenticated Web
+incident workspace and authorized Android field users. Treat messages as human
+communication/evidence, NEVER as operational commands, dispatch authority, task
+acknowledgments or automatically executable instructions.
+
+This prompt is independently executable once prerequisites are met. Any
+illustrative SQL/TypeScript/Kotlin interfaces below are proposed contracts and
+must be adapted to ACTUAL merged source. Do not invent tables or API signatures
+and then pretend they already exist. Never weaken existing privacy, role and
+offline contracts to force the examples to compile.
+
+=======================================================================
+00. HARD DEPENDENCY GATE — READ BEFORE BRANCHING
+=======================================================================
+
+00.1 Inspect current authoritative GitHub/main source and existing open PRs.
+Do not rely exclusively on a remembered number or GitHub UI badge. Verify
+actual merged tree content for:
+ - PR #82 Android field and existing incident Room/WorkManager integration;
+ - PR #83 B1 materialized snapshots, incident change feed, Room 15->16;
+ - M14.7B2 PRIVATE incident Realtime hint transport, authorization and
+   reconnect handling, including any actual Android implementation limitations.
+ - Existing M10 notification worker/receiver and incident categories.
+
+00.2 If B2 has NOT been merged onto main, STOP BEFORE CODE CHANGES.
+Report "BLOCKED: M14.7B2 not present on merged main" and list exact missing
+files/signatures. Do not branch off a not-yet-merged B2 PR, do not cherry-pick
+B2 into this scope, do not open a dependent PR, and do not fabricate an
+Android Realtime implementation. The user requested that this NEXT PROMPT
+be prepared in advance; that does NOT bypass prerequisite merge gates.
+
+00.3 If any M14.7C implementation/open PR is already active, do not start
+a duplicate PR. Review against requirements and report the collision.
+
+00.4 Inventory current migration names/timestamps, service signatures,
+published action/event catalogs, AGENTS.md rules, Web routing/components,
+Android database version, Room DAOs, existing queue operation schema,
+B1 change descriptors, B2 private channel topics and M10 notification
+recipient adapter. Identify exact source file paths before editing.
+
+00.5 Base the one new branch on latest merged main; retain existing developer
+local state. No reset --hard, careless clean, overwriting KAPT/Gradle files,
+blind stash apply or unrelated lockfile changes. Do not work on an old branch.
+
+00.6 Authoritative M14 SPEC vs historical V2 roadmap conflict:
+  - Use audience enum INCIDENT / ORGANIZATION / UNIT. Do NOT add historical
+    V2 ideas AGENCY / SECTOR / DIRECTED in this milestone.
+  - Max body length is 4000 characters, not historical V2 suggestion 2000.
+  - Keep messages append-only with superseding corrections, not mutable chat.
+  - No attachments in C; they belong to D.
+  - M10 is the sole push infrastructure.
+Record these canonical decisions in the milestone documentation.
+
+=======================================================================
+01. STRICT OWNER RULES — NEVER VIOLATE
+=======================================================================
+
+- ONE new PR for M14.7C. All its SQL, Web, Android, localization and docs
+  in that one PR. Corrections update the SAME PR. Do NOT merge.
+- Implementation and static source inspection only. No tests added or run;
+  no build, compile, lint, typecheck, Gradle sync, CI, emulator, browser,
+  runtime validation, local Supabase, Docker, executing SQL or applying
+  migrations, publishing apps, Edge deployments or real push notifications.
+- Do not edit Android Gradle/KAPT/KSP, dependency declarations, version
+  catalogs, pnpm-lock.yaml, generated Room schema JSON, local configs,
+  auth secrets, Cron or deployed Realtime project settings. If a required
+  capability truly cannot work using merged dependencies, STOP with a
+  precise dependency report rather than a fake implementation.
+- Do not add a second FCM worker, Android sync engine, Room database,
+  task system, command queue, Realtime transport, notification table,
+  permission/role hierarchy or application login flow.
+- No automated dispatch, no simulator activity, no REAL incident data
+  generation, no changes to simulated hazard/routing/physics, no GPS tracking.
+- Follow the repository's established [skip ci] convention on commits.
+  State that AGENTS.md has test/CI expectations conflicting with this
+  task-specific owner restriction; do not silently rewrite AGENTS.md.
+  Human-run validation remains a mandatory release gate, not "passed".
+- Never disclose confidential incident content in GitHub PRs, commits,
+  logs, notifications or example telemetry.
+- Preserve separate REAL vs TRAINING/SIM semantics. Critical orders still
+  use canonical M14.5A command/task issue with independent recipient ACK.
+  Text communication is NEVER official radio ZA-RE replacement.
+
+=======================================================================
+02. DOMAIN GOALS / MUST HAVE / NON-GOALS
+=======================================================================
+
+MUST:
+  A. Web commander can compose, scope, send, browse and explicitly correct
+     a message within an incident using a confirmed server operation.
+  B. Authorized Android responder can read applicable messages and send
+     messages using the existing authenticated repository/offline pattern.
+  C. INCIDENT / ORGANIZATION / UNIT audiences are represented with exact
+     canonical IDs and constrained by current membership/participation/
+     command/crew episodes.
+  D. All message bodies and revision histories are durable, scoped, ordered,
+     append-only, paginated and fully audit attributable.
+  E. Exact duplicate requests are idempotent; unknown network responses are
+     reconciled using the original operation/message UUID.
+  F. Scoped message changes use B1 authoritative refresh protocol and B2
+     private hint transport with M10 optional generic notifications; never
+     put body text into generic push, broadcast or incident-wide timeline.
+  G. Account/org/incident switch, incident lease expiry and confirmed access
+     revocation hide protected content while preserving unsent local intent.
+  H. Slovenian and German UI with default safe wording, accessible operation,
+     and clear distinction between SENT / PENDING / FAILED / UNSENT.
+  I. Migrations forward-only, source-only, with documented human rollout.
+
+SHOULD:
+  J. Efficient unread affordances, where achievable without a second
+     receipt system; local last-visited marker is not proof another
+     responder read or accepted anything.
+  K. Efficient concurrent pagination and modest capped offline caching.
+  L. Safety warning: "Operational messages are not command acknowledgments";
+     provide accessible link to canonical task issuance/ACK only for role
+     authorized users.
+
+MUST NOT:
+  - public/social/general chat, group invitation/contact list, typing status,
+    voice, video, audio, media/file uploads, emoji reactions, geotag sharing;
+  - arbitrary direct user messaging or new SECTOR/DIRECTED scope;
+  - automatic task creation, automatic ACK, task state changes on read;
+  - broad privileged service_role reads/writes, direct client DML;
+  - cross-incident message reuse, organization inherited-read privilege;
+  - in-app read receipt interpreted as operational confirmation.
+
+=======================================================================
+03. DOMAIN IDENTITIES AND AUTHORIZATION TERMINOLOGY
+=======================================================================
+
+Distinguish these UUID identities:
+ - incident_id: canonical incidents UUID;
+ - actor_user_id: derived from auth.uid(), NEVER trusted from client;
+ - acting_organization_id: explicit valid active exact membership;
+ - incident_participation_id / participant organization;
+ - unit_assignment_id: deployed incident unit episode, NOT inventory unit
+   UUID, NOT vehicle UUID, NOT crew person's profile ID;
+ - message_id: stable UUID (generated before offline send);
+ - operation_id: separate immutable command receipt UUID;
+ - supersedes_id: prior message within same incident and same audience
+   identity (if correcting);
+ - change revision/event sequence: server-created incident aggregate
+   revision and timeline sequence, NOT Android timestamps.
+
+No separate "chat members" table or chat roles. Authorization derives
+from the EXISTING active membership, incident participation, effective
+command hierarchy, unit assignment and crew episodes. Administrative
+organization membership alone is not incident command authority.
+
+Server must verify exact actor/org/incident target on BOTH writes and reads,
+and recheck under existing command lock/permission conventions for writes.
+Use existing private.can_read_incident, private.has_incident_capability,
+locked org/profile helpers, incident receipt and participation contracts
+after checking their precise signatures.
+
+For FINAL/CLOSED historical read, follow current incident archival rules
+and preserve immutable messages, but never broaden archived audience to
+anyone who later gains general org membership. If no approved historical
+scoped access policy exists, provide a strictly conservative policy and
+document the limitation; do not default to full-incident visibility.
+
+=======================================================================
+04. AUDIENCE AND SEND/READ CAPABILITY MATRIX
+=======================================================================
+
+Implement an explicit source- and documentation-backed matrix, adapted
+to real domain capability names and role relationships.
+
+INCIDENT audience:
+ - target is the specific incident; no audience_org_id/unit_assignment_id;
+ - read only by users with active approved incident-wide read capability
+   according to canonical incident participation and visibility; avoid
+   allowing an unrelated agency to read more than the SPEC authorizes;
+ - send conservatively by effective incident commander/deputy or explicitly
+   delegated incident-wide communication capability; do not infer authority
+   from organization ADMIN/MANAGER or from merely reading incident;
+ - if owner approves wider participant posting later, add a deliberate
+   capability and spec revision, not an implicit open chat.
+
+ORGANIZATION audience:
+ - audience_org_id required; must be an ACTIVE participating organization
+   linked to that incident; unit_assignment_id NULL;
+ - reader must currently have that exact active org membership AND current
+   incident participation/authorized command relationship;
+ - sender may address own active participating org if currently authorized
+   member/responder; cross-org organization announcements require explicit
+   superior incident command capability and still must respect target
+   recipient scope and sender privilege;
+ - an IC may issue an authorized message to a participant org without
+   acquiring that org's general organization records or membership rights;
+   validate the relevant command delegation and recipient participation
+   before allowing this path.
+ - different orgs in the same incident cannot read one another's private
+   messages merely because both participate.
+
+UNIT audience:
+ - unit_assignment_id required; must belong to same incident; audience_org_id
+   NULL or normalized to verified unit owner only if current spec requires;
+ - user must be current member of that deployment's crew, effective unit
+   leader, or authorized commander over the unit as derived from the REAL
+   command tree; unrelated responder and released-episode users denied;
+ - sending to the unit requires same validated scope (or an effective
+   superior command scope), NEVER any arbitrary unit UUID;
+ - a unit leader is not automatically commander over another unit;
+ - if a unit is reassigned/released, explicitly determine whether old
+   messages remain historically readable by currently authorized actors;
+   never allow stale offline scope to override a server revocation.
+
+Send and read rights are distinct. Add a capability matrix to documentation
+for current IC, deputy, agency commander, sector commander, unit leader,
+crew responder, org admin without incident role, unrelated org member,
+SUSPENDED, PENDING_APPROVAL, historical/released participant. Tie every
+ALLOW to an existing helper/canonical role predicate, not an invented title.
+
+Default DENY for ambiguous roles or missing command hierarchy information.
+
+=======================================================================
+05. SQL DATA MODEL — USE CANONICAL ENTITY WHEN AVAILABLE
+=======================================================================
+
+Inspect all migrations: if a suitable existing `incident_messages` table is
+present, extend it minimally. Otherwise create an additive forward migration
+AFTER current merged migrations, conceptually:
+
+public.incident_messages
+  id UUID PRIMARY KEY
+  incident_id UUID NOT NULL
+  sender_user_id UUID NOT NULL
+  sender_acting_org_id UUID NOT NULL
+  audience_kind TEXT NOT NULL CHECK IN ('INCIDENT','ORGANIZATION','UNIT')
+  audience_org_id UUID NULL
+  audience_unit_assignment_id UUID NULL
+  body TEXT NOT NULL
+  supersedes_id UUID NULL
+  sent_at TIMESTAMPTZ NOT NULL DEFAULT server_clock
+  version BIGINT NOT NULL DEFAULT 1
+  changed_revision BIGINT NOT NULL
+  operation_id UUID NOT NULL
+  status_code TEXT (only if needed for append-only correction/retraction
+                    projection; not a second mutable message lifecycle)
+
+Constraints/invariants:
+  - INCIDENT: both target columns NULL;
+  - ORGANIZATION: exactly org target, unit target NULL;
+  - UNIT: exactly unit assignment target, org target NULL;
+  - trim(body) nonempty and char_length(body) <= 4000;
+  - optionally a conservative byte cap as defense against abuse, WITHOUT
+    accidentally reducing the accepted four-thousand-character contract
+    for normal Unicode text;
+  - FK target must belong to same incident: composite FK or locked
+    trusted validation, not an unchecked ID equality assumption;
+  - sender profile FK, incident FK, organization/participation identity;
+  - immutable author/scope/body/created time once committed;
+  - supersedes_id same incident and SAME audience identity, and previous
+    message is authorized for correction; avoid cycles, double supersession
+    and cross-scope laundering;
+  - no hard delete; RESTRICT historical FK deletion;
+  - stable server revisions and monotonically ordered feed identities.
+
+Suggested indexes:
+  (incident_id, sent_at DESC, id DESC)
+  (incident_id, audience_kind, audience_org_id, sent_at DESC, id DESC)
+  (incident_id, audience_kind, audience_unit_assignment_id,
+         sent_at DESC, id DESC)
+  (incident_id, supersedes_id) WHERE supersedes_id IS NOT NULL
+Avoid premature JSONB GIN indexes or unbounded full-text indexing.
+No index for a query not implemented in this milestone.
+
+If existing version/revision schema differs, adapt with an explicit
+mapping. Do NOT blindly create a duplicate sent_at/created_at/version
+concept or add `incident_id` foreign keys to unrelated hydrant tables.
+
+=======================================================================
+06. SQL PRIVILEGES, ROW SECURITY AND PRIVATE HELPERS
+=======================================================================
+
+- Enable RLS on newly created public message tables, if not already enabled.
+- REVOKE default PUBLIC privileges; clients do not INSERT/UPDATE/DELETE
+  directly, including through exposed PostgREST table endpoints.
+- SELECT either through a narrow RLS policy matching exact recipient scope,
+  OR preferably through a caller-bound, SECURITY DEFINER read RPC that
+  does NOT expose raw rows without audience filtering. Never presume
+  existing incident read RLS alone is enough for private messages.
+- Private authorization helper must not accept arbitrary actor_user_id
+  client claims; derive auth.uid() and verify account ACTIVE/exact org.
+- SECURITY DEFINER functions use `SET search_path = ''` or equivalent
+  safe empty search_path, schema-qualify every relation/function/cast,
+  declare distinct PL/pgSQL variables and SQL aliases, and use explicit
+  grants to authenticated only.
+- Never grant authenticated direct SELECT on private operation receipts,
+  audit, notification internals or other org's crew roster.
+- Select policies must not rely on an Android/Web audience filter as
+  the security boundary.
+- Check RLS recursion and search_path pitfalls by static inspection.
+- Avoid constructing dynamic SQL using audience values or user text.
+- Use bounded page limit with canonical parameter and safe errors.
+- If privacy precludes a useful NOT_FOUND vs DENIED distinction, return
+  the existing uniform deny/not-found contract.
+- Do not run the SQL, create policies in live Supabase, or alter Realtime
+  Settings; deliver migration code only.
+
+=======================================================================
+07. IMMUTABLE OPERATION RECEIPT AND COMMIT PATH
+=======================================================================
+
+A message send is a canonical incident mutation, not a direct INSERT
+from Web/Android. Use the M14.1 receipt helper and existing lock order.
+
+Conceptual RPC:
+  incident_message_send(
+    p_incident_id UUID,
+    p_acting_organization_id UUID,
+    p_operation_id UUID,
+    p_message_id UUID,
+    p_audience_kind TEXT,
+    p_audience_org_id UUID DEFAULT NULL,
+    p_audience_unit_assignment_id UUID DEFAULT NULL,
+    p_body TEXT,
+    p_expected_incident_revision BIGINT DEFAULT NULL
+  ) RETURNS permitted message DTO / accepted command receipt
+
+Actual signature MUST follow current repo migration conventions; do not
+assume this function already exists, and do not introduce breaking default
+arg ordering in PostgreSQL. If existing command framework requires an
+expected revision, use it and keep stale conflicts explicit. If normal
+chat concurrent writes can safely use incident row lock with snapshot
+revision rather than a stale client expected version, document choice
+rather than forcing false frequent conflicts.
+
+Successful transaction should, under existing canonical sorted locks:
+  1. Read exact existing operation receipt by operation UUID.
+  2. If exact same actor/org/action/normalized payload, recheck current
+     permitted visibility as canonical replay policy requires and return
+     committed result; do not emit duplicate message/notification/change.
+  3. If UUID is reused with different payload/scope, OPERATION_REUSED.
+  4. Revalidate ACTIVE actor, organization membership, incident active
+     participation, legal incident lifecycle and target audience authority
+     within the same transaction.
+  5. Validate UTF-8 body, normalized line endings, max 4000 characters,
+     dangerous control chars, no HTML interpretation in clients.
+  6. Validate message ID not already bound to conflicting content;
+     no client-supplied created_at or changed_revision authority.
+  7. Acquire canonical incident mutation lock and target episode locks.
+  8. Allocate one incident revision and appropriate source timeline
+     evidence following exact current helpers; do not manually bump
+     unrelated task versions.
+  9. Insert immutable message row(s), audit provenance, operation receipt
+     and authorized change descriptor(s) in SAME DB transaction.
+ 10. If M10 notification event is applicable, enqueue via existing
+     durable notification mechanism in transaction with deterministic
+     source ID. Actual push occurs separately AFTER commit.
+ 11. Return authoritative message ID, scope, server sent time and revision.
+
+No external network requests, Realtime subscription or FCM delivery inside
+locked mutation transaction. Atomic rollback must leave no partial
+message, revision, audit or receipt.
+
+Preserve canonical timeline sequencing. Do not put confidential text
+or target IDs from private audiences into the shared incident timeline.
+If the general incident append helper necessarily publishes shared event
+metadata, use a safe audience-aware event or a deliberately redacted generic
+event with SQL-filtered visibility, not client-side hiding. Explain exactly
+what is visible and why.
+
+=======================================================================
+08. MESSAGE CORRECTION / RETRACTION
+=======================================================================
+
+The M14 SPEC requires APPEND-ONLY corrections, not editable chat rows.
+
+Conceptual RPC:
+  incident_message_correct(
+    p_incident_id UUID,
+    p_acting_organization_id UUID,
+    p_operation_id UUID,
+    p_message_id UUID,
+    p_supersedes_id UUID,
+    p_body TEXT,
+    p_expected_parent_version BIGINT
+  ) RETURNS immutable correction message DTO
+
+Required behavior:
+  - New UUID, new receipt, new immutable row, supersedes original.
+  - Original content remains in restricted audit/history for authorized
+    historical readers, not silently overwritten or deleted.
+  - Same incident/author or explicit incident command ability to correct;
+    commander may need additional reason and auditing when correcting
+    another sender's message; by default restrict correction to original
+    sender and preserve privilege boundary.
+  - Original audience identity is frozen. Cannot "correct" a unit-private
+    message into incident-wide broadcast, or vice versa.
+  - Normal user UI shows newest authorized revision as current, with
+    "corrected" indicator and accessible history for permitted roles.
+  - Concurrent corrections to one parent resolve deterministically:
+    one succeeds; the other gets STALE_VERSION / ALREADY_SUPERSEDED.
+  - Retracting content, if required by approved repo semantics, is
+    append-only tombstone/correction with reason and retained audit,
+    never an unrestricted SQL DELETE.
+  - If corrections are not specified for an archived CLOSED incident,
+    prohibit them after terminal status instead of silently editing
+    immutable closed history.
+  - No automatic post-send editing / "undo" against authoritative server.
+
+If a previous correction is authorized, specify whether the next version
+links directly to immediate predecessor and prevent multiple active heads
+in the correction chain. Use unique constraints/transaction locks rather
+than merely checking client state.
+
+=======================================================================
+09. READ RPCS, PAGINATION AND PRIVACY-SAFE DTOS
+=======================================================================
+
+Proposed endpoints (names only illustrative):
+  incident_message_page(
+    p_incident_id,
+    p_acting_organization_id,
+    p_audience_kind OPTIONAL,
+    p_audience_scope_id OPTIONAL,
+    p_before_sent_at OPTIONAL,
+    p_before_id OPTIONAL,
+    p_limit DEFAULT 30
+  ) -> {messages[],next_cursor,has_more,server_revision,schema_version}
+
+  incident_message_get(
+    p_incident_id,
+    p_acting_organization_id,
+    p_message_id
+  ) -> one authorized immutable or corrected projection
+
+ALL responses are filtered in SQL for current actor and exact audience.
+A user requesting "ALL" sees only a UNION of the scopes they may read;
+never return raw joined hidden messages and count on UI filtering.
+
+Keyset order:
+  ORDER BY sent_at DESC, id DESC
+Cursor rule:
+  (sent_at, id) < (before_sent_at, before_id)
+Never OFFSET, never trust a timestamp alone to break ties. Prefer
+server-generated sent_at; client observed_at is not message ordering.
+
+Bind range 1..50/page. Snapshot and total-size caps apply as in B1:
+avoid loading unlimited messages into one 3MiB incident projection.
+If there is a pending local unsent message, keep it separate from server
+rows; rendering both does not make the local row server-confirmed.
+
+Separate "current message" (latest correction) and "history" reads:
+avoid exposing bodies of superseded/retracted versions to users whose
+current audience permission no longer permits them. Do not return
+another audience's message in message correction linkage.
+
+Do not allow arbitrary text search across all incident organizations.
+Search, if included, must be bounded AND SQL audience-scoped.
+
+For absent/inaccessible messages, use the canonical uniform NOT_FOUND
+pattern to avoid message existence enumeration.
+
+=======================================================================
+10. B1 CHANGE FEED AND RECONCILIATION CONTRACT
+=======================================================================
+
+Inspect exactly how PR #83 B1 represents field collection descriptors,
+scope fingerprints, manifest pages, history and reset_required.
+
+Implement message freshness without claiming B1 automatically includes
+incident_messages. Select the minimal correct integration:
+  (a) add a scoped message collection kind and authorized field DTO,
+      if B1 supports it without excessive privacy risk; OR
+  (b) append an audience-safe coarse "messages changed" descriptor and
+      trigger a bounded separate message page refresh, preserving cursor;
+      OR
+  (c) if change feed cannot safely carry private metadata, arrange
+      only an authorized revision hint and direct message read on demand,
+      documenting this fallback.
+
+The old B1 data change feed and snapshot TTL cannot be repurposed as a
+message retention policy. Messages and correction history are durable
+operational evidence, not 30-day disposable change descriptors.
+
+Producer must append message-related revision/invalidation descriptors
+atomically in the message transaction, in the existing incident revision
+order; avoid double-counting event ordinals or duplicate descriptor ID.
+On replay of the same operation, do not generate another change event.
+
+A change in account/org participation, crew episode, role authority or
+unit assignment must invalidate previously visible message pages/cache
+as appropriate; do not rely on a feed hint delivered while revoked.
+If insufficient safe granularity exists, reset only affected authorized
+message projection; preserve pending local drafts/original UUID.
+Cursor advancing requires successful durable authorized message update.
+
+If B1 size/row limits would force truncation, provide separate bounded
+message paging, not a silent drop or a "complete" cache with missing rows.
+
+=======================================================================
+11. B2 PRIVATE REALTIME TRANSPORT
+=======================================================================
+
+M14.7B2 private Realtime is only a LOW-TRUST WAKE-UP SIGNAL.
+Reuse its existing channel join/logout/reconnect/authorization logic.
+Do not create an alternate public channel or independently register
+a broad Postgres Changes subscription to public.incident_messages.
+
+B2 contract carries only revision/sequence hints (per M14 SPEC:
+{incident_id,revision,timeline_sequence}). It must NEVER carry
+message body, sender, recipient private identifiers, task notes or
+"who is talking" metadata to an unaudited incident-wide channel.
+
+On authorized message commit:
+  - publish only a scope-safe generic revision hint using existing
+    B2 flow; if the existing incident topic is broader than message
+    audience, ensure emitted hint does not reveal private message
+    metadata and assess whether a scope-specific authorized channel is
+    required for private change notifications;
+  - receiver schedules existing B1/message RPC reconciliation;
+  - duplicate, reordered, delayed or missing hint must be harmless;
+  - revoked client must not regain message access through an old channel;
+    every subsequent RPC rechecks current authority;
+  - if B2 has no Android compile-available transport, do not add
+    Gradle/dependency changes; rely on existing FCM/foreground/WorkManager
+    fallback and explicitly document what is not real-time on Android.
+
+Do NOT send a message's full content through broadcast to bypass SQL RLS.
+Do NOT make Realtime "message sent" status authoritative; only receipt/RPC
+reply establishes server acceptance.
+
+=======================================================================
+12. M10 NOTIFICATIONS — SINGLE DELIVERY STACK
+=======================================================================
+
+Inspect existing:
+ private.notification_categories
+ notification event adapter
+ recipient resolution
+ device registrations
+ M10 leases/retries/preferences
+ incident notification deep links
+
+Add an incident message category ONLY if justified by current category
+vocabulary; otherwise reuse an appropriate existing scoped category.
+Do not invent another FCM provider, device table, cron or queue.
+
+For every eligible recipient organization/audience:
+  - create deterministic source identity based on incident + message +
+    org/scope; enqueue through existing M10 outbox after message commits;
+  - resolve ACTIVE user/exact organization membership and effective
+    incident/unit audience, both at creation and delivery where M10
+    architecture permits. Ineligible users get NOTHING;
+  - respect notification preferences and existing quiet rules;
+  - use generic localized payload: "New incident message" without
+    message text, author identity, unit, exact location or victim data;
+  - never push to sender merely because they share the target audience;
+  - tap opens authenticated incident/message route, rechecks current
+    scope, then fetches through secured RPC;
+  - tapping or seeing push must NOT mark received, read or acknowledged
+    in canonical task state;
+  - failed FCM delivery does not roll back committed message.
+
+If M10's recipient model cannot express dynamic UNIT/private audience
+without exposing content, implement the safe generic incident/org
+notification subset, document deferred unit delivery with no leak.
+Better to miss a hint than expose protected communication to wrong org.
+
+=======================================================================
+13. ANDROID — REPOSITORY AND ROOM INTEGRATION
+=======================================================================
+
+Inspect current actual package names and implementations:
+ IncidentRepository.kt, IncidentFieldCache.kt,
+ IncidentReconciliation.kt, IncidentViewModel.kt, IncidentScreen.kt,
+ RegistryDatabase.kt, existing DAOs, WorkManager and operation payloads.
+
+Reuse Compose → ViewModel → Repository → Room → existing sync worker.
+Do NOT access Supabase directly from a composable for domain mutation.
+
+Propose minimal scoped Room entity/DAO:
+  account_id
+  acting_organization_id
+  incident_id
+  message_id
+  audience_kind
+  audience_scope_id
+  sender_user_id
+  sent_at (nullable while unsent)
+  authoritative_revision (nullable while unsent)
+  body or protected redacted state
+  supersedes_id
+  server_confirmed flag / sync state
+  local_created_at / local_operation_id where unsent
+  visibility generation / authorized lease binding.
+
+Use existing encryption/account isolation conventions.
+If change requires DB version bump, migrate from CURRENT version
+(the B1 verified version was 16; B2 may have changed it), with an
+additive NONDESTRUCTIVE Room migration. Register in real database
+builder. Do not modify exported schema JSON manually. Human generates
+new export during local build. No `.fallbackToDestructiveMigration`.
+
+Local UI:
+ - server accepted message must have durable receipt/confirmed result;
+ - locally submitted draft is PENDING or UNSENT, never "Delivered";
+ - synchronized authoritative messages render only when account/org/
+   incident/audience lease permits;
+ - revoked access immediately hides message body but keeps pending
+   original draft/evidence in a protected scoped record;
+ - sign-out and account/org switch invalidate old response generations,
+   cancel old subscriptions and prevent wrong-account writes;
+ - offline cache expiry uses existing incident 24h read lease, with
+   earlier org/session expiry taking precedence; not the registry's
+   separate 30-day authorization.
+
+Build a bounded message list with paging, de-duplication by message_id,
+stable correction display and zero new background workers. Prefer
+existing repository result/error types and localized safe strings.
+
+=======================================================================
+14. ANDROID — OFFLINE COMPOSITION AND RETRY
+=======================================================================
+
+Low-risk operational notes are ONLINE_PREFERRED in the M14 SPEC.
+Preserve the offline-first promise without granting offline authority.
+
+Required:
+  - allow compose while offline, freeze exact body/audience/target and
+    generate stable message_id + operation_id before send;
+  - preserve local draft after process death, app restart and network
+    loss, using existing account/org/incident isolation;
+  - if current existing operation queue supports safe low-risk incident
+    note types, extend it with ONE typed MESSAGE_SEND operation and
+    explicit immutable payload/parent dependency; never clone queue
+    processor or bypass its serialization;
+  - if existing queue cannot safely represent this message operation
+    without forbidden infrastructure/dependency changes, persist it
+    clearly as UNSENT DRAFT requiring user-approved online send, and
+    document that automatic retry is intentionally unavailable;
+  - for unknown HTTP outcome, lookup existing operation receipt or
+    retry SAME operation UUID and identical frozen request under
+    canonical idempotency; never generate a replacement message UUID
+    just because the response timed out;
+  - explicit authoritative rejection (stale scope, no membership,
+    reassignment, terminal incident) => NEEDS_ATTENTION, retain draft,
+    never automatically rebase recipient or remap unit target;
+  - no accidental auto-send for a different signed-in account/org;
+  - if audience scope disappears, do not send to a silently selected
+    wider audience. User must review a NEW request explicitly.
+  - no attachment bytes or new general-purpose note upload pipeline.
+
+Do not claim automatic delivery unless the actual queue path handles it.
+A local visible `PENDING` is not `SENT`, and sent is not `READ` or `ACK`.
+
+=======================================================================
+15. WEB — AUTHENTICATED INCIDENT COMMUNICATION TAB
+=======================================================================
+
+Find actual Next.js incident workspace routes/provider and existing
+SI/DE localization. Do not build a second incident dashboard.
+
+Include:
+  - "Sporočila / Nachrichten" tab/panel within existing incident view;
+  - audience selector with audience preview: incident, own/authorized
+    participating orgs, authorized current unit assignments;
+  - send input with remaining characters up to 4000; disable on
+    unsupported role/terminal incident/invalid scope;
+  - explicit recipient scope summary adjacent to submit;
+  - confirm scope for private vs incident-wide audience to prevent
+    accidental disclosure;
+  - stable submitted/pending/accepted/error states; retain text after
+    errors and stale transitions;
+  - message list newest-first, server paginated with "older" pagination;
+  - sender/time/scope labels limited to fields current actor may view;
+  - corrected indicator and linked authorized correction history;
+  - own-message correction UI via new immutable message version; no
+    direct UPDATE or DELETE from browser;
+  - no HTML/markdown execution from stored body; render plain text,
+    escape unsafe content, safe clickable URL handling if supported;
+  - obvious separation from "Issue task"/"Acknowledge task" controls;
+  - empty/loading/error/denied states and accessible keyboard operation;
+  - canonical account/org switch cleanup; no residual private bodies;
+  - reuse B1 head and B2 private hint refresh instead of independent
+    polling/realtime subscription engine.
+
+Web mutations go through existing authenticated route/server RPC
+pattern (SSR/client as appropriate) and do not expose secret keys.
+Do not confuse commander privilege with org ADMIN role.
+
+=======================================================================
+16. UI LANGUAGE AND ACCESSIBILITY
+=======================================================================
+
+Localization:
+ - Slovenian: Sporočila, Intervencija, Organizacija, Enota,
+   Poslano, Pošiljanje, Ni povezave, Osnutek, Popravljeno,
+   Dostop ni več dovoljen, Vsebina je zastarela, Poskusi znova.
+ - German: Nachrichten, Einsatz, Organisation, Einheit,
+   Gesendet, Wird gesendet, Offline, Entwurf, Korrigiert,
+   Zugriff nicht mehr erlaubt, Veraltete Daten, Erneut versuchen.
+Use existing names/translations where they exist. Don't duplicate keys.
+
+Critical warning copy should say:
+ "Sporočila niso povelja. Za naloge in potrditve uporabi ukaze intervencije."
+ and equivalent German localization.
+
+Do not add a UI button that implies a message counts as task START,
+ACK, BLOCKED, COMPLETE or an officially dispatched order.
+
+Accessible: semantic send button, disabled reason, logical focus after
+send/error, visible announcement of pending/confirmed, clear audience
+for screen readers, non-color-only states, reliable touch targets,
+dynamic text sizing and lazy list virtualization in Android.
+
+=======================================================================
+17. MESSAGE SAFETY AND CONTENT POLICY IN APPLICATION
+=======================================================================
+
+Messages are short operational notes. They may contain personal data,
+so minimize exposure:
+ - server validates bounded body and strips/rejects forbidden control
+   characters; preserve intended normal line breaks;
+ - no SQL/string concatenation with user input; parameterized RPC;
+ - never render content as unsafe HTML or embedded executable markup;
+ - private bodies absent from shared timeline, push, broadcast payloads,
+   analytics, crash logs and error response details;
+ - do not suggest sensitive medical/patient details in examples;
+ - do not expose sender profile records outside the read projection;
+ - no data mining/cross-scope full-text search;
+ - retraction/correction preserves audit but hides a superseded public
+   display appropriately, without erasing retained legal history;
+ - prevent extremely rapid spamming using bounded writes and existing
+   server-side operational limits if available; avoid creating a
+   second rate limiter/service.
+ - messages are not an alternative to emergency radio communications.
+
+REAL vs TRAINING: use same permission model but clearly show training
+label, prevent SIM-generated messages from appearing as genuine human
+communication or from triggering REAL notification recipients.
+
+=======================================================================
+18. LIFECYCLE AND TERMINAL STATES
+=======================================================================
+
+Inspect actual state enum and M14.1/M14.10 migration status.
+Define explicit send/correct/read matrix for:
+  DRAFT, ACTIVE, PAUSED (if canonical), STABILIZED, CANCELLED/CLOSED,
+  TRAINING and any other actual states.
+
+Default:
+ - send/correct only in live states where canonical incident command
+   authority permits communication and the human actor retains scope;
+ - archived terminal incidents READ ONLY under specifically authorized
+   historical permissions; no new messages after closure;
+ - never resurrect audience authority based on old unit membership;
+ - terminal or reassigned incident message UI disables composer with
+   truthful localized status;
+ - if historical participation allows archive reads, enforce audience
+   history conditions explicitly; do not grant private unit messages to
+   every historical participant.
+
+Conservative gate beats convenience for ambiguous historical scope.
+
+=======================================================================
+19. CONCURRENCY / TIMESTAMPS / REVISIONS
+=======================================================================
+
+- Server sent_at controls ordering, not phone clock.
+- For same timestamp use message UUID tie break, no OFFSET.
+- Concurrent sends from different authorized actors are both retained,
+  each separate incident revision/receipt under canonical locking.
+- Client's stale revision may be advisory for normal send if command
+  framework permits; correction needs a version/head check.
+- A duplicate operation_id does not create two messages or notifications.
+- Lost response yields UNKNOWN until canonical receipt or bounded
+  authoritative read resolves it; never assume 500 means no commit.
+- Current incident revision and timeline sequence are not identical
+  to message_id, created_at, or local queue insertion index.
+- B1 changes and Room cached message version apply under same durable
+  cursor advancement rule; no cursor commit ahead of message state.
+- Shared Realtime hint delivery is best effort, never source of truth.
+- If two message edits target same latest message, one becomes explicit
+  stale conflict, NOT silent last-writer-wins.
+
+=======================================================================
+20. FAILURE MATRIX — IMPLEMENT ALL APPLICABLE PATHS
+=======================================================================
+
+A. Network absent BEFORE send:
+   keep scoped DRAFT/QUEUED, user sees no SENT success.
+
+B. Server commits but HTTP response lost:
+   identical operation UUID replay/receipt lookup, never duplicate.
+
+C. Message commit succeeds but notification enqueuing fails in same
+   transaction:
+   either whole transaction rolls back or deterministic enqueue
+   occurs in an approved deferred reliable path; do not claim delivery.
+   Existing M10 transaction pattern takes precedence.
+
+D. FCM provider fails AFTER commit:
+   durable message intact; foreground fetch eventually sees it.
+
+E. Realtime packet duplicated/out of order:
+   coalesce and fetch by server cursor; no duplicate rendering.
+
+F. Current org membership revoked:
+   immediate hide on confirmed denial, prevent future send,
+   retain protected unsent draft evidence per account rules.
+
+G. Unit member leaves / unit is reassigned:
+   refresh authorization; old UNIT-private message hidden if no longer
+   permitted, even if old Room row physically remains until safe cleanup.
+
+H. Incident scope changes mid-pagination:
+   reject stale page, hide unauthorized cached state, restart permitted
+   snapshot or page; no mixed-audience pages.
+
+I. Correction races another correction:
+   one committed immutable successor; other STALE_VERSION.
+
+J. Reconnect with old message page cursor:
+   do not silently skip newly appended messages; use refresh at head
+   plus keyset history and documented fence/watermark semantics.
+
+K. Message body too large/empty:
+   deterministic validation; preserve editable draft, no success.
+
+L. Another organization tries direct RPC:
+   SQL-denied; no existence/content leakage in error.
+
+M. Account switch during network result:
+   late result must not write into active new account's Room/view.
+
+N. Incident lease expired offline:
+   body hidden; unsent intent preserved; verified online scope required.
+
+O. Unsupported B2 Android Realtime dependency:
+   rely on M10/foreground/WorkManager; do not fake WebSocket or edit Gradle.
+
+P. Archive/terminal incident:
+   read only when authorized; no new operational messages.
+
+Q. SIM/TRAINING incident:
+   labeled training; no REAL broadcast or notification audience.
+
+R. Duplicate notification from same message:
+   M10 deterministic source key prevents duplicate notification
+   effects where existing architecture allows.
+
+S. Server reports malformed audience:
+   reject. Do NOT widen from UNIT to ORGANIZATION/INCIDENT.
+
+T. Unexpected SQL/PLpgSQL error:
+   return safe code; preserve draft/receipt evidence, avoid logging body.
+
+=======================================================================
+21. PERF, SIZING AND BACKPRESSURE
+=======================================================================
+
+Proposed boundaries to document (change only if actual repo/spec
+has stricter existing limits):
+ - 4000 message body characters; no file payload;
+ - max 50 messages per page (default 30);
+ - max 100 authorized messages prefetched per active incident view;
+ - one active message refresh per account/org/incident generation;
+ - bounded correction history fetch;
+ - no unbounded subscription per message or per crew member;
+ - page reply byte cap compatible with B1's 3MiB field projection;
+ - coalesce duplicate revision hints and foreground refresh;
+ - message list virtualization in Android, stable Web pagination;
+ - avoid N+1 sender/profile/crew queries; join only permitted DTOs;
+ - transaction locks in canonical order, no network under lock;
+ - safe limit for simultaneous open incident subscriptions from B2.
+
+Retention: canonical messages long-lived under the configurable incident
+retention policy, NOT 30-day change-feed retention, NOT a temporary
+Realtime replay cache, and NOT 5-minute manifest TTL. No invented
+statutory retention claim. No Cron for cleanup.
+
+Diagnostics: operation ID, message ID, incident ID and safe error category
+only when current logging conventions allow; avoid private body,
+audience membership lists, personnel details, GPS and tokens.
+
+=======================================================================
+22. API AND CONTRACT COMPATIBILITY
+=======================================================================
+
+Use additive RPCs/schema after latest migration. Old clients should
+continue to work with incident B1 snapshot and task operations without
+message feature. If adding message descriptor kind, unknown older clients
+must invoke safe scope refresh or ignore a *non-critical and accurately
+documented* extension without silently losing canonical state.
+
+If B1 schema_version / manifest collection list needs extension, add
+a negotiated version that preserves v1 client behavior. Do not make
+older Android apps fail opening incidents simply because messages exist.
+
+All RPC outputs should include a stable contract schema version if
+consistent with existing conventions. Return explicit safe errors:
+ NOT_AUTHORIZED, NOT_FOUND, INVALID_AUDIENCE, VALIDATION_FAILED,
+ OPERATION_REUSED, STALE_VERSION, INCIDENT_TERMINAL,
+ SCOPE_CHANGED, NEEDS_REAUTH, RATE_LIMITED (if implemented).
+Prefer actual canonical codes; do not create aliases unnecessarily.
+
+No new dependency or external SaaS/vendor. No .env secrets.
+If a required Android UI feature is impossible without forbidden Gradle
+dependencies, stop that portion and report exact blocker; do not
+silently present "fully implemented Android" on PR handoff.
+
+=======================================================================
+23. VERSIONED FORWARD-ONLY MIGRATIONS / MANUAL ROLLOUT
+=======================================================================
+
+Choose a migration timestamp newer than actual current main. Do not
+edit PR #82/#83/B2 historical migrations already applied/merged.
+Implement smallest coherent forward-only SQL migration containing:
+ - message table/constraints/indexes or minimal extensions;
+ - RLS and grants;
+ - private helper(s) for audience authorization;
+ - authorized send/correct/read RPCs;
+ - canonical receipts, timeline/audit and B1 change append integration;
+ - M10 notification category/adapter changes if necessary;
+ - B2 private hint adaptation if strictly necessary and safe.
+
+Do not apply migration. Document human ordering:
+  1. manually verify all upstream migrations actually applied in remote;
+  2. owner manually merges PR after independent source review;
+  3. owner applies new SQL migration;
+  4. compatible Web deployment;
+  5. owner exports Room schema/compiles Android locally if changed;
+  6. distribute compatible Android when backend already supports it;
+  7. controlled TRAINING pilot with two orgs and real accounts;
+  8. verify negative authorization, revocation, idempotency, offline,
+     duplicate/late notification and no command state mutation;
+  9. only later approve any real operational use.
+
+Git pull does NOT apply SQL migrations. Source code is not proof of
+schema deployed. No automatic rollback SQL that deletes message history.
+Document forward-fix and feature-disable recovery instead.
+
+=======================================================================
+24. DOCS AND CHANGED FILES
+=======================================================================
+
+Create:
+ docs/M14.7C-operational-scoped-messages.md
+
+Include:
+ - existing code inventory and all actual changed paths;
+ - canonical audience enum and role/capability decision matrix;
+ - authoritative DB schema/index/FK/RLS and SQL RPC signatures;
+ - write transaction order and immutable receipt/supersession;
+ - pagination, correction history, timeline/audit boundaries;
+ - B1 change/feed scope and any reset rules;
+ - B2 private hint topic/exposure boundary;
+ - M10 notifications including recipient eligibility;
+ - Android Room/sync/offline states and schema migration version;
+ - Web UI and server API mapping;
+ - SI/DE string key mapping and accessibility;
+ - account/org switch, revocation, leases and data retention;
+ - release compatibility with old Web/Android;
+ - concrete human acceptance checklist, NOT EXECUTED;
+ - actual limitations/unsupported features;
+ - clear MANUAL SQL/Room/Web/Android rollout in correct order.
+
+Update scoped implementation notes in:
+ docs/SPEC-M14-INCIDENT-OPERATIONS.md
+ without rewriting historic approved requirements or marking deployment done.
+
+Potential files (inspect actual before editing):
+ supabase/migrations/<new_m14_7c_migration>.sql
+ web/features/incidents/...
+ web/app/api/incidents/... (only if existing conventions)
+ android/app/src/main/java/si/gasilko/app/feature/incidents/...
+ android/app/src/main/java/si/gasilko/app/core/database/...
+ android/app/src/main/res/values*/strings.xml
+ existing M10 notification adapter and B2 Realtime provider hooks.
+
+No changes to Android Gradle, Kotlin toolchain, Java toolchain, KAPT/KSP,
+`pnpm-lock.yaml`, generated Room schemas, credentials, Cron or unrelated
+hydant/inspection routes.
+
+=======================================================================
+25. HUMAN-RUN MANUAL ACCEPTANCE — DO NOT RUN
+=======================================================================
+
+At least these scenarios must be fully implementable and written in
+the milestone doc; only the HUMAN OWNER runs them after deployment:
+
+ 01. IC sends incident-wide note; authorized participant Web/Android
+     reads exact body, sender and server order.
+ 02. Agency commander sees only permitted organization notes;
+     unrelated agency cannot fetch them even by guessed UUID.
+ 03. Authorized unit leader sends to own unit only.
+ 04. Unrelated unit leader cannot see/send to another unit, including
+     direct SQL RPC attempt.
+ 05. Ordinary org ADMIN without incident role cannot use incident-wide
+     send solely because admin.
+ 06. Nonparticipating member/inherited-only org reader cannot open
+     message pages or target directly.
+ 07. Pending/suspended account gets no private read/send/notification.
+ 08. All three audience payload validations reject mismatched IDs,
+     wrong incident unit assignment and too-long body.
+ 09. Empty/whitespace body rejected; draft retained.
+ 10. Two concurrent messages both appear once with deterministic order.
+ 11. Identical operation retry returns same receipt/message, no duplicate.
+ 12. Same operation UUID with different payload rejected OPERATION_REUSED.
+ 13. Server commits but response lost: Android/Web reconcile original.
+ 14. Sender corrects own message; old version preserved in audit,
+     current display indicates corrected.
+ 15. Two concurrent corrections: one wins; one explicit conflict.
+ 16. Correction cannot change original audience to wider visibility.
+ 17. Unauthorized actor cannot correct another sender's message.
+ 18. Message read/tap never changes task ACK/START/COMPLETE status.
+ 19. No private message text appears in incident-wide timeline.
+ 20. No private message text appears in FCM payload or Realtime broadcast.
+ 21. M10 delivery fails: durable message still appears on refresh.
+ 22. Duplicate, missing, delayed B2 hint does not lose/double messages.
+ 23. Android goes offline; draft survives app process restart.
+ 24. Android reconnects: original operation identity preserved;
+     successful send marked confirmed only from server response.
+ 25. Authorization expires while offline: content hidden, unsent draft
+     retained securely; no reauth bypass.
+ 26. Member removed from crew: UNIT-private body disappears immediately
+     on confirmed scope change; no stale in-flight refresh resurrects it.
+ 27. Organization switch: prior private content not shown in new org.
+ 28. Account switch: old draft never uploads under new account.
+ 29. Unit deployment released or reassigned: current authority applied,
+     no unintended historical access grant.
+ 30. Incident becomes terminal: composer disabled, historical authorized
+     read remains correct.
+ 31. B1 cursor/history expiration triggers safe sync reset without
+     deleting unrelated local pending task/registry operations.
+ 32. B1 manifest pagination interrupted: previous complete cache
+     preserved until replacement.
+ 33. Android Room migration preserves existing hydrant/inspection
+     entities and all offline task receipts.
+ 34. Old Android build without M14.7C still performs existing task
+     operations when backend schema is upgraded.
+ 35. SI and DE translations work with long text and accessibility.
+ 36. TRAINING incident messaging remains marked training, cannot
+     become REAL dispatch or notify REAL incident audience.
+ 37. Person guesses message UUID in another org: no detail/existence leak.
+ 38. No unauthorized storage signed URL or attachment accessible
+     because M14.7D was not implemented.
+ 39. Timestamp tie and page cursor stable under a new concurrent send.
+ 40. No "message delivered" success based only on notification send.
+ 41. Existing RLS on hydrants, photos and organizations unaffected.
+ 42. Human sees NOT TESTED/NOT DEPLOYED explicitly on PR handoff.
+
+Document expected canonical DB outcome for each, not merely UI output.
+Add a manual access matrix for negative roles and boundary cases.
+Do NOT create test data or fire real emergency notifications.
+
+=======================================================================
+26. IMPLEMENTATION PLAN / ORDER OF WORK
+=======================================================================
+
+1. Inspect prerequisites and actual merged main/PRs. Stop if B2 missing.
+2. Inspect M14 schema/spec/auth and choose exact allowed audiences.
+3. Plan read/write privileges and immutable correction/receipt models.
+4. Add minimal forward-only SQL and actor-bound read/write RPCs.
+5. Integrate canonical revisions, timeline/audit and B1 invalidation.
+6. Integrate B2 private hints safely with no content in payload.
+7. Integrate existing M10 recipient resolver and generic notification.
+8. Add Web scoped message panel/confirmed-send/correction.
+9. Extend Android existing Room/repository/queue/UI with scoped data,
+   stable UUID and offline lease-safe drafts.
+10. Implement SI/DE localized errors, security/scope/failure presentation.
+11. Write milestone docs, human manual rollout, known limitations.
+12. Publish EXACTLY ONE PR to main. Report source-only completion.
+13. STOP. Do not merge, run SQL, tests or builds.
+
+If some step needs forbidden external changes, do not silently downgrade
+its requirement or claim full success: report precise blocker, and keep
+existing features safe. A coherent partial implementation can be
+reported as partial but not "done".
+
+=======================================================================
+27. FINAL CODEX REPORT — REQUIRED FIELDS
+=======================================================================
+
+Report in English (Codex PR), with clear brief Slovenian handoff if
+the owner-facing channel normally uses Slovenian:
+
+ - PR URL, branch, exact base main SHA and implementation commit SHA;
+ - definitive confirmation M14.7B2 was already present in main;
+ - exact SQL migration filename and actual schema/RPC names;
+ - incident audience matrix and restrictions;
+ - append-only message/correction design + receipt idempotency;
+ - atomic revision/audit/B1 change producer coverage;
+ - Web screens/routes/provider integration;
+ - Android DB version, migration and exact changed files;
+ - whether offline send autoqueues or remains an UNSENT DRAFT;
+ - existing M10 and B2 integration and precise runtime limitations;
+ - ALL manual migration/deployment/Room export steps in proper order;
+ - current unresolved blockers and explicit source-level uncertainties;
+ - agreement that no tests/builds/Gradle/lint/typecheck/CI/SQL,
+   runtime verification, real FCM or deployment were performed;
+ - human-run acceptance checklist location.
+
+STOP AFTER THE ONE PR. DO NOT MERGE. HUMAN OWNER DECIDES NEXT MILESTONE.
+
+Official upstream documentation references to consult BEFORE code if
+API contracts have evolved:
+  https://supabase.com/docs/guides/realtime/authorization
+  https://supabase.com/docs/guides/realtime/broadcast
+  https://supabase.com/docs/guides/realtime/subscribing-to-database-changes
+Avoid broad `USING (true)` Realtime SELECT policies for incident privacy.
+Remember: Realtime join authorization can remain cached; revocation must
+still be enforced on every canonical message read/write, and the B2
+channel revocation/reconnect mechanism must be reused.
+
+END OF GASILKO M14.7C FULL CODEX IMPLEMENTATION PROMPT.
