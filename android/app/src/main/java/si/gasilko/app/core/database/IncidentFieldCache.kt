@@ -37,6 +37,10 @@ interface IncidentFieldDao {
     suspend fun clearCursors(account: String,org: String)
     @Query("DELETE FROM incident_sync_cursor WHERE account=:account AND organization=:org AND incident=:incident")
     suspend fun removeCursor(account: String,org: String,incident: String)
+    @Query("""UPDATE pending_hydrant_changes SET payload=:payload,state=:state
+        WHERE account=:account AND organization=:org AND operationId=:operation
+        AND operation='INCIDENT_TASK' AND state='DRAFT'""")
+    suspend fun updateMessageDraft(account: String,org: String,operation: String,payload: String,state: String): Int
     @Insert suspend fun dispatch(row: IncidentDispatch)
     @Query("""SELECT q.*,d.parent,d.request,d.result,d.error FROM pending_hydrant_changes q
         JOIN incident_operation_dispatch d ON d.sequence=q.sequence

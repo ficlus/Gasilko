@@ -27,6 +27,8 @@ internal fun JsonObject.rows(key: String)=(get(key) as? JsonArray)?.mapNotNull {
 internal fun parse(value: String)=Json.parseToJsonElement(value).jsonObject
 /** Serialize credential-changing UI actions with authenticated field requests. */
 internal val incidentIdentityAccess=kotlinx.coroutines.sync.Mutex()
+internal class MessageAccessFailure(val reason: String): IllegalStateException("MESSAGE_UNAVAILABLE")
+private val messageGenerations=mutableMapOf<String,Long>() // guarded by incidentIdentityAccess
 private val activeDispatches=MutableStateFlow<Set<String>>(emptySet())
 internal val terminal=setOf("COMPLETED","UNABLE","CANCELLED")
 internal fun transitions(status: String,ack: Boolean)=when(status) {
@@ -102,12 +104,29 @@ class IncidentRepository(private val context: Context,private val client: Supaba
         }
         dao.removeCursor(account,org,id)
     }
+    private suspend fun invalidateMessages(org: String,id: String,reason: String) = incidentIdentityAccess.withLock {
+        scope(org);currentCoroutineContext().ensureActive()
+        val key="$account/$org/$id"
+        messageGenerations[key]=(messageGenerations[key] ?: 0L)+1
+        var hadPage=false
+        db.withTransaction {
+            dao.snapshot(account,org)?.let { row ->
+                val root=parse(row.payload)
+                hadPage=root.rows("incidents").any { it.text("id")==id && it["message_page"] is JsonObject }
+                dao.save(row.copy(payload=JsonObject(root+("incidents" to JsonArray(root.rows("incidents").map {
+                    if(it.text("id")==id)JsonObject((it-"message_page")+("message_access" to JsonPrimitive(reason))) else it
+                }))).toString()))
+            }
+        }
+        hadPage
+    }
     private suspend fun refreshLocked(org: String) {
         scope(org)
         try {
             val previous=dao.snapshot(account,org)
             val reconciler=IncidentReconciliation(account,org,
-                { name,request -> rpc(name,request).also { scope(org) } },
+                { name,request -> if(name=="incident_message_page")messageRead(org,request.text("p_incident_id"),name,request)
+                    else rpc(name,request).also { scope(org) } },
                 { id -> revokeIncident(org,id) })
             val staged=reconciler.reconcile(previous?.let { parse(it.payload).rows("incidents") }.orEmpty(),dao.cursors(account,org))
             scope(org)
@@ -118,6 +137,10 @@ class IncidentRepository(private val context: Context,private val client: Supaba
             // Account changes cannot cross this final authorization + atomic cache/cursor commit.
             incidentIdentityAccess.withLock {
                 scope(org);currentCoroutineContext().ensureActive()
+                for(i in staged.incidents)if(i["message_page"] is JsonObject) {
+                    check(i.obj("message_page").text("_cache_generation")==
+                        (messageGenerations["$account/$org/"+i.text("id")] ?: 0L).toString()) { "STALE" }
+                }
                 // Saving lease first fails closed if Room commit is interrupted.
                 secure.saveIncidentLease(account,org,buildJsonObject {
                     put("wall",row.verifiedAt);put("elapsed",row.elapsed);put("boot",row.boot)
@@ -220,7 +243,7 @@ class IncidentRepository(private val context: Context,private val client: Supaba
         var retry=false
         for(op in dao.operations(account,org)) {
             if(op.operation.state in listOf("SERVER_CONFIRMED","NEEDS_ATTENTION") ||
-                payload(op).text("rpc")!="incident_transition_task_assignment")continue
+                payload(op).text("rpc") !in listOf("incident_transition_task_assignment","incident_message_send"))continue
             val parent=op.parent?.let { id -> dao.operations(account,org).find { it.operation.sequence==id } }
             if(parent?.operation?.state=="NEEDS_ATTENTION") {
                 dao.state(account,org,op.operation.sequence,"NEEDS_ATTENTION")
@@ -262,7 +285,8 @@ class IncidentRepository(private val context: Context,private val client: Supaba
         // A receipt proves this operation committed, not a fabricated current assignment
         // state/version. Cache reconciliation failures must never turn success into rejection.
         if(result.text("operation_id")!=op.operation.operationId || result.text("incident_id")!=payload(op).text("incident") ||
-            (payload(op).text("rpc")=="incident_transition_task_assignment" && result.text("task_id")!=payload(op).text("task"))) {
+            (payload(op).text("rpc")=="incident_transition_task_assignment" && result.text("task_id")!=payload(op).text("task")) ||
+            (payload(op).text("rpc")=="incident_message_send" && result.text("message_id")!=op.operation.entityId)) {
             dao.state(account,org,op.operation.sequence,"OUTCOME_UNKNOWN")
             dao.outcome(op.operation.sequence,null,"RECEIPT_UNCERTAIN")
             return false
@@ -297,6 +321,131 @@ class IncidentRepository(private val context: Context,private val client: Supaba
         val sent=send(org,op,request(org,op)!!)
         if(sent)refreshLocked(org)
         dao.operations(account,org).single { it.operation.operationId==operation }.operation.state=="SERVER_CONFIRMED"
+    }
+    suspend fun queueMessage(org: String,incident: String,target: JsonObject,body: String,parent: JsonObject?,draftOperation: String) =
+        hydrantRemoteAccess.withLock {
+            scope(org)
+            val row=dao.snapshot(account,org)
+            require(lease(org,row)>0)
+            val i=parse(row!!.payload).rows("incidents").single { it.text("id")==incident }
+            require(i.text("status") in listOf("ACTIVE","STABILIZED"))
+            require(i.obj("message_page").rows("targets").any { it==target })
+            val normalized=body.replace("\r\n","\n").replace("\r","\n").trim()
+            require(normalized.isNotEmpty() && normalized.codePointCount(0,normalized.length)<=4000)
+            val existing=dao.operations(account,org).find { it.operation.operationId==draftOperation }
+            if(existing!=null && existing.operation.state!="DRAFT")return@withLock
+            val id=existing?.operation?.entityId ?: UUID.randomUUID().toString()
+            val request=buildJsonObject {
+                put("id",id);put("body",normalized);put("audience_kind",target.text("kind"))
+                if(target.text("kind")=="ORGANIZATION")put("audience_org_id",target.text("id"))
+                if(target.text("kind")=="UNIT")put("audience_unit_assignment_id",target.text("id"))
+                if(parent!=null) {
+                    require(parent.text("sender_user_id")==account && parent.flag("can_correct"))
+                    require(parent.text("audience_kind")==target.text("kind"))
+                    require(when(target.text("kind")) {
+                        "ORGANIZATION" -> parent.text("audience_org_id")==target.text("id")
+                        "UNIT" -> parent.text("audience_unit_assignment_id")==target.text("id")
+                        else -> true
+                    })
+                    put("supersedes_id",parent.text("id"));put("parent_version",parent.text("version"))
+                }
+            }
+            val intent=buildJsonObject {
+                put("incident",incident);put("expected",i.text("version"));put("rpc","incident_message_send");put("payload",request)
+            }
+            db.withTransaction {
+                if(existing!=null) {
+                    check(dao.updateMessageDraft(account,org,draftOperation,intent.toString(),"LOCAL_PENDING")==1)
+                } else {
+                val seq=db.registry().enqueue(PendingHydrantChange(operationId=draftOperation,account=account,
+                    organization=org,entityId=id,operation="INCIDENT_TASK",payload=intent.toString(),baseVersion=null,
+                    createdAt=System.currentTimeMillis(),state="LOCAL_PENDING"))
+                dao.dispatch(IncidentDispatch(seq,null,null))
+                }
+            }
+            scheduler.enqueue(account,org)
+        }
+    suspend fun saveMessageDraft(org: String,incident: String,operation: String,target: JsonObject,body: String,parent: JsonObject?) =
+        hydrantRemoteAccess.withLock {
+            scope(org)
+            val row=dao.snapshot(account,org)
+            require(lease(org,row)>0 && body.codePointCount(0,body.length)<=4000)
+            val i=parse(row!!.payload).rows("incidents").single { it.text("id")==incident }
+            require(i.obj("message_page").rows("targets").any { it==target })
+            val existing=dao.operations(account,org).find { it.operation.operationId==operation }
+            if(existing!=null && existing.operation.state!="DRAFT")return@withLock
+            val id=existing?.operation?.entityId ?: UUID.randomUUID().toString()
+            val intent=buildJsonObject {
+                put("rpc","incident_message_draft");put("incident",incident)
+                put("draft_target",target);put("draft_parent",parent ?: JsonNull)
+                put("payload",buildJsonObject { put("id",id);put("body",body) })
+            }.toString()
+            db.withTransaction {
+                scope(org)
+                if(existing!=null)dao.updateMessageDraft(account,org,operation,intent,"DRAFT") else {
+                    val seq=db.registry().enqueue(PendingHydrantChange(operationId=operation,account=account,
+                        organization=org,entityId=id,operation="INCIDENT_TASK",payload=intent,baseVersion=null,
+                        createdAt=System.currentTimeMillis(),state="DRAFT"))
+                    dao.dispatch(IncidentDispatch(seq,null,null))
+                }
+            }
+        }
+    private suspend fun messageRead(org: String,incident: String,name: String,args: JsonObject): JsonObject {
+        val key="$account/$org/$incident"
+        val generation=incidentIdentityAccess.withLock { scope(org);messageGenerations[key] ?: 0L }
+        try {
+            val value=rpc(name,args)
+            return incidentIdentityAccess.withLock {
+                scope(org);currentCoroutineContext().ensureActive()
+                if((messageGenerations[key] ?: 0L)!=generation)throw FieldProtocolFailure("STALE")
+                JsonObject(value+("_cache_generation" to JsonPrimitive(generation.toString())))
+            }
+        } catch(e: CancellationException) { throw e }
+        catch(e: Exception) {
+            if(e is RestException && e.statusCode==401) { revoke(org);throw e }
+            val changed="SCOPE_CHANGED" in e.message.orEmpty()
+            val denied="NOT_AUTHORIZED" in e.message.orEmpty() || (e is RestException && e.statusCode==403)
+            if(changed || denied) {
+                if(invalidateMessages(org,incident,if(changed)"SCOPE_CHANGED" else "DENIED"))
+                    si.gasilko.app.core.notifications.NotificationTap.hint()
+                throw MessageAccessFailure(if(changed)"SCOPE_CHANGED" else "DENIED")
+            }
+            throw e
+        }
+    }
+    suspend fun messageHistory(org: String,incident: String,id: String): JsonObject {
+        scope(org)
+        val value=messageRead(org,incident,"incident_message_history",buildJsonObject {
+            put("p_acting_organization_id",org);put("p_incident_id",incident);put("p_message_id",id)
+        })
+        scope(org);return value
+    }
+    suspend fun olderMessages(org: String,incident: String)=hydrantRemoteAccess.withLock {
+        scope(org)
+        val row=dao.snapshot(account,org) ?: return@withLock
+        require(lease(org,row)>0)
+        val root=parse(row.payload);val current=root.rows("incidents").single { it.text("id")==incident }
+        val page=current.obj("message_page")
+        if(!page.flag("has_more"))return@withLock
+        val next=messageRead(org,incident,"incident_message_page",buildJsonObject {
+            put("p_acting_organization_id",org);put("p_incident_id",incident);put("p_before_sent_at",page.text("next_sent_at"))
+            put("p_before_id",page.text("next_id"));put("p_limit",30)
+            put("p_expected_revision",current.text("revision"));put("p_scope_fingerprint",page.text("scope_fingerprint"))
+        })
+        scope(org)
+        check(next.text("account")==account && next.text("organization")==org && next.text("incident_id")==incident &&
+            next.text("revision")==current.text("revision") && next.text("scope_fingerprint")==page.text("scope_fingerprint"))
+        val combined=(page.rows("messages")+next.rows("messages")).distinctBy { it.text("id") }.take(100)
+        val updated=JsonObject(next+("messages" to JsonArray(combined))+("has_more" to JsonPrimitive(combined.size<100 && next.flag("has_more"))))
+        incidentIdentityAccess.withLock {
+            scope(org)
+            check(next.text("_cache_generation")==(messageGenerations["$account/$org/$incident"] ?: 0L).toString()) { "STALE" }
+            db.withTransaction {
+                dao.save(row.copy(payload=JsonObject(root+("incidents" to JsonArray(root.rows("incidents").map {
+                    if(it.text("id")==incident)JsonObject(it+("message_page" to updated)) else it
+                }))).toString()))
+            }
+        }
     }
     fun syncNow(org: String)=scheduler.enqueue(account,org)
     suspend fun catalog(org: String): List<JsonObject> {

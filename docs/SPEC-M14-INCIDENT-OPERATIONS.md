@@ -3025,3 +3025,21 @@ Forced immediate constraints may create duplicate transactional hints; transport
 delivery is not exactly-once. Web deduplicates/coalesces and rechecks authority.
 An online dirty-flag scheduling fix preserves catch-up after offline hints.
 No Android WebSocket dependency or runtime verification is added.
+
+
+### M14.7C — operational scoped messages source implementation
+
+Adds immutable INCIDENT/ORGANIZATION/UNIT notes (4000 characters) and same-audience
+superseding corrections via caller-bound RPCs/receipts. Low-risk message append
+advances aggregate revision independently; B1 fallback/B2 revision hints carry no
+private body or target identity. M10 adds a dynamically scoped generic category,
+retaining its existing delivery worker and preferences.
+
+Web uses an existing workspace panel and authenticated API. Android uses existing
+Room 16 cache/queue, durable editable DRAFT then frozen queued MESSAGE_SEND,
+existing WorkManager and lease/identity gates. No second sync or notification
+system; no actual Android WebSocket dependency or attachments. Terminal private
+archive reads are conservatively denied pending an approved historical policy.
+History RPC is bounded/online; Web transient requests remain component-memory.
+See [M14.7C source contracts and manual acceptance](M14.7C-operational-scoped-messages.md).
+Implementation only: no test/build/SQL/runtime/deployment or merge was performed.

@@ -60,7 +60,7 @@ object NotificationInstallation {
     fun channels(c: Context) {
         val manager=c.getSystemService(NotificationManager::class.java)
         listOf("ASSIGNMENT" to R.string.notifications_assignment,"ACTIVATION" to R.string.notifications_activation,
-            "HYDRANT" to R.string.notifications_hydrant,"INCIDENT_TASK" to R.string.field_notifications).forEach { (id,label)->
+            "HYDRANT" to R.string.notifications_hydrant,"INCIDENT_TASK" to R.string.field_notifications,"INCIDENT_MESSAGE" to R.string.mc_title).forEach { (id,label)->
             manager.createNotificationChannel(NotificationChannel(id,c.getString(label),NotificationManager.IMPORTANCE_DEFAULT).apply {
                 lockscreenVisibility=Notification.VISIBILITY_PRIVATE
                 description=c.getString(R.string.notifications_privacy)
@@ -137,7 +137,7 @@ class GasilkoMessagingService: FirebaseMessagingService() {
     override fun onMessageReceived(message: RemoteMessage) {
         val destination=NotificationTap.read(message.data) ?: return
         if(NotificationInstallation.account(this)!=destination.account)return
-        val category=message.data["category"]?.takeIf { it in listOf("ASSIGNMENT","ACTIVATION","HYDRANT","INCIDENT_TASK") } ?: return
+        val category=message.data["category"]?.takeIf { it in listOf("ASSIGNMENT","ACTIVATION","HYDRANT","INCIDENT_TASK","INCIDENT_MESSAGE") } ?: return
         if(destination.kind=="INCIDENT") {
             NotificationTap.hint()
             si.gasilko.app.core.sync.HydrantSyncScheduler(this).enqueue(destination.account,destination.organization)
@@ -154,6 +154,7 @@ class GasilkoMessagingService: FirebaseMessagingService() {
             "PLAN_ACTIVATED"->R.string.notifications_activation
             "HYDRANT_NEEDS_ATTENTION","HYDRANT_NOT_WORKING"->R.string.notifications_hydrant
             "INCIDENT_TASK_CHANGED"->R.string.field_notifications
+            "INCIDENT_MESSAGE_CHANGED"->R.string.mc_title
             else->R.string.notifications_title
         }
         val notification=Notification.Builder(this,category).setSmallIcon(R.drawable.ic_field_refresh)
