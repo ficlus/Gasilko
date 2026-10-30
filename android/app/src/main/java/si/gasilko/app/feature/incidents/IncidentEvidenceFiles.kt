@@ -24,7 +24,8 @@ internal class IncidentEvidenceFiles(private val context: Context) {
         listOf(account,org,incident,id).forEach { require(UUID.fromString(it).toString()==it) }
         return File(root,"$account/$org/$incident/$id")
     }
-    suspend fun stage(account: String,org: String,incident: String,id: String,uri: Uri): JsonObject=withContext(Dispatchers.IO) {
+    suspend fun stage(account: String,org: String,incident: String,id: String,uri: Uri,checkAcquisition: ()->Unit): JsonObject=withContext(Dispatchers.IO) {
+        checkAcquisition();currentCoroutineContext().ensureActive()
         val mime=context.contentResolver.getType(uri) ?: error("ATTACHMENT_TYPE_UNSUPPORTED")
         evidenceExtension(mime)
         val max=if(mime=="application/pdf")EVIDENCE_MAX else EVIDENCE_MAX/2
@@ -44,7 +45,7 @@ internal class IncidentEvidenceFiles(private val context: Context) {
                 temp.outputStream().use { out ->
                     val buffer=ByteArray(8192)
                     while(true) {
-                        currentCoroutineContext().ensureActive()
+                        currentCoroutineContext().ensureActive();checkAcquisition()
                         val n=input.read(buffer);if(n<0)break
                         total+=n;if(total>max)error("ATTACHMENT_TOO_LARGE")
                         out.write(buffer,0,n)
@@ -54,6 +55,7 @@ internal class IncidentEvidenceFiles(private val context: Context) {
             check(total>0) { "ATTACHMENT_MALFORMED" }
             val bytes=temp.readBytes()
             require(localSignature(bytes,mime)) { "ATTACHMENT_MALFORMED" }
+            checkAcquisition();currentCoroutineContext().ensureActive()
             check(temp.renameTo(target))
             buildJsonObject { put("filename",name);put("mime",mime);put("size",total.toString());put("sha256",evidenceHash(bytes)) }
         } finally { temp.delete() } // Only this not-yet-registered partial copy. Never delete queued evidence.

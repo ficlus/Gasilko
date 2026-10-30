@@ -513,8 +513,14 @@ class IncidentRepository(private val context: Context,private val client: Supaba
 
     private val evidenceFiles=IncidentEvidenceFiles(context)
     /** Original queue/dispatch tables: attachment bytes never enter Room JSON. */
-    suspend fun stageAttachment(org: String,incident: String,kind: String,target: String?,uri: android.net.Uri)=hydrantRemoteAccess.withLock {
-        scope(org)
+    suspend fun stageAttachment(org: String,incident: String,kind: String,target: String?,uri: android.net.Uri,
+        originAccount: String,checkAcquisition: ()->Unit)=hydrantRemoteAccess.withLock {
+        scope(org);checkAcquisition();currentCoroutineContext().ensureActive()
+        require(originAccount==account)
+        val acquisitionGeneration=incidentIdentityAccess.withLock {
+            scope(org);checkAcquisition()
+            evidenceGenerations["$account/$org/$incident"] ?: 0L
+        }
         val cache=dao.snapshot(account,org)
         require(lease(org,cache)>0)
         val i=parse(cache!!.payload).rows("incidents").single { it.text("id")==incident }
@@ -530,20 +536,24 @@ class IncidentRepository(private val context: Context,private val client: Supaba
         val pending=dao.operations(account,org).filter { payload(it).text("rpc")=="incident_attachment_prepare" && it.operation.state!="SERVER_CONFIRMED" }
         require(pending.size<32 && pending.sumOf { payload(it).obj("metadata").text("size").toLongOrNull() ?: 0L }<134217728)
         val id=UUID.randomUUID().toString();val operation=UUID.randomUUID().toString()
-        val metadata=evidenceFiles.stage(account,org,incident,id,uri)
+        val metadata=evidenceFiles.stage(account,org,incident,id,uri,checkAcquisition)
+        scope(org);checkAcquisition();currentCoroutineContext().ensureActive()
         val intent=buildJsonObject {
             put("rpc","incident_attachment_prepare");put("incident",incident);put("kind",kind)
             put("target",target?.let(::JsonPrimitive) ?: JsonNull);put("metadata",metadata)
             put("finalize",UUID.randomUUID().toString())
         }
         incidentIdentityAccess.withLock {
-            scope(org);currentCoroutineContext().ensureActive()
+            scope(org);checkAcquisition();currentCoroutineContext().ensureActive()
+            check((evidenceGenerations["$account/$org/$incident"] ?: 0L)==acquisitionGeneration)
             require(lease(org,dao.snapshot(account,org))>0)
             db.withTransaction {
+                checkAcquisition();currentCoroutineContext().ensureActive()
                 val seq=db.registry().enqueue(PendingHydrantChange(operationId=operation,account=account,organization=org,
                     entityId=id,operation="INCIDENT_TASK",payload=intent.toString(),baseVersion=null,
                     createdAt=System.currentTimeMillis(),state="LOCAL_PENDING"))
                 dao.dispatch(IncidentDispatch(seq,parent?.operation?.sequence,null))
+                checkAcquisition();currentCoroutineContext().ensureActive()
             }
         }
         scheduler.enqueue(account,org)
