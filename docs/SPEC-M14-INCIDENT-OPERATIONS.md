@@ -2998,3 +2998,30 @@ transport are not claimed; private transport remains M14.7B2.
 See [M14.7B1 protocol](M14.7B1-incident-snapshots-change-feed.md) for actual RPCs,
 projection limits, producer coverage, forward migration, manual rollout and
 unexecuted acceptance. This is implementation source, not verified readiness.
+
+
+### M14.7B2 — private incident hint transport source implementation
+
+Web adds a private scoped Broadcast channel to the existing authoritative
+head/timeline refresh coordinator. A deferred optional database producer emits
+only incident ID/revision/sequence under restricted receive policies; reconnect
+always catches up through authorized reads. Polling/FCM remain fallback.
+Channel policy caching means instantaneous remote socket revocation is not
+guaranteed; details still require current read authority.
+
+Android has a disabled foreground hint-source seam only: realtime-kt is not
+declared/installed, and Gradle changes are prohibited. Actual private Android
+transport requires separate owner dependency approval. Room 16, B1 atomic
+reconciliation, offline queue and lease behavior are preserved.
+See [B2 contracts and manual scenarios](M14.7B2-secure-private-realtime.md).
+No tests/builds/SQL/runtime/deployments were performed; readiness is unverified.
+
+
+M14.7B2 follow-up: the single optional deferred producer covers positive revision
+advancement as well as timeline sequence advancement. It compares both counters
+against the final row, coalescing canonical monotonic multi-update transactions
+under normal deferred execution. B1 revision-only fallback remains independent.
+Forced immediate constraints may create duplicate transactional hints; transport
+delivery is not exactly-once. Web deduplicates/coalesces and rechecks authority.
+An online dirty-flag scheduling fix preserves catch-up after offline hints.
+No Android WebSocket dependency or runtime verification is added.

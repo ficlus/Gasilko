@@ -8,7 +8,7 @@ const sl = {
  explicitSectorRelations:'Izrecne dodelitve sektorju. Viri so povezani prek dodeljene enote.',
 
  liveNotifications:"Operativna obvestila",liveUnread:"nova obvestila",liveNoNotifications:"Ni novih operativnih obvestil.",liveLowOn:"Izklopi manj pomembna obvestila",liveLowOff:"Vklopi manj pomembna obvestila",
- live_CONNECTING:"Povezovanje",live_LIVE:"V živo",live_REFRESHING:"Posodabljanje",live_OFFLINE:"Povezava prekinjena",live_STALE:"Podatki zastareli",live_ACCESS_LOST:"Dostop potekel",
+ live_POLLING:"Posodobljeno · redno preverjanje",live_CONNECTING:"Povezovanje",live_LIVE:"V živo",live_REFRESHING:"Posodabljanje",live_OFFLINE:"Povezava prekinjena",live_STALE:"Podatki zastareli",live_ACCESS_LOST:"Dostop potekel",
  live_INFO:"Informacija",live_WARNING:"Opozorilo",live_CRITICAL:"Kritično",
  copCreateTactical:"Ustvari taktični objekt",
  copOtherTactical:"Druga taktična oznaka",
@@ -212,7 +212,7 @@ const de:Record<keyof typeof sl,string> = {
  explicitSectorRelations:'Ausdrückliche Abschnittszuordnungen. Ressourcen sind über die zugeordnete Einheit verbunden.',
 
  liveNotifications:"Operative Meldungen",liveUnread:"neue Meldungen",liveNoNotifications:"Keine neuen operativen Meldungen.",liveLowOn:"Niedrige Priorität ausschalten",liveLowOff:"Niedrige Priorität einschalten",
- live_CONNECTING:"Verbinden",live_LIVE:"Live",live_REFRESHING:"Aktualisieren",live_OFFLINE:"Verbindung unterbrochen",live_STALE:"Daten veraltet",live_ACCESS_LOST:"Zugriff abgelaufen",
+ live_POLLING:"Aktuell · regelmäßige Prüfung",live_CONNECTING:"Verbinden",live_LIVE:"Live",live_REFRESHING:"Aktualisieren",live_OFFLINE:"Verbindung unterbrochen",live_STALE:"Daten veraltet",live_ACCESS_LOST:"Zugriff abgelaufen",
  live_INFO:"Information",live_WARNING:"Warnung",live_CRITICAL:"Kritisch",
  copCreateTactical:"Taktisches Objekt erstellen",
  copOtherTactical:"Weitere taktische Markierung",

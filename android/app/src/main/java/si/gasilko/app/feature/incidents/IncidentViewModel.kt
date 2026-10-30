@@ -20,7 +20,8 @@ class IncidentViewModel(val repository: IncidentRepository,val organization: Str
     /** Called only inside repeatOnLifecycle(STARTED). Conflation retains a trailing hint. */
     @OptIn(ExperimentalCoroutinesApi::class)
     suspend fun foreground() {
-        merge(flow { while(true) { emit(Unit);delay(30_000) } },NotificationTap.hints.map { Unit })
+        merge(flow { while(true) { emit(Unit);delay(30_000) } },NotificationTap.hints.map { Unit },
+            UnsupportedIncidentRealtime.hints(repository.account,organization))
             .conflate().collect {
                 try { repository.refresh(organization);offline.value=false }
                 catch(e: CancellationException) { throw e }
