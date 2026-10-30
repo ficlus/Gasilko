@@ -127,7 +127,7 @@ data class HydrantConflictEntity(
     val resolutionServerState: String? = null, val resolutionVersion: Long? = null, val replacementSequence: Long? = null,
 )
 
-@Database(entities = [OrganizationEntity::class, TypeEntity::class, HydrantEntity::class, PendingHydrantChange::class, HydrantConflictEntity::class, InspectionEntity::class, PhotoEntity::class, TeamEntity::class, TeamMemberEntity::class, TeamPersonEntity::class, PlanEntity::class, PlanTeamEntity::class, PlanItemEntity::class, PlanCoverage::class, PlanRouteEntity::class, PlanReassignmentRecord::class, IncidentFieldCache::class, IncidentDispatch::class], version = 15, exportSchema = true)
+@Database(entities = [OrganizationEntity::class, TypeEntity::class, HydrantEntity::class, PendingHydrantChange::class, HydrantConflictEntity::class, InspectionEntity::class, PhotoEntity::class, TeamEntity::class, TeamMemberEntity::class, TeamPersonEntity::class, PlanEntity::class, PlanTeamEntity::class, PlanItemEntity::class, PlanCoverage::class, PlanRouteEntity::class, PlanReassignmentRecord::class, IncidentFieldCache::class, IncidentDispatch::class, IncidentSyncCursor::class], version = 16, exportSchema = true)
 abstract class RegistryDatabase : RoomDatabase() {
     abstract fun registry(): RegistryDao
     abstract fun photos(): PhotoDao
@@ -135,6 +135,15 @@ abstract class RegistryDatabase : RoomDatabase() {
     abstract fun plans(): PlanDao
     abstract fun incidents(): IncidentFieldDao
     companion object {
+        val MIGRATION_15_16 = object : Migration(15,16) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""CREATE TABLE IF NOT EXISTS incident_sync_cursor (
+                    account TEXT NOT NULL,organization TEXT NOT NULL,incident TEXT NOT NULL,
+                    manifest TEXT,revision INTEGER NOT NULL,ordinal INTEGER NOT NULL,
+                    timelineSequence INTEGER NOT NULL,fingerprint TEXT NOT NULL,schemaVersion INTEGER NOT NULL,
+                    syncedAt INTEGER NOT NULL,PRIMARY KEY(account,organization,incident))""")
+            }
+        }
         val MIGRATION_14_15 = object : Migration(14,15) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("""CREATE TABLE IF NOT EXISTS incident_field_cache (
@@ -272,7 +281,7 @@ abstract class RegistryDatabase : RoomDatabase() {
         @Volatile private var instance: RegistryDatabase? = null
         fun open(context: Context): RegistryDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(context.applicationContext, RegistryDatabase::class.java,
-                "hydrant-registry.db").addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15).build().also { instance = it }
+                "hydrant-registry.db").addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16).build().also { instance = it }
         }
     }
 }

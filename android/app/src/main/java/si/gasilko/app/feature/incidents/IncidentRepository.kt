@@ -53,6 +53,8 @@ class IncidentRepository(private val context: Context,private val client: Supaba
     private val dao=db.incidents()
     private val scheduler=HydrantSyncScheduler(context)
     private val secure=KeystoreSessionManager(context)
+    private val refreshFailure=MutableStateFlow<String?>(null)
+    val syncFailure=refreshFailure.asStateFlow()
     private fun boot()=Settings.Global.getInt(context.contentResolver,Settings.Global.BOOT_COUNT,-1)
     private suspend fun scope(org: String): Long {
         if(client.auth.currentUserOrNull()?.id!=account || !scheduler.selected(account,org))throw CancellationException()
@@ -82,7 +84,9 @@ class IncidentRepository(private val context: Context,private val client: Supaba
     }
     private suspend fun revoke(org: String) {
         secure.clearIncidentLease(account,org)
-        dao.revoke(account,org) // Pending operations and immutable payloads are retained.
+        db.withTransaction {
+            dao.revoke(account,org);dao.clearCursors(account,org)
+        } // Pending operations and immutable payloads are retained.
     }
     private suspend fun rpc(name: String,request: JsonObject): JsonObject = incidentIdentityAccess.withLock {
         scope(request.text("p_acting_organization_id").ifEmpty { request.text("p_organization_id") })
@@ -90,21 +94,57 @@ class IncidentRepository(private val context: Context,private val client: Supaba
         client.postgrest.rpc(name,request).decodeAs<JsonObject>()
     }
     suspend fun refresh(org: String)=hydrantRemoteAccess.withLock { refreshLocked(org) }
+    private suspend fun revokeIncident(org: String,id: String)=db.withTransaction {
+        dao.snapshot(account,org)?.let { row ->
+            val value=parse(row.payload)
+            dao.save(row.copy(payload=JsonObject(value+("incidents" to JsonArray(
+                value.rows("incidents").filterNot { it.text("id")==id }))).toString()))
+        }
+        dao.removeCursor(account,org,id)
+    }
     private suspend fun refreshLocked(org: String) {
         scope(org)
         try {
-            val result=rpc("incident_field_snapshot",buildJsonObject { put("p_acting_organization_id",org) })
+            val previous=dao.snapshot(account,org)
+            val reconciler=IncidentReconciliation(account,org,
+                { name,request -> rpc(name,request).also { scope(org) } },
+                { id -> revokeIncident(org,id) })
+            val staged=reconciler.reconcile(previous?.let { parse(it.payload).rows("incidents") }.orEmpty(),dao.cursors(account,org))
             scope(org)
-            check(result.text("account")==account && result.text("organization")==org)
-            val row=IncidentFieldCache(account,org,result.toString(),System.currentTimeMillis(),SystemClock.elapsedRealtime(),boot())
-            // Save lease first: interruption fails closed, never makes an older payload fresh.
-            secure.saveIncidentLease(account,org,buildJsonObject {
-                put("wall",row.verifiedAt);put("elapsed",row.elapsed);put("boot",row.boot)
-            }.toString())
-            scope(org);dao.save(row)
+            val payload=buildJsonObject {
+                put("account",account);put("organization",org);put("incidents",JsonArray(staged.incidents))
+            }
+            val row=IncidentFieldCache(account,org,payload.toString(),System.currentTimeMillis(),SystemClock.elapsedRealtime(),boot())
+            // Account changes cannot cross this final authorization + atomic cache/cursor commit.
+            incidentIdentityAccess.withLock {
+                scope(org);currentCoroutineContext().ensureActive()
+                // Saving lease first fails closed if Room commit is interrupted.
+                secure.saveIncidentLease(account,org,buildJsonObject {
+                    put("wall",row.verifiedAt);put("elapsed",row.elapsed);put("boot",row.boot)
+                }.toString())
+                db.withTransaction {
+                    scope(org);dao.save(row);dao.clearCursors(account,org);dao.saveCursors(staged.cursors)
+                }
+            }
+            if(!staged.caughtUp)throw FieldProtocolFailure("STALE")
+            refreshFailure.value=null
         } catch(e: CancellationException) { throw e }
-        catch(e: RestException) {
-            if(e.statusCode==401 || e.statusCode==403 || e.message.orEmpty().contains("NOT_AUTHORIZED"))revoke(org)
+        catch(e: Exception) {
+            val message=e.message.orEmpty()
+            val denied=(e is RestException && e.statusCode in listOf(401,403)) || "NOT_AUTHORIZED" in message
+            if(denied)revoke(org)
+            refreshFailure.value=when {
+                denied -> "ACCESS"
+                "SCOPE_CHANGED" in message -> "SCOPE"
+                "MANIFEST_EXPIRED" in message || "MANIFEST_NOT_FOUND" in message -> "MANIFEST"
+                "SNAPSHOT_TOO_LARGE" in message || "FIELD_SNAPSHOT_LIMIT" in message || "SNAPSHOT_CAPACITY" in message -> "CAPACITY"
+                "PGRST202" in message || "SCHEMA" in message || "PROTOCOL" in message || "MANIFEST_INCOMPLETE" in message -> "PROTOCOL"
+                "lock timeout" in message || "55P03" in message -> "BUSY"
+                "RESET_REQUIRED" in message || "STALE" in message -> "STALE"
+                e is java.io.IOException || e is io.ktor.client.plugins.HttpRequestTimeoutException -> "NETWORK"
+                else -> "SERVER"
+            }
+            android.util.Log.d("IncidentSync","refresh failure category="+refreshFailure.value)
             throw e
         }
     }
