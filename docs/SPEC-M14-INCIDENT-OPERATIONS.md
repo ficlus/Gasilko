@@ -3043,3 +3043,29 @@ archive reads are conservatively denied pending an approved historical policy.
 History RPC is bounded/online; Web transient requests remain component-memory.
 See [M14.7C source contracts and manual acceptance](M14.7C-operational-scoped-messages.md).
 Implementation only: no test/build/SQL/runtime/deployment or merge was performed.
+
+### M14.7D — Private incident attachments and immutable evidence (source implementation)
+
+INCIDENT/TASK/MESSAGE evidence uses its own same-incident metadata and private
+`incident-evidence` Storage namespace. Existing Room16 operation/dispatch queue,
+worker, stable UUIDs, parent receipts and scoped field lease are reused.
+Authenticated prepare -> immutable upload -> trusted Edge byte/size/signature/
+SHA-256 verification -> current-authority commit -> READY. READY advances only
+aggregate revision; B1/B2 invalidation carries no private attachment content.
+
+Message-only access loss strips message/evidence pages without revoking valid
+field tasks/cursor. Target-specific attachment denial hides that target page;
+global incident/session revocation still locks protected field data.
+Web and Android expose scoped evidence entry points, retry, private image preview
+and PDF download/viewer. Sensitive durable encrypted download cache is unavailable:
+preview is deliberately online-only; pending app-private no-backup files survive.
+No signed URL is persisted or issued by this implementation.
+
+See [M14.7D contracts, ACL matrix, rollout and unexecuted acceptance checks](M14.7D-private-incident-attachments-evidence.md).
+Migration `20261030160000_incident_private_attachments.sql` and Edge
+`incident-evidence` are authored only. Signature/structure/hash checks are not
+malware scanning or full image/PDF decoding; EXIF is not stripped. Web drafts do
+not survive tab closure; standard upload retries restart the same immutable
+object transfer. No tests/build/SQL/runtime/deployment/merge performed. No new
+Gradle/npm dependency, Room schema version, worker, Cron, notification channel or
+command authority.
