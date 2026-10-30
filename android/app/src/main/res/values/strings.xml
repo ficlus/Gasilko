@@ -522,4 +522,11 @@
     <string name="field_dependency_changed">Dodelitev se je po predhodni potrditvi spremenila ali dostop ni več dovoljen. Naslednje dejanje ni bilo poslano; potreben je pregled.</string>
     <string name="field_recovery_denied">Ponovitev je bila zavrnjena. Izid prejšnjega pošiljanja ostaja nejasen; preverite operacijo, ne ustvarjajte nove.</string>
     <string name="field_definition_version">Nespremenljiva definicija: verzija %1$s · %2$s</string>
+    <string name="field_sync_scope">Access changed. Online verification is required.</string>
+    <string name="field_sync_manifest">Snapshot expired. Retry downloads a new complete snapshot.</string>
+    <string name="field_sync_capacity">The snapshot or server cache exceeds its limit. Existing data may be stale; try again later.</string>
+    <string name="field_sync_protocol">Synchronization protocol is incompatible or incomplete. An app/server update may be required.</string>
+    <string name="field_sync_busy">The server is busy. The previous snapshot is retained; retry shortly.</string>
+    <string name="field_sync_network">Connection unavailable. Showing previously verified data where authorization is still valid.</string>
+    <string name="field_sync_server">Refresh failed. Data may be stale; try again.</string>
 </resources>

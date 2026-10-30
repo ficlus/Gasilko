@@ -3,7 +3,7 @@ package si.gasilko.app.core.database
 import androidx.room.*
 import kotlinx.coroutines.flow.Flow
 
-/** One bounded authoritative organization snapshot; no mixed-revision page assembly. */
+/** Authorized read projection; per-incident protocol cursors commit in the same transaction. */
 @Entity(tableName="incident_field_cache", primaryKeys=["account","organization"])
 data class IncidentFieldCache(val account: String,val organization: String,val payload: String,
     val verifiedAt: Long,val elapsed: Long,val boot: Int)
@@ -16,6 +16,11 @@ data class IncidentDispatch(@PrimaryKey val sequence: Long,val parent: Long?,val
 data class FieldOperation(@Embedded val operation: PendingHydrantChange,
     val parent: Long?,val request: String?,val result: String?,val error: String?)
 
+@Entity(tableName="incident_sync_cursor",primaryKeys=["account","organization","incident"])
+data class IncidentSyncCursor(val account: String,val organization: String,val incident: String,
+    val manifest: String?,val revision: Long,val ordinal: Int,val timelineSequence: Long,
+    val fingerprint: String,val schemaVersion: Int,val syncedAt: Long)
+
 @Dao
 interface IncidentFieldDao {
     @Query("SELECT * FROM incident_field_cache WHERE account=:account AND organization=:org")
@@ -25,6 +30,13 @@ interface IncidentFieldDao {
     @Upsert suspend fun save(row: IncidentFieldCache)
     @Query("DELETE FROM incident_field_cache WHERE account=:account AND organization=:org")
     suspend fun revoke(account: String,org: String)
+    @Query("SELECT * FROM incident_sync_cursor WHERE account=:account AND organization=:org")
+    suspend fun cursors(account: String,org: String): List<IncidentSyncCursor>
+    @Upsert suspend fun saveCursors(rows: List<IncidentSyncCursor>)
+    @Query("DELETE FROM incident_sync_cursor WHERE account=:account AND organization=:org")
+    suspend fun clearCursors(account: String,org: String)
+    @Query("DELETE FROM incident_sync_cursor WHERE account=:account AND organization=:org AND incident=:incident")
+    suspend fun removeCursor(account: String,org: String,incident: String)
     @Insert suspend fun dispatch(row: IncidentDispatch)
     @Query("""SELECT q.*,d.parent,d.request,d.result,d.error FROM pending_hydrant_changes q
         JOIN incident_operation_dispatch d ON d.sequence=q.sequence

@@ -66,6 +66,17 @@ fun IncidentScreen(model: IncidentViewModel,registry: HydrantViewModel,organizat
     val busy by model.busy.collectAsStateWithLifecycle()
     val error by model.error.collectAsStateWithLifecycle()
     val stale by model.stale.collectAsStateWithLifecycle()
+    val syncFailure by model.syncFailure.collectAsStateWithLifecycle()
+    val syncMessage=when(syncFailure) {
+            "ACCESS","SCOPE" -> R.string.field_sync_scope
+            "MANIFEST" -> R.string.field_sync_manifest
+            "CAPACITY" -> R.string.field_sync_capacity
+            "PROTOCOL" -> R.string.field_sync_protocol
+            "BUSY" -> R.string.field_sync_busy
+            "NETWORK" -> R.string.field_sync_network
+            "SERVER" -> R.string.field_sync_server
+            else -> R.string.field_stale
+        }
     val lifecycle=LocalLifecycleOwner.current.lifecycle
     LaunchedEffect(model,lifecycle) { lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) { model.foreground() } }
     var incidentId by remember(model,navigationEvent) { mutableStateOf(initialIncident) }
@@ -82,6 +93,7 @@ fun IncidentScreen(model: IncidentViewModel,registry: HydrantViewModel,organizat
         Column(Modifier.fillMaxSize().padding(16.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
             ScreenHeading(stringResource(R.string.field_title))
             FieldBanner(stringResource(R.string.field_locked),FieldTone.WARNING)
+            if(syncFailure!=null)FieldBanner(stringResource(syncMessage),FieldTone.WARNING)
             TextButton(onClick=back) { Text(stringResource(R.string.h_back)) }
             TextButton(onClick=model::sync) { Text(stringResource(R.string.h_sync_now)) }
         }
@@ -110,7 +122,7 @@ fun IncidentScreen(model: IncidentViewModel,registry: HydrantViewModel,organizat
         Text(organizationName)
         if(busy)LinearProgressIndicator(Modifier.fillMaxWidth())
         if(error)FieldBanner(stringResource(R.string.field_error),FieldTone.WARNING)
-        if(stale)FieldBanner(stringResource(R.string.field_stale),FieldTone.WARNING)
+        if(stale || syncFailure!=null)FieldBanner(stringResource(syncMessage),FieldTone.WARNING)
         if(data.warning)FieldBanner(stringResource(R.string.field_lease_warning),FieldTone.WARNING)
         data.verifiedAt?.let { Text(stringResource(R.string.field_verified,DateFormat.getDateTimeInstance().format(Date(it))),style=MaterialTheme.typography.bodySmall) }
         if(incidentId!=null && incident==null)FieldBanner(stringResource(R.string.field_unavailable),FieldTone.WARNING)

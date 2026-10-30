@@ -449,4 +449,11 @@
     <string name="field_dependency_changed">Dodelitev se je po predhodni potrditvi spremenila ali dostop ni več dovoljen. Naslednje dejanje ni bilo poslano; potreben je pregled.</string>
     <string name="field_recovery_denied">Ponovitev je bila zavrnjena. Izid prejšnjega pošiljanja ostaja nejasen; preverite operacijo, ne ustvarjajte nove.</string>
     <string name="field_definition_version">Nespremenljiva definicija: verzija %1$s · %2$s</string>
+    <string name="field_sync_scope">Dostop se je spremenil. Potrebno je spletno preverjanje.</string>
+    <string name="field_sync_manifest">Posnetek je potekel. Ponovni poskus prenese nov celoten posnetek.</string>
+    <string name="field_sync_capacity">Posnetek ali strežniški predpomnilnik presega omejitev. Podatki so lahko zastareli; poskusite pozneje.</string>
+    <string name="field_sync_protocol">Protokol sinhronizacije ni združljiv ali popoln. Morda je potrebna posodobitev aplikacije ali strežnika.</string>
+    <string name="field_sync_busy">Strežnik je zaseden. Prejšnji posnetek je ohranjen; kmalu poskusite znova.</string>
+    <string name="field_sync_network">Povezava ni na voljo. Prikazani so prej preverjeni podatki, kjer dovoljenje še velja.</string>
+    <string name="field_sync_server">Osveževanje ni uspelo. Podatki so lahko zastareli; poskusite znova.</string>
 </resources>

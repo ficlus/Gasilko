@@ -2982,3 +2982,19 @@ PRIVATE Realtime/change feeds remain deferred: the current dependency set uses
 foreground coalesced polling/resume/FCM hints. This is source implementation,
 not verified readiness for emergency operations; no tests/builds/SQL/deployments
 were performed.
+
+
+### M14.7B1 — pinned snapshots and durable change feed source implementation
+
+The field projection now supports caller/organization/incident-bound five-minute
+materialized manifests, keyset pages, canonical timeline change descriptors and
+authorized collection reconciliation. Room 16 commits projection and independent
+revision/timeline cursors together, preserving the existing queue and incident
+lease. Unsupported mutation classes explicitly reset rather than silently skipping
+changes. Web uses a smaller authorization-aware revision watermark while retaining
+its existing command/COP reads. Full Web manifest adoption and private Realtime
+transport are not claimed; private transport remains M14.7B2.
+
+See [M14.7B1 protocol](M14.7B1-incident-snapshots-change-feed.md) for actual RPCs,
+projection limits, producer coverage, forward migration, manual rollout and
+unexecuted acceptance. This is implementation source, not verified readiness.

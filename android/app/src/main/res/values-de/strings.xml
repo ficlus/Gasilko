@@ -522,4 +522,11 @@
     <string name="field_dependency_changed">Die Zuweisung hat sich nach der vorherigen Bestätigung geändert oder der Zugriff ist nicht mehr erlaubt. Die nächste Aktion wurde nicht gesendet; Überprüfung erforderlich.</string>
     <string name="field_recovery_denied">Die Wiederholung wurde abgelehnt. Das Ergebnis des früheren Sendeversuchs bleibt unklar; Vorgang prüfen, nicht neu erstellen.</string>
     <string name="field_definition_version">Unveränderliche Definition: Version %1$s · %2$s</string>
+    <string name="field_sync_scope">Der Zugriff hat sich geändert. Eine Online-Prüfung ist erforderlich.</string>
+    <string name="field_sync_manifest">Der Snapshot ist abgelaufen. Ein erneuter Versuch lädt einen neuen vollständigen Snapshot.</string>
+    <string name="field_sync_capacity">Der Snapshot oder Servercache überschreitet das Limit. Daten können veraltet sein; versuchen Sie es später erneut.</string>
+    <string name="field_sync_protocol">Das Synchronisationsprotokoll ist inkompatibel oder unvollständig. Ein App- oder Serverupdate kann erforderlich sein.</string>
+    <string name="field_sync_busy">Der Server ist ausgelastet. Der bisherige Snapshot bleibt erhalten; versuchen Sie es gleich erneut.</string>
+    <string name="field_sync_network">Keine Verbindung. Zuvor geprüfte Daten werden angezeigt, solange die Berechtigung gültig ist.</string>
+    <string name="field_sync_server">Aktualisierung fehlgeschlagen. Daten können veraltet sein; versuchen Sie es erneut.</string>
 </resources>

@@ -86,10 +86,10 @@ export function IncidentLiveProvider({account,org,incidentId,read,onInvalidate,o
    const timeout=setTimeout(()=>controller?.abort(),15000);
    setStatus(successful.current?'REFRESHING':'CONNECTING');
    try{
-    const snapshot=await read<Incident|null>('incident_context',{p_acting_organization_id:org,p_incident_id:incidentId},signal,account);
+    const snapshot=await read<Pick<Incident,'id'|'version'|'revision'|'timeline_sequence'|'training'>&{scope_fingerprint:string}|null>('incident_sync_head',{p_acting_organization_id:org,p_incident_id:incidentId},signal,account);
     if(disposed||deniedScope.current||signal.aborted)return;
     if(!snapshot)throw new Error('NOT_AUTHORIZED');
-    const next=[snapshot.version,snapshot.revision,snapshot.timeline_sequence].join(':');
+    const next=[snapshot.version,snapshot.revision,snapshot.timeline_sequence,snapshot.scope_fingerprint].join(':');
     const changed=revision.current!==null&&revision.current!==next;revision.current=next;
     if(cursor.current===null)cursor.current=String(snapshot.timeline_sequence);
     if(changed)latest.current.onInvalidate();

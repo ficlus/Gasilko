@@ -7,6 +7,7 @@ import si.gasilko.app.core.notifications.NotificationTap
 import kotlinx.serialization.json.JsonObject
 
 class IncidentViewModel(val repository: IncidentRepository,val organization: String,private val scope: CoroutineScope): ViewModel() {
+    val syncFailure=repository.syncFailure
     val state=repository.observe(organization).stateIn(scope,SharingStarted.WhileSubscribed(5_000),IncidentFieldState())
     private val working=MutableStateFlow(false)
     val busy=working.asStateFlow()

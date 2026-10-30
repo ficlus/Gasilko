@@ -13,7 +13,7 @@ import {loadAccount} from '../../../lib/auth/load';
 import {mutationNames} from '../../../lib/incidents/model';
 import {copErrors} from '../../../lib/incidents/cop';
 
-const reads = ['simulation_operational_command','simulation_operations_read','simulation_operational_actions','simulation_operation_resolve','simulation_hazard_history',...hazardRpcs,'simulation_map_sample',...scenarioEventRpcs,...templateRpcs,'simulation_automation_feed','simulation_agents_read','simulation_agent_command',...navigationReads,...simulationReads,'simulation_command',...taskReads,'incident_resource_selection_page','incident_team_template','incident_entry','incident_list','incident_context','incident_timeline_page','incident_candidates','incident_command_candidates','incident_command_view','incident_command_inbox','incident_cop','incident_cop_hydrants','incident_resources','incident_unit_candidates','incident_resource_candidates','incident_crew_candidates','incident_crew_history','incident_unit_leader_candidates'];
+const reads = ['incident_sync_head','simulation_operational_command','simulation_operations_read','simulation_operational_actions','simulation_operation_resolve','simulation_hazard_history',...hazardRpcs,'simulation_map_sample',...scenarioEventRpcs,...templateRpcs,'simulation_automation_feed','simulation_agents_read','simulation_agent_command',...navigationReads,...simulationReads,'simulation_command',...taskReads,'incident_resource_selection_page','incident_team_template','incident_entry','incident_list','incident_context','incident_timeline_page','incident_candidates','incident_command_candidates','incident_command_view','incident_command_inbox','incident_cop','incident_cop_hydrants','incident_resources','incident_unit_candidates','incident_resource_candidates','incident_crew_candidates','incident_crew_history','incident_unit_leader_candidates'];
 const safeErrors = new Set([...operationalErrors,'INVALID_TEMPLATE','INVALID_EVENT_PLAN','INVALID_HAZARD_PLAN','SCHEMA_MISMATCH','REQUEST_TOO_LARGE','TEMPLATE_SETUP_REQUIRED',...agentErrors,...navigationErrors,...simulationErrors,'NOT_AUTHORIZED','STALE_VERSION','INVALID_TRANSITION','INVALID_COMMANDER','INVALID_PARTICIPANT','INCIDENT_TERMINAL','OPERATION_REUSED','VALIDATION_FAILED','INVALID_STATE',
  'INVALID_COMMAND_HIERARCHY','INVALID_COMMAND_ROLE','INVALID_COMMAND_CANDIDATE','TRANSFER_NOT_CURRENT','TRANSFER_EXPIRED','TRANSFER_ALREADY_PENDING','LEAD_TRANSFER_REQUIRES_CONSENT','COMMANDER_STILL_VALID','PARTICIPANT_HAS_ACTIVE_COMMAND',...copErrors,...resourceErrors,...taskErrors]);
 export async function POST(request:Request) {
@@ -55,7 +55,7 @@ export async function POST(request:Request) {
   }
   // Mark all returned incidents using authoritative scenario membership, even
   // when simulation writes are disabled. Fail closed rather than show unlabelled training data.
-  if(input.name==='incident_list'||input.name==='incident_context'){
+  if(input.name==='incident_list'||input.name==='incident_context'||input.name==='incident_sync_head'){
    const records=Array.isArray(data)?data:data?[data]:[];
    const args=input.args as Record<string,unknown>;
    const labels=await client.rpc('simulation_labels',{p_acting_organization_id:args.p_acting_organization_id,p_ids:records.map((row:{id:string})=>row.id)});
