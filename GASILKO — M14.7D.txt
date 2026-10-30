@@ -1,0 +1,888 @@
+# GASILKO — M14.7D
+# Private Incident Attachments & Immutable Evidence
+# FULL CODEX IMPLEMENTATION SPECIFICATION — ONE NEW PR, NO MERGE
+
+Repository: https://github.com/ficlus/Gasilko
+Previous milestone: M14.7C — Operational Scoped Messages (PR #85, corrected head 90650b5b866f4428ec4e16aa3c53e8dbdf85bf61)
+Next milestone: M14.7D — Private Incident Attachments & Evidence
+Prepared: 2026-10-30
+Language: English implementation instructions. UI translations: default, Slovenian (SI), German (DE).
+
+HARD WORKFLOW: Implement ONE complete milestone in ONE new PR. DO NOT MERGE.
+HARD RUN POLICY: Do not add/run tests, builds, lint, typecheck, CI, Gradle sync, SQL, migrations, runtime checks or deployment.
+Owner manually reviews/merges, executes SQL migrations, builds Android, deploys and validates.
+
+IMPORTANT SOURCE HIERARCHY
+1. Current real GitHub `main`, current code, current applied migration inventory (as documented; do not execute SQL), `AGENTS.md`.
+2. `docs/SPEC.md` and `docs/SPEC-M14-INCIDENT-OPERATIONS.md`, especially section "Notifications, communications and attachments".
+3. Existing canonical SQL/RPC contracts and current M14.7A/B1/B2/C documentation.
+4. This implementation specification. Proposed schema/API names below are designs to align with real source, not facts about already-existing tables.
+5. The previous V2 package for context only; do not use its speculative numbers to override the actual SPEC.
+
+PROJECT REQUIREMENTS FROM THE EXISTING M14 SPEC
+- Attachments reuse PRIVATE Supabase Storage, authenticated loading/cache, staged files, stable UUIDs/object paths and the prior photo approach.
+- Attachment metadata has its OWN incident/target relationships; never reuse inspection_id or a public bucket.
+- Parent incident/task/message MUST exist and be committed before registration/upload.
+- Stable file and retry identifiers are mandatory; pending files must NEVER be deleted as "unowned".
+- Initially permit ONLY JPEG and WebP image <=10 MiB, and PDF <=20 MiB.
+- Validate claimed MIME and actual file size on trusted server path; reject executable, HTML and invalid content.
+- Object path contains canonical incident and attachment UUID; never treat an externally provided URL as authority.
+- Short-lived authenticated/signed fetch only AFTER live target/audience authorization.
+- Offline files/cache are account- and audience-scoped, hidden on revocation.
+- REAL and TRAINING remain strictly separated, no automated live emergency dispatch.
+These boundaries come from the source SPEC, not assumptions.
+
+===============================================================================
+PART 0 — PRE-FLIGHT / DEPENDENCY AND SOURCE INVENTORY
+===============================================================================
+
+01. VERIFY C DEPENDENCY BEFORE CODING
+   a. Fetch/inspect authoritative current `main` and verify that ALL corrected M14.7C code is actually present there. GitHub UI may briefly show an old PR status; source ancestry takes precedence. The owner reports PR #85 merged; independently verify its actual SQL, web and Android content on main.
+   b. Confirm corrected C behavior: INCIDENT/ORGANIZATION/UNIT messages, append-only corrections, message_page only revocation, Web scope recovery, stable operation UUID, 4000-character body, Room 16.
+   c. Verify actual migration name for C, expected `20261030140000_incident_scoped_messages.sql`, and the latest filename timestamp. DO NOT assume a migration has been applied to production just because it was merged.
+   d. Find any already-running/merged M14.7D work, incident attachments table, storage bucket, existing PR/branch/task. If present, STOP or scope down to missing work; do not duplicate it.
+   e. If C's corrected source is not on main, STOP and report the missing prerequisite; do not build on a speculative branch.
+
+02. INVENTORY EXISTING PHOTO/STORAGE CODE
+   Before implementing, locate and read actual existing Gasilko photo flows, including:
+   - photo preparation/staging, local file keys and Android caching;
+   - Storage bucket declarations and RLS policy conventions;
+   - image upload/retry, size/content validation and deduplication;
+   - mobile account/org scoped offline operation queue;
+   - Android `RegistryDatabase` and current Room schema/migration number;
+   - Web SSR/storage client/route conventions;
+   - Edge Function conventions for current-user JWT verification;
+   - existing M10 notification envelopes, private B2 hints and B1 change feed;
+   - `incident_messages` target and audience predicates in C.
+   Reuse those abstractions. Do not invent a second photo manager, generic blob sync worker, separate audit system or incompatible Storage authorization.
+
+03. PLAN AND REPORT BEFORE MUTATION
+   Provide a short source inventory and chosen data path in your task notes. Be specific:
+   - existing reusable files/functions;
+   - source-verified SDK capabilities for Web and Android;
+   - expected new migration and, only if truly required, trusted Edge handler;
+   - whether a private existing bucket can be safely reused or one dedicated private bucket is needed;
+   - how actual bytes will be validated without trusting declared client MIME;
+   - any blocking dependency that would require Gradle, package-lock/pnpm-lock, new infrastructure or secret changes.
+   Never silently weaken validation or use public URLs to bypass a missing API.
+
+===============================================================================
+PART 1 — PRODUCT CONTRACT AND NON-GOALS
+===============================================================================
+
+04. USER PURPOSE
+   Permit an authenticated, authorized responder/leader/commander to capture, stage,
+   upload, view and download incident evidence attached to exactly one authorized
+   target, without leaking sensitive photos/documents across organizations, units,
+   tasks, messages or past participants.
+
+   Examples:
+   - unit leader attaches a photo documenting a task obstruction;
+   - firefighter attaches a field photo to a permitted own task;
+   - officer attaches a PDF as incident-wide evidence if they have suitable authority;
+   - a scoped operational note carries an image whose audience is NEVER broader than
+     the note's effective current audience;
+   - when offline, the user's prepared evidence remains durable, explicitly PENDING,
+     and is retried with the same ID once the parent target is committed and access
+     is revalidated.
+
+05. NON-GOALS
+   Do not add voice/video media, live streaming, recordings, OCR, facial recognition,
+   geotagged live tracking, automatic image analysis, object recognition, AI summarization,
+   automatic reports, public share links, guest downloads, unbounded full-bucket lists,
+   automatic retention/deletion jobs, new chat semantics, read receipts or new command
+   authority. Do not implement M14.8B/C/D, M14.9, or M14.10 within this PR.
+   Photos are EVIDENCE, NOT command acknowledgements. Upload success never completes
+   a task. Official radio remains essential for emergency operations.
+
+06. TARGETS — ONE ATTACHMENT, ONE PARENT
+   Support canonical target types:
+   - INCIDENT: authorized incident-wide evidence; do not assume all incident readers
+     are allowed to publish to this audience.
+   - TASK: exact task UUID within same incident; visibility follows current task
+     assignment/recipient and authorized command lineage, not mere incident membership.
+   - MESSAGE: exact immutable M14.7C message UUID; visibility inherits its immutable
+     audience (INCIDENT/ORGANIZATION/UNIT) AND current message visibility; do not let
+     later correction/reassignment widen old attachment audience.
+   Implement exact same-incident FK protection; never trust a client path or UUID alone.
+   If source has another equivalent typed-target vocabulary, reuse/extend it without
+   multiplying relationships. One and only one target reference must be non-null.
+
+07. WHO MAY CREATE/VIEW
+   Read/write rules must derive from CURRENT canonical incident authority, not org
+   hierarchy or a cached role label. At minimum:
+   - ACTIVE profile, exact current ACTIVE org membership, current ACTIVE org and
+     appropriate ACTIVE incident participation for operational writes.
+   - INCIDENT write: current effective IC/deputy or another existing explicit
+     incident-wide evidence capability VERIFIED in source; a generic org ADMIN alone
+     is insufficient.
+   - TASK write: own active assigned task recipient or currently effective superior
+     with existing domain ability to act on that task; define exact source predicates.
+   - MESSAGE write: creator of current/authorized immutable note or explicitly
+     authorized user whose audience exactly matches; initial safe default is original
+     sender only. No historical correction grants fresh attachment write.
+   - Reads require current ability to read BOTH incident AND exact target/audience.
+     "I uploaded it" alone is NOT a permanent bypass to a revoked target.
+   - Cross-organization participants see only content permitted by the target.
+   - CLOSED/CANCELLED incidents: no new attachment writes; historical reads are
+     denied unless existing proven target-specific historical policy is already
+     established. Follow conservative C precedent; preserve metadata for reports.
+
+08. FILE RESTRICTIONS
+   Accepted normalized MIME:
+   image/jpeg       <=10 * 1024 * 1024 bytes
+   image/webp       <=10 * 1024 * 1024 bytes
+   application/pdf  <=20 * 1024 * 1024 bytes
+   Require nonempty data; no zero-byte files. Browser/Android prevalidate size and
+   type for UX, but enforce on trusted backend before publishing READY.
+   Reject GIF, PNG, SVG, HEIC, video, ZIP, Word, HTML, script, disguised binaries,
+   double-extension tricks, malformed JPEG/WebP/PDF signatures and empty payloads.
+   Never accept `Content-Type`/extension alone as sufficient validation. Check
+   actual bytes/magic, length and preferably strict decoder/parser when existing
+   safe libraries already exist. For PDF: basic signature checks do not prove it
+   benign; render/download conservatively, no embedded JS execution.
+   Check documented Storage global/bucket maximum settings as a human rollout item.
+   Filename is display metadata only; strip path separators/control/bidi trickery,
+   limit length, render escaped text, derive storage extension independently.
+
+===============================================================================
+PART 2 — STORAGE SECURITY DESIGN
+===============================================================================
+
+09. PRIVATE BUCKET AND ISOLATED OBJECT PATHS
+   Inspect whether the existing PRIVATE photo bucket can provide strict incident-
+   scoped RLS without accidentally widening hydrant/inspection policies. Reuse only
+   if exact authorization remains provably isolated. Otherwise add ONE dedicated
+   private bucket in a forward migration or a manual bucket-creation instruction,
+   e.g. logical id `incident-evidence` (confirm no collision).
+   Never create/alter a public bucket.
+   Suggested object key:
+       {incident_uuid}/{attachment_uuid}/original.{jpg|webp|pdf}
+   The bucket id and canonical path are derived on server, not supplied by clients.
+   Avoid original filename, organization name, email, person ID, real-location name,
+   secret, caption or audience label in the path.
+   Object is immutable at a given attachment UUID; no upsert/overwrite.
+
+10. STORAGE RLS
+   Storage RLS is independent of ordinary incident-table RLS: implement explicitly.
+   `storage.objects` is not itself a domain database.
+   - Deny anon/public access.
+   - INSERT only for a validated STAGED upload intent created by that exact authenticated
+     actor, acting organization, incident and attachment UUID, within expiry and limits.
+   - SELECT/download only after CURRENT exact incident AND target visibility; optionally
+     use trusted per-request download handler for stronger revocation and short cache.
+   - Do NOT allow arbitrary listing of a folder just because its first segment is
+     an incident UUID.
+   - No ordinary user UPDATE/upsert, COPY/MOVE, DELETE or broad admin bypass.
+   - Object ownership alone grants no target read permission.
+   - If Storage RLS needs policy operation differentiation, use supported official
+     `storage.allow_only_operation` / `allow_any_operation` helpers after checking
+     current Supabase docs; prevent an object-list permission from becoming read.
+   - Do not edit storage system table rows by direct SQL for object lifecycle. Supabase
+     recommends Storage API operations, not direct metadata mutation.
+   - No service-role credential in mobile or browser; in a trusted function it must
+     be tightly isolated, caller-validated, path-constrained and never used to bypass
+     the canonical authorization decision.
+
+11. SHORT-LIVED DOWNLOAD
+   Preferred: authorized read RPC/handler authenticates requester, checks current
+   org+incident+target+audi­ence, returns a narrowly scoped download capability,
+   e.g. signed URL <=60 seconds OR an authenticated no-store stream when immediate
+   revocation guarantees require stronger protection.
+   Signed Storage URLs are bearer capabilities and may continue serving until expiry;
+   cached responses can outlive an authorization change. Do not claim instant remote
+   revocation of an already-issued URL. Never persist signed URLs in SQL, Room,
+   plaintext logs, FCM, Realtime payload, crash reports or browser storage.
+   Never place URLs in shared incident timeline or notification text.
+   Set conservative cache-control and no-store on your own proxy responses; explain
+   limitations of Supabase CDN/browser caches.
+   Recheck authorization before every NEW capability issuance and each metadata page.
+
+12. UPLOAD AUTHORIZATION AND EXPIRY
+   Two separate concerns:
+   (a) SERVER COMMITTED metadata upload INTENT for parent that already exists;
+   (b) actual Storage bytes and their verification before READY registration.
+   Client must never choose arbitrary bucket/path, claim a READY state or modify
+   metadata via direct table DML. Use short-lived upload credentials if the existing
+   architecture supports them, otherwise direct Storage RLS tied to the live intent.
+   Consider that official Supabase `createSignedUploadUrl` tokens commonly last up to
+   two hours; creating one does not guarantee immediate permission revocation. On
+   completion, revalidate current authority before exposing the file. If authority
+   disappears, keep evidence isolated/quarantined, never mark READY.
+   Never use upsert and never overwrite a READY object's bytes.
+
+===============================================================================
+PART 3 — SQL SCHEMA / CANONICAL EVIDENCE
+===============================================================================
+
+13. FORWARD-ONLY SQL MIGRATION
+   Add migration with timestamp AFTER the latest current main migration. Do not reuse
+   `20261030140000` (M14.7C) or edit historical migrations. Example proposed name:
+       supabase/migrations/20261030160000_incident_private_attachments.sql
+   Choose actual timestamp safely based on inspected files. Migration is authored
+   but NEVER executed by Codex.
+   Use `CREATE ... IF NOT EXISTS` only when compatible with project migration style;
+   don't paper over conflicting schema definitions.
+
+14. CONCEPTUAL TABLE `public.incident_attachments`
+   Align exact canonical names and FK signatures with current incident/task/message schema.
+   Representative columns:
+       id UUID PRIMARY KEY                         -- client-created immutable identity
+       incident_id UUID NOT NULL
+       target_kind TEXT NOT NULL                   -- INCIDENT, TASK, MESSAGE
+       target_task_id UUID NULL
+       target_message_id UUID NULL
+       creator_user_id UUID NOT NULL
+       acting_organization_id UUID NOT NULL
+       operation_id UUID NOT NULL UNIQUE            -- stable operation identity
+       storage_bucket TEXT NOT NULL                 -- locked configured bucket
+       storage_object_key TEXT NOT NULL UNIQUE      -- canonical derived immutable path
+       original_filename_display TEXT NOT NULL
+       normalized_mime TEXT NOT NULL
+       declared_size BIGINT NOT NULL
+       validated_size BIGINT NULL
+       sha256_hex TEXT NULL                         -- trusted observed bytes
+       status TEXT NOT NULL                         -- STAGED, UPLOADED, READY, REJECTED
+       created_at TIMESTAMPTZ NOT NULL
+       uploaded_at TIMESTAMPTZ NULL
+       verified_at TIMESTAMPTZ NULL
+       changed_revision BIGINT NULL
+       verification_error_code TEXT NULL
+       schema_version INTEGER NOT NULL DEFAULT 1
+   Additional immutable audience/provenance metadata as source demands. Avoid storing
+   path-bearing signed token or original GPS EXIF data in DB.
+   `status` is a trusted controlled lifecycle, not freely writable by client.
+   Physical content is NEVER stored inline in JSONB, timeline or Room DTO.
+   No direct client INSERT/UPDATE/DELETE/TRUNCATE; restricted authenticated SELECT
+   through actor-scoped RPC with precise per-target checks. No ordinary hard delete.
+
+15. PARENT FOREIGN KEYS AND VALIDATION
+   Enforce same incident by composite FKs when existing targets have suitable unique
+   keys; otherwise trusted SQL helper validates with row locks and appropriate
+   indexes/constraints. Exactly one of target_task_id/target_message_id is present for
+   targeted types, none for INCIDENT; `target_kind` must match. FK ON DELETE RESTRICT,
+   no cascading disappearance of evidence. For MESSAGE inherit audience at creation
+   from immutable canonical C message (not current Web client preview). For TASK
+   never treat task id as a globally readable public id.
+   Detect wrong incident, wrong unit/org, unknown task/message and uncommitted parent;
+   return a safe uniform error without existence oracle across organizations.
+
+16. PROVENANCE, VERSION, RETENTION
+   Store uploader actor, acting org, canonical target, UTC server timestamps,
+   object identity, actual validated MIME/bytes, immutable digest and operation id.
+   Append status transitions to existing audit/evidence mechanism with only IDs and
+   codes, not file bytes, private filenames or signed links. Reuse `private.write_audit`
+   and incident receipt helpers if compatible; avoid duplicate audit subsystem.
+   READY file bytes may not be silently replaced/re-signed as a new file.
+   Corrections occur via a new immutable attachment row/version that references prior
+   evidence if source contract supports this; no deleting original. Do not invent
+   legal deletion/retention policy, legal hold service or background cleanup. Pending
+   evidence is not orphan garbage.
+
+17. OPERATION RECEIPTS / REPLAY
+   Every mutation accepts a caller-generated stable operation UUID. Under the
+   established advisory lock + incident/participant lock order:
+   - exact replay of the same normalized request returns the original receipt/state;
+   - same operation UUID with different incident/target/path/hash/MIME/size returns
+     OPERATION_REUSED, no second file;
+   - two concurrent attempts with same file UUID cannot yield separate READY rows;
+   - a concurrent authority revocation is checked at commit;
+   - ambiguous network success does not cause new attachment ID/path.
+   Do not use an Android timestamp or filename as idempotency key.
+   Approved auth reads cannot rely on a stale offline role snapshot.
+
+18. AUTHORITATIVE RPC CONTRACTS (NAMES PROPOSED)
+   Implement or adapt caller-bound SECURITY DEFINER RPCs:
+   - incident_attachment_prepare(
+       p_operation uuid,
+       p_acting_organization_id uuid,
+       p_incident_id uuid,
+       p_attachment_id uuid,
+       p_target_kind text,
+       p_target_id uuid,
+       p_metadata jsonb
+     ) RETURNS JSONB
+     Validates immutable intent, parent exists, upload authorization, file type,
+     advertised size, bucket+path; creates STAGED row/receipt. Returns no service key.
+   - incident_attachment_status(
+       p_acting_organization_id uuid,
+       p_incident_id uuid,
+       p_attachment_id uuid
+     ) RETURNS JSONB
+     Returns authorized current state and recovery instructions, not arbitrary paths.
+   - incident_attachment_finalize(
+       p_operation uuid,
+       p_acting_organization_id uuid,
+       p_incident_id uuid,
+       p_attachment_id uuid,
+       p_verified_metadata jsonb
+     ) RETURNS JSONB
+     IMPORTANT: Caller-supplied verified_metadata alone must NOT be trusted as proof
+     of actual bytes. Finalization must be gated by trusted Storage verification
+     tied cryptographically/operationally to exact object path, observed length,
+     signature and digest. Prefer separate private trusted finalize helper invoked
+     only by authenticated, caller-authorized server handler after it verifies bytes.
+   - incident_attachment_page(
+       p_acting_organization_id uuid,
+       p_incident_id uuid,
+       p_target_kind text,
+       p_target_id uuid,
+       p_before_created_at timestamptz,
+       p_before_id uuid,
+       p_limit integer DEFAULT 30,
+       p_expected_revision bigint DEFAULT NULL
+     ) RETURNS JSONB
+   - incident_attachment_access(
+       p_acting_organization_id uuid,
+       p_incident_id uuid,
+       p_attachment_id uuid
+     ) RETURNS JSONB
+     Authorizes download and returns only bounded metadata/path to trusted handler.
+   Adapt actual names to project conventions and Web route error mapper. Do not
+   expose private helpers to ordinary clients.
+
+19. SQL SECURITY PRACTICES
+   SECURITY DEFINER search_path = '' and fully-qualified schema names; GRANT EXECUTE
+   only to authenticated on intended RPC; REVOKE from anon/public; no direct DML or
+   broad SELECT on private storage metadata; explicit RLS on public table.
+   `auth.uid()` derives actor; no client-supplied "actor_user_id" authorization.
+   Validate current exact membership AND incident participation AND target visibility.
+   Bound every text/JSON input and page limit. No user-controlled table/function name,
+   path interpolation, dynamic SQL or unsafe PL/pgSQL shadowed identifiers.
+   Use safe error codes; no external ID enumeration. All numeric BIGINT counters cross
+   Web/Android as decimal strings.
+
+20. LISTING AND PAGINATION
+   Strict keyset `(created_at DESC, id DESC)` maximum 50 rows/page (default 20/30).
+   Authorize EVERY item, not merely incident membership. Return metadata only; no
+   signed tokens, private bytes, arbitrary Storage URL or raw audit JSON.
+   Distinguish STAGED/UPLOADING/VERIFYING/READY/REJECTED for creator without exposing
+   partially uploaded bytes to other users. Only READY becomes target-visible evidence.
+   Return normalized localized-friendly codes, safe displayed filename, MIME, size,
+   creator display name only if already authorized and permitted.
+   Never silently truncate and then mark a page complete.
+
+21. B1/B2 INTEGRATION
+   READY transition advances incident aggregate revision in established event/receipt
+   transaction; preserve core version, task version and timeline sequence semantics.
+   Private attachment metadata must NOT go into public/shared timeline, M10 payload or
+   B2 Realtime hint. Reuse B1 coarse scope reset/collection invalidation where a new
+   collection is not yet supported, and B2 metadata-only (incident/revision/cursor)
+   hint; FCM optional generic type within existing M10 only if clearly required and
+   recipient authority is rechecked. No new notification worker/broadcast channel.
+   Revocation of message-specific attachment view must NOT wipe whole Android B1
+   field cache. Apply the M14.7C fix pattern.
+
+===============================================================================
+PART 4 — TRUSTED BYTE VALIDATION / STORAGE TWO-PHASE PROTOCOL
+===============================================================================
+
+22. TRUSTED SERVER VALIDATION IS MANDATORY
+   SQL can validate row metadata, but cannot inspect Storage object bytes by itself.
+   Implement an authorized trusted server step using EXISTING supported Web server
+   handler or Supabase Edge Function runtime (choose based on actual source and SDK),
+   which:
+   - verifies current authenticated requester / exact acting org / target;
+   - resolves object key FROM trusted metadata, never from client URL;
+   - fetches Storage object with restrictive trusted privileges where required;
+   - caps received bytes before unbounded allocation, enforces file size and type;
+   - validates format magic (JPEG SOI, WebP RIFF/WEBP, PDF %PDF-) and actual MIME;
+   - optionally uses existing safe content parser/decoder if installed, without adding
+     dependencies or claiming full malware scanning;
+   - computes SHA-256 on received bytes (trusted, not claimed by browser);
+   - ensures actual key and stored object correspond to STAGED intent;
+   - retries idempotently or marks a safe failure without publishing a corrupt file;
+   - performs finalize under current SQL authority before READY visibility.
+   If there is no secure supported verification path without new dependency or secret,
+   do NOT mark bytes READY based on client data. Stop and report the concrete blocking
+   integration instead of silently reducing this safety property.
+
+23. PREPARE -> TRANSFER -> VERIFY -> READY STATE MACHINE
+   Client-visible stages, carefully mapped to actual canonical codes:
+   LOCAL_DRAFT (client only) -> LOCAL_QUEUED -> SERVER_STAGED -> TRANSFERRING ->
+   SERVER_UPLOADED/VERIFYING -> READY.
+   Failure branches: RETRYABLE, ATTENTION_REQUIRED, REJECTED, ACCESS_REVOKED.
+   Invariant: READY requires trusted bytes AND current target authority at commit.
+   Server never expects upload to be transactional with Postgres; use an idempotent
+   two-phase/compensating design, no imaginary distributed transaction.
+
+24. PREPARE
+   Only after parent incident/task/message commit is known:
+   - create stable attachment UUID and stable prepare operation UUID;
+   - enforce permission and type/size limits in authenticated RPC;
+   - reserve immutable canonical path; return a safe upload capability if supported;
+   - do not create a duplicate parent on replay;
+   - if offline parent message is still in LOCAL_PENDING, wait for its server receipt,
+     keep attachment frozen in local queue and maintain parent dependency.
+
+25. TRANSFER
+   Transfer bytes using supported existing Supabase Storage client/API, not a
+   custom unencrypted relay through insecure endpoints.
+   - For Web: use SDK standard upload for smaller files; where TUS is already
+     available, use resumable transfer for >6MiB or unreliable networks.
+   - For 10/20MiB without existing TUS dependency, implement bounded streaming/
+     replay-safe standard transfer plus explicit retry/resume semantics and explain
+     reduced reliability; DO NOT add tus-js-client/other dependency unless authorized.
+   - For Android: use existing `storage-kt` if available and suitable, otherwise
+     supported authenticated HTTP transfer through existing stack; no Gradle changes.
+   - Never upsert; conflict on existing path is not automatic failure if server
+     status/digest confirms the same prior completed content.
+   - Exponential backoff with bounded attempts via existing queue/worker.
+   - No "upload succeeded" UI when bytes are merely staged.
+   Do not issue a short-lived signed upload token while offline; obtain it online at
+   dispatch and refresh when expired. It is NOT an offline credential.
+
+26. VERIFY / FINALIZE
+   Trusted validator obtains exact Storage object bytes, validates real content and
+   observed metadata, then revalidates current parent/actor/target authorization.
+   Idempotent finalization atomically records verified digest, length, MIME, READY,
+   changed revision/audit/receipt and existing invalidation hint.
+   A failing validation yields REJECTED/quarantined, never READY.
+   If revocation occurs mid-upload, the object may physically exist but must never
+   become visible or downloadable to former recipients. Do not call it orphan-safe to
+   auto-delete pending evidence. Mark for human/admin remediation with limited access.
+   If finalization response is lost, client calls status with same IDs and only retries
+   original operation, never creates duplicate evidence.
+
+27. ORPHAN / QUARANTINE AND CLEANUP
+   Model:
+   - STAGED but never transferred;
+   - uploaded object but failed finalize;
+   - validated bytes but lost ACK;
+   - rejected content requiring retention policy decision;
+   - account switched before upload;
+   - parent scope revoked.
+   Do not create a Cron/scheduler or automatic garbage collector in this milestone.
+   Do not delete unowned-looking objects, especially with pending offline intents.
+   Provide a safe, bounded audit/admin inventory proposal for later manual cleanup;
+   do not expose object paths publicly or allow normal users to hard-delete evidence.
+
+28. SECURITY LIMITS AND DENIAL OF SERVICE
+   Server-side quotas based on true file size, active staged count per actor/org and
+   bounded page size; choose explicit conservative limits only after checking realistic
+   field needs, document them as implementation policy and not established facts.
+   Prevent unlimited STAGED intents, repeated downloads, arbitrary signed URL
+   generation, overlong filename/metadata and SQL lock starvation.
+   Limit in-memory buffering; use streams if existing runtime supports them.
+   Verification overhead must not block incident command transactions on network I/O.
+   Do not call Storage while holding PostgreSQL locks.
+
+===============================================================================
+PART 5 — ANDROID FIELD / OFFLINE
+===============================================================================
+
+29. REUSE EXISTING ANDROID ARCHITECTURE
+   Compose -> existing IncidentViewModel -> IncidentRepository -> Room/operation queue
+   -> existing WorkManager -> Supabase. No UI direct privileged Storage or PostgREST
+   domain calls. Reuse `IncidentFieldCache.kt`, `IncidentReconciliation.kt`, existing
+   pending operation engine and account-switch generation protection.
+   The attachment transport helper may be focused but must not become a second
+   global worker or auth subsystem.
+
+30. SECURE LOCAL FILE STAGING
+   When user selects a file via Android system picker or camera flow (only reuse
+   existing safe camera integration; do not add camera permission by default):
+   - copy bytes into app-private, account/org/incident/attachment-scoped durable
+     staging location under existing protected local-storage strategy;
+   - do not depend forever on a temporary `content://` URI grant;
+   - verify local size/type and avoid loading 20MiB into Compose memory;
+   - preserve exact original file bytes, stable ID and original frozen intent;
+   - if existing at-rest file encryption is available, reuse it. If not, do not
+     claim encrypted cache or invent a new keystore subsystem without analyzing
+     existing secure storage. Sensitive file staging must not silently write to a
+     shared, world-readable, gallery or backup directory.
+   - avoid Android automatic cloud backup of private evidence unless explicitly
+     allowed by existing policy; inspect backup exclusions.
+   - no EXIF/GPS metadata exposed automatically in UI/FCM; document that image
+     bytes themselves may contain EXIF and require trusted policy before asserting
+     EXIF removal. Do not mutate evidentiary bytes without explicit provenance.
+
+31. ROOM SCHEMA CHOICE
+   Inspect current Room version (expected 16). If current tables can safely store
+   small metadata/intent and a private staging-file reference, reuse them. Do NOT
+   store 10/20MiB raw binaries/base64 inside JSON `message_page`, field projection
+   or Room large blobs.
+   If an additive durable attachment queue/entity is required, implement minimal
+   forward-only Room 16->17 (or actual next version) migration, correct DAO and
+   index/account/org/incident keys. Do not manually edit generated Room JSON.
+   Do not change Gradle/KAPT/KSP. Human will later export the schema and build.
+   Original M14.7C message draft queue must keep working unchanged.
+
+32. OFFLINE OPERATION DEPENDENCIES
+   Example dependency:
+      message LOCAL_PENDING -> message SEND RECEIPT -> attachment PREPARE
+      -> Storage upload -> trusted FINALIZE -> attachment READY
+   Existing ACK/START/BLOCKED/COMPLETE pending command workflow must remain ordered
+   and totally independent from attachment upload success unless user explicitly
+   chooses an operation dependency already supported by domain rules.
+   Freeze request body/target UUID/path/operation UUID at send. Replays reuse them.
+   If target task was reassigned or message visibility narrowed, move attachment to
+   ATTENTION_REQUIRED without redirecting it to a different target or org.
+   Preserve evidence for user action. Show "pending upload" separately from command
+   completion state; don't claim official evidence is server-confirmed until READY.
+
+33. ANDROID PRESENTATION
+   Add a bounded attachments section in the existing IncidentScreen / permitted
+   task or message detail, using current navigation and Compose UI components:
+   - Add attachment (gallery/file picker) where currently authorized;
+   - show type icon, sanitized name, byte size and status;
+   - open/download only after currently authorized server fetch;
+   - local pending and failed states are visually distinct from READY;
+   - retry/attention actions reuse original IDs;
+   - safe previews for JPEG/WebP only using existing libraries, no HTML previews;
+   - PDF opens only in trusted system/document viewer with explicit user action and
+     no publicly shared content URI permissions longer than needed;
+   - progress/cancel UI but never cancel by deleting original bytes/evidence receipt;
+   - clear SI/DE/default localized error categories;
+   - accessible labels, content descriptions, loading state and narrow screens.
+   Avoid copying evidence to public photos/gallery automatically.
+
+34. DOWNLOAD CACHE, PRIVACY, LEASE
+   Downloaded READY evidence belongs in private per-account/per-org/per-audience cache.
+   Bound cache by bytes and age, and check current incident read lease (existing 24h
+   maximum) before presenting; never give a Storage signed URL authority over local
+   lease. Explicit confirmed message-scope revocation hides relevant attachments
+   ONLY, not whole incident field projection. Global incident access revocation hides
+   incident projection AND its evidence.
+   Sign-out/org/account switch clears visible state, cancels in-flight downloads
+   and stops stale response commits using generation tokens. Existing pending local
+   owner evidence remains safely isolated for original account (not auto-uploaded
+   under a different account).
+   A cached attachment should not be assumed authorized indefinitely because the
+   user previously downloaded it.
+   If secure local encryption/expiry cannot be implemented using current facilities,
+   use bounded online-only preview rather than insecure offline persistence and
+   report the limitation.
+
+35. CONCURRENCY / PROCESS DEATH
+   Handle repeated picker callbacks, duplicate WorkManager wake-ups, process kill
+   mid-copy/mid-upload, URI read failures, `409 existing path`, stale signed token,
+   device storage pressure, lost finalize response, network changes and logout during
+   upload. On restart reconcile existing immutable IDs with server status first.
+   Conflated FCM/B2 refresh may update page metadata but must not overwrite local
+   pending evidence or leak revoked content.
+
+===============================================================================
+PART 6 — WEB CLIENT / AUTHENTICATED ROUTES
+===============================================================================
+
+36. WEB ROUTE INTEGRATION
+   Reuse authenticated Next.js server route conventions and `loadAccount`/acting-org
+   handling. Add narrowly scoped attachment actions to existing incident API or a
+   dedicated authenticated route only if needed for streaming/signed URL issuance.
+   Never proxy arbitrary URL or let browser provide Storage service-role credentials.
+   Do not widen admin/manager entry roles into command authority.
+   Disable caching of private metadata/auth decisions where appropriate.
+
+37. WEB INCIDENT UI
+   Add evidence list and upload affordance in current commander/operational surface,
+   plus task/message attachment entry points where current user has permission.
+   A scope selector must show the effective audience BEFORE upload and not allow
+   arbitrary manual broadening from UNIT note to INCIDENT evidence.
+   Display sanitized filename/size/type/uploader/status, distinguish pending/
+   verifying/ready/rejected, support retry with same ID and safe download.
+   Web form draft persistence beyond tab closure is optional; don't silently promise
+   durable offline Web uploads. Browser refresh after ambiguous upload should
+   recover by ID/status when permitted; never duplicate the evidence.
+
+38. CONTENT SAFETY IN BROWSER
+   Use `textContent`/React escaped text, not `dangerouslySetInnerHTML`.
+   Don't render SVG, HTML or arbitrary inline content from evidence. JPEG/WebP
+   preview via time-limited blob URLs or authorized URL, revoke object URLs on
+   unmount. PDF ideally download (or sandboxed viewer if existing safe pattern);
+   set `Content-Disposition: attachment` from trusted handler to avoid script/HTML
+   execution. Prevent open redirects and leaking signed token in referrer/logs.
+   Error messages and presentation in default/SI/DE. No new npm/pnpm dependency
+   or lockfile changes without explicit owner approval.
+
+39. B1/B2/C AND UI REFRESH
+   Existing revision watermark/B2 private hints request authoritative reads only.
+   Integrate attachment metadata pages with those refresh triggers; no new public
+   Realtime channel, no raw binary payload in Broadcast, no independent 5-second
+   polling loop. MESSAGE attachments must use current C scope fingerprint or
+   stronger authority checks; do not reuse only B1 field fingerprint as proof of
+   message visibility. Restrict older history attachments to same current audience
+   rules as predecessor message history. If history is denied, its files are denied.
+
+===============================================================================
+PART 7 — ERRORS, SECURITY INVARIANTS AND EDGE CASES
+===============================================================================
+
+40. ERROR CODES / CLIENT MAPPING
+   Use existing style and add only necessary safe codes, for example:
+       ATTACHMENT_TYPE_UNSUPPORTED
+       ATTACHMENT_TOO_LARGE
+       ATTACHMENT_MALFORMED
+       ATTACHMENT_NOT_READY
+       ATTACHMENT_REVOKED
+       ATTACHMENT_PARENT_PENDING
+       ATTACHMENT_TARGET_STALE
+       ATTACHMENT_ALREADY_FINALIZED
+       UPLOAD_TOKEN_EXPIRED
+       STORAGE_TEMPORARILY_UNAVAILABLE
+       OPERATION_REUSED
+       NOT_AUTHORIZED
+       SCOPE_CHANGED
+   Normalize across SQL, Edge/Web route, Android and SI/DE UI. Do not return
+   bucket enumeration, hidden file existence, SQL messages, secret details or signed
+   tokens in general error reports. HTTP 401 global session handling must remain
+   distinct from target-specific 403/message-scope denial.
+
+41. AUTHORITATIVE ACL MATRIX
+   Construct and document a precise table with columns:
+       actor role / effective incident org / target / read / prepare / upload
+       / finalize / signed fetch / historical read.
+   Cover effective IC/deputy, agency commander, sector commander, unit leader,
+   exact responder, other unit, nonparticipating org, org ADMIN without incident
+   role, suspended user, removed crew, released participant and terminal incident.
+   If target is a MESSAGE, apply C audience filters and correction history policy.
+   If target is a TASK, apply current canonical task recipient privacy.
+   Do not claim cross-organization role inheritance creates incident authority.
+
+42. DATA-INTEGRITY / CROSS-SCOPE
+   Explicitly prevent:
+   - account A's staged bytes submitted by account B;
+   - acting org A's upload completed under org B after org switch;
+   - file path from incident A registered under incident B;
+   - task or message from another incident used as parent;
+   - a public bucket/object URL masquerading as authorized evidence;
+   - different content uploaded to same immutable key;
+   - an original note corrected and its image secretly made incident-wide;
+   - revoked unit participant retaining later signed capabilities;
+   - stale trusted verification attaching to a different metadata generation;
+   - duplicate notifications or aggregate revision bumps on exact replay;
+   - metadata READY without a verified physical object;
+   - a failed upload destroying offline ACK, message draft or Room B1 cursor;
+   - a late async callback resurrecting revoked private attachment;
+   - file bytes, filename, signed URL, GPS EXIF or private message body in M10/B2.
+
+43. SECURITY CAVEATS TO DOCUMENT
+   - Existing downloaded bytes may be copied/screenshot by authorized humans;
+     technical revocation cannot retrieve copies.
+   - Short-lived signed Storage URLs and CDN caches may outlive scope revocation
+     for their remaining lifetime; "instant revocation" applies to NEW authority
+     and UI/cache hiding, not already-issued bearer URLs.
+   - Magic-byte checks + hash do NOT constitute full malware scanning.
+   - EXIF may exist inside JPEG/WebP; do not claim stripping unless actually done.
+   - Secure local cache depends on actual Android encryption/no-backup behavior.
+   - Manual owner QA/deploy required; no real incident operational readiness claim.
+
+44. PERFORMANCE
+   Bound attachment lists, number of simultaneous uploads/downloads, staging quota,
+   verification memory, retry count/backoff and signed-link lifetime. Avoid N+1
+   authorization reads when listing many attachments without widening audience.
+   Use indexes `(incident_id,target_kind,target_id,created_at DESC,id DESC)`,
+   `operation_id`, `storage_object_key` as appropriate after checking real schema.
+   No CDN/public cache of private URLs beyond documented unavoidable behavior.
+   Keep server SQL transactions short and no storage HTTP under locks.
+
+===============================================================================
+PART 8 — IMPLEMENTATION TASK LIST
+===============================================================================
+
+45. DATABASE DELIVERABLES
+   - Exactly one or small set of forward-only migration(s) AFTER current main.
+   - Dedicated incident attachment metadata, same-incident FK/constraints, stable
+     operation identity, lifecycle, append-only provenance.
+   - Correct private Storage bucket/RLS or safe reuse with proof of isolation.
+   - Narrow caller-bound RPCs and trusted-only finalize authority.
+   - Safe indexes and restricted grants.
+   - Existing B1 revision and B2 hint integration.
+   - No applied SQL, no Cron/secret changes and no unrelated migrations modified.
+
+46. TRUSTED BACKEND DELIVERABLES
+   - Authenticated trusted file verification/finalize endpoint (using existing Next
+     server or Edge Function conventions); source code only, not deployed.
+   - Real observed MIME/length/hash and current target authorization before READY.
+   - Bounded memory/network behavior and recoverable finalize status.
+   - Safe authorized short-lived fetch or no-store authenticated streaming.
+   - No new service-role secret or unchecked `--no-verify-jwt` Edge endpoint.
+
+47. ANDROID DELIVERABLES
+   - Minimal integrated Compose/ViewModel/Repository changes.
+   - Durable private staging, stable file UUID/operation ID, dependency-aware upload.
+   - Existing WorkManager queue integration, recovery and attention states.
+   - Additive Room migration only if needed, matching current version, never
+     editing generated JSON directly.
+   - Authorized preview/download, SI/DE/default messages and correct scope handling.
+   - Do not modify Android Gradle, KAPT, KSP or unrelated hydrant/inspection sync.
+
+48. WEB DELIVERABLES
+   - Incident/task/message authorized attachment UI, limited preview and retry.
+   - Server-authenticated Storage access/finalize path and safe audience preview.
+   - Integrated B1/B2 refresh without independent realtime engine.
+   - SI/DE/default translations and accessible controls.
+   - No pnpm-lock modification or added dependencies without approval.
+
+49. DOCUMENTATION DELIVERABLES
+   Create `docs/M14.7D-private-incident-attachments-evidence.md` and update
+   `docs/SPEC-M14-INCIDENT-OPERATIONS.md` only in relevant progress/implementation
+   notes. Include:
+   - exact canonical schema, indexes/FKs/status transitions;
+   - exact RPC signatures and SQL grants;
+   - Storage bucket/private policy and upload protocol;
+   - actual trusted validation method and limitations;
+   - target audience/role matrix and terminal history policy;
+   - immutable replay/recovery and pending cleanup safety;
+   - Android offline/Room/file-staging architecture;
+   - Web authenticated download/preview strategy;
+   - limits, error codes, subscription semantics and security caveats;
+   - manual SQL/Storage rollout order;
+   - 45+ manual acceptance scenarios, explicitly UNEXECUTED.
+   Keep existing history and architectural decisions intact. Do not claim
+   features were deployed or production-verified.
+
+===============================================================================
+PART 9 — MANUAL ACCEPTANCE SCENARIOS (NOT TO BE EXECUTED BY CODEX)
+===============================================================================
+
+50. REQUIRED HUMAN ACCEPTANCE MATRIX
+   Write an explicit checklist supporting at least all scenarios below:
+
+   PREREQUISITES
+   [ ] M14.7C corrected source is on main.
+   [ ] Previously required M14 migrations are applied in correct order by owner.
+   [ ] Storage bucket is private and actual RLS/grants reviewed by owner.
+   [ ] No public list/read/UPDATE/DELETE policy accidentally grants access.
+
+   AUTHORITY / AUDIENCE
+   [ ] Effective IC uploads INCIDENT evidence to authorized incident.
+   [ ] Generic org ADMIN without command cannot upload incident-wide evidence.
+   [ ] Effective unit leader uploads for exact authorized task.
+   [ ] Exact responder uploads for own active permitted task.
+   [ ] Other unit cannot see/respond to private task attachment.
+   [ ] Different organization cannot infer attachment existence by UUID.
+   [ ] MESSAGE attachment inherits INCIDENT/ORGANIZATION/UNIT audience.
+   [ ] Correction of a message does not widen old attachment audience.
+   [ ] Predecessor history denied => predecessor file denied.
+   [ ] Released or suspended participant loses current download authorization.
+   [ ] Global session 401 and target-specific NOT_AUTHORIZED behave differently.
+   [ ] CLOSED/CANCELLED incident forbids new attachments.
+   [ ] Historical access is conservative and does not leak old bytes.
+
+   FILE VALIDATION
+   [ ] Valid JPEG under 10MiB succeeds.
+   [ ] Valid WebP under 10MiB succeeds.
+   [ ] Valid PDF under 20MiB succeeds.
+   [ ] Zero bytes rejected.
+   [ ] JPEG just over 10MiB rejected.
+   [ ] PDF just over 20MiB rejected.
+   [ ] PNG/GIF/SVG/HTML/EXE/ZIP rejected.
+   [ ] Fake `.jpg` MIME with executable bytes rejected.
+   [ ] PDF with incorrect magic rejected.
+   [ ] Weird Unicode/path-control filename safely displayed.
+   [ ] Filename/path can't choose arbitrary bucket or user path.
+   [ ] Original file bytes remain immutable after finalization.
+
+   TRANSFER / REPLAY
+   [ ] Offline selected file survives Android process restart.
+   [ ] Offline unsent message parent blocks attachment upload.
+   [ ] After parent receipt, same attachment UUID is used.
+   [ ] Prepare response lost -> replay returns same intent and path.
+   [ ] Upload completes but finalize response lost -> status/replay recovers.
+   [ ] Existing object key conflict never silently overwrites bytes.
+   [ ] Different content with reused operation UUID rejected.
+   [ ] Two concurrent uploads of same attachment produce one READY record.
+   [ ] Network fails at mid-upload; original file and pending status retained.
+   [ ] Storage unavailable leaves retryable state, not falsely READY.
+   [ ] Device storage full yields safe attention state, no silent loss.
+   [ ] User changes account mid-upload; former account intent isolated.
+   [ ] User changes acting organization mid-upload; cannot complete as new org.
+   [ ] Actor removed from task between prepare/finalize -> deny publication.
+   [ ] User removed from note audience between upload/verify -> deny publication.
+   [ ] Rejected upload stays non-public and is not indiscriminately auto-deleted.
+   [ ] No command ACK/START/COMPLETE altered by attachment error.
+   [ ] Room B1 revision/cursor and message_page stay correct.
+   [ ] App crash in status/metadata transaction does not duplicate an item.
+
+   DOWNLOAD / UI
+   [ ] Web download URL issued only after current target authorization.
+   [ ] Signed fetch TTL bounded; no URL in FCM/Realtime/event timeline/log.
+   [ ] Previously downloaded file hidden on confirmed revocation.
+   [ ] Message-only revocation hides only message/file, not field tasks.
+   [ ] Full incident revocation hides full incident protected cache.
+   [ ] No private data persists in new user's UI after account switch.
+   [ ] Old response callback cannot re-show revoked photo.
+   [ ] Web object URLs cleaned up on unmount/sign-out.
+   [ ] Invalid preview never executes HTML/JavaScript.
+   [ ] PDF opens/downloads safely.
+   [ ] SI/DE/default translations, accessible actions, narrow layouts.
+   [ ] Existing realtime reconnect/FCM refresh only drives re-read.
+   [ ] REAL/SIM isolation holds and file never triggers automatic command.
+
+   OPERATIONS
+   [ ] Owner performs controlled SQL migration, not Codex.
+   [ ] Owner manually verifies bucket policies/storage settings.
+   [ ] Owner deploys trusted verification code and Web.
+   [ ] Owner builds/distributes Android, Room export if required.
+   [ ] Controlled TRAINING incident end-to-end verified by humans.
+   [ ] Rollback strategy preserves already uploaded evidence/receipts.
+   [ ] No claim of production verification until hands-on testing.
+
+===============================================================================
+PART 10 — STRICT EXECUTION / GIT / HANDOFF
+===============================================================================
+
+51. ABSOLUTE CODEX PROHIBITIONS
+   - Do not create, run or modify automated tests.
+   - Do not run build, Gradle sync, lint, typecheck, CI or any quality command.
+   - Do not execute SQL, Supabase migrations, database consoles or migrations reset.
+   - Do not deploy Web/Edge Functions or Android binaries.
+   - Do not send real notifications or simulate actual live dispatch.
+   - Do not modify Cron, scheduler, server secrets, environment credentials.
+   - Do not modify Android Gradle/KAPT/KSP/dependencies or generated Room schema.
+   - Do not modify `pnpm-lock.yaml` or add packages without explicit approval.
+   - Do not use `git reset --hard`, destructive cleanup, blind stash apply, force push,
+     or discard uncommitted local files. Respect Android Studio local configs.
+   - Do not create more than ONE new PR for this milestone.
+   - Do not merge the PR and do not begin M14.8B automatically.
+   - Use `[skip ci]` if established by repository conventions.
+   - Existing AGENTS.md general automated test recommendations do not override the
+     owner's explicit implementation-only restrictions for this Codex run.
+   - Source inspection/review only is permitted; do not claim runtime verification.
+
+52. PR FORM
+   Suggested branch: `codex/m14-7d-private-incident-evidence`
+   Suggested title: `M14.7D — Private Incident Attachments & Evidence`
+   Base: actual verified current `main` containing corrected M14.7C.
+   All SQL, trusted handler, Android, Web and docs changes in this single PR.
+   Existing independent local/uncommitted Android/Gradle changes are preserved.
+   Update THE SAME PR if later reviewers identify corrections.
+   Do not merge.
+
+53. REQUIRED COMPLETION REPORT
+   In concise Slovenian to owner, include:
+   1. PR URL, branch, full implementation HEAD commit.
+   2. Confirmed main base commit and presence of corrected PR #85.
+   3. Exact forward SQL migration file(s), NOT applied.
+   4. Reused private bucket vs new bucket decision and Storage RLS specifics.
+   5. Exact canonical table, constraints and indexes.
+   6. Exact RPC/handler names and authentication boundaries.
+   7. Parent/target/audience ACL matrix summary.
+   8. Trusted byte validation details; what is and isn't malware-scanned.
+   9. State machine and stable UUID/replay behavior.
+  10. Proof by source inspection of no READY without actual verified bytes.
+  11. Signed URL lifetime, revocation/cache limitations.
+  12. Android local staging, account isolation, offline recovery and Room version.
+  13. Web UI and authorized file fetch behavior.
+  14. B1/B2/C integration and no private data in public timeline/hints.
+  15. File/size/queue/per-user limits.
+  16. Translation and accessibility handling.
+  17. Human-only migration/bucket/deploy/build order.
+  18. Precise unmet dependencies or necessary owner approvals.
+  19. Known limitations, deferred capabilities and unverified hazards.
+  20. Explicit confirmation: NO tests/build/lint/typecheck/Gradle sync/CI/SQL/
+      runtime checks/real notifications/deployments/merge performed.
+
+54. STOP CONDITIONS / PARTIAL COMPLETION
+   If the repository lacks a secure way to perform trusted byte validation or to
+   upload 20MiB files from Android without forbidden dependency changes:
+   - Do not invent a weaker "verified" implementation.
+   - Implement only independently safe portions if they do not create misleading
+     user-visible READY states or a security regression.
+   - Report the exact blocker and explicit owner authorization needed.
+   - Do not mark the milestone fully complete.
+   - Never modify Gradle, add an unofficial storage integration, use a public bucket,
+     trust client-supplied hash, or skip target authorization to force completion.
+
+FINAL: STOP AFTER CREATING ONE PR. DO NOT MERGE. DO NOT DEPLOY. DO NOT RUN TESTS.
