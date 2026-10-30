@@ -107,7 +107,7 @@ internal class IncidentReconciliation(
         })
         identity(feed,id)
         if(feed.flag("reset_required")) {
-            revokeIncident(id)
+            if(feed.text("reason")=="SCOPE_CHANGED")revokeIncident(id)
             Log.d("IncidentSync","feed reset required")
             return null
         }
@@ -124,12 +124,13 @@ internal class IncidentReconciliation(
                 (revision>previousRevision || (revision==previousRevision && ordinal>previousOrdinal)) &&
                 change.text("entity_id")==id && change.text("entity_version")==revision.toString())
             previousRevision=revision;previousOrdinal=ordinal.toInt()
+            if(change.text("operation")=="REVOKE")revokeIncident(id)
             if(change.text("operation")!="UPSERT" || change.text("entity_kind")!="FIELD_COLLECTIONS") {
-                revokeIncident(id);return null
+                return null
             }
         }
         checkProtocol(feed.text("next_revision")==previousRevision.toString() && feed.text("next_ordinal")==previousOrdinal.toString())
-        if(feed.flag("has_more")) { revokeIncident(id);return null } // Unknown later descriptors require a safe reset.
+        if(feed.flag("has_more"))return null // Unknown later descriptors require a safe reset.
         if(changes.isEmpty()) {
             checkProtocol(current==cursor.revision && number(feed.text("timeline_sequence"))==cursor.timelineSequence)
             return old to cursor.copy(syncedAt=System.currentTimeMillis())
@@ -155,7 +156,9 @@ internal class IncidentReconciliation(
             val cursor=saved.find { it.incident==id && it.account==account && it.organization==org }
             val compatible=old!=null && cursor!=null && cursor.schemaVersion==1 &&
                 old.text("revision")==cursor.revision.toString() && entry.text("scope_fingerprint")==cursor.fingerprint
-            if(old!=null && !compatible)revokeIncident(id)
+            // Missing/old protocol metadata is a data reset, not evidence of access loss.
+            if(old!=null && cursor!=null && entry.text("scope_fingerprint")!=cursor.fingerprint)
+                revokeIncident(id)
             try {
                 var pair=if(compatible)changes(id,old!!,cursor!!) else null
                 if(pair==null) {

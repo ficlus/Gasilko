@@ -108,8 +108,8 @@ begin
  then raise exception 'NOT_AUTHORIZED' using errcode='42501'; end if;
  select coalesce(jsonb_agg(q.value order by q.id),'[]'),count(*) into v_units,v_count from (
  select u.id,jsonb_build_object('unit',u.id,'leader',private.field_unit_leader(auth.uid(),p_org,u.id),
- 'catalog',ou.updated_at,'crew',coalesce((select jsonb_agg(jsonb_build_array(c.id,c.user_id,pr.account_status,
- pr.display_name,m.role) order by c.id)
+ 'crew',coalesce((select jsonb_agg(jsonb_build_array(c.id,c.user_id,pr.account_status,
+ m.role) order by c.id)
  from (select cc.* from public.incident_crew_members cc where cc.unit_assignment_id=u.id and cc.status='ACTIVE'
  and (cc.user_id=auth.uid() or private.field_unit_leader(auth.uid(),p_org,u.id))
  order by cc.id limit 101) c join public.profiles pr on pr.id=c.user_id
@@ -126,8 +126,7 @@ begin
  v_scope:=jsonb_build_array(auth.uid(),p_org,p_incident,v_units,
  (select jsonb_agg(jsonb_build_array(r.id,r.version::text,private.incident_assignment_effective(r.id)) order by r.id)
  from public.incident_role_assignments r where r.incident_id=p_incident and r.organization_id=p_org
- and r.user_id=auth.uid() and r.status='ACTIVE'),
- (select h.floor_revision::text from private.incident_change_horizons h where h.incident_id=p_incident));
+ and r.user_id=auth.uid() and r.status='ACTIVE'));
  return md5((select l.salt::text from private.incident_sync_limits l where l.id)||v_scope::text);
 end;
 $field_scope$;
@@ -324,7 +323,6 @@ begin
  perform private.prune_incident_changes(p_incident_id);
  v_scope:=private.incident_field_scope(p_acting_organization_id,p_incident_id);
  select * into v_i from public.incidents i where i.id=p_incident_id;
- perform private.prune_incident_changes(p_incident_id);
  select h.floor_revision into v_floor from private.incident_change_horizons h where h.incident_id=p_incident_id;
  if v_scope<>p_scope_fingerprint then v_reset:='SCOPE_CHANGED';
  elsif p_after_revision>v_i.revision then v_reset:='CURSOR_FUTURE';
@@ -401,15 +399,31 @@ create constraint trigger incident_change_fallback after insert or update on pub
 -- This small authorization-aware watermark replaces the heavy context polling.
 create function public.incident_sync_head(p_acting_organization_id uuid,p_incident_id uuid) returns jsonb
 language plpgsql volatile security definer set search_path='' set lock_timeout='1500ms' as $web_head$
-declare v_context jsonb;
+declare v_i record;v_scope jsonb;
 begin
  perform private.incident_sync_lock(p_acting_organization_id,p_incident_id);
- v_context:=public.incident_context(p_incident_id,p_acting_organization_id);
- if v_context is null then raise exception 'NOT_AUTHORIZED' using errcode='42501';end if;
- return jsonb_build_object('id',p_incident_id,'version',v_context->>'version',
- 'revision',v_context->>'revision','timeline_sequence',v_context->>'timeline_sequence',
- 'scope_fingerprint',md5((select l.salt::text from private.incident_sync_limits l where l.id)||
- auth.uid()::text||p_acting_organization_id::text||v_context::text));
+ -- Same read predicate as incident_context, without constructing its DTO.
+ if not private.can_read_incident(p_incident_id) then
+  raise exception 'NOT_AUTHORIZED' using errcode='42501';end if;
+ select i.id,i.version,i.revision,i.timeline_sequence,i.status,i.created_organization_id,i.lead_organization_id
+ into v_i from public.incidents i where i.id=p_incident_id;
+ if not found then raise exception 'NOT_AUTHORIZED' using errcode='42501';end if;
+ if not (private.incident_draft_manager(p_incident_id,p_acting_organization_id)
+ or (v_i.status<>'DRAFT' and exists(select 1 from public.incident_participants ip
+ where ip.incident_id=p_incident_id and ip.organization_id=p_acting_organization_id
+ and (ip.status='ACTIVE' or (v_i.status in ('CLOSED','CANCELLED') and ip.status='RELEASED')))))
+ then raise exception 'NOT_AUTHORIZED' using errcode='42501';end if;
+ v_scope:=jsonb_build_array(auth.uid(),p_acting_organization_id,p_incident_id,v_i.lead_organization_id,
+ (select m.role from public.user_organizations m where m.user_id=auth.uid() and m.organization_id=p_acting_organization_id),
+ (select jsonb_agg(jsonb_build_array(ip.id,ip.status) order by ip.id)
+ from public.incident_participants ip where ip.incident_id=p_incident_id and ip.organization_id=p_acting_organization_id),
+ (select jsonb_agg(jsonb_build_array(r.id,r.role,r.unit_assignment_id,r.sector_id,
+ private.incident_assignment_effective(r.id)) order by r.id)
+ from public.incident_role_assignments r where r.incident_id=p_incident_id
+ and r.organization_id=p_acting_organization_id and r.user_id=auth.uid() and r.status='ACTIVE'));
+ return jsonb_build_object('id',v_i.id,'version',v_i.version::text,
+ 'revision',v_i.revision::text,'timeline_sequence',v_i.timeline_sequence::text,
+ 'scope_fingerprint',md5((select l.salt::text from private.incident_sync_limits l where l.id)||v_scope::text));
 end;
 $web_head$;
 
