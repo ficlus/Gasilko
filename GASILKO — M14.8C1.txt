@@ -1,0 +1,688 @@
+GASILKO — M14.8C1
+ANDROID INCIDENT MAP & TASK NAVIGATION
+DETAILED CODEX IMPLEMENTATION BRIEF — OWNER-APPROVAL DRAFT
+
+Prepared: 2026-10-30
+Repository: https://github.com/ficlus/Gasilko
+Target: ONE new PR against the latest MERGED main after explicit owner authorization.
+Scope: Android field incident map, authorized targets and safe task-navigation integration.
+Priority: P1. Planned V2 prompt 07. Source implementation only.
+
+OWNER DELIVERY / DEPLOYMENT STATE
+- Owner reports PRs #78–#87 are merged. Verify latest actual GitHub main and open PRs at task start; do not rely solely on dated handoffs or old queue.json.
+- Owner has NOT applied Supabase SQL migrations belonging to PR #82 onward and is deliberately deferring the rollout. Do not require or attempt a local rollout as part of this Codex task. This is not approval to deploy.
+- Existing ordered human-only SQL prerequisites (not requests to execute):
+  20261027100000_incident_android_field_pilot.sql      (#82)
+  20261030100000_incident_snapshot_protocol.sql       (#83)
+  20261030120000_incident_private_realtime.sql        (#84)
+  20261030140000_incident_scoped_messages.sql         (#85)
+  20261030160000_incident_private_attachments.sql     (#86)
+  20261030180000_android_unit_leadership.sql          (#87)
+  Older migrations through #81 must also be checked by owner before their rollout.
+- New M14.8C1 SQL, if truly required, must be an ADDITIVE FORWARD migration AFTER the current latest main migration; list its exact filename/order in the PR, never edit applied migration history.
+- PR #86 also requires later human deployment of the incident-evidence Edge function, private Storage verification and compatible Web/API. No deployment of that function is part of this milestone.
+- Code merged, SQL applied, app deployed, and human verified are four different states. Never conflate them.
+
+TASK INSTRUCTION
+Implement a complete, privacy-preserving, offline-capable Android incident map and task target/navigation workflow by reusing Gasilko's existing MapLibre, field incidents, Room16, B1 snapshot/change-feed, M14.5A canonical assignment, M14.5D navigation/RoadProvider, NAV1/NAV2 and existing hydrated hydrant registry. Do not build a parallel map, routing, command or synchronization engine.
+
+This brief is detailed by design. Its proposed DTOs and RPC sketches are DESIGN GUIDANCE, NOT claims about current schema. Actual merged source, migrations, AGENTS.md and authoritative SPEC files always win. Resolve any mismatch by source inspection and document the result.
+
+======================================================================
+0. NON-NEGOTIABLE EXECUTION CONTRACT
+======================================================================
+
+0.1 Read/inspect before editing:
+- AGENTS.md
+- docs/SPEC.md
+- docs/SPEC-M14-INCIDENT-OPERATIONS.md
+- SPEC-1-Hydrant-Management-Platform.md as background
+- docs/M14.7A-M14.8A-android-field-pilot.md
+- docs/M14.7B1-incident-snapshots-change-feed.md
+- docs/M14.7B2-secure-private-realtime.md
+- docs/M14.7C-operational-scoped-messages.md
+- docs/M14.7D-private-incident-attachments-evidence.md
+- docs/M14.8B-android-unit-leader-command.md
+- SPECS/prompts/07_m14-8c1-android-incident-map-and-task-navigation.md
+- relevant M14.5A/M14.5D/NAV1/NAV2 and Android map specifications and actual source files.
+
+0.2 Inspect current main HEAD SHA, branch, open PRs and latest relevant migrations. If a current PR already implements M14.8C1, STOP, report it and continue only with explicit same-PR correction approval. If any dependency is unmerged or a security assumption is unresolved, report a blocker; do not implement overlapping architecture.
+
+0.3 ONE new PR for this NEW milestone, based on merged main. Do not merge it. If corrections follow, update that same open PR and same branch; maximum two automatic correction cycles if such a process is later authorized. Never open multiple overlapping PRs.
+
+0.4 STRICTLY FORBIDDEN for Codex:
+- DO NOT add, modify or run tests.
+- DO NOT run a build, lint, typecheck, CI, emulator, runtime smoke test, browser automation, SQL parse/execute, local Supabase, Docker, deployment, Gradle sync or manual acceptance.
+- DO NOT apply database migrations or deploy Edge/Web/Android.
+- DO NOT change Gradle, KAPT, KSP, dependencies, version catalogs, generated Room schema files, personal IDE or local machine settings without separate explicit owner approval.
+- DO NOT touch or discard unrelated local owner changes; no hard reset, broad cleanup or destructive migration.
+- DO NOT create real incidents, send actual operational notifications or activate REAL tracking.
+- Use [skip ci] project convention for implementation commits; report any conflict with AGENTS.md testing expectations and leave actual validation as human-only.
+- No autonomous follow-up milestone; stop after one PR.
+
+0.5 Preserve all canonical authority, immutable operation IDs/requests/receipts, audit, queue, M10 notification delivery, offline hydrants/inspections/evidence, exact-org permissions and existing role boundaries. No new worker, background scheduler, Cron, Room database, GPS tracker, simulator or service-role keys in clients.
+
+======================================================================
+1. ARCHITECTURAL OUTCOME / PRODUCT DEFINITION
+======================================================================
+
+A responder or effective leader who can view a task/own incident can:
+A. Enter an incident-scoped Android Map from IncidentScreen, a specific task assignment, or the existing own-unit screen.
+B. See only authorized incident context: task target, available incident sectors/zones/objects, incident-linked hydrants, and legitimately permitted unit information.
+C. Distinguish incident-linked hydrants from normal background registry hydrants, and distinguish REAL from TRAINING.
+D. Focus on a selected assignment and its typed target without silently substituting a mutable current object for the issued target snapshot.
+E. Select overlapping objects through compact, unobtrusive markers and a disambiguation sheet.
+F. View an existing authorized navigation route/session if accessible; request a route preview ONLY through a legitimate current provider boundary and authority, with explicit origin provenance. If no safe internal route is available, show target-only guidance and a clearly labeled opt-in external-navigation handoff if supported.
+G. Read stale/offline cached authorized context with clear provenance/lease indicators. The UI must NEVER claim that old map data is current.
+H. Return to the original assignment without changing ACK/START/COMPLETE/UNABLE, incident status, unit status or navigation execution status.
+
+NON-GOALS: new incident command semantics; issuing instructions by map tap; automatic task acknowledgement; destination arrival detection; autonomous vehicle motion; GPS uploading/sharing/tracking; broad commander COP on Android; new routing provider; new map engine; generic geospatial data editor; global offline-map tile infrastructure; SIM simulation-physics enhancements; real dispatch/CAD/112/ZA-RE integration; stock changes; new notifications.
+
+UX language is Slovenian and German. Back-end identifiers, action codes and error codes stay language-neutral.
+
+======================================================================
+2. CURRENT SOURCE INVENTORY — MANDATORY FIRST COMMIT / PR NOTES
+======================================================================
+
+Verify and document actual file paths, types and function signatures. Expected reusable areas from existing milestone docs:
+
+Android:
+- feature/incidents/IncidentRepository.kt / IncidentViewModel.kt / IncidentScreen.kt;
+- feature/map/MapScreen.kt and existing MapLibre lifecycle/styles/camera/layers;
+- core/database/RegistryDatabase.kt, Room v16 incident_field_cache and incident_sync_cursor;
+- existing incident task target display, typed IncidentCommandDraft, own-unit entry, authenticated org/account scope;
+- pending_hydrant_changes INCIDENT_TASK discriminator, incident_operation_dispatch, existing queue and WorkManager only for canonical mutations;
+- existing hydrant registry Room/map data, GPS permission handling, NAV1/NAV2 route/map facilities;
+- existing map tile/style/offline controls and legal attribution.
+
+PostgreSQL/Edge/Web:
+- canonical public.incidents, incident_task_assignments, incident_tasks, incident_sectors, incident_map_objects, incident_hydrant_links, incident_units;
+- M14.5A issued task target snapshot and assignment episode visibility;
+- M14.5D incident_navigation_sessions/routes/events and incident-navigation Edge function;
+- plan-routes/provider.ts RoadProvider (OSRM/GraphHopper behavior as actually configured);
+- B1 incident_field_directory, incident_snapshot_manifest/page, incident_change_feed, incident_field_entities and incident_field_timeline;
+- private.field_projection and actual visibility helpers, including #87 field_unit_leader/field_unit_visible and hierarchy rules;
+- existing incident map/command-map/nav reads; do not grant a field responder access to a commander-only RPC simply because Android needs a layer.
+
+Document the actual authoritative owner of each dataset, actual on-wire field shape, actual UUID keys and version field. Search for equivalent functionality in the source before introducing ANY DTO, RPC, layer or data store.
+
+IMPORTANT: Existing #87 documentation confirms an Android target map already exists, but explicitly says it is not an integrated M14.8C map/navigation feature. Reuse and extend, do not recreate it. Existing #83 B1 field projection is intentionally narrower than the full commander COP. Keep it narrower.
+
+DEPENDENCY GATE: #82/#83/#87 source must exist in merged main. Code implementation can be prepared against merged main while the owner's backend rollout is deferred, but user-facing activation must be protected until compatible backend/feature capability actually exists. No simulated success.
+
+======================================================================
+3. M14.8C1 DATA CONTRACT AND VISIBILITY
+======================================================================
+
+3.1 Canonical objects and identifiers
+
+Never duplicate canonical incident/hydrant/task/object rows just to draw them. Prefer a typed read projection/adapters with fields conceptually equivalent to:
+
+  IncidentMapContext(
+    incidentId UUID,
+    actingOrganizationId UUID,
+    actorId from authenticated session (NEVER client authority),
+    mode REAL|TRAINING as derived from existing source,
+    aggregateRevision decimal string,
+    sourceFingerprint opaque string,
+    verifiedAt UTC,
+    leaseExpiresAt UTC,
+    layers ...
+  )
+
+  MapFeature(
+    kind = TASK_TARGET|INCIDENT_SECTOR|INCIDENT_MAP_OBJECT|
+           INCIDENT_LINKED_HYDRANT|REGISTRY_HYDRANT|AUTHORIZED_UNIT,
+    canonicalId UUID or stable assignment/target identity,
+    incidentId UUID when incident-scoped,
+    assignmentId UUID when task-scoped,
+    geometry with explicit WGS84 longitude/latitude,
+    canonicalLabel or safe display text,
+    sourceVersion decimal string where applicable,
+    issuedTargetSnapshot boolean,
+    visibilityScope from server projection, not a client-supplied grant,
+    originProvenance ACTUAL_AUTHORIZED|MANUAL_PLANNING|REFERENCE_ONLY|NONE,
+    observedAt UTC when genuine observation exists,
+    verifiedAt UTC,
+    state/current/stale/unknown fields
+  )
+
+These are conceptual field expectations. Adapt actual existing return JSON rather than imposing incompatible new shapes.
+
+3.2 Exact typed task targets (known canonical issue-task shape)
+
+  {kind:"NONE"}
+  {kind:"COORDINATE", coordinate:[longitude,latitude]}
+  {kind:"HYDRANT", entityId: UUID}
+  {kind:"INCIDENT_MAP_OBJECT"|"INCIDENT_SECTOR",
+   entityId: UUID, incidentId: UUID}
+
+The issued immutable target snapshot has priority for the task-specific pin/route destination. A later edit to a live hydrant, sector or object must not silently redirect an already-issued task.
+
+If target geometry is not a point (sector polygon, line or area), show geometry and a safe "no canonical point destination" state unless the issued task contains an authoritative point or existing NAV2 contract explicitly defines one. DO NOT invent centroids, nearest edge snap, random points or fallback "arrival" positions. Distinguish live contextual geometry from frozen task target.
+
+3.3 Latitude/longitude
+
+- Explicit names longitude and latitude. WGS84 and correct coordinate order [lon,lat] for GeoJSON and RPCs.
+- Validate finite numbers; longitude [-180,180], latitude [-90,90]; reject NaN, swapped/out-of-range values and nonsensical geometry.
+- No silently corrected coordinates. Report localized invalid geometry/target state.
+- Bound geometries/vertices according to actual server constraints. Respect M14.5D limits if dealing with navigation geometry.
+
+3.4 Hydrants
+
+- Incident-linked hydrants are incident context references, not copies. Preserve original registry UUID and provenance.
+- Background registry hydrants remain from the user's existing authorized Room registry/map, with separate legend/style and existing access/lease rules.
+- A hydrant linked to multiple incidents remains one canonical hydrant; the per-incident link is a separate relationship.
+- Never display an incident link because the hydrant exists in an unrelated org; verify current field incident visibility + registry permissions independently where required.
+- Do not claim registry hydrant pressure, availability or flow if those facts are not currently verified. Display appropriate stale/unknown states.
+
+3.5 Units and positions
+
+- Only show units the authenticated actor is currently allowed to see through the field projection, not all incident deployments.
+- If no genuine authorized REAL position source exists, show unit as a list/card with "position unavailable", NOT at incident center or imaginary station point.
+- NEVER show SIM_AGENT_INTERPOLATED / SIMULATED_POSITION as actual REAL GPS.
+- TRAINING may show training-labeled data only if that exact field actor is authorized by an existing source; don't widen simulator-controller private data.
+- Device-local location use is not automatic sharing. No persistence, telemetry stream, server upload or hidden route-origin transfer. M14.8C2 is reserved for owner-approved consented REAL unit location sharing.
+
+3.6 Access and projections
+
+Every field map projection must apply:
+- auth.uid() from server session;
+- ACTIVE profile;
+- exact active acting-organization membership;
+- current incident participation and unit/crew/effective leader episode;
+- data-specific visibility and current incident status;
+- no assumed rights from org ADMIN/MANAGER or historical relationship;
+- no cross-incident ID guessing, join leakage or broad COP grant.
+
+A responder gets own assignment target and only specifically permitted operational context. An effective own-unit leader may see its own supervised assignments and appropriate team context, but cannot see another unit's private reasons, messages, resource details or instructor hazards. A controller's protected training visibility is a distinct authority, not implied by the TRAINING label.
+
+NEVER ship broad raw private table rows and depend on Android UI filtering. The SQL read must be safe in itself. RLS + properly scoped SECURITY DEFINER read contracts are mandatory where appropriate.
+
+======================================================================
+4. SERVER READ DESIGN — MINIMAL AND SAFE
+======================================================================
+
+Decision order:
+1. REUSE existing B1 field projection for task/assignment/unit context.
+2. REUSE current authorized incident map read IF its actor/role/RLS contract actually allows field participants.
+3. Reuse existing hydrant Room projection and canonical incident-hydrant link as authorized.
+4. Add the smallest narrow field-only map read RPC only if no current contract can supply required geometry safely.
+5. Do NOT replace private.field_projection wholesale or copy commander incident_command_map_read permissions.
+
+IF a new map RPC is unavoidable, suggested design (verify with actual schema):
+  public.incident_field_map_page(
+    p_acting_organization_id uuid,
+    p_incident_id uuid,
+    p_layer text,
+    p_after_id uuid DEFAULT NULL,
+    p_limit integer DEFAULT 100
+  ) RETURNS jsonb
+
+Conceptual output:
+  { incident_id, layer, revision:"...", scope_fingerprint:"...",
+    verified_at:"UTC", rows:[...], next_after_id, has_more,
+    schema_version:1 }
+
+Implementation must:
+- derive actor from auth.uid, never accept p_actor;
+- check all exact membership/role/data visibility;
+- allowlist layer kind: only genuinely authorized field sectors, map objects and incident-hydrant links; no raw SIM/private commander or telemetry tables;
+- scope every ID to the requested incident and organization;
+- filter before pagination, not after;
+- use deterministic `(id)` keyset (or actual stable composite key) and bound result counts/bytes;
+- require revision/fingerprint consistency; if changed, discard partial generations and request a new coherent read rather than mix scopes;
+- handle revoked visibility by invalidating protected cache and denying reads;
+- use safe search_path, schema-qualified functions/relations, restricted EXECUTE, no unnecessary table grants;
+- preserve lock ordering/current authorization; do not hold locks through network/routing;
+- prevent N+1 joins, unbounded JSON aggregation, scans or content leaks;
+- emit safe NOT_AUTHORIZED, STALE_VERSION/RESET_REQUIRED, MAP_TOO_LARGE or similar only if consistent with existing error taxonomy;
+- document indexes actually needed and choose source-backed query shape.
+- No map-layer mutation API unless absolutely unavoidable; this is a READ feature.
+
+An additional map RPC is an OPTION, not a mandatory new schema/table. If existing canonical reads suffice, make NO SQL migration and explain why.
+
+B1 integration:
+- Keep pinned snapshot, change feed, actor/org/incident scope, 5-minute manifest TTL, 24-hour incident lease, 2-hour warning and current 3MiB field projection limit.
+- Do not blindly inject all map geometry into the four existing core/units/assignments/history collections if it exceeds B1 bounds or breaks protocol compatibility.
+- For changed map/sector/link permissions, source must trigger the correct reset/revalidation. Read map-specific data as a separate bounded scope only if appropriate.
+- Atomically publish only complete authorized map generations in Room; never commit an incomplete set of pages as "current".
+- Existing queued operations/unknown receipts/unsynced evidence MUST survive map resets and visibility narrowing.
+- Avoid renewing an authorization lease because only cached map tiles were displayed.
+
+======================================================================
+5. ROOM / CLIENT CACHE CONTRACT
+======================================================================
+
+Default: no new Room table or version bump unless source inspection proves essential. Room v16 is the baseline. Reuse incident_field_cache (or the current repository-provided typed projection), existing cursor/identity locking and current authorized registry data.
+
+If the existing Room data can hold a bounded map generation without violating B1 size/transaction boundaries, adapt it with explicit schema/version validation.
+
+If persistence cannot be correct without a separate cache, propose the SMALLEST additive Room entity and migration, but STOP and request owner permission before changing generated Room schema, Gradle/configuration or DB version under this task's current restrictions. Do not deliver a feature that relies on an unapproved destructive fallback. A memory-only authorized map cache with safe re-read/offline limitations is preferable to violating Room constraints; document what survives process death.
+
+Any cached incident geometry is keyed by:
+(accountId, actingOrganizationId, incidentId, projectionScopeFingerprint, revision or generationId)
+with no cross-account/global fallback. NEVER just key by incident UUID across organizations or users.
+
+- Atomic generation commitment: no partial page visibility as fully synchronized.
+- Ignore late network responses from a prior account/org/incident/assignment selection, using scope generation tokens and cancellation.
+- Reconcile B1 revisions and account/incident scope before reusing cached map geometry.
+- On confirmed authorization loss or incident lease expiry: immediately hide protected map layers, marker details, feature cache and selected inspector. Do NOT destroy unrelated permitted hydrants or pending local task/evidence intent.
+- A restricted object disappearing after permission change must disappear from map and selection; do not leave a stale pinned popup exposing a private label.
+- Distinguish "offline and still lease-authorized but stale" from "offline and access expired" and "server currently refused".
+- Incident lease max24h; two-hour warning; registry 30-day authorization remains a separate boundary.
+- No new background poll loop. Reuse existing foreground refresh, B1 reconciliation and FCM hint triggers. Android Realtime WebSocket is not implemented.
+
+======================================================================
+6. ANDROID UX — COHERENT FIELD WORKFLOW
+======================================================================
+
+Entry points:
+- IncidentScreen > "Map / Karta" for an active authorized incident.
+- Own assignment detail > "Show target on map / Pokaži cilj na karti".
+- Own-unit leader dashboard > map target for a selected permitted own-unit task.
+- Existing notification deep link may bring the user to authorized assignment details, but MUST NOT ACK or navigate to an unrelated incident.
+- Back returns to the original incident/task/unit context; no duplicate screen stack or hidden task mutation.
+
+States:
+NO_SELECTION, LOADING, VISIBLE_CURRENT, VISIBLE_STALE,
+PARTIAL_CONTEXT (explicitly incomplete), OFFLINE_WITHIN_LEASE,
+AUTH_EXPIRED, NOT_AUTHORIZED, TARGET_MISSING, ROUTE_UNAVAILABLE,
+ROUTE_STALE, DATA_LIMIT, RECONCILING and RECOVERY_REQUIRED.
+
+Layout:
+- Reuse MapScreen/MapLibre map instance and shared lifecycle.
+- Incident top bar: reference, REAL/TRAINING badge, last verified time, offline/lease status.
+- Layer controls with clear labels for TASK TARGETS, SECTORS, OBJECTS,
+  INCIDENT HYDRANTS, BACKGROUND HYDRANTS, AUTHORIZED UNITS and ROUTES.
+- Selected target bottom sheet: canonical title, type, current vs issued target, task assignment status, source & age, route action; separate navigation and task controls.
+- Explicit "Back to task" action with preserved task scroll/state.
+- One unobstructed map viewport; accessible controls and adequate field touch targets.
+- Material 3, SI/default/DE, high contrast, long names wrap rather than overlap.
+
+Marker behavior — specifically avoid the crowded overlapping bubbles observed in older Gasilko map views:
+- Take the visual philosophy of existing hydrant markers: compact, readable, limited emphasis, small outlines. Do NOT copy Web-only MapLibre implementation blindly into Android.
+- Single point markers remain individually visible at a sufficiently large zoom.
+- A count badge appears ONLY when screen-space marker collision makes separate markers unreadable (or at low zoom where grouping is actually useful); do not show huge circles for each group at every zoom.
+- Proposed size: group badge ~32–40 device-independent pixels with white count, not proportional to count; actual constants should follow existing map's density/touch geometry.
+- Layer-aware grouping; NEVER merge unrelated security scopes or dangerous/priority states into an anonymous group that hides essential alerts.
+- Group radius and minimum spacing based on rendered icon extent and hitbox, not an arbitrary physical distance. Avoid stacked cluster-on-cluster markers.
+- Clicking a group zooms to separate members. If coordinates remain identical at max zoom, open a bounded selection sheet/spiderfy-style visual layout, without writing modified positions.
+- Selected task target is always accessible, highlighted or excluded from clustering; don't hide it behind a cluster.
+- Never paint raw route coordinates as unit GPS.
+- Large polygon/sector geometry renders as shape; don't turn it into an artificial point.
+- Stable drawing IDs, keyed feature updates, controlled layer order, no map reinitialization on every refresh or selection.
+- Establish an actual drawing order so selected task target, critical warning and unit indicators stay discoverable without exposing hidden subjects.
+
+Overlays use distinct label/legend states:
+  Task target: task/snapshot target, visual icon.
+  Linked hydrant: linked-to-incident icon variant.
+  Registry hydrant: background/ordinary status style.
+  Sector: outline/fill, name available via selection.
+  Tactical object: category icon, only if visible.
+  Authorized unit: genuine location if available; otherwise no position.
+  Route: geometry provenance and freshness, planned guidance only.
+Do not display another actor's hidden assignment, exact private message location or SIM instructor model.
+
+Map camera:
+- Initial focus selected task target if geometry exists; else authorized incident center; else preserved last permitted camera for THIS incident.
+- Fit selected feature without wildly zooming out due to unrelated background hydrants.
+- Preserve camera per authorized incident while switching task sheet/layers.
+- Avoid auto recenters on every B1/hint refresh; manual re-center action.
+- Offscreen selected task gets clear "focus" control.
+- In offline mode with no licensed cached tiles, show plain map-unavailable state and target information; do not imply a complete cartographic base exists.
+
+======================================================================
+7. NAVIGATION / ROUTING — NO NEW ENGINE
+======================================================================
+
+Hard invariant:
+  COMMAND INTENT != EXECUTION PLAN != TELEMETRY
+
+Existing M14.5D navigation sessions are linked to actual task-assignment/deployment identity and have distinct session/route/event history. Preserve exact status machine PLANNED, ACTIVE, PAUSED, ARRIVED_REPORTED, STOPPED, CANCELLED, SUPERSEDED. Do not invent Android-only "arrived" or "executed" state.
+
+Route/read matrix (source-inspect every capability):
+- Show an EXISTING authorized route/session when the server permits current actor to read it and its issued target matches the assignment.
+- If actor can legitimately prepare a NAV2 plan, use only the existing authenticated incident-navigation/RoadProvider path, including existing operation UUID, lease, identity, profile and actor authority. Explicit review before any preparation that creates persistent navigation data; do not call it opportunistically on map opening or zoom.
+- If only a target is available and the actor lacks server route authority or a valid permitted origin, show target-only view; offer explicitly labeled external navigation via a standard installed maps application if appropriate and user chooses it.
+- NEVER claim a route was computed when only a straight line to a coordinate was drawn.
+- No direct public OSRM/GraphHopper client call or provider secret stored in Android.
+- No independent route-cache database or second Edge function.
+- Route calculation from device GPS must not secretly transmit live device position. M14.8C2 REAL location sharing is not approved. Distinguish device-local "my position" camera aid from any explicitly approved one-off route origin transfer; if current contracts do not permit that, do NOT implement server-uploaded origin, use the safer target-only/external-handoff path instead.
+- Existing M14.5D ACTUAL_POSITION is documented as unavailable without a genuine incident position source. Never switch it to device GPS silently or synthesize a unit position.
+- Existing M14.5D MANUAL_PLANNING_POINT is only a reviewed planning origin, not telemetry, and may be used solely when present authority and RPC contracts allow it.
+- An existing stored route can become stale when origin/issued target/position versions or authorized scope change. Label stale and require explicit recalculation; do not silently adapt a previously frozen plan.
+- Use server-returned route distance/duration/provider/last calculated time when available. Do not fabricate ETA/arrival safety or turn-by-turn instructions if provider supplied no steps.
+- If existing route contains bounded steps, map them through an existing NAV2 presentation contract when available, but do not invent spoken turn-by-turn or safety guarantees.
+- Route length, vertex count, size and provider timeout must respect current M14.5D bounds. Do not add noisy polling/retry cascades.
+
+Critical semantics:
+Opening the map, tapping a marker, calculating a route, launching external navigation, entering a sector, approaching a hydrant, receiving FCM and returning to the app NEVER change task ACK/START/COMPLETE/UNABLE; never change incident/unit state; never update GPS/position observations. Task execution only changes through the existing separately reviewed canonical actions.
+
+External map handoff:
+- Use safe Android Intent/URI with explicit user interaction; avoid sharing incident-private names/notes in URIs or logs. Target-only WGS84 coordinate if authorized.
+- If no suitable app, route or GPS is available, present actionable offline static target details.
+- Warn that external maps may require connectivity and are outside Gasilko's authorization boundary.
+- No automatic in-app silent tracking on return.
+
+======================================================================
+8. DETERMINISTIC CLIENT DATAFLOW / CONCURRENCY
+======================================================================
+
+Define explicit state transitions and source fields.
+
+Read:
+1. User selects incident or assignment (capture account/org/incident/assignment identity).
+2. Repository resolves current B1 authorized projection and incident lease.
+3. Resolve issued task target from canonical assignment/task DTO; validate kind and coordinates.
+4. Load allowed cached incident map layers for same identity/fingerprint; load registry hydrants under their own permissions.
+5. Start bounded authenticated map reads only if online and capability supported; cancel stale scope generations.
+6. Page independently per layer; all pages must match pinned version/fingerprint before atomically publishing a complete generation.
+7. Render only authorized layers with source/provenance/current/stale indications.
+8. A new B1 revision, role change, account/org/incident switch or revocation invalidates the appropriate selection and rereads data; do not promote an old response into a new context.
+9. A layer denial revokes only that layer if canonical incident/task access remains; avoid gratuitous destruction of permitted cached tasks, evidence and messages.
+10. Reuse the current refresh coordinator and backoff; no new refresh storm.
+
+Advisory navigation:
+1. User taps "Route" on one exact authorized assignment.
+2. Show frozen target and origin provenance/limitations; check current role and incident scope.
+3. Prefer READ of existing authorized route. If creation needed and allowed, explicit review/confirmation with unchanged canonical task target and verified origin.
+4. Invoke existing server navigation boundary with exact identity and existing version/receipt protocol if mutating.
+5. On confirmed receipt, refetch authoritative route/session state. On ambiguous timeout, preserve ORIGINAL operation UUID/payload, show unknown and use existing receipt recovery. Do not reissue different UUIDs.
+6. On stale version, invalidate preview or require new explicit review; never silently change target.
+7. Show route as advisory, not execution evidence. Return to assignment unchanged.
+
+No new locally queued navigation mutation unless existing canonical dispatcher already explicitly supports that exact request and server semantics. Online-only preview is acceptable if appropriately labeled. Preserve existing durable task operations and their parent dependencies independently.
+
+Cancel, remove, revoked:
+- Scope generation and identity mutex prevent late data from being displayed under a new account.
+- Do not retain selected private marker inspector after revocation.
+- Route cancellation in UI does not invoke server STOP/CANCEL unless user explicitly chooses a supported canonical navigation action with review.
+
+======================================================================
+9. ERROR/RECOVERY MATRIX — MUST IMPLEMENT APPLICABLE PATHS
+======================================================================
+
+NO_ACTIVE_ACCOUNT          -> sign-in/access state, no private overlays.
+NO_EXACT_ORG_MEMBERSHIP    -> no incident map, no inherited grants.
+NOT_INCIDENT_PARTICIPANT  -> deny private layers, protect pending evidence.
+WRONG_INCIDENT_OBJECT     -> reject cross-incident references.
+ROLE_LOST                 -> hide own-unit/private target fields immediately.
+INCIDENT_LEASE_EXPIRED    -> hide private incident cache; protect local unsynced data.
+REGISTRY_AUTH_EXPIRED     -> hide registry layers only as required by registry scope.
+TARGET_KIND_NONE          -> no destination; keep assignment details.
+NONPOINT_TARGET           -> show sector/geometry, no fabricated point route.
+TARGET_NOT_FOUND          -> show frozen target if authorized; never redirect.
+INVALID_COORDINATES       -> safe SI/DE correction message, no incorrect map pin.
+GPS_PERMISSION_DENIED     -> target-only map, optional explicit external navigation.
+DEVICE_LOCATION_MISSING   -> no live-origin claims.
+PROVIDER_UNAVAILABLE      -> existing stale verified route or target only; no fake ETA.
+ROUTE_NOT_AUTHORIZED      -> target view remains available if permitted; no route.
+ROUTE_STALE               -> clear stale badge; explicit current re-review.
+NO_MANEUVER_STEPS         -> geometry/summary only; no fabricated instructions.
+STALE_VERSION             -> refresh read and prompt re-review.
+OUTCOME_UNKNOWN           -> retain original request identity; receipt reconciliation.
+OPERATION_REUSED          -> hard mismatch; never reuse UUID for altered request.
+B1_SCOPE_RESET            -> invalidate scoped map and perform full authorized refresh.
+B1_CURSOR_GAP             -> no partial "current" map; existing recovery.
+PARTIAL_PAGE              -> remain incomplete until all pages validated.
+MAP_TOO_LARGE             -> safe limit state with smaller viewport/layer selector.
+OFFLINE_LICENSED_TILES_NO -> honest blank/limited map, target details still accessible.
+NETWORK_TIMEOUT          -> bounded retry/backoff; no hammering.
+CLOSED_OR_HISTORICAL      -> permitted historical map read only; no active navigation.
+TRAINING_PRIVATE_DATA     -> deny protected layers; no REAL/SIM crossing.
+LATE_ASYNC_RESPONSE       -> discard by generation token.
+BACKGROUND/FOREGROUND     -> lifecycle-safe map and no duplicate refresh subscriptions.
+
+Use existing code mappings; if literal codes differ in current RPCs, document canonical equivalents. Do not expose SQL details, service keys, hidden labels or private payloads. An HTTP 200 wrapper is not sufficient evidence of a successful RPC; respect response/body classifications.
+
+======================================================================
+10. PERFORMANCE / MAP GROUPING / DEVICE RELIABILITY
+======================================================================
+
+- No N+1 full object reads per rendered marker. Prefer bounded collection calls.
+- No full map/style remount on small updates or task selection.
+- Batch feature updates and diff by stable ID; do not recreate all GeoJSON sources every polling tick when source is unchanged.
+- Cap vertices, payload bytes, marker/cluster display and route geometry by existing domain rules.
+- Never load all registry hydrants globally simply because the incident has one linked hydrant.
+- Viewport bounds may reduce rendered background registry points; still show a selected off-viewport target when focused.
+- Coalesce identical background refreshes and prevent simultaneous same-scope requests.
+- Cluster only true screen collisions; compact stable count bubbles; no uncontrolled nested clusters. Preserve high-priority visibility, category legends and selection.
+- Render long route in a native line layer rather than thousands of UI annotations.
+- Use the already configured Android map/style provider and attribution. No illegal offline tiles, silent new providers or license changes.
+- Preserve handset battery: do not repeatedly request location or screen-on behavior by entering incident map.
+- Remove observers/listeners on navigation exit and account switch; release map resources through existing lifecycle.
+- Expose non-secret source/age/error status for operator diagnosis, not noisy raw traces.
+- Write source-level rationale for chosen bounds/indices; performance figures are NOT claimed until human measurement.
+
+======================================================================
+11. SECURITY / SAFETY / MODE / PROVENANCE
+======================================================================
+
+Explicit matrix in docs:
+- responder with active crew and personal assignment;
+- responder viewing shared own-unit target, if existing field contract permits;
+- effective UNIT_LEADER viewing own crew assignments;
+- descriptive crew LEADER without actual command role;
+- commander controller, distinct from normal field authority;
+- ordinary organization ADMIN/MANAGER without incident command role;
+- actor from another organization;
+- suspended/revoked user or incident participant;
+- historical/closed incident actor;
+- TRAINING participant vs protected instructor/controller;
+- same actor after account/org/incident switch.
+
+Do not treat possession of incident UUID, a push message, cached Room row or an expired lease as authorization. No raw audit, private message, instructor hazard geometry, SIM agents or service-role secrets. Current server permissions always bound online reads and route creation.
+
+ALWAYS enforce:
+- Task target is a destination snapshot, not task completion.
+- A route is a plan, not proof of motion or arrival.
+- Actual device GPS is neither unit telemetry nor permission for sharing.
+- SIM positions do not become REAL.
+- REAL navigational guidance must include no fabricated precision.
+- Command hierarchy and effective episode permissions override UI convenience.
+- Existing immutable receipts, offline intent and M10 hints remain intact.
+- Existing hydrant/inspection flows cannot be broken to support incident map.
+
+======================================================================
+12. DESIGN / FILE CHANGE PLAN — SOURCE GUIDANCE
+======================================================================
+
+Phase A — Discovery and source matrix:
+- Read actual current files/functions; map roles, callbacks, map lifecycle, existing target UI, Room fields, NAV2 route contracts and privacy scope.
+- List confirmed existing capability vs missing capability, and exact proposed files.
+- Confirm no M14.8C1 PR already exists and prerequisites merged in code.
+- Decide whether this is Android-only with zero SQL, or requires ONE narrow forward read migration.
+
+Phase B — Authoritative field map read:
+- Reuse current B1 data and field visibility; add narrow map read only if justified.
+- Ensure no field participant receives commander COP or private instructor data.
+- Document actual RPC signature, response schema, pagination, revision/fingerprint and grants.
+- No new canonical write semantics.
+
+Phase C — Android repository and authorized cache:
+- Adapt DTOs with typed target/feature/source provenance.
+- Use existing session/org scope and Room v16 strategy.
+- Prevent cross-context async commits and stale cache leakage.
+- Keep incident and registry lease rules separate.
+
+Phase D — Android MapLibre integration:
+- Reuse existing MapScreen, map layer lifecycle and registry hydrants.
+- Add incident layers, target focusing, selection sheet, compact collision clustering, field legend, route display and no-position state.
+- Integrate existing task/unit screen navigation with return semantics.
+
+Phase E — NAV2 / external fallback:
+- Read existing permitted session/route where appropriate.
+- Route requests only through existing approved boundary and explicit review if mutating.
+- Use target-only and opt-in external navigation fallback when internal authority/provider/origin unavailable.
+- Preserve identity/receipt rules without a second queue.
+
+Phase F — Documentation and human rollout:
+- Document architectural choices, actual paths and APIs, permission matrix, source state machine, manual migration order, feature gating, limits, acceptance checklist and known gaps.
+- Update docs/SPEC-M14-INCIDENT-OPERATIONS.md with a SCOPED progress note; don't rewrite old history.
+- Add milestone doc under docs/M14.8C1-android-incident-map-task-navigation.md.
+- Update historical context/roadmap files only if present and necessary; do not blindly rewrite dated queue.json to invent rollout completion.
+- PR must explicitly say NOT BUILT / NOT TESTED / NOT APPLIED / NOT DEPLOYED / NOT HUMAN VERIFIED.
+
+======================================================================
+13. HUMAN-ONLY MANUAL ACCEPTANCE — UNEXECUTED
+======================================================================
+
+Codex must document these as UNEXECUTED checkboxes with expected authoritative outcomes and relevant screen/RPC, but must NOT perform any of them. Owner later runs in controlled TRAINING with real signed-in accounts, and separately approves any REAL-mode scenario if ever needed.
+
+A. Initial access and identity
+01. Valid own incident/assignment opens map with correct incident reference and mode.
+02. Actor with two organizations never sees cached markers of the other org.
+03. Actor switching accounts while map load is pending cannot show previous actor's private features.
+04. Suspended actor gets no new private map data.
+05. Participant removed while map is open loses private map visibility on confirmed scope refresh.
+06. Effective own-unit leader sees own-unit context only, not another unit's private tasks.
+07. Descriptive crew LEADER without effective UNIT_LEADER role gets no leader-specific map data.
+08. Organization ADMIN without incident participation gets no incident map privilege.
+09. Wrong incident UUID + existing object UUID cannot leak a point/geometry.
+10. Historical/closed incident respects only existing read policy; no active-route initiation.
+
+B. Targets and map coordinates
+11. COORDINATE task target maps longitude/latitude correctly; check axis reversal against real location.
+12. NONE target shows no pin or fake fallback.
+13. HYDRANT target uses issued immutable snapshot and canonical hydrant identity.
+14. INCIDENT_MAP_OBJECT target uses correct incident-specific reference.
+15. INCIDENT_SECTOR polygon shows actual geometry and no arbitrary centroid navigation.
+16. Mutable live object's position changes after task issuance; old task target remains frozen.
+17. Multiple tasks to same hydrant share registry ID without duplicating hydrant.
+18. Incident-linked hydrant and ordinary background registry hydrant are styled differently.
+19. Registry layer access expiry does not accidentally extend incident lease, and vice versa.
+20. Task missing current object reference shows honest unresolved/frozen state.
+21. Data with invalid coordinates produces safe error, no marker at [0,0].
+22. Selected offscreen assignment focus returns to exact intended target.
+23. Back from map preserves originating assignment and scroll context.
+24. Changing selected task while route request is inflight cannot attach old route to new task.
+
+C. Overlap, geometry, usability
+25. Nearby distinct markers at high zoom stay separate, without excessive count circles.
+26. Truly colliding markers group into compact badge matching hydrant style.
+27. Cluster tap zooms/unpacks, with bounded selection sheet for identical coordinates.
+28. Selected task marker remains accessible inside a dense group.
+29. Mixed privacy scopes never combine hidden and visible features in a rendered cluster.
+30. Sector and object polygons stay geometries, not invented points.
+31. Long titles, large text and SI/DE labels remain readable on a narrow Android screen.
+32. Map layers toggle without losing camera or reinitializing entire map.
+33. Background hydrant visibility doesn't distort fitting selected task route.
+34. Styles show source age, last verification and REAL/TRAINING distinction.
+
+D. Navigation/route semantics
+35. Existing authorized NAV2 session route displays with correct assignment/deployment identity.
+36. Navigation view does not ACK or START assignment merely by opening.
+37. User without route authority still sees permitted target-only guidance.
+38. Existing route's origin is labeled as planning or valid authorized position, never assumed GPS.
+39. Actual-position route creation is unavailable where genuine source is missing.
+40. No GPS permission still allows target-only map and optional explicit external handoff.
+41. Missing or changed manual origin never silently uses unit/incident center.
+42. Provider outage shows stale verified route or target-only state, no invented ETA.
+43. Route with no maneuver steps shows geometry/summary, not fake turn instructions.
+44. Route becomes stale when relevant issued target/origin/source version changes.
+45. Explicit re-preview after stale version never changes underlying task target.
+46. External maps handoff shares only intended authorized coordinates, not private task text.
+47. Arrival at route endpoint does not auto COMPLETE task or report unit arrival.
+48. Launching or returning from external navigation doesn't mutate incident/unit/task.
+49. No SIM interpolated position appears as REAL GPS/unit location.
+50. Training map shows no hidden instructor hazard/agent overlays to ordinary participant.
+
+E. B1/offline/performance/recovery
+51. B1 full snapshot pages produce one coherent authorized map generation.
+52. Concurrent revision during page download triggers discard/reconcile, not mixed map.
+53. Cursor gap or reset does not destroy pending task ACK or immutable receipt identity.
+54. Missed/duplicated FCM hint triggers at most necessary authoritative refreshes.
+55. Android remains usable offline with cached map context inside incident lease.
+56. Incident lease expiry hides protected overlays even if offline tiles persist.
+57. Offline licensed basemap unavailable -> honest limited state with target details.
+58. Foreground/background switching does not create concurrent map polling loops.
+59. Slow network responses after account/org/incident switch are discarded.
+60. Map payload limit is visible and recoverable without broad query explosion.
+61. Handoff/role loss during an open route review prevents unauthorized new server action.
+62. Ambiguous allowed navigation mutation preserves exact original UUID/request/expected version and permits receipt recovery.
+63. Repeated same request returns canonical receipt, not duplicated route/mutation.
+64. UUID reused with different request fails safely without corrupting current route.
+65. Existing hydrant/inspection/photo/offline queues still function unchanged.
+66. Existing evidence/message private attachment access is not broadened by map targets.
+67. No new Android Room migration or generated schema changes were introduced without owner authorization.
+68. Returning from a map never silently alters task ACK/START/COMPLETE/UNABLE.
+69. Human checks real device map responsiveness, battery and memory after install.
+70. Human records SQL/Edge/Web/Android actual deployment independently of source merge.
+
+For each applicable test case, manual document must state expected UI, authoritative server/Room evidence and whether this milestone changes persisted domain state (normally NO). Mark ALL UNEXECUTED. No fictitious PASS status.
+
+======================================================================
+14. HUMAN ROLLOUT — DEFERRED, NOT A TASK FOR CODEX
+======================================================================
+
+There is NO rollout authorization in this request. The owner will explicitly say "local" later.
+
+Future owner-only sequence (document, do not perform):
+1. Confirm source was merged by owner and inspect final PR/commit.
+2. Record existing database state through #81.
+3. Apply six previously pending #82–#87 migrations in documented order, inspecting actual outcomes; do not assume SQL Editor executions appear in schema_migrations ledger.
+4. Review private Realtime and incident-evidence bucket/storage permissions, size/MIME requirements; deploy incident-evidence Edge function under existing JWT policy when owner authorizes.
+5. Deploy compatible Web/API as needed, then Android Room16 app build/schema export and compatible install by owner; protect upgrade path 14->15->16.
+6. If M14.8C1 introduces a new forward-only SQL migration, apply only AFTER all prerequisites, and coordinate backend/API capabilities before distributing M14.8C1 Android.
+7. If this PR requires changes to incident-navigation Edge or Web, list them precisely and why, but NEVER redeploy speculatively.
+8. Controlled authenticated training acceptance; no public emergency readiness claim.
+9. Owner records actual CODE_MERGED, SQL_APPLIED, EDGE_DEPLOYED, WEB_DEPLOYED, ANDROID_INSTALLED, HUMAN_VERIFIED independently.
+10. On unknown migration/deploy outcome stop, inspect state, do not blindly rerun.
+
+======================================================================
+15. DEFINITION OF DONE — SOURCE IMPLEMENTATION ONLY
+======================================================================
+
+Must deliver:
+- A coherent working-source intended feature slice: Android incident map view, typed authorized layers, task focus, disambiguation and permitted navigation route/fallback paths.
+- A precise source-level capability matrix confirming reused functions/classes and explicit unsupported functions.
+- Read scopes enforced server-side; no newly granted broad COP access.
+- Room v16 cache/identity/lease/reconciliation safety without an unauthorized schema upgrade.
+- Correct target snapshots, mode, provenance and role boundaries; no fake GPS or command completion.
+- Collision-only compact grouping patterned after hydrant style.
+- SI/DE localization and a field-usable, accessible failure/empty path.
+- Optional minimal additive forward SQL only if necessary and consistent with already merged source.
+- Updated SPEC milestone note and detailed docs/M14.8C1-android-incident-map-task-navigation.md.
+- At least the 70 human-only acceptance scenarios above, adapted to actual delivered behavior and clearly UNEXECUTED.
+- PR description and final report with URL, base SHA, branch, changed files, exact source function signatures, migration filename if any, security matrix, limited scope, backward compatibility, manual rollout order, known unresolved limitations and honest status.
+- Any unimplemented required capability must be explicitly marked BLOCKED/NOT IMPLEMENTED with a concrete source-backed reason, never hidden as a fake demonstration.
+
+Do not conclude "production ready". Do not claim installed, build successful or source runtime tested.
+
+FINAL CODING AGENT REPORT FORMAT (ENGLISH)
+1. Baseline main SHA / current open-PR collision scan / branch / PR URL.
+2. Source inventory and exact current contracts.
+3. Implemented Android UI/data/MapLibre/navigation flows.
+4. Server read/RLS/SECURITY DEFINER decisions and exact signature(s).
+5. Room compatibility and offline cache/identity/lease handling.
+6. Route authority/origin/GPS privacy assessment.
+7. Cursor, revision, scope switch and late response handling.
+8. Marker grouping, layers, geometry and accessibility decisions.
+9. SI/DE localization and safe errors.
+10. Files changed and proposed migration deployment order (if any).
+11. Known limitations and gates requiring owner decision.
+12. Explicit status: NO TESTS ADDED OR RUN; NO BUILD; NO LINT; NO TYPECHECK;
+    NO CI; NO GRADLE SYNC; NO SQL RUN; NO SUPABASE APPLY; NO EDGE/WEB/ANDROID
+    DEPLOY; NO RUNTIME OR MANUAL VERIFICATION; NO MERGE.
+
+STOP AFTER ONE NEW PR. OWNER ALONE DECIDES WHAT HAPPENS NEXT.
+
+======================================================================
+REPOSITORY REFERENCES USED FOR THIS BRIEF (NOT DEPLOYMENT PROOF)
+======================================================================
+
+- https://github.com/ficlus/Gasilko
+- AGENTS.md and docs/SPEC.md
+- docs/SPEC-M14-INCIDENT-OPERATIONS.md (M14.5D route/execution boundary)
+- docs/M14.7A-M14.8A-android-field-pilot.md
+- docs/M14.7B1-incident-snapshots-change-feed.md
+- docs/M14.7B2-secure-private-realtime.md
+- docs/M14.7C-operational-scoped-messages.md
+- docs/M14.7D-private-incident-attachments-evidence.md
+- docs/M14.8B-android-unit-leader-command.md
+- SPECS/prompts/07_m14-8c1-android-incident-map-and-task-navigation.md
+- Owner handoff / rollout notes, 2026-10-30.
+
+Existing V2 prompt 07 is a dated planning baseline. This brief adapts it to
+post-#87 merged code and the owner's explicit request to DEFER rollout.
