@@ -24,7 +24,11 @@ export function IncidentMessages({locale,account,org,incidentId,read,operational
   read<Page>('incident_message_page',{p_acting_organization_id:org,p_incident_id:incidentId,p_scope_fingerprint:scope.current},ac.signal,account).then(value=>{
    if(ac.signal.aborted||stamp!==generation.current)return;
    if(value.account!==account||value.organization!==org||value.incident_id!==incidentId||value.schema_version!==1)throw new Error('SCHEMA_MISMATCH');
-   scope.current=value.scope_fingerprint;setPage(value);setDenied(false);
+   scope.current=value.scope_fingerprint;setPage(current=>
+    current&&current.revision===value.revision&&current.scope_fingerprint===value.scope_fingerprint&&current.messages.length>value.messages.length
+     ? {...value,messages:current.messages.map(m=>value.messages.find(fresh=>fresh.id===m.id)??m),
+        has_more:current.has_more,next_sent_at:current.next_sent_at,next_id:current.next_id}
+     :value);setDenied(false);
   }).catch(err=>{
    if(ac.signal.aborted||stamp!==generation.current)return;setError(true);
    if(err instanceof Error&&['NOT_AUTHORIZED','EXPIRED','SCOPE_CHANGED'].includes(err.message)){setPage(null);setHistory(null);scope.current=null;setDenied(true);}

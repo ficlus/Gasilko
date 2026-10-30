@@ -183,7 +183,16 @@ internal class IncidentReconciliation(
                     identity(messages,id)
                     checkProtocol(messages.text("revision")==pair.second.revision.toString() &&
                         messages["messages"] is JsonArray && messages.rows("messages").size<=30)
-                    pair=JsonObject(pair.first+("message_page" to messages)) to pair.second
+                    val prior=old?.obj("message_page")
+                    val kept=if(prior!=null && prior.text("revision")==messages.text("revision") &&
+                        prior.text("scope_fingerprint")==messages.text("scope_fingerprint") &&
+                        prior.rows("messages").size>messages.rows("messages").size) {
+                        JsonObject(messages+mapOf("messages" to JsonArray(prior.rows("messages").map { before ->
+                            messages.rows("messages").find { it.text("id")==before.text("id") } ?: before
+                        }),"has_more" to (prior["has_more"] ?: JsonPrimitive(false)),
+                        "next_sent_at" to (prior["next_sent_at"] ?: JsonNull),"next_id" to (prior["next_id"] ?: JsonNull)))
+                    } else messages
+                    pair=JsonObject(pair.first+("message_page" to kept)) to pair.second
                 }
                 result+=pair.first;cursors+=pair.second
             } catch(e: CancellationException) { throw e }
