@@ -42,6 +42,8 @@ class IncidentViewModel(val repository: IncidentRepository,val organization: Str
             finally { working.value=false }
         }
     }
+    internal suspend fun vehicleLocationCapability(incident: String)=repository.vehicleLocationCapability(organization,incident)
+
     fun sync() { observation.update {it+1};repository.syncNow(organization);NotificationTap.hint() }
     fun transition(incident: String,assignment: String,status: String,reason: String)=action {
         repository.transition(organization,incident,assignment,status,reason)

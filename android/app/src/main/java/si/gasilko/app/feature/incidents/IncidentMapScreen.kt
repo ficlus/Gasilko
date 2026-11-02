@@ -206,6 +206,7 @@ internal fun IncidentMapScreen(model: IncidentViewModel,registry: HydrantViewMod
             val units=allUnits.filter {canonicalUuid(it.text("id"))}.distinctBy {it.text("id")}.sortedBy {it.text("id")}.take(100)
             val currentUnitPage=minOf(unitPage,(units.size-1).coerceAtLeast(0)/30)
             RealUnitLocationNotice()
+            VehicleLocationCapabilityCard(model,incidentId,incident.obj("field_map").text("_scope"))
             if(allUnits.size!=units.size)FieldBanner(stringResource(R.string.c3_partial),FieldTone.WARNING)
             units.drop(currentUnitPage*30).take(30).forEach {u->
                 val position=realUnitPositionView(RealUnitBinding(model.repository.account,model.organization,incidentId,u.text("id"),

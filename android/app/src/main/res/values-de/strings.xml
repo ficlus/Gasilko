@@ -764,4 +764,10 @@
     <string name="c3_expired">NICHT VERFÜGBAR — grau, ab %1$s Min. oder ohne Rechte, Quelle bzw. vertrauenswürdige Zeit; kein Pin</string>
     <string name="c3_retention">Gültige Berechtigung und erlaubte Aufbewahrung können die Anzeige früher begrenzen. Alter wird nicht aus Lesezeit oder Route berechnet.</string>
     <string name="c3_partial">Liste unvollständig. Höchstens 100 bereits erlaubte Einheiten des aktuellen Einsatzabbilds werden angezeigt.</string>
+    <string name="c2_off">Fahrzeugstandortfreigabe ist ausgeschaltet</string>
+    <string name="c2_blocked">Vor der Telefonkopplung müssen Datenschutzregeln, ein sicherer Gerätenachweis und die zuverlässige Löschung abgelaufener Koordinaten genehmigt sein.</string>
+    <string name="c2_no_capture">Diese Funktion erfasst oder sendet kein GPS. Die Standortberechtigung des Telefons ist keine Zustimmung zur Freigabe.</string>
+    <string name="c2_check">Verfügbarkeit der Standortfreigabe prüfen</string>
+    <string name="c2_server_off">Der Server bestätigt: Freigabe ausgeschaltet. Dies erlaubt weder Erfassung noch Einsicht in Positionen.</string>
+    <string name="c2_unverified">Verfügbarkeit nicht bestätigt. Die Freigabe bleibt ausgeschaltet; Aufträge und Karte können weiter genutzt werden.</string>
 </resources>
