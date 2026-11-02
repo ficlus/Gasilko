@@ -62,4 +62,11 @@ class IncidentViewModel(val repository: IncidentRepository,val organization: Str
     fun searchCrew(incident: String,unit: String,query: String,done: (List<JsonObject>)->Unit)=action {
         done(repository.crewCandidates(organization,incident,unit,query))
     }
+    fun verifyMapHandoff(incident: String,kind: String,id: String,geometry: JsonObject,revision: String,version: String,
+        done: (Boolean)->Unit)=action {
+        val allowed=try { repository.verifyMapHandoff(organization,incident,kind,id,geometry,revision,version);true }
+            catch(e: CancellationException){throw e} catch(_: Exception){false}
+        done(allowed)
+    }
+
 }

@@ -67,8 +67,12 @@ fun MapScreen(onBack: () -> Unit, hydrants: List<Hydrant>, onOpenHydrant: ((Stri
     onSelectStart: ((Double,Double)->Unit)? = null, initialStart: GeoPoint? = null,
     navigationMode: Boolean=false, animatedRouteArrows: Boolean=true, navigationContent: @Composable ()->Unit={},
     onLocationUpdate: (Location?)->Unit={}, followUser: Boolean=false, onUserPan: ()->Unit={},
-    onRecenter: ()->Unit={}, requestLocationKey: String?=null, targetPoint: GeoPoint?=null) {
+    onRecenter: ()->Unit={}, requestLocationKey: String?=null, targetPoint: GeoPoint?=null,
+    incidentScene: IncidentMapScene?=null, onIncidentSelect: (List<String>)->Unit={},
+    locationControlsEnabled: Boolean=true, incidentDetails: @Composable ()->Unit={}) {
     val lifecycle = LocalLifecycleOwner.current.lifecycle
+    val currentIncident by rememberUpdatedState(incidentScene)
+    val incidentSelect by rememberUpdatedState(onIncidentSelect)
     val userPan by rememberUpdatedState(onUserPan)
     var lastFollowed by remember { mutableLongStateOf(0L) }
     val routeData=remember(route,completedHydrants,routeHydrantIds,completedRouteNumbers,hydrants) {
@@ -127,7 +131,7 @@ fun MapScreen(onBack: () -> Unit, hydrants: List<Hydrant>, onOpenHydrant: ((Stri
                 Text(stringResource(R.string.map_title), Modifier.padding(top=12.dp), style=MaterialTheme.typography.titleLarge)
             }
             navigationContent()
-            if(!navigationMode)FlowRow(Modifier.padding(horizontal=16.dp), horizontalArrangement=Arrangement.spacedBy(12.dp)) {
+            if(!navigationMode && incidentScene==null)FlowRow(Modifier.padding(horizontal=16.dp), horizontalArrangement=Arrangement.spacedBy(12.dp)) {
                 HydrantStatus.entries.forEach { status ->
                     Row(horizontalArrangement=Arrangement.spacedBy(4.dp)) {
                         Text("●",Modifier.clearAndSetSemantics {},color=Color(HydrantMapLayers.color(status)))
@@ -142,7 +146,7 @@ fun MapScreen(onBack: () -> Unit, hydrants: List<Hydrant>, onOpenHydrant: ((Stri
                 }
             }
             if(dataLoading)LinearProgressIndicator(Modifier.fillMaxWidth())
-            LocationControls(hydrants, onLocation={location=it;onLocationUpdate(it)}, onCenter={cancelFocus();centerRequested=true;onRecenter()},
+            if(locationControlsEnabled)LocationControls(hydrants, onLocation={location=it;onLocationUpdate(it)}, onCenter={cancelFocus();centerRequested=true;onRecenter()},
                 requestLocationKey=requestLocationKey,navigation=navigationMode,
                 centerLabel=if(navigationMode)R.string.nav_follow else R.string.map_my_location,
                 dataLoading=dataLoading,
@@ -169,7 +173,7 @@ fun MapScreen(onBack: () -> Unit, hydrants: List<Hydrant>, onOpenHydrant: ((Stri
             if(!navigationMode && routeData?.numbers?.size==1)Text(stringResource(R.string.routes_single_stop),Modifier.padding(horizontal=16.dp))
             else if(!navigationMode && routeData!=null && !routeData.hasRoad && routeData.numbers.isNotEmpty())
                 Text(stringResource(R.string.routes_no_road_geometry),Modifier.padding(horizontal=16.dp))
-            if(!navigationMode && !dataLoading && dataError==null && route==null) {
+            if(!navigationMode && !dataLoading && dataError==null && route==null && incidentScene==null) {
                 val notice=when { hydrants.isEmpty()->R.string.map_empty;validCount==0->R.string.map_no_coordinates
                     validCount<hydrants.size->R.string.map_missing_coordinates;else->null }
                 notice?.let { Text(stringResource(it,hydrants.size-validCount),Modifier.padding(horizontal=16.dp),style=MaterialTheme.typography.bodySmall) }
@@ -197,18 +201,20 @@ fun MapScreen(onBack: () -> Unit, hydrants: List<Hydrant>, onOpenHydrant: ((Stri
                                 if(!released) {
                                     hydrantLayers=HydrantMapLayers(style); hydrantLayers?.update(currentData,currentSelection)
                                     routeLayers?.close();routeLayers=PlanRouteLayers(style,lifecycle);routeLayers?.update(currentRoute,animateRoute)
+                                    incidentLayers?.close();incidentLayers=if(currentIncident!=null)IncidentMapLayers(nativeMap!!,style,resources.displayMetrics.density,saved.bundle!=null) else null
+                                    incidentLayers?.update(currentIncident)
                                     updateLocation(currentLocation,navigationMode)
                                     renderReady=true
                                 }
                             }
                             val fail: () -> Unit = {
                                 if(!released && !fallback) {
-                                    failed=true; loading=false;renderReady=false;hydrantLayers=null;routeLayers?.close();routeLayers=null
+                                    failed=true; loading=false;renderReady=false;hydrantLayers=null;routeLayers?.close();routeLayers=null;incidentLayers?.close();incidentLayers=null
                                     if(!fallback && readyMap != null) {
                                         fallback=true
                                         // Finish the SDK failure dispatch before replacing its style callback.
                                         post { if(!released) {
-                                            hydrantLayers=null;routeLayers?.close();routeLayers=null
+                                            hydrantLayers=null;routeLayers?.close();routeLayers=null;incidentLayers?.close();incidentLayers=null
                                             readyMap?.setStyle(Style.Builder().fromJson(HydrantMapLayers.OFFLINE_STYLE)) { install(it) }
                                         } }
                                     }
@@ -232,7 +238,9 @@ fun MapScreen(onBack: () -> Unit, hydrants: List<Hydrant>, onOpenHydrant: ((Stri
                                         }
                                     }
                                     map.addOnMapClickListener { point ->
-                                        if(released || hydrantLayers==null) false else if(selectingStart) {
+                                        if(released || hydrantLayers==null) false else if(currentIncident!=null && incidentLayers?.select(point)?.let { ids->
+                                            cancelFocus();selectedId=null;incidentSelect(ids);true
+                                        }==true)true else if(selectingStart) {
                                             startPoint=GeoPoint(point.latitude,point.longitude);cancelFocus();true
                                         } else {
                                             val pixel=map.projection.toScreenLocation(point)
@@ -264,6 +272,7 @@ fun MapScreen(onBack: () -> Unit, hydrants: List<Hydrant>, onOpenHydrant: ((Stri
                     }, update={ view -> if(!view.released) {
                         view.hydrantLayers?.update(visibleData, selected?.id)
                         view.routeLayers?.update(routeData,navigationMode && animatedRouteArrows)
+                        view.incidentLayers?.update(incidentScene)
                         view.nativeMap?.style?.takeIf { it.isFullyLoaded }?.let { style -> StartPointLayer.update(style,startPoint) }
                         if(!navigationMode && renderReady && mapSize.width>0 && mapSize.height>0 && view.width>0 && view.height>0 && routeData!=null &&
                             fittedRoute!=routeData.key && routeData.points.isNotEmpty()) {
@@ -307,6 +316,8 @@ fun MapScreen(onBack: () -> Unit, hydrants: List<Hydrant>, onOpenHydrant: ((Stri
                     ActionLabel(stringResource(R.string.nav_follow),R.drawable.ic_field_my_location)
                 }
             }
+            if(incidentScene!=null)Box(Modifier.align(Alignment.BottomCenter).padding(start=12.dp,end=12.dp,bottom=48.dp)
+                .heightIn(max=popupHeight).verticalScroll(rememberScrollState())) { incidentDetails() }
             popupId?.let { id -> key(id) {
                 // Leave the native attribution/logo edge visible; the card scrolls on short screens.
                 Box(Modifier.align(Alignment.BottomCenter).padding(start=12.dp,end=12.dp,bottom=48.dp)
@@ -354,6 +365,7 @@ private class LifecycleMapView(context: Context, private val lifecycle: Lifecycl
     var nativeMap: MapLibreMap? = null
     var hydrantLayers: HydrantMapLayers? = null
     var routeLayers: PlanRouteLayers? = null
+    var incidentLayers: IncidentMapLayers? = null
     var beforeRelease: (() -> Unit)? = null
     private var lastLocation: Location? = null
     private var locationStyle: Style? = null
@@ -421,6 +433,7 @@ private class LifecycleMapView(context: Context, private val lifecycle: Lifecycl
         nativeMap=null
         hydrantLayers=null
         routeLayers?.close();routeLayers=null
+        incidentLayers?.close();incidentLayers=null
         lifecycle.removeObserver(observer)
         context.applicationContext.unregisterComponentCallbacks(memory)
         stop()
