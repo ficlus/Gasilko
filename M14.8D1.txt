@@ -1,0 +1,552 @@
+GASILKO — CODEX IMPLEMENTATION BRIEF
+M14.8D1 — FIELD OFFLINE RELIABILITY, RECOVERY & CONFLICT UX
+New, standalone PR after M14.8C1 (PR #88) has been merged
+Prepared: 2026-11-02 | Document revision: OWNER-CONTEXT-V1
+
+STATUS / APPROVAL BOUNDARY
+==========================
+This text is an implementation task for Codex, not a deployment instruction.
+The owner approves ONLY this M14.8D1 source-level milestone by submitting it.
+Owner alone merges PRs, applies SQL, deploys Edge/Web, builds/installs Android,
+performs manual acceptance, and authorizes operational release.
+
+STOP / DEPENDENCY GATE:
+- Inspect ACTUAL GitHub main, HEAD commit and open PRs before modifying anything.
+- PR #88 (M14.8C1) was source-reviewed at commit
+  3865bc39fbc99dd5d167f1f731164548f6ed1a0a; its merge status MUST be
+  verified anew. Never assume a source-reviewed PR has merged.
+- If #88 is still open OR a different active implementation PR conflicts with D1,
+  do NOT build D1 on the unmerged branch, and do NOT create an overlapping new PR.
+  Report DEPENDENCY BLOCKED and stop, unless owner has explicitly authorized
+  another stacking arrangement.
+- Do not restart or recreate already implemented PRs #78–#88.
+- If current main already has this exact feature, identify it and report a
+  source-backed NO-OP instead of duplicating a queue, UI or protocol.
+- Rollout of #82–#88 remains intentionally DEFERRED. Do not apply any SQL,
+  deploy Edge/Web, perform app build/installation, configure production, or
+  describe merged source as deployed. Do not "fix" deployment by adding tools.
+
+WHY THIS MILESTONE / OWNER AGREEMENTS
+=====================================
+Gasilko is an emergency incident-management and SIM/training platform using
+Next.js/Web, Android Kotlin/Compose, Supabase/PostgreSQL/RLS/RPC, MapLibre,
+Room16, authenticated B1 snapshots/change-feed and existing WorkManager.
+
+M14.8C1 is about incident field map and task-target navigation. It does not
+implement actual or last-known REAL unit positions; do not append GPS features
+or location markers to PR #88 or D1.
+
+The owner explicitly wants future separate PRs for:
+(a) current/last-known REAL unit location, with green CURRENT, orange STALE,
+    grey VERY OLD / unavailable and source time, never simulated/fabricated;
+(b) voluntary vehicle-phone association and opt-in incident-scoped REAL GPS;
+(c) command-map compact marker UX and SIM/Nav read-performance hardening.
+Those are NOT D1; the privacy-sensitive GPS producer (M14.8C2 / M15) requires
+its own policy/retention/permission approval. No precise location tracking now.
+
+D1 solves a different critical problem: a firefighter can complete the allowed
+human workflow offline, keep the ORIGINAL action evidence intact, recover from
+lost replies, restart, auth changes and stale revisions, and understand EXACTLY
+what the server has and has not confirmed. Preserve the existing legal/incident
+authority and NEVER turn a locally queued operation into a fake server ACK.
+
+SOURCE-OF-TRUTH / REQUIRED READING
+==================================
+Before editing read CURRENT:
+- AGENTS.md
+- docs/SPEC.md
+- docs/SPEC-M14-INCIDENT-OPERATIONS.md
+- docs/M14.7A-M14.8A-android-field-pilot.md
+- docs/M14.7B1-incident-snapshots-change-feed.md
+- docs/M14.7B2-secure-private-realtime.md
+- docs/M14.7C-operational-scoped-messages.md
+- docs/M14.7D-private-incident-attachments-evidence.md
+- docs/M14.8B-android-unit-leader-command.md
+- docs/M14.8C1-android-incident-map-task-navigation.md
+- SPECS/prompts/09_m14-8d1-field-offline-reliability-and-conflict-ux.md
+- SPECS/prompts/10_m14-8d2-reliability-metrics-review-queue-and-readiness-dashboard.md
+- root/SPECS older prompts, reference state and queue.json ONLY as historical
+  guides; queue.json is a 2026-10-28 snapshot and may mark merged PRs open.
+- Relevant actual SQL migrations and current Kotlin/Web code.
+
+Authority order:
+current canonical code/schema and SPEC + AGENTS; explicit owner decisions;
+this brief; older proposed prompts and snapshots. If conflict, explain it.
+AGENTS normally calls for tests; current owner specifically prohibits adding,
+editing or running tests in this task. Do not silently modify AGENTS.md.
+
+SOURCE INVENTORY REQUIRED BEFORE ANY CHANGES
+=============================================
+Locate exact current paths/packages and document real signature/ownership for:
+A. IncidentRepository, IncidentViewModel and field IncidentScreen / own-unit
+   dashboard / task detail, exact identity and role guard.
+B. Room16 RegistryDatabase, incident_field_cache, incident_sync_cursor,
+   pending_hydrant_changes or the current durable INCIDENT_TASK discriminator
+   and any relevant DAO / pending records / dependency metadata.
+C. The existing sync engine, WorkManager worker, unique work scheduling,
+   connectivity gating, retry/backoff and operation dispatch/receipt resolution.
+D. Current field authenticated API and real public RPC signatures:
+   incident_field_directory(p_acting_organization_id uuid),
+   incident_snapshot_manifest(p_acting_organization_id uuid,p_incident_id uuid),
+   incident_snapshot_page(...),
+   incident_change_feed(...),
+   incident_field_entities(...),
+   incident_field_timeline(...),
+   canonical issue/transition/status/crew/resource RPCs,
+   receipt resolution/read contracts.
+E. B1 signed authorization fingerprint, account/org/incident identities,
+   encrypted offline read lease, expiry, scope-revocation behavior, independent
+   timeline sequence and revision counters, atomic projection/cursor replacement.
+F. Evidence and private attachments (PR #86), scoped messages and M10/FCM
+   notification hints; do not interfere with pending photo/evidence upload.
+G. Existing confirmed/rejected/unknown protocol status codes and current UI
+   surfaces, including authoritative server receipts and local review affordances.
+
+Include an "as-found contract matrix" in PR docs:
+entry point; authoritative owner; identity; permission; persistence; version;
+receipt; existing recovery path; exact extension. Do not invent APIs based on
+old prompt examples. Check for duplicated capability under a different name.
+Do not run tests, builds, lint, typecheck, Gradle sync, SQL or runtime commands.
+
+MUST HAVE / MoSCoW
+==================
+[MUST] Durable, per-account+acting-org+incident recovery of already supported
+       offline-safe INCIDENT_TASK actions using the ORIGINAL operation UUID,
+       original normalized immutable payload, original expected versions and
+       exact task assignment/episode and dependency identity.
+[MUST] Human-readable per-action distinction: LOCAL_INTENT, READY_TO_SEND,
+       SENDING, OUTCOME_UNKNOWN, SERVER_CONFIRMED, DEFINITIVELY_REJECTED,
+       STALE/NEEDS_ATTENTION, BLOCKED_DEPENDENCY, SCOPE_UNAVAILABLE.
+       Map these conceptual labels to actual persisted protocol states rather
+       than rewriting a working server enum.
+[MUST] Lost response reconciliation by authoritative original receipt before
+       considering exact-identity retry; never generate a new UUID implicitly.
+[MUST] Correct account/org switch, role changes, participation loss, expired
+       lease and cold-start/reboot isolation without dropping queued evidence.
+[MUST] Present status/review UX in Slovenian/German, working with the existing
+       offline Room view; clearly distinguish confirmed server result from
+       pending local action and speculative UI progress.
+[MUST] Deterministic parent/child command dependency behavior (ACK then START
+       then COMPLETE) without guessing parent version or resending rejected
+       parent; maintain original request's frozen version once first dispatched.
+[MUST] Preserve existing queue and single Worker; NO new worker, scheduler,
+       notification transport, command engine or server write authority.
+[MUST] Safe concurrency control, bounded reads/retries and B1 scope fencing.
+[MUST] Preservation of unrelated hydrant inspections, photos, registry
+       offline editing and pending evidence operations. No destructive reset.
+[SHOULD] A compact "Sinhronizacija" / "Synchronisierung" screen or existing
+         screen section for counts: pending, unknown, attention, confirmed;
+         bounded action details and safe manual recovery options.
+[SHOULD] Actionable error text, safe correlations and relative age times
+         ("last confirmed at" is different from local created time).
+[SHOULD] Display offline lease freshness/warning and safe radio fallback.
+[COULD] UI-only grouping by incident/unit/operation status using existing data;
+        no new database analytics event stream.
+[WON'T] New categories of offline command, offline issue of online-only unit
+        commands, GPS tracking, location markers, SIM agent commands, new
+        evidence/upload pipeline, general fleet tracking, D2 metrics dashboard,
+        changes to NAV3 capacity or routing provider, ANY rollout.
+
+AUTHORITATIVE DOMAIN INVARIANTS
+===============================
+1. One original operation_id UUID identifies one frozen immutable request, with
+   original actor, exact acting organization, incident, assignment/episode,
+   action, version, payload, parent relation and any idempotency proof.
+   The SAME UUID with a changed request must be rejected; do not rebase and
+   mutate a dispatched request while retaining its UUID.
+2. An operation may be sent only by its authorized account/organization under
+   current capability, visible assignment episode, and permitted active state.
+   Reauthorization must happen on reconnect and before network dispatch.
+   Cached role or stale lease NEVER grants fresh command authority.
+3. Use the existing server command as authoritative; server results and durable
+   receipt decide CONFIRMED vs REJECTED. HTTP 200 on unrelated reads, FCM
+   delivery, notification open, map selection and locally queued changes are
+   not ACK/START/COMPLETE.
+4. Identical retry is permitted only if current authorized read allows receipt
+   reconciliation and existing immutable request contract supports it.
+   If receipt is absent, result remains UNKNOWN; not "definitively failed."
+   A definitive first rejection can be corrected ONLY via explicit review and
+   a NEW operation UUID. Previously ambiguous attempts must not be erased.
+5. Parent/child sequencing: child may be prepared/persisted only if the existing
+   queue permits; child dispatch must wait for confirmed parent receipt and the
+   authoritative version needed by its exact original request. If that version
+   cannot be known before freezing, defer freezing/sending child using existing
+   supported mechanism; never silently modify an already dispatched child.
+   Do not fabricate successful parent transition or task/version.
+6. Cached field incident read lease maximum 24 hours with 2-hour warning,
+   conservatively invalidated for authorization loss, uncertain clock/reboot,
+   account/org mismatch or confirmed revocation. Registry offline lease remains
+   separate (up to 30 days) and must not become a command grant.
+7. Privileged server reads execute with auth.uid() and exact org/incident/actor
+   guards. Supabase SECURITY DEFINER least privilege and RLS not broadened.
+   Unit leader's own-unit authority != IC or organization ADMIN/MANAGER.
+8. REAL and SIM/TRAINING are separate. No fake positions, arrival, GPS data,
+   resource stock transition in TRAINING, command execution inferred from map.
+   No change to existing consent, close or real dispatch rules.
+9. Existing audit/incident timeline and original operation receipts immutable.
+   Do not delete/rewrite history, rewrite applied migrations or create a cleanup
+   bypass. Do not use current production incident IDs in scripts or fixtures.
+10. Local unsynced hydrant/picture/inspection/task/evidence data are not deleted
+    on worker retry, logout, invalid room projection, SQL error or lease expiry.
+
+CLIENT-SIDE RECOVERY STATE TRANSITIONS
+======================================
+Illustrative application-level model (adapt exact current enum names):
+ IDLE + human action
+ -> freeze and durably persist same-account original request (or refuse)
+ -> QUEUED (offline or safe existing worker schedule)
+ -> REAUTHORIZING / DEPENDENCY_BLOCKED
+ -> SENDING
+ -> CONFIRMED if matching original server receipt/canonical projection;
+    REJECTED if definitive and first unambiguous server rejection;
+    UNKNOWN if network/server/timeout/partial response cannot establish outcome;
+    NEEDS_ATTENTION if STALE_VERSION, assignment cancellation/role change,
+       server capability/schema mismatch, dependency rejection or revocation.
+From UNKNOWN:
+ -> read matching receipt under current scope;
+ -> if receipt found, reconcile original result and refresh;
+ -> if receipt absent, retain UNKNOWN; present exact retry ONLY if canonical
+    existing contract supports exact replay and actor is authorized;
+ -> if exact retry responds ambiguous, retain identity, evidence and UNKNOWN.
+Do not auto-create a corrected version and dispatch it behind user's back.
+Retain durable evidence until authoritative resolution and existing retention
+policy permit cleanup; never add silent aging/eviction of pending actions.
+Queue order is not proof of domain completion.
+
+PERSISTENCE / ROOM16 REQUIREMENTS
+=================================
+- Prefer composing read-only status/review models from EXISTING durable queue,
+  Room projection and cursor rather than introducing an extra table.
+- Room stays VERSION 16 for this milestone if feasible. Do not change
+  generated schemas, KAPT/KSP, Gradle or dependencies.
+- If absolutely necessary persistence cannot be implemented safely without a
+  Room version bump, stop and report the exact data-model blocker and owner
+  approval needed instead of inventing a destructive migration or silently
+  changing Room.
+- Preserve legacy pending_hydrant_changes identities and synchronized flags.
+- In local status, never store private sensitive body in logs or screen
+  notifications; UI can show safe human-readable task title from authorized
+  Room projection, but when access is revoked show a neutral generic row.
+- Identity partition: (account_id, acting_org_id, incident_id, operation_id).
+  Track assignment_episode_id and parent_operation_id where current schema
+  already stores them. Do not assume extra fields exist.
+- Reopen app after process death: pending remains in Room; UI derives state
+  from persistent truth. No session-only recovery state.
+- Disk-full / Keystore unavailability: reject sending a new action that cannot
+  first be persisted durably; show clear recoverable error; never cleanup data.
+- Old Room cache schema or corrupted staging: preserve last valid committed
+  generation and request safe re-snapshot with proper scope; do not wipe queue.
+
+OPERATIONS / CLASSIFICATION / CONFLICT POLICY
+==============================================
+Define a source-level matrix for every currently supported offline action and
+its actual server RPC. Do not accidentally promote ONLINE_REQUIRED commands
+to the offline queue. At minimum consider:
+- Assignment ACKNOWLEDGED, STARTED, COMPLETED and existing supported transitions.
+- BLOCKED / UNABLE / CANCELLED if already supported by original dispatcher.
+- Crew/leader issue, crew join/leave, unit status and resource status remain
+  online-only where the current contract says so.
+- Existing local photo/inspection and evidence upload continue separately.
+
+Actual error -> user/worker behavior:
+ A. HTTP timeout, disconnection, body parse failure, RPC SERVER ambiguous:
+    UNKNOWN, original UUID + request retained; receipt reconciliation.
+ B. Confirmed matching receipt:
+    CONFIRMED and authoritative field refresh; no duplicate domain effect.
+ C. DEFINITIVE_NOT_AUTHORIZED / revoked profile/org/assignment:
+    hide protected projection; retain local immutable record/evidence locked;
+    do not auto retry. Role return requires fresh authorization.
+ D. STALE_VERSION or task closed/recipient changed:
+    NEEDS_ATTENTION with authoritative diff and explicit human review.
+    Preserve old frozen request untouched; new corrected request gets new UUID.
+ E. OPERATION_REUSED:
+    flag identity mismatch / abnormal replay; never attempt auto-fix by changing
+    original request.
+ F. DEPENDENCY_PARENT_UNKNOWN:
+    child BLOCKED; resolve parent receipt first, no guesswork.
+ G. DEPENDENCY_PARENT_REJECTED:
+    child BLOCKED_NEEDS_REVIEW; do not auto-send.
+ H. ENCRYPTION/LEASE/CLOCK uncertainty:
+    protect visible cached incident data and disable dispatch when unauthorized;
+    preserve queued local evidence.
+ I. Unsupported backend schema/capability:
+    show compatibility message; never silently skip canonical server checks.
+ J. Partial B1 snapshot, missing gap, cursor drift:
+    retain last complete authorized cache; full reset/read as prescribed, NOT
+    partial-current success; pending queue untouched.
+ K. Duplicate WorkManager delivery / concurrent foreground refresh:
+    one in-flight send/receipt resolution for each immutable operation; collapse
+    duplicate hints instead of spawning another queue.
+ L. Temporary busy response / rate limiting:
+    bounded exponential backoff with cap/jitter from existing engine, but never
+    rapid polling; visible "retry later" for human.
+
+Be precise: an error may be definitive only when canonical response proves it.
+Do not declare NOT_AUTHORIZED from a transient 57014 SQL timeout.
+The 57014 error often means statement cancellation or timeout, not evidence
+that operation did not commit.
+
+SECURITY / ACCESS CHANGE / LEASE
+================================
+Scenarios to defend:
+- Same account, different organization.
+- Different account, same device and previously cached incident.
+- Organization membership revoked while offline / app backgrounded.
+- Unit leader permission lost; previously visible crew/task controls vanish.
+- Crew episode ended and replaced with new episode for same person/vehicle.
+- Incident closed/cancelled while pending; no silently successful action.
+- B1 fingerprint change requiring scope reset, separate from ordinary data
+  watermark change. No release of old scope map/task/card private labels.
+- Incident authorization lease 24h max and 2h warning; no reliance solely on
+  wall-clock after reboot/clock rollback.
+- Legacy hydrant registry authorization remains independent.
+- Credentials refreshed / invalid; never upload with stale actor identity.
+- FCM/Realtime hints remain hints; no new socket or worker to solve this.
+
+UX: "SINHRONIZACIJA" / "SYNCHRONISIERUNG"
+========================================
+Extend the current incident/field UI at the existing integration point.
+If a general local sync view already exists, reuse it. Do not add a redundant
+separate top-level module or business engine.
+
+Minimum state:
+- Compact offline status with last SERVER-CONFIRMED sync timestamp, cached
+  authorized-read age, lease warning, and number of pending/unknown/attention.
+- Accessible operation list keyed by UUID (not just duplicate labels); safe
+  status, action kind, original frozen target/episode when currently authorized,
+  created_at, last attempted/reconciled_at if already persisted, dependency.
+- Details show which facts are LOCAL and which are CONFIRMED BY SERVER.
+- Controls: "Preveri stanje"/"Status prüfen" (authoritative reconciliation);
+  "Ponovno poskusi"/"Erneut versuchen" (same UUID/payload only when safe);
+  "Preglej konflikt"/"Konflikt prüfen" (read server state, compare, no rebase);
+  "Odpri nalogo"/"Aufgabe öffnen" (authorized task detail);
+  "Nazaj"/"Zurück".
+- If no safe discard/withdraw action exists, DO NOT invent "delete pending";
+  explain that an unknown original request must be resolved first. Any local
+  dismiss UI must not delete immutable evidence.
+- Already reviewed and server-confirmed results can leave the active inbox
+  according to existing retention rules but receipts and audit never deleted.
+- For known revoke: neutral message without cached task title/coordinates,
+  inspect/retry disabled until same actor/scope authorized again.
+- Non-UI accessible alternatives, proper focus/keyboard/talkback, concise
+  SI and DE strings with fallback translation resources.
+- No overlay or timer that makes incident map redraw, changes camera or duplicates
+  markers. User can navigate between map/task and sync screen without losing
+  pending data or causing command submission.
+
+OFFLINE / WORKMANAGER / PERFORMANCE
+===================================
+- Reuse existing one unique scheduled worker and its retry/backoff controls.
+- Prefer existing authenticated repository methods, and no direct Compose
+  Supabase, service-role requests or fresh polling loops per queue row.
+- One in-flight immutable operation attempt per identity under original mutex;
+  preserve existing worker concurrency semantics; avoid deadlock with B1 global
+  remote mutex or foreground refresh.
+- Check app/account/org/incident generation BEFORE and AFTER suspension, before
+  persisting any network response or drawing cached data.
+- Limit status list rendering and visibility windows, prohibit N+1 server calls.
+  Use existing bounded bulk reads when available; never fetch receipt for each
+  operation on every recomposition or frame.
+- No aggressive retries causing 57014 or stale_version read storms seen in
+  prior SIM navigation. Diagnose backend overload separately under M14.6J.
+- Preexisting M10 FCM and B2 Realtime hint transport remain unchanged. Android
+  WebSocket is NOT implemented and D1 must not claim it.
+- Keep latest complete authorized projection, version and cursor atomic. Do not
+  intermingle timeline_sequence with incident_revision or NAV data watermark.
+- No automatic task completion based on GPS proximity, route display, SIM movement,
+  FCM delivery or notification opening.
+
+COMPATIBILITY / SQL / API
+=========================
+By default, D1 should be a client/UX/integration milestone without a new
+database migration if existing durable protocol satisfies all requirements.
+If an actual missing server guarantee is proven by code:
+1. Document source-backed gap and why the current canonical RPC cannot support it.
+2. Prefer a narrow additive forward-only SQL change after CURRENT latest
+   merged migration, never rewriting applied historical files.
+3. Keep existing public signatures where clients rely on them.
+4. Use auth.uid(), exact org membership and current role/episode/incident
+   checks, optimistic locking, immutable receipts and safe errors.
+5. Private SECURITY DEFINER helper: fully qualified names/empty search_path,
+   explicit GRANT/REVOKE, bounded data; no broad TABLE SELECT grant or RLS bypass.
+6. Check all PL/pgSQL delimiter pairs, alias vs variable conflicts and NULL/JSON
+   normalization in review, not by executing SQL.
+7. Add no Cron, no new Edge function, no Storage changes, no Realtime publication.
+8. Record owner-run migration ordering AFTER #82,#83,#84,#85,#86,#87 and #88
+   in docs if a migration is added; SQL Editor not necessarily represented in
+   migration ledger. Never require or initiate rollout as part of source coding.
+
+Do not change Room16 or generated schemas without explicit owner permission.
+Do not expand offline issue to command types presently online-only.
+
+IMPLEMENTATION PATH / REVIEWABLE COMMITS
+========================================
+0. Hard dependency gate (#88 merge, current HEAD, existing PR collision).
+1. Source contract matrix with exact current identifiers and existing behavior.
+2. Central classification and recovery state derived from existing persisted
+   queue; no new server authority.
+3. Receipt-first reconciliation / exact-identity retry/dependency safety.
+4. Account/org/incident scope fencing, lease/clock/restart protection.
+5. Human review and sync UX within existing Android UI.
+6. Error mapping and SI/DE strings; no private logging.
+7. Cross-feature regression-oriented source review and compatible docs.
+8. One PR with [skip ci] commits, full operator handoff, stop without merge.
+
+DOC DELIVERABLE
+===============
+Create or update:
+docs/M14.8D1-field-offline-reliability-conflict-ux.md
+and a concise scoped progress note in docs/SPEC-M14-INCIDENT-OPERATIONS.md.
+Do not rewrite historical milestones or mark PR #82–#88 deployed.
+
+The document must include:
+- actual code/contract matrix, no guessed function signatures;
+- state diagram in Mermaid or PlantUML as text, with scope/retry invariants;
+- operation classification matrix and permissions per exact actor;
+- local durable evidence/receipt/parent semantics;
+- cache lease and privacy policy; security/invalidation paths;
+- source-backed list of anything not implementable without schema permissions;
+- deployment compatibility and owner-only manual rollout;
+- specific human-run acceptance matrix;
+- risks/limitations and "SOURCE REVIEW != RUNTIME VERIFICATION".
+
+MANUAL ACCEPTANCE CHECKLIST — OWNER ONLY; DO NOT EXECUTE
+=========================================================
+Document these concrete checks (expand with actual source-specific cases).
+The expected outcome must be explicit for each; do not claim they passed.
+
+01. On an approved TRAINING incident, available supported offline ACK in airplane
+    mode -> local pending only, no server confirmed badge.
+02. Offline START then COMPLETE with a valid dependency chain -> correct ordered
+    dispatch after parent confirmation, no guessed versions.
+03. Airplane mode before freezing: no lost action if persistent storage succeeds.
+04. No available storage: show failure; no network dispatch of unpersisted action.
+05. App process killed after local queue persists -> operation survives restart.
+06. Device reboot -> pending identity survives, lease uncertainty handled safely.
+07. Local clock moved backwards -> prevent false extension of cache authorization.
+08. Local clock moved forwards -> display conservative expiry, preserve evidence.
+09. Lose network during send (unknown commit) -> original UUID and payload survive.
+10. Recover matching receipt -> confirmation and read reconciliation, no duplicate.
+11. No matching receipt -> UNKNOWN, not rejected, no invented success.
+12. Exact same UUID retry with same request -> one server mutation, same receipt.
+13. Retry original UUID with altered payload -> must be blocked/rejected.
+14. Confirmed first rejection -> human may create corrected NEW operation.
+15. Earlier unknown request + later rejection -> don't forget original unknown.
+16. Parent ACK unknown -> child START is blocked until receipt resolution.
+17. Parent ACK rejected -> child remains blocked for explicit human review.
+18. Parent ACK confirmed but changed version -> derive authoritative child only
+    if not dispatched/frozen; otherwise conflict review, never silent mutation.
+19. Duplicate WorkManager dispatch -> no duplicate task transitions.
+20. Rapid app foreground/background cycles -> no overlapping command storms.
+21. Concurrent UI inspect and worker dispatch -> deterministic safe display.
+22. Realtime/FCM duplicate hints -> no duplicated operations.
+23. Hint lost -> existing polling/reconciliation remains functional.
+24. One account switches to another mid-request -> old response cannot write into
+    new account's UI/cache or change selected action.
+25. Same account switches organization mid-request -> no wrong-org replay.
+26. Switch incident mid-request -> returned details remain properly scoped.
+27. Switch back to original permitted scope -> original queue is recoverable.
+28. Access revoked while offline -> visible private cached content disappears
+    at authorized lease limit; no new command is sent.
+29. Access revoked while online -> immediate scope denial and masked details.
+30. Unit-leader role lost -> supervised actions hidden; evidence preserved.
+31. Crew episode replaced -> old target episode is not reused as new target.
+32. Incident CANCELLED/CLOSED while disconnected -> attention, not auto retry.
+33. Schema mismatch after app update -> safe compatibility warning.
+34. B1 scope fingerprint changed -> old protected projection not displayed.
+35. B1 NAV data-only watermark changed -> no false role revocation.
+36. Change feed gap / expired horizon -> full bounded snapshot, no partial success.
+37. Interrupted manifest paging -> last complete valid cache retained.
+38. Cursor update never precedes authoritative projection transaction.
+39. Reconciliation with bad result -> original evidence and previous authorized
+    data persist; no false caught-up indicator.
+40. Incident read lease warning around 22h -> accurate and localized.
+41. Incident read lease exceeded 24h -> no protected stale incident read.
+42. Hydrant registry separate lease continues per existing policy.
+43. Offline hydrant edit survives incident cache reset.
+44. Offline inspection survives app restart while incident pending.
+45. Pending hydrant photo upload is not evicted by incident queue changes.
+46. Pending evidence attachment remains intact after loss of incident visibility.
+47. Web IC issues a task; Android responder receives authorized assignment.
+48. Crew user cannot perform an effective leader's command.
+49. Organization admin without incident capability cannot bypass authority.
+50. REAL vs TRAINING separation survives all error and retry states.
+51. SIM FINISH does not become incident CLOSE.
+52. UI displays original action title/recipient/version when permitted.
+53. Same-title actions still separated by original operation UUIDs.
+54. SI text for pending/unknown/rejected/confirmed/status/retry/permission.
+55. DE text for same states and accessibility labeling.
+56. Screen reader can understand status without relying solely on colors.
+57. Sync inbox can be opened without network using existing Room.
+58. Unknown operation cannot be silently dismissed/deleted.
+59. Definitively rejected action can be reviewed without resending.
+60. User opens task/map then returns, retains state; no accidental action.
+61. Conflicting newer task version shows details rather than auto-rebase.
+62. Offline banner offers radio/voice operational fallback guidance.
+63. Background battery saver constraints do not mark pending as confirmed.
+64. Session refresh or auth token expiry shows appropriate scopes.
+65. Correlation display never exposes raw sensitive request/SQL.
+66. Long queue shows bounded list without per-row network reads.
+67. Repeated retry/manual refresh respects existing concurrency controls.
+68. Multiple incidents in same org remain isolated.
+69. Two organizations with same incident title remain isolated by UUID.
+70. PR applied only in code; after human rollout, result logged distinctly as
+    MERGED, SQL_APPLIED, EDGE_DEPLOYED, WEB_DEPLOYED, ANDROID_INSTALLED, VERIFIED.
+
+No automated acceptance from Codex; no new or changed tests in this task.
+
+NON-GOALS — STRICTLY KEEP SEPARATE PRs
+======================================
+1. M14.8C2 / M15: consented REAL GPS, last-known source/provenance, authorized
+   unit position map marker, voluntary phone/vehicle association, foreground
+   service and Android runtime permission policy. Explicit privacy approval
+   and separate PR. The owner wants CURRENT=green, STALE=orange, VERY OLD/
+   unavailable=grey, source/age; none of this is to be faked in D1.
+2. Command Map UX: hydrant-like compact marker size, count badges ONLY when
+   actually overlapping, avoid duplicated navigation layers, accessible
+   selection; separate Web command-map PR.
+3. M14.6J: diagnose SIM map/agent/hazard read timeout 57014, map polling and
+   stale_version  P0001; measure rather than blindly raise statement_timeout.
+4. M14.8D2: reliability metrics/observations and dashboard, AFTER D1.
+5. M14.10A/B/C: closure seal, reporting, after-action review.
+6. M14.6E/F/G/H/I: additional simulator/physics/training/replay/orchestration.
+7. NAV3 limit changes (100 -> 200) NOT APPROVED.
+8. No Android WebSocket implementation, no new public Realtime channels.
+9. No new generic incident purge/delete feature.
+10. No modernization of unrelated Gradle, KAPT/KSP, map provider, inventory or
+    hydant inspection UI.
+
+HARD TOOL AND WORKFLOW RESTRICTIONS — OWNER DIRECTIVE
+=====================================================
+Codex MUST NOT:
+- add/modify/run tests or automated checks;
+- run build, lint, typecheck, CI, Gradle sync, Android Studio sync or emulator;
+- execute SQL, migrate DB, deploy Edge Functions or Web, touch production,
+  change Storage/Realtime admin settings or secrets;
+- change Gradle/KAPT/KSP/dependencies/generated Room schemas or local user config
+  without prior explicit owner permission;
+- remove existing manual local changes or alter unrelated files;
+- merge PRs, trigger rollout, launch monitor, claim manual acceptance.
+Source inspection and source editing only. Use one new PR once #88 is merged and
+there is no overlapping open PR, and [skip ci] commit messages.
+
+END-OF-TASK CODEX HANDOFF
+=========================
+Provide, exactly:
+1. PR URL, branch, base/main SHA and final commit SHA.
+2. Proof #88 is merged/ancestor or explicit dependency blocker.
+3. All source areas and exact signatures inspected, what already existed.
+4. What was actually implemented vs consciously left unchanged.
+5. List of changed files and significant line ranges.
+6. Persistent original UUID/immutable request behavior and receipt recovery.
+7. Parent dependencies, stale version and conservative cache security behavior.
+8. Room version (target: unchanged 16); any owner approval blocker.
+9. RPC/SQL migration requirements (prefer none); if present exact file/order.
+10. SI/DE strings and human screen paths.
+11. Owner-only rollout and manual acceptance steps, no deploy performed.
+12. Risks unresolved without SQL/Android/manual testing.
+13. Explicit "No tests added/modified/run; no build/lint/typecheck/CI,
+    Gradle sync, SQL execution, deployment or runtime verification."
+14. Stop after opening ONE new PR. Do not merge.
+
+IMPORTANT: A source-level PR is NOT an operational release.
