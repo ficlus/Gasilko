@@ -3121,3 +3121,22 @@ Marker taps inside polygons and same-identity authorization-scope camera changes
 are hardened. NO current or last-known REAL unit positions are rendered:
 POSITION UNAVAILABLE remains honest. Location freshness and consented vehicle-phone
 GPS work require separate later PRs. No tests/build/SQL/runtime/deploy/merge ran.
+
+
+### M14.8D1 — Field offline recovery and conflict UX (source implementation)
+
+Existing Room16 INCIDENT_TASK/dispatch records now drive the field synchronization
+inbox, safe phase distinctions, receipt-first uncertain recovery and explicit
+comparison/corrective intent. Original requests/UUIDs/parents/receipts remain;
+no new worker, queue, offline command category, GPS or unit position source.
+
+Forward-only `20261102100000_incident_field_receipt_recovery.sql` adds bounded,
+actor/org/incident/request-bound read of existing immutable operation receipts.
+ABSENT stays UNKNOWN, later rejection cannot erase prior uncertainty, and new
+corrective UUIDs require explicit review/current authority without modifying the
+old action. Known scope loss masks private details and preserves durable evidence.
+B1 read time and local created time are never represented as server write success.
+
+See [M14.8D1 contracts, state model and70 UNEXECUTED owner checks](M14.8D1-field-offline-reliability-conflict-ux.md).
+No tests/build/CI/SQL/migrations/runtime/deployment/merge were performed.
+Owner-deferred #82–88 rollout and this migration remain separate from code merge.

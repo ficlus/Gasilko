@@ -35,7 +35,7 @@ class IncidentViewModel(val repository: IncidentRepository,val organization: Str
         working.value=true;failed.value=false;commandFailure.value=null
         scope.launch {
             try { block() } catch(e: CancellationException) { throw e }
-            catch(e: Exception) { failed.value=true;commandFailure.value=leaderError(e.message) }
+            catch(e: Exception) { failed.value=true;commandFailure.value=if(e is IllegalArgumentException)leaderError(e.message) else fieldFailure(e) }
             finally { working.value=false }
         }
     }
@@ -67,6 +67,12 @@ class IncidentViewModel(val repository: IncidentRepository,val organization: Str
         val allowed=try { repository.verifyMapHandoff(organization,incident,kind,id,geometry,revision,version);true }
             catch(e: CancellationException){throw e} catch(_: Exception){false}
         done(allowed)
+    }
+
+    fun inspectRecovery(operation: String?=null,incident: String?=null)=action {repository.inspectRecovery(organization,operation,incident)}
+    fun retryRecovery(operation: String)=action {repository.retryRecovery(organization,operation)}
+    fun correctRecovery(incident: String,assignment: String,status: String,reason: String,original: String,version: String,done: ()->Unit)=action {
+        repository.transition(organization,incident,assignment,status,reason,original,version);done()
     }
 
 }

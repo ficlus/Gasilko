@@ -34,18 +34,25 @@ import java.util.UUID
     "ACTIVE"->stringResource(R.string.ul_active)
     else->stateName(code)
 }
-@Composable internal fun leaderErrorText(code: String)=stringResource(when(code) {
-    "NOT_AUTHORIZED","SCOPE_CHANGED","MANIFEST_SCOPE_CHANGED"->R.string.ul_scope_lost
-    "STALE_VERSION","OPERATION_REUSED"->R.string.ul_stale_request
-    "CATALOG_LIMIT"->R.string.ul_catalog_limit
-    "INVALID_UNIT_STATUS","INVALID_RESOURCE_STATUS"->R.string.ul_transition
-    "RESOURCE_LIMIT_REACHED","INSUFFICIENT_RESOURCE_QUANTITY"->R.string.ul_resource_limit
-    "UNIT_HAS_ACTIVE_COMMAND","UNIT_HAS_ACTIVE_CREW","RESOURCE_IN_USE","UNRESOLVED_TASKS"->R.string.ul_blocked
-    "SIMULATION_RESOURCE_DISABLED"->R.string.ul_training_resource
-    "INVALID_CREW_MEMBER","INVALID_TASK_RECIPIENT","INVALID_ACTION_DEFINITION"->R.string.ul_eligibility
-    "OUTCOME_UNKNOWN","TRANSPORT_UNCERTAIN","RECEIPT_UNCERTAIN"->R.string.ul_unknown
-    else->R.string.ul_failed
-})
+@Composable internal fun leaderErrorText(original: String): String {
+    if(original.startsWith("UNKNOWN_REJECTED:") || original in setOf("SCOPE_UNAVAILABLE","TEMPORARY_BUSY",
+        "COMPATIBILITY","LOCAL_STORAGE","SECURE_STORAGE","RECEIPT_ABSENT","IDENTITY_MISMATCH"))
+        return recoveryErrorText(original)
+    val code=original.removePrefix("REJECTED:")
+    return stringResource(when(code) {
+        "NOT_AUTHORIZED","SCOPE_CHANGED","MANIFEST_SCOPE_CHANGED"->R.string.ul_scope_lost
+        "STALE_VERSION","OPERATION_REUSED"->R.string.ul_stale_request
+        "CATALOG_LIMIT"->R.string.ul_catalog_limit
+        "INVALID_UNIT_STATUS","INVALID_RESOURCE_STATUS","INVALID_TASK_TRANSITION"->R.string.ul_transition
+        "RESOURCE_LIMIT_REACHED","INSUFFICIENT_RESOURCE_QUANTITY","TASK_LIMIT_REACHED"->R.string.ul_resource_limit
+        "UNIT_HAS_ACTIVE_COMMAND","UNIT_HAS_ACTIVE_CREW","RESOURCE_IN_USE","UNRESOLVED_TASKS"->R.string.ul_blocked
+        "SIMULATION_RESOURCE_DISABLED","INVALID_SIMULATION_UNIT"->R.string.ul_training_resource
+        "INVALID_CREW_MEMBER","INVALID_TASK_RECIPIENT","INVALID_ACTION_DEFINITION","INVALID_ACTION_PARAMETERS",
+        "INVALID_TASK_TARGET","TASK_POINT_REQUIRED","INVALID_UNIT","INVALID_RESOURCE"->R.string.ul_eligibility
+        "OUTCOME_UNKNOWN","TRANSPORT_UNCERTAIN","RECEIPT_UNCERTAIN"->R.string.ul_unknown
+        else->if(original.startsWith("REJECTED:") && code in firstRejections)R.string.ir_rejected else R.string.ul_failed
+    })
+}
 @Composable
 internal fun LeaderReview(model: IncidentViewModel,incident: JsonObject,unit: JsonObject,op: FieldOperation,busy: Boolean,stale: Boolean,close: ()->Unit) {
     val body=parse(op.operation.payload);val review=body.obj("review");val payload=body.obj("payload")
@@ -95,7 +102,7 @@ internal fun LeaderReview(model: IncidentViewModel,incident: JsonObject,unit: Js
 }
 @Composable
 internal fun UnitLeadershipScreen(model: IncidentViewModel,incidentId: String,unitId: String,
-    openAssignment: (String)->Unit,issue: ()->Unit,openMap: (String?)->Unit,back: ()->Unit) {
+    openAssignment: (String)->Unit,issue: ()->Unit,openMap: (String?)->Unit,back: ()->Unit,openRecovery: ()->Unit={}) {
     val data by model.state.collectAsStateWithLifecycle()
     val i=data.incidents.find { it.text("id")==incidentId }
     val unit=i?.rows("units")?.find { it.text("id")==unitId }
@@ -103,12 +110,12 @@ internal fun UnitLeadershipScreen(model: IncidentViewModel,incidentId: String,un
         Column(Modifier.padding(16.dp)) { TextButton(onClick=back){Text(stringResource(R.string.h_back))};FieldBanner(stringResource(R.string.field_locked),FieldTone.WARNING) }
         return
     }
-    key(model,incidentId,unitId,leaderStamp(unit)) { UnitLeadershipContent(model,data,i,unit,openAssignment,issue,openMap,back) }
+    key(model,incidentId,unitId,leaderStamp(unit)) { UnitLeadershipContent(model,data,i,unit,openAssignment,issue,openMap,back,openRecovery) }
 }
 @Composable
 @OptIn(ExperimentalLayoutApi::class)
 private fun UnitLeadershipContent(model: IncidentViewModel,data: IncidentFieldState,incident: JsonObject,unit: JsonObject,
-    openAssignment: (String)->Unit,issue: ()->Unit,openMap: (String?)->Unit,back: ()->Unit) {
+    openAssignment: (String)->Unit,issue: ()->Unit,openMap: (String?)->Unit,back: ()->Unit,openRecovery: ()->Unit={}) {
     val busy by model.busy.collectAsStateWithLifecycle()
     val stale by model.stale.collectAsStateWithLifecycle()
     val syncFailure by model.syncFailure.collectAsStateWithLifecycle()
@@ -155,8 +162,11 @@ private fun UnitLeadershipContent(model: IncidentViewModel,data: IncidentFieldSt
         if(!leader)FieldBanner(stringResource(R.string.ul_read_only))
         if(busy)LinearProgressIndicator(Modifier.fillMaxWidth())
         error?.let { FieldBanner(leaderErrorText(it),FieldTone.WARNING) }
-        TextButton(onClick=model::sync,enabled=!busy){Text(stringResource(R.string.h_sync_now))}
-        TextButton(onClick={openMap(null)}){Text(stringResource(R.string.field_map))}
+        FlowRow {
+            TextButton(onClick=model::sync,enabled=!busy){Text(stringResource(R.string.h_sync_now))}
+            TextButton(onClick={openMap(null)}){Text(stringResource(R.string.field_map))}
+            TextButton(onClick=openRecovery){Text(stringResource(R.string.ir_title))}
+        }
         LazyColumn(Modifier.weight(1f),state=listState,verticalArrangement=Arrangement.spacedBy(12.dp)) {
             item { OperationalCard {
                 SectionHeading(stringResource(R.string.ul_status))

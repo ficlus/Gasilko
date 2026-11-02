@@ -37,8 +37,7 @@ internal fun validateLeaderPayload(incident: JsonObject,unit: JsonObject,rpc: St
     }
 }
 
-internal fun leaderError(message: String?): String = listOf("NOT_AUTHORIZED","MANIFEST_SCOPE_CHANGED","SCOPE_CHANGED","STALE_VERSION",
-    "INVALID_UNIT_STATUS","UNIT_HAS_ACTIVE_COMMAND","UNIT_HAS_ACTIVE_CREW","RESOURCE_IN_USE","UNRESOLVED_TASKS",
-    "INVALID_CREW_MEMBER","INVALID_RESOURCE_STATUS","INVALID_TASK_RECIPIENT","INVALID_ACTION_DEFINITION","OPERATION_REUSED",
-    "SIMULATION_RESOURCE_DISABLED","INSUFFICIENT_RESOURCE_QUANTITY","RESOURCE_LIMIT_REACHED","INCIDENT_TERMINAL",
-    "VALIDATION_FAILED","CATALOG_LIMIT","OUTCOME_UNKNOWN","TRANSPORT_UNCERTAIN").firstOrNull { message.orEmpty().contains(it) } ?: "SERVER"
+/** Shared canonical codes for presentation; local validation never proves server rejection. */
+internal fun leaderError(message: String?): String = message?.takeIf {it in firstRejections || it in setOf(
+    "NOT_AUTHORIZED","MANIFEST_SCOPE_CHANGED","SCOPE_CHANGED","OPERATION_REUSED","CATALOG_LIMIT",
+    "OUTCOME_UNKNOWN","TRANSPORT_UNCERTAIN")} ?: "SERVER"

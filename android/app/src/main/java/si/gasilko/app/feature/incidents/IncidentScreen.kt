@@ -67,6 +67,7 @@ fun IncidentScreen(model: IncidentViewModel,registry: HydrantViewModel,organizat
     val data by model.state.collectAsStateWithLifecycle()
     val busy by model.busy.collectAsStateWithLifecycle()
     val error by model.error.collectAsStateWithLifecycle()
+    val recoveryFailure by model.commandError.collectAsStateWithLifecycle()
     val stale by model.stale.collectAsStateWithLifecycle()
     val syncFailure by model.syncFailure.collectAsStateWithLifecycle()
     val syncMessage=when(syncFailure) {
@@ -89,6 +90,7 @@ fun IncidentScreen(model: IncidentViewModel,registry: HydrantViewModel,organizat
     var commandUnit by remember(model,navigationEvent,incidentId) { mutableStateOf<String?>(null) }
     var messages by remember(model,navigationEvent,incidentId) { mutableStateOf(false) }
     var evidence by remember(model,navigationEvent,incidentId) { mutableStateOf<EvidenceTarget?>(null) }
+    var recovery by remember(model,navigationEvent){mutableStateOf(false)}
     var incidentMap by remember(model,navigationEvent,incidentId) { mutableStateOf(false) }
     var mapAssignment by remember(model,navigationEvent,incidentId) { mutableStateOf<String?>(null) }
     val mapStates=key(model){rememberSaveableStateHolder()}
@@ -105,8 +107,15 @@ fun IncidentScreen(model: IncidentViewModel,registry: HydrantViewModel,organizat
     val assignmentScroll=rememberSaveable(model,incidentId,assignmentId,saver=LazyListState.Saver){LazyListState()}
     val incident=data.incidents.find { it.text("id")==incidentId }
     val assignment=incident?.rows("assignments")?.find { it.text("id")==assignmentId }
-    fun close() { when { evidence!=null->evidence=null;messages->messages=false;incidentMap->incidentMap=false;issue->issue=false;assignmentId!=null->assignmentId=null;commandUnit!=null->commandUnit=null;incidentId!=null->incidentId=null;else->back() } }
+    fun close() { when { recovery->recovery=false;evidence!=null->evidence=null;messages->messages=false;incidentMap->incidentMap=false;issue->issue=false;assignmentId!=null->assignmentId=null;commandUnit!=null->commandUnit=null;incidentId!=null->incidentId=null;else->back() } }
     BackHandler(onBack=::close)
+    if(recovery) {
+        key(model,incidentId) {
+            IncidentRecoveryScreen(model,incidentId,{inc,task->incidentId=inc;assignmentId=task;recovery=false},
+                {inc,unit->incidentId=inc;commandUnit=unit;assignmentId=null;recovery=false},{recovery=false})
+        }
+        return
+    }
     if(data.locked) {
         Column(Modifier.fillMaxSize().padding(16.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
             ScreenHeading(stringResource(R.string.field_title))
@@ -114,6 +123,7 @@ fun IncidentScreen(model: IncidentViewModel,registry: HydrantViewModel,organizat
             if(syncFailure!=null)FieldBanner(stringResource(syncMessage),FieldTone.WARNING)
             TextButton(onClick=back) { Text(stringResource(R.string.h_back)) }
             TextButton(onClick=model::sync) { Text(stringResource(R.string.h_sync_now)) }
+            TextButton(onClick={recovery=true}){Text(stringResource(R.string.ir_title))}
         }
         return
     }
@@ -145,7 +155,7 @@ fun IncidentScreen(model: IncidentViewModel,registry: HydrantViewModel,organizat
         mapStates.SaveableStateProvider("unit/"+model.repository.account+"/"+model.organization+"/"+incident.text("id")+"/"+commandUnit) {
             UnitLeadershipScreen(model,incident.text("id"),commandUnit!!,{assignmentId=it},
                 {issue=true;model.loadCatalog()},{id->mapAssignment=id;incidentMap=true},
-                {commandUnit=null;assignmentId=null;issue=false})
+                {commandUnit=null;assignmentId=null;issue=false},openRecovery={recovery=true})
         }
         return
     }
@@ -153,11 +163,13 @@ fun IncidentScreen(model: IncidentViewModel,registry: HydrantViewModel,organizat
         FlowRow(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
             TextButton(onClick=::close) { Text(stringResource(R.string.h_back)) }
             TextButton(onClick=model::sync,enabled=!busy) { Text(stringResource(R.string.h_sync_now)) }
+            TextButton(onClick={recovery=true}){Text(stringResource(R.string.ir_title))}
         }
         ScreenHeading(stringResource(R.string.field_title))
         Text(organizationName)
         if(busy)LinearProgressIndicator(Modifier.fillMaxWidth())
         if(error)FieldBanner(stringResource(R.string.field_error),FieldTone.WARNING)
+        recoveryFailure?.let {FieldBanner(recoveryErrorText(it),FieldTone.WARNING)}
         if(stale || syncFailure!=null)FieldBanner(stringResource(syncMessage),FieldTone.WARNING)
         if(data.warning)FieldBanner(stringResource(R.string.field_lease_warning),FieldTone.WARNING)
         data.verifiedAt?.let { Text(stringResource(R.string.field_verified,DateFormat.getDateTimeInstance().format(Date(it))),style=MaterialTheme.typography.bodySmall) }
