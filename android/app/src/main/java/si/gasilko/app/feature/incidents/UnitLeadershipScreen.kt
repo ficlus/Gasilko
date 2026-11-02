@@ -34,18 +34,25 @@ import java.util.UUID
     "ACTIVE"->stringResource(R.string.ul_active)
     else->stateName(code)
 }
-@Composable internal fun leaderErrorText(code: String)=stringResource(when(code) {
-    "NOT_AUTHORIZED","SCOPE_CHANGED","MANIFEST_SCOPE_CHANGED"->R.string.ul_scope_lost
-    "STALE_VERSION","OPERATION_REUSED"->R.string.ul_stale_request
-    "CATALOG_LIMIT"->R.string.ul_catalog_limit
-    "INVALID_UNIT_STATUS","INVALID_RESOURCE_STATUS"->R.string.ul_transition
-    "RESOURCE_LIMIT_REACHED","INSUFFICIENT_RESOURCE_QUANTITY"->R.string.ul_resource_limit
-    "UNIT_HAS_ACTIVE_COMMAND","UNIT_HAS_ACTIVE_CREW","RESOURCE_IN_USE","UNRESOLVED_TASKS"->R.string.ul_blocked
-    "SIMULATION_RESOURCE_DISABLED"->R.string.ul_training_resource
-    "INVALID_CREW_MEMBER","INVALID_TASK_RECIPIENT","INVALID_ACTION_DEFINITION"->R.string.ul_eligibility
-    "OUTCOME_UNKNOWN","TRANSPORT_UNCERTAIN","RECEIPT_UNCERTAIN"->R.string.ul_unknown
-    else->R.string.ul_failed
-})
+@Composable internal fun leaderErrorText(original: String): String {
+    if(original.startsWith("UNKNOWN_REJECTED:") || original in setOf("SCOPE_UNAVAILABLE","TEMPORARY_BUSY",
+        "COMPATIBILITY","LOCAL_STORAGE","SECURE_STORAGE","RECEIPT_ABSENT","IDENTITY_MISMATCH"))
+        return recoveryErrorText(original)
+    val code=original.removePrefix("REJECTED:")
+    return stringResource(when(code) {
+        "NOT_AUTHORIZED","SCOPE_CHANGED","MANIFEST_SCOPE_CHANGED"->R.string.ul_scope_lost
+        "STALE_VERSION","OPERATION_REUSED"->R.string.ul_stale_request
+        "CATALOG_LIMIT"->R.string.ul_catalog_limit
+        "INVALID_UNIT_STATUS","INVALID_RESOURCE_STATUS","INVALID_TASK_TRANSITION"->R.string.ul_transition
+        "RESOURCE_LIMIT_REACHED","INSUFFICIENT_RESOURCE_QUANTITY","TASK_LIMIT_REACHED"->R.string.ul_resource_limit
+        "UNIT_HAS_ACTIVE_COMMAND","UNIT_HAS_ACTIVE_CREW","RESOURCE_IN_USE","UNRESOLVED_TASKS"->R.string.ul_blocked
+        "SIMULATION_RESOURCE_DISABLED","INVALID_SIMULATION_UNIT"->R.string.ul_training_resource
+        "INVALID_CREW_MEMBER","INVALID_TASK_RECIPIENT","INVALID_ACTION_DEFINITION","INVALID_ACTION_PARAMETERS",
+        "INVALID_TASK_TARGET","TASK_POINT_REQUIRED","INVALID_UNIT","INVALID_RESOURCE"->R.string.ul_eligibility
+        "OUTCOME_UNKNOWN","TRANSPORT_UNCERTAIN","RECEIPT_UNCERTAIN"->R.string.ul_unknown
+        else->if(original.startsWith("REJECTED:") && code in firstRejections)R.string.ir_rejected else R.string.ul_failed
+    })
+}
 @Composable
 internal fun LeaderReview(model: IncidentViewModel,incident: JsonObject,unit: JsonObject,op: FieldOperation,busy: Boolean,stale: Boolean,close: ()->Unit) {
     val body=parse(op.operation.payload);val review=body.obj("review");val payload=body.obj("payload")
