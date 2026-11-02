@@ -3140,3 +3140,22 @@ B1 read time and local created time are never represented as server write succes
 See [M14.8D1 contracts, state model and70 UNEXECUTED owner checks](M14.8D1-field-offline-reliability-conflict-ux.md).
 No tests/build/CI/SQL/migrations/runtime/deployment/merge were performed.
 Owner-deferred #82–88 rollout and this migration remain separate from code merge.
+
+## M14.8D2 — Field reliability diagnostics (source implementation, not rollout)
+
+Extends the same Android D1 recovery screen with own-device scoped Room-derived
+diagnostics, source availability and local/read age; Room stays16. No new queue,
+worker, telemetry upload, immutable-request change or command authority.
+
+Web adds an explicitly opened controller summary through the existing authenticated
+API/live lifecycle. New incident_field_reliability_summary(uuid,uuid,text) uses
+current B1 read scope and CHANGE_LIFECYCLE, own canonical receipts, acting-org
+task history and task-only M10 transport samples with fixed caps. Missing sources
+remain NOT_COLLECTED/UNKNOWN; provider acceptance is never human ACK. Private
+message audiences, payloads and remote unsent device queues are excluded.
+
+Migration20261102120000_incident_field_reliability.sql is forward-only after D1,
+NOT APPLIED. No D2 Edge, Storage, Realtime, Cron, dependency or Room migration.
+Human sign-off remains a separate operator record; no metric declares readiness.
+See [D2 source/provenance, owner rollout and all80 UNEXECUTED checks](M14.8D2-field-reliability-metrics-review-readiness.md).
+No tests/build/SQL/deployment/runtime/manual acceptance performed by the agent.

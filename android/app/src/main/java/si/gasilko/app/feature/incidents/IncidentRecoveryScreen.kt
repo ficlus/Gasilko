@@ -63,11 +63,15 @@ internal fun IncidentRecoveryScreen(model: IncidentViewModel,incidentFilter: Str
     var correction by remember {mutableStateOf<String?>(null)}
     BackHandler(onBack=back)
     val all=data.operations
-    val scoped=all.filter {data.locked || incidentFilter==null || runCatching {parse(it.operation.payload).text("incident")==incidentFilter}.getOrDefault(false)}
-    val rows=scoped.filter {phase.isEmpty() || recoveryPhase(it,all,recoveryVisible(it,data)).name==phase}.asReversed()
-    val receiptTime=scoped.filter {recoveryVisible(it,data)}.mapNotNull {
-        runCatching {java.time.Instant.parse(it.result?.let(::parse)?.text("_d1_confirmed_at")).toEpochMilli()}.getOrNull()
-    }.maxOrNull()
+    // Derive once per Room/lease projection, not on every dialog/control recomposition.
+    val diagnostics=remember(data.operations,data.incidents,data.locked,incidentFilter) {incidentDiagnostics(data,incidentFilter)}
+    val rows=remember(diagnostics,phase) {diagnostics.rows.filter {
+        phase.isEmpty() || diagnostics.phases[it.operation.sequence]?.name==phase
+    }.asReversed()}
+    val receiptTime=diagnostics.lastReceipt
+    val now=System.currentTimeMillis()
+    fun age(time: Long?)=time?.takeIf {it>0 && !data.locked && data.leaseRemaining>0 && now>=it}?.let {((now-it)/60_000).toString()}
+    val unknownText=stringResource(R.string.ir_unavailable)
     BoxWithConstraints(Modifier.fillMaxSize()) {
     val headerHeight=maxHeight*0.55f
     Column(Modifier.fillMaxSize().padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
@@ -82,32 +86,61 @@ internal fun IncidentRecoveryScreen(model: IncidentViewModel,incidentFilter: Str
         Text(stringResource(R.string.ir_last_receipt,receiptTime?.let(::localDate) ?: stringResource(R.string.ir_unavailable)))
         if(!data.locked)Text(stringResource(R.string.ir_lease_minutes,(data.leaseRemaining/60_000).toString()))
         Text(stringResource(R.string.ir_radio),style=MaterialTheme.typography.bodySmall)
-        FlowRow(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+        OperationalCard {
+            SectionHeading(stringResource(R.string.idg_title))
+            Text(stringResource(if(diagnostics.organizationScope)R.string.idg_org_scope else R.string.idg_incident_scope))
+            Text(stringResource(R.string.idg_device_only))
+            if(!data.queueAvailable)FieldBanner(stringResource(R.string.idg_unavailable),FieldTone.WARNING)
+            else {
+                Text(stringResource(R.string.idg_pending,if(diagnostics.incompleteScope)unknownText else diagnostics.pending.toString()))
+                Text(stringResource(R.string.idg_unknown,if(diagnostics.incompleteScope)unknownText else diagnostics.unknown.toString()))
+                Text(stringResource(R.string.idg_oldest,age(diagnostics.oldestIntent) ?: unknownText))
+                Text(stringResource(R.string.idg_read_age,age(data.verifiedAt) ?: unknownText))
+                if(!data.locked) {
+                    Text(stringResource(R.string.idg_issue_stale,(diagnostics.issues[DiagnosticIssue.LOCAL_STALE_VERSION] ?: 0).toString()))
+                    Text(stringResource(R.string.idg_issue_protocol,(diagnostics.issues[DiagnosticIssue.PROTOCOL] ?: 0).toString()))
+                    Text(stringResource(R.string.idg_issue_network,(diagnostics.issues[DiagnosticIssue.NETWORK] ?: 0).toString()))
+                    Text(stringResource(R.string.idg_issue_busy,(diagnostics.issues[DiagnosticIssue.BUSY] ?: 0).toString()))
+                    Text(stringResource(R.string.idg_issue_storage,(diagnostics.issues[DiagnosticIssue.STORAGE] ?: 0).toString()))
+                }
+                if(data.operations.isEmpty())Text(stringResource(R.string.idg_local_empty))
+                if(diagnostics.incompleteScope)FieldBanner(stringResource(R.string.idg_partial_scope),FieldTone.WARNING)
+            }
+            Text(stringResource(R.string.idg_read_failure,stringResource(when(syncFailure) {
+                "ACCESS","SCOPE"->R.string.field_sync_scope;"MANIFEST"->R.string.field_sync_manifest
+                "CAPACITY"->R.string.field_sync_capacity;"PROTOCOL"->R.string.field_sync_protocol
+                "BUSY"->R.string.field_sync_busy;"NETWORK"->R.string.field_sync_network;"SERVER"->R.string.field_sync_server
+                "STALE"->R.string.field_stale;else->R.string.idg_not_observed
+            })))
+            data.diagnosticsFailure?.let {FieldBanner(recoveryErrorText(it),FieldTone.WARNING)}
+            Text(stringResource(R.string.idg_not_collected))
+        }
+        if(data.queueAvailable && !diagnostics.incompleteScope)FlowRow(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
             listOf(RecoveryPhase.READY_TO_SEND,RecoveryPhase.OUTCOME_UNKNOWN,RecoveryPhase.NEEDS_ATTENTION,
                 RecoveryPhase.DEFINITIVELY_REJECTED,RecoveryPhase.BLOCKED_DEPENDENCY,RecoveryPhase.SERVER_CONFIRMED,
                 RecoveryPhase.LOCAL_INTENT,RecoveryPhase.SENDING,RecoveryPhase.SCOPE_UNAVAILABLE).forEach {kind->
-                Text(recoveryLabel(kind)+": "+scoped.count {recoveryPhase(it,all,recoveryVisible(it,data))==kind})
+                Text(recoveryLabel(kind)+": "+(diagnostics.counts[kind] ?: 0))
             }
         }
         Selector(stringResource(R.string.ir_filter),phase,listOf("" to stringResource(R.string.ir_all))+
             RecoveryPhase.entries.map {it.name to recoveryLabel(it)},!busy){phase=it;page=0}
         FlowRow {
             TextButton(enabled=!busy && !data.locked,onClick={model.inspectRecovery(incident=incidentFilter)}){Text(stringResource(R.string.ir_check))}
-            TextButton(enabled=!busy && !data.locked,onClick=model::sync){Text(stringResource(R.string.h_sync_now))}
+            TextButton(enabled=!busy,onClick=model::sync){Text(stringResource(R.string.h_sync_now))}
         }
         if(busy)LinearProgressIndicator(Modifier.fillMaxWidth())
         failure?.let {FieldBanner(recoveryErrorText(it),FieldTone.WARNING)}
-        if(rows.isEmpty())Text(stringResource(R.string.ir_empty))
+        if(data.queueAvailable && !diagnostics.incompleteScope && rows.isEmpty())Text(stringResource(R.string.ir_empty))
         }
         LazyColumn(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(8.dp)) {
-            items(rows.drop(page*50).take(50),key={it.operation.operationId}) {op->
+            items(rows.subList(minOf(page*50,rows.size),minOf((page+1)*50,rows.size)),key={it.operation.operationId}) {op->
                 val visible=recoveryVisible(op,data)
                 val body=runCatching {parse(op.operation.payload)}.getOrDefault(kotlinx.serialization.json.JsonObject(emptyMap()))
                 val incident=data.incidents.find {it.text("id")==body.text("incident")}
                 val a=incident?.rows("assignments")?.find {it.text("id")==op.operation.entityId}
                 OperationalCard {
                     Text(op.operation.operationId,style=MaterialTheme.typography.bodySmall)
-                    StatusBadge(recoveryLabel(recoveryPhase(op,all,visible)),FieldTone.INFO)
+                    StatusBadge(recoveryLabel(diagnostics.phases[op.operation.sequence] ?: RecoveryPhase.NEEDS_ATTENTION),FieldTone.INFO)
                     Text(stringResource(R.string.ir_created,localDate(op.operation.createdAt)))
                     if(visible && incident!=null) {
                         Text(incident.text("reference"));StatusBadge(stringResource(if(incident.text("mode")=="TRAINING")R.string.field_training else R.string.ul_real),FieldTone.WARNING)

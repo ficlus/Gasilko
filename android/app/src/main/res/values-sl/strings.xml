@@ -658,4 +658,23 @@
     <string name="ir_transport">Izida ni mogoče varno potrditi. Ohranite izvirni zahtevek in uporabite preverjanje stanja.</string>
     <string name="ir_storage">Trajnega zapisa ni mogoče shraniti. Nepersistirane nove akcije ne pošiljamo; izid že poslanih zahtevkov preverite po obnovi shrambe.</string>
     <string name="ir_secure_storage">Varna shramba ali ključ ni na voljo. Dostop ostaja zaklenjen; ne brišite čakajočih podatkov.</string>
+    <string name="idg_title">Diagnostika — moja naprava</string>
+    <string name="idg_org_scope">Obseg: ta račun in izbrana organizacija. Pri zaklenjenem dostopu nevtralni števci ostanejo organizacijski.</string>
+    <string name="idg_incident_scope">Obseg: ta račun, izbrana organizacija in incident.</string>
+    <string name="idg_device_only">LOKALNO NA NAPRAVI. Ti števci niso strežniški backlog ali dokaz izvedbe.</string>
+    <string name="idg_unavailable">Lokalnega trajnega vira ni mogoče prebrati. Število in stanje operacij sta NEZNANA, ne nič ali uspeh.</string>
+    <string name="idg_pending">Trajno LOCAL_PENDING: %1$s</string>
+    <string name="idg_unknown">Neznan izid iz trajnih zapisov: %1$s</string>
+    <string name="idg_oldest">Starost najstarejšega nepotrjenega namena (lokalne minute): %1$s</string>
+    <string name="idg_read_age">Starost zadnjega avtoriziranega branja (lokalne minute): %1$s</string>
+    <string name="idg_local_empty">Lokalni vir je bil prebran in za ta račun/organizacijo nima operacij. To ne dokazuje strežniškega zdravja.</string>
+    <string name="idg_partial_scope">Nekaterih trajnih zapisov ni mogoče varno povezati z incidentom. Popolnost incidentnih števcev je NEZNANA; izvirne evidence ne brišemo.</string>
+    <string name="idg_read_failure">Zadnja opažena kategorija branja: %1$s</string>
+    <string name="idg_not_observed">Ni opažanja — NEZNANO</string>
+    <string name="idg_not_collected">Ni zbrano: število poskusov posamezne operacije, čas zadnjega poskusa, človeško prebrano/ACK in porazdelitev različic. Lokalna starost ni strežniška zakasnitev.</string>
+    <string name="idg_issue_stale">Shranjena zadnja kategorija — zastarela različica: %1$s</string>
+    <string name="idg_issue_protocol">Shranjena zadnja kategorija — protokol/identiteta: %1$s</string>
+    <string name="idg_issue_network">Shranjena zadnja kategorija — negotov prenos: %1$s</string>
+    <string name="idg_issue_busy">Shranjena zadnja kategorija — začasna zasedenost: %1$s</string>
+    <string name="idg_issue_storage">Shranjena zadnja kategorija — shramba: %1$s</string>
 </resources>

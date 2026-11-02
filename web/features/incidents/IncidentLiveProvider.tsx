@@ -9,7 +9,7 @@ export type IncidentLiveDomain='INCIDENT'|'COP'|'TASKS'|'RESOURCES'|'NAVIGATION'
 export type IncidentLiveNotification={id:string;eventCode:string;priority:'INFO'|'WARNING'|'CRITICAL';createdAt:string;entity?:{kind:'MAP_OBJECT'|'TASK'|'INCIDENT_UNIT';id:string};};
 type Status='CONNECTING'|'LIVE'|'REFRESHING'|'OFFLINE'|'STALE'|'ACCESS_LOST'|'POLLING';
 type FastRefresh=(signal:AbortSignal)=>Promise<void>;
-type Live={bindFastRefresh:(refresh:FastRefresh)=>()=>void;status:Status;lastSuccess:number|null;notifications:IncidentLiveNotification[];unread:number;lowPriorityToasts:boolean;requestRefresh:()=>void;markSeen:()=>void;dismiss:(id:string)=>void;setLowPriorityToasts:(value:boolean)=>void;};
+type Live={bindFastRefresh:(refresh:FastRefresh)=>()=>void;status:Status;lastSuccess:number|null;authorizationFingerprint:string|null;notifications:IncidentLiveNotification[];unread:number;lowPriorityToasts:boolean;requestRefresh:()=>void;markSeen:()=>void;dismiss:(id:string)=>void;setLowPriorityToasts:(value:boolean)=>void;};
 const Context=createContext<Live|null>(null);
 export const useIncidentLive=()=>useContext(Context);
 function priority(code:string):IncidentLiveNotification['priority']{
@@ -24,6 +24,7 @@ function entity(event:Timeline['events'][number]):IncidentLiveNotification['enti
 }
 /** Authoritative polling coordinator. Socket payloads are intentionally not operational state. */
 export function IncidentLiveProvider({account,org,incidentId,read,onInvalidate,onAccessLost,children}:{account:string;org:string;incidentId:string;read:TaskRead;onInvalidate:()=>void;onAccessLost:()=>void;children:ReactNode}){
+ const [authorizationFingerprint,setAuthorizationFingerprint]=useState<string|null>(null);
  const [status,setStatus]=useState<Status>('CONNECTING'),[lastSuccess,setLastSuccess]=useState<number|null>(null),[epoch,setEpoch]=useState(0);
  const [notifications,setNotifications]=useState<IncidentLiveNotification[]>([]),[unread,setUnread]=useState(0),[lowPriorityToasts,setLowPriorityToasts]=useState(true);
  const deniedScope=useRef(false),fast=useRef<FastRefresh|null>(null),[fastEpoch,setFastEpoch]=useState(0);
@@ -62,7 +63,7 @@ export function IncidentLiveProvider({account,org,incidentId,read,onInvalidate,o
  const revision=useRef<string|null>(null),cursor=useRef<string|null>(null),simCursor=useRef<string|null>(null),scope=useRef(''),successful=useRef(false);
  useEffect(()=>{
   const nextScope=account+':'+org+':'+incidentId;
-  if(scope.current!==nextScope){deniedScope.current=false;scope.current=nextScope;revision.current=null;cursor.current=null;simCursor.current=null;successful.current=false;setNotifications([]);setUnread(0);setLastSuccess(null);}
+  if(scope.current!==nextScope){deniedScope.current=false;scope.current=nextScope;revision.current=null;cursor.current=null;simCursor.current=null;successful.current=false;setNotifications([]);setUnread(0);setLastSuccess(null);setAuthorizationFingerprint(null);}
   let disposed=false,denied=false,inFlight=false,backoff=8000,timer:ReturnType<typeof setTimeout>|undefined,controller:AbortController|null=null;
   const client=browserClient();
   let channel:RealtimeChannel|null=null,joined=false,joinGeneration=0,retry=1000,dirty=false;
@@ -115,7 +116,7 @@ export function IncidentLiveProvider({account,org,incidentId,read,onInvalidate,o
   }
   function denyAccess(){
    deniedScope.current=true;denied=true;closeChannel();clearTimeout(authTimer);
-   controller?.abort();setStatus('ACCESS_LOST');setNotifications([]);setUnread(0);latest.current.onAccessLost();
+   controller?.abort();setStatus('ACCESS_LOST');setAuthorizationFingerprint(null);setNotifications([]);setUnread(0);latest.current.onAccessLost();
   }
   const auth=client?.auth.onAuthStateChange((event,session)=>{
    if(disposed)return;
@@ -153,6 +154,7 @@ export function IncidentLiveProvider({account,org,incidentId,read,onInvalidate,o
     if(!snapshot)throw new Error('NOT_AUTHORIZED');
     if(!decimal(snapshot.revision)||!decimal(snapshot.timeline_sequence))throw new Error('SCHEMA_MISMATCH');
     if(BigInt(snapshot.revision)<confirmedRevision||BigInt(snapshot.timeline_sequence)<confirmedSequence)throw new Error('STALE');
+    setAuthorizationFingerprint(snapshot.scope_fingerprint);
     confirmedRevision=BigInt(snapshot.revision);confirmedSequence=BigInt(snapshot.timeline_sequence);
     const next=[snapshot.version,snapshot.revision,snapshot.timeline_sequence,snapshot.scope_fingerprint].join(':');
     const changed=revision.current!==null&&revision.current!==next;revision.current=next;
@@ -192,6 +194,6 @@ export function IncidentLiveProvider({account,org,incidentId,read,onInvalidate,o
   void connect();void refresh();document.addEventListener('visibilitychange',visible);window.addEventListener('online',online);window.addEventListener('offline',offline);
   return()=>{disposed=true;closeChannel();clearTimeout(authTimer);auth?.data.subscription.unsubscribe();clearTimeout(timer);controller?.abort();document.removeEventListener('visibilitychange',visible);window.removeEventListener('online',online);window.removeEventListener('offline',offline);};
  },[account,org,incidentId,read,epoch,status==='ACCESS_LOST']);
- const value:Live={bindFastRefresh,status,lastSuccess,notifications,unread,lowPriorityToasts,requestRefresh:()=>setEpoch(value=>value+1),markSeen:()=>setUnread(0),dismiss:id=>setNotifications(current=>current.filter(note=>note.id!==id)),setLowPriorityToasts};
+ const value:Live={bindFastRefresh,status,lastSuccess,authorizationFingerprint,notifications,unread,lowPriorityToasts,requestRefresh:()=>setEpoch(value=>value+1),markSeen:()=>setUnread(0),dismiss:id=>setNotifications(current=>current.filter(note=>note.id!==id)),setLowPriorityToasts};
  return <Context.Provider value={value}>{children}</Context.Provider>;
 }

@@ -1,5 +1,6 @@
 'use client';
 import {IncidentEvidence} from './IncidentEvidence';
+import {IncidentReliability} from './IncidentReliability';
 import {IncidentMessages} from './IncidentMessages';
 import {mapMetric} from '../../lib/operational/mapDiagnostics';
 import type {Initialization} from '../../lib/operational/templates';
@@ -246,6 +247,7 @@ export function IncidentArea({locale,account,destination,initialOrg}:{locale:Loc
     {['CLOSED','CANCELLED'].includes(detail.status)?<p>{t('terminal')}</p>:!Object.values(detail.actions).some(Boolean)&&<p>{t('readOnly')}</p>}
    </header>}
    operations={<>
+    <IncidentReliability locale={locale} account={account} org={org} incidentId={detail.id} controller={!!(detail.actions.stabilize||detail.actions.reactivate||detail.actions.close)} refresh={refresh} read={rpc}/>
     {detail.training&&<TrainingLifecycle locale={locale} incident={detail} initialization={initialization?.incident===detail.id?initialization.value:undefined} disabled={loading||busy||!!pending} onAction={action=>ask(action)}/>}
     {detail.training&&<TemplateInitialization key={account+'/'+org+'/'+detail.id} locale={locale} account={account} org={org} incident={detail.id} refresh={refresh} read={rpc} onRefresh={reload} onState={value=>setInitialization({incident:detail.id,value})}/>}
     <div id="sim-command"><WorkspaceSection title={t('commandTree')}>   {detail.status!=='DRAFT'&&<CommandSection key={`${account}/${org}/${detail.id}`} locale={locale} account={account} org={org} incident={detail} disabled={loading||busy||!!pending} read={rpc} onAction={ask}/>}

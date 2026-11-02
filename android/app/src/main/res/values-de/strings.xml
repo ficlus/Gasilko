@@ -731,4 +731,23 @@
     <string name="ir_transport">Das Ergebnis lässt sich nicht sicher bestätigen. Originalanfrage behalten und Statusprüfung verwenden.</string>
     <string name="ir_storage">Dauerhaftes Speichern nicht möglich. Neue ungespeicherte Aktionen werden nicht gesendet; Ergebnisse bereits gesendeter Anfragen nach Wiederherstellung des Speichers prüfen.</string>
     <string name="ir_secure_storage">Sicherer Speicher oder Schlüssel nicht verfügbar. Zugriff bleibt gesperrt; ausstehende Daten nicht löschen.</string>
+    <string name="idg_title">Diagnostik — mein Gerät</string>
+    <string name="idg_org_scope">Bereich: dieses Konto und ausgewählte Organisation. Bei gesperrtem Zugriff bleiben neutrale Zähler organisationsbezogen.</string>
+    <string name="idg_incident_scope">Bereich: dieses Konto, ausgewählte Organisation und Einsatz.</string>
+    <string name="idg_device_only">LOKAL AUF DEM GERÄT. Diese Zähler sind weder Serverrückstand noch Ausführungsnachweis.</string>
+    <string name="idg_unavailable">Dauerhafte lokale Quelle nicht lesbar. Anzahl und Zustand der Vorgänge sind UNBEKANNT, weder null noch erfolgreich.</string>
+    <string name="idg_pending">Dauerhaft LOCAL_PENDING: %1$s</string>
+    <string name="idg_unknown">Unbekanntes Ergebnis aus dauerhaften Datensätzen: %1$s</string>
+    <string name="idg_oldest">Alter der ältesten unbestätigten Absicht (lokale Minuten): %1$s</string>
+    <string name="idg_read_age">Alter des letzten autorisierten Lesens (lokale Minuten): %1$s</string>
+    <string name="idg_local_empty">Lokale Quelle gelesen; keine Vorgänge für dieses Konto/diese Organisation. Kein Nachweis eines gesunden Servers.</string>
+    <string name="idg_partial_scope">Einige dauerhafte Datensätze lassen sich dem Einsatz nicht sicher zuordnen. Vollständigkeit der Einsatzzähler UNBEKANNT; Originalnachweise bleiben erhalten.</string>
+    <string name="idg_read_failure">Zuletzt beobachtete Lesefehlerkategorie: %1$s</string>
+    <string name="idg_not_observed">Keine Beobachtung — UNBEKANNT</string>
+    <string name="idg_not_collected">Nicht erfasst: Versuchsanzahl je Vorgang, letzter Versuch, menschlich gelesen/ACK und Versionsverteilung. Lokales Alter ist keine Serverlatenz.</string>
+    <string name="idg_issue_stale">Gespeicherte letzte Kategorie — veraltete Version: %1$s</string>
+    <string name="idg_issue_protocol">Gespeicherte letzte Kategorie — Protokoll/Identität: %1$s</string>
+    <string name="idg_issue_network">Gespeicherte letzte Kategorie — unsichere Übertragung: %1$s</string>
+    <string name="idg_issue_busy">Gespeicherte letzte Kategorie — vorübergehend ausgelastet: %1$s</string>
+    <string name="idg_issue_storage">Gespeicherte letzte Kategorie — Speicher: %1$s</string>
 </resources>

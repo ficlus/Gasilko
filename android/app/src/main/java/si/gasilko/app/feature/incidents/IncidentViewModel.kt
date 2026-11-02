@@ -8,7 +8,10 @@ import kotlinx.serialization.json.JsonObject
 
 class IncidentViewModel(val repository: IncidentRepository,val organization: String,private val scope: CoroutineScope): ViewModel() {
     val syncFailure=repository.syncFailure
-    val state=repository.observe(organization).stateIn(scope,SharingStarted.WhileSubscribed(5_000),IncidentFieldState())
+    private val observation=MutableStateFlow(0)
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val state=observation.flatMapLatest {repository.observe(organization)}
+        .stateIn(scope,SharingStarted.WhileSubscribed(5_000),IncidentFieldState())
     private val working=MutableStateFlow(false)
     val busy=working.asStateFlow()
     private val commandFailure=MutableStateFlow<String?>(null)
@@ -39,7 +42,7 @@ class IncidentViewModel(val repository: IncidentRepository,val organization: Str
             finally { working.value=false }
         }
     }
-    fun sync() { repository.syncNow(organization);NotificationTap.hint() }
+    fun sync() { observation.update {it+1};repository.syncNow(organization);NotificationTap.hint() }
     fun transition(incident: String,assignment: String,status: String,reason: String)=action {
         repository.transition(organization,incident,assignment,status,reason)
     }

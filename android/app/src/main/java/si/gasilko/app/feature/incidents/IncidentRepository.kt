@@ -48,7 +48,8 @@ internal fun unreconciledReceipt(assignment: JsonObject,op: FieldOperation?): Bo
     return revision>(assignment.text("changed_revision").toLongOrNull() ?: -1L)
 }
 data class IncidentFieldState(val incidents: List<JsonObject> = emptyList(),val operations: List<FieldOperation> = emptyList(),
-    val locked: Boolean=true,val warning: Boolean=false,val verifiedAt: Long?=null,val leaseRemaining: Long=0)
+    val locked: Boolean=true,val warning: Boolean=false,val verifiedAt: Long?=null,val leaseRemaining: Long=0,
+    val queueAvailable: Boolean=false,val diagnosticsFailure: String?=null)
 
 /** Captures one authenticated identity. Scope checks also run after every network suspension. */
 class IncidentRepository(private val context: Context,private val client: SupabaseClient,
@@ -80,13 +81,19 @@ class IncidentRepository(private val context: Context,private val client: Supaba
         return combine(dao.observe(account,org),dao.observeOperations(account,org),ticks,activeDispatches) { row,ops,_,active ->
             try {
                 val left=lease(org,row)
-                if(left<=0)IncidentFieldState(operations=ops.map(::neutralOperation)) else IncidentFieldState(parse(row!!.payload).rows("incidents"),ops.map { op ->
+                if(left<=0)IncidentFieldState(operations=ops.map(::neutralOperation),queueAvailable=true) else IncidentFieldState(parse(row!!.payload).rows("incidents"),ops.map { op ->
                     if(op.operation.state=="SENDING" && "$account/$org/${op.operation.operationId}" !in active)op.copy(operation=op.operation.copy(state="OUTCOME_UNKNOWN")) else op
-                },false,left<=7_200_000,row.verifiedAt,left)
+                },false,left<=7_200_000,row.verifiedAt,left,queueAvailable=true)
             } catch(e: CancellationException) {
                 if(currentCoroutineContext().isActive && (client.auth.currentUserOrNull()?.id!=account || !scheduler.selected(account,org)))IncidentFieldState() else throw e
-            } catch(_: Exception) { if(client.auth.currentUserOrNull()?.id==account && scheduler.selected(account,org))
-                IncidentFieldState(operations=ops.map(::neutralOperation)) else IncidentFieldState() }
+            } catch(e: Exception) { if(client.auth.currentUserOrNull()?.id==account && scheduler.selected(account,org))
+                IncidentFieldState(operations=ops.map(::neutralOperation),queueAvailable=true,
+                    diagnosticsFailure=when(e) {is java.security.GeneralSecurityException->"SECURE_STORAGE"
+                        is RegistryFailure->"SCOPE_UNAVAILABLE";else->"COMPATIBILITY"}) else IncidentFieldState() }
+        }.catch {e->
+            if(e is CancellationException)throw e
+            // A failed Room observation must not leave an old successful count on screen.
+            emit(IncidentFieldState(diagnosticsFailure="LOCAL_STORAGE"))
         }
     }
     private suspend fun revoke(org: String)=incidentIdentityAccess.withLock {

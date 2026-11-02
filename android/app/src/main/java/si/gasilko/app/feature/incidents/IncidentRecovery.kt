@@ -47,13 +47,14 @@ internal fun neutralOperation(op: FieldOperation)=op.copy(operation=op.operation
     request=null,result=null,error="SCOPE_UNAVAILABLE")
 internal enum class RecoveryPhase { LOCAL_INTENT,READY_TO_SEND,SENDING,OUTCOME_UNKNOWN,SERVER_CONFIRMED,
     DEFINITIVELY_REJECTED,NEEDS_ATTENTION,BLOCKED_DEPENDENCY,SCOPE_UNAVAILABLE }
-internal fun recoveryPhase(op: FieldOperation,all: List<FieldOperation>,visible: Boolean): RecoveryPhase {
+internal fun recoveryPhase(op: FieldOperation,all: List<FieldOperation>,visible: Boolean)=
+    recoveryPhaseWithParent(op,op.parent?.let {p->all.find {it.operation.sequence==p}},visible)
+internal fun recoveryPhaseWithParent(op: FieldOperation,parent: FieldOperation?,visible: Boolean): RecoveryPhase {
     if(!visible || op.error in setOf("SCOPE_UNAVAILABLE","NOT_AUTHORIZED"))return RecoveryPhase.SCOPE_UNAVAILABLE
     if(op.error in setOf("OPERATION_REUSED","IDENTITY_MISMATCH"))return RecoveryPhase.NEEDS_ATTENTION
     if(op.operation.state=="SERVER_CONFIRMED")return RecoveryPhase.SERVER_CONFIRMED
     if(op.operation.state=="SENDING")return RecoveryPhase.SENDING
     if(op.uncertain())return RecoveryPhase.OUTCOME_UNKNOWN
-    val parent=op.parent?.let {p->all.find {it.operation.sequence==p}}
     if(op.parent!=null && parent?.operation?.state!="SERVER_CONFIRMED")return RecoveryPhase.BLOCKED_DEPENDENCY
     if(op.firstRejected())return RecoveryPhase.DEFINITIVELY_REJECTED
     return when(op.operation.state) {
