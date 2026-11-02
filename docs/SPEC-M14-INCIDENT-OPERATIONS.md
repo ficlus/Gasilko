@@ -3159,3 +3159,22 @@ NOT APPLIED. No D2 Edge, Storage, Realtime, Cron, dependency or Room migration.
 Human sign-off remains a separate operator record; no metric declares readiness.
 See [D2 source/provenance, owner rollout and all80 UNEXECUTED checks](M14.8D2-field-reliability-metrics-review-readiness.md).
 No tests/build/SQL/deployment/runtime/manual acceptance performed by the agent.
+
+## M14.8C3 — REAL unit position availability (source-only, decision B)
+
+Source inventory found no usable authorized OBSERVED_REAL source. Existing
+simulation positions remain SIMULATED; NAV ACTUAL_POSITION is unavailable and
+manual route origins/targets are not observations. No GPS ingestion or sharing
+permission is introduced.
+
+Web command-map notice and existing unit rows, plus Android C1 map/Units dialog,
+now expose a scoped grey position-unavailable view and conditional120s/900s
+freshness legend. Observation coordinate/time/age/accuracy/revision remain null.
+No REAL marker layer, live/last-known claim, tracking store, new RPC or SQL
+migration exists. Room16, C1 schema1/B1 atomic cursor, D1/D2 recovery, original
+operation receipts and all existing SIM/RTS/NAV behavior remain unchanged.
+
+Positive REAL observation/freshness/retention/map cases are BLOCKED pending
+separately approved C2/M15 source, permission/consent, trusted time and expiry.
+See [C3 source evidence and all80 UNEXECUTED owner cases](M14.8C3-real-unit-location-freshness.md).
+No tests/build/SQL/deployment/runtime/monitoring/manual acceptance performed.

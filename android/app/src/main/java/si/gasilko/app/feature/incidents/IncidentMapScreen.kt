@@ -71,6 +71,7 @@ internal fun IncidentMapScreen(model: IncidentViewModel,registry: HydrantViewMod
     var choicePage by remember {mutableIntStateOf(0)}
     var browse by remember {mutableStateOf(false)}
     var showUnits by remember {mutableStateOf(false)}
+    var unitPage by remember(model,incidentId) {mutableIntStateOf(0)}
     var focusKey by remember(initialAssignment) {mutableIntStateOf(if(initialAssignment==null)0 else 1)}
     var routeFocus by remember {mutableStateOf(false)}
     var external by remember {mutableStateOf<ExternalMapIntent?>(null)}
@@ -143,6 +144,7 @@ internal fun IncidentMapScreen(model: IncidentViewModel,registry: HydrantViewMod
                 if(changedReview)FieldBanner(stringResource(R.string.im_review_changed),FieldTone.WARNING)
                 if(projection.invalid)FieldBanner(stringResource(R.string.im_invalid),FieldTone.WARNING)
                 Text(stringResource(R.string.im_scope),style=MaterialTheme.typography.bodySmall)
+                RealUnitLocationNotice()
                 FlowRow(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
                     listOf("TASK_TARGET","INCIDENT_SECTOR","INCIDENT_MAP_OBJECT","INCIDENT_LINKED_HYDRANT","ROUTE").forEach {kind->
                         FilterChip(selected=kind in layers,onClick={layers=if(kind in layers)layers-kind else layers+kind},label={Text(mapKind(kind))})
@@ -151,7 +153,7 @@ internal fun IncidentMapScreen(model: IncidentViewModel,registry: HydrantViewMod
                 }
                 FlowRow {
                     TextButton(onClick={browse=true;choices=visible.filter {it.kind!="ROUTE"}.map {it.id};choicePage=0}){Text(stringResource(R.string.im_features))}
-                    TextButton(onClick={showUnits=true}){Text(stringResource(R.string.im_units))}
+                    TextButton(onClick={unitPage=0;showUnits=true}){Text(stringResource(R.string.im_units))}
                     TextButton(onClick=model::sync){Text(stringResource(R.string.h_sync_now))}
                     TextButton(onClick={routeFocus=false;focusKey++},enabled=focus!=null){Text(stringResource(R.string.im_focus))}
                 }
@@ -200,7 +202,23 @@ internal fun IncidentMapScreen(model: IncidentViewModel,registry: HydrantViewMod
         },confirmButton={TextButton(onClick={choices=emptyList();browse=false}){Text(stringResource(R.string.h_back))}})
     if(showUnits)AlertDialog(onDismissRequest={showUnits=false},title={Text(stringResource(R.string.im_units))},
         text={Column(Modifier.heightIn(max=360.dp).verticalScroll(rememberScrollState())) {
-            incident.rows("units").forEach {u->Text(u.text("name"));Text(leaderStatus(u.text("status")));Text(stringResource(R.string.im_no_position))}
+            val allUnits=incident.rows("units")
+            val units=allUnits.filter {canonicalUuid(it.text("id"))}.distinctBy {it.text("id")}.sortedBy {it.text("id")}.take(100)
+            val currentUnitPage=minOf(unitPage,(units.size-1).coerceAtLeast(0)/30)
+            RealUnitLocationNotice()
+            if(allUnits.size!=units.size)FieldBanner(stringResource(R.string.c3_partial),FieldTone.WARNING)
+            units.drop(currentUnitPage*30).take(30).forEach {u->
+                val position=realUnitPositionView(RealUnitBinding(model.repository.account,model.organization,incidentId,u.text("id"),
+                    incident.obj("field_map").text("_scope")),!state.locked&&projection.supported)
+                OperationalCard {
+                    Text(u.text("name"));Text(leaderStatus(u.text("status")))
+                    RealUnitPositionBadge(position)
+                }
+            }
+            FlowRow {
+                TextButton(enabled=currentUnitPage>0,onClick={unitPage=currentUnitPage-1}){Text(stringResource(R.string.im_previous))}
+                TextButton(enabled=(currentUnitPage+1)*30<units.size,onClick={unitPage=currentUnitPage+1}){Text(stringResource(R.string.im_next))}
+            }
         }},confirmButton={TextButton(onClick={showUnits=false}){Text(stringResource(R.string.h_back))}})
     external?.let { intent->val f=features.find {it.id==intent.feature};val point=f?.let {mapPoint(it.geometry)}
         val permitted=f!=null && point==intent.point && f.version==intent.version && incident.text("revision")==intent.revision

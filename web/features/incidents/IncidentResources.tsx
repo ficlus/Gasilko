@@ -1,6 +1,8 @@
 'use client';
 import {useEffect,useRef,useState,type FormEvent} from 'react';
 import {incidentText} from '../../lib/incidents/messages';
+import {RealUnitPositionBadge} from './RealUnitPosition';
+import {useIncidentLive} from './IncidentLiveProvider';
 import type {Locale} from '../../lib/i18n';
 import {operationalText} from '../../lib/operational/messages';
 import type {Resources,ResourceCandidate,Unit,Allocation} from '../../lib/operational/model';
@@ -20,7 +22,9 @@ type Read=<T>(name:string,args:Record<string,unknown>,signal?:AbortSignal,accoun
 type Props={crewOutcomes:CrewOutcomes;locale:Locale;account:string;org:string;incidentId:string;refresh:number;feedback:CopFeedback;disabled:boolean;read:Read;onAction:CommandAction};
 export function IncidentResources({crewOutcomes,locale,account,org,incidentId,refresh,feedback,disabled,read,onAction}:Props){
  const workspace=useWorkspace(),rts=useRts(),simulation=useSimulation(),navigation=useIncidentNavigation(),nt=navigationText(locale),tt=taskText(locale);
- const t=operationalText(locale);
+ const t=operationalText(locale),live=useIncidentLive();
+ const positionScope=account+'/'+org+'/'+incidentId,positionScopeRef=useRef(positionScope);positionScopeRef.current=positionScope;
+ const [positionReadScope,setPositionReadScope]=useState('');
  const [view,setView]=useState<Resources|null>(null),[error,setError]=useState(''),[page,setPage]=useState(0),[reload,setReload]=useState(0);
  const [owner,setOwner]=useState(''),[mode,setMode]=useState<'UNIT'|'RESOURCE'>('UNIT'),[candidate,setCandidate]=useState<ResourceCandidate|null>(null);
  const [sector,setSector]=useState(''),[unit,setUnit]=useState(''),[quantity,setQuantity]=useState('1'),[newId,setNewId]=useState(''),[manual,setManual]=useState(false);
@@ -28,6 +32,9 @@ export function IncidentResources({crewOutcomes,locale,account,org,incidentId,re
  const acRef=useRef<AbortController|null>(null);
  const scope={p_incident_id:incidentId,p_acting_organization_id:org};
  const blockedRef=useRef(false);
+ const positionAuthorized=positionReadScope===positionScope&&!error&&!blockedRef.current&&live?.status!=='ACCESS_LOST'&&!rts?.blocked;
+ const positionBadge=(id:string)=><RealUnitPositionBadge locale={locale} authorized={positionAuthorized}
+  binding={{account,actingOrganizationId:org,incidentId,unitAssignmentId:id}}/>;
  function fail(e:unknown){const code=e instanceof Error?e.message:'SERVER';setError(code);
   if(['NOT_AUTHORIZED','EXPIRED'].includes(code)){rts?.revoke();blockedRef.current=true;setBlocked(true);setView(null);setCandidate(null);acRef.current?.abort();}}
  useEffect(()=>{if(feedback.kind==='blocked'){blockedRef.current=true;setBlocked(true);setView(null);setCandidate(null);acRef.current?.abort();}
@@ -36,8 +43,8 @@ export function IncidentResources({crewOutcomes,locale,account,org,incidentId,re
  },[feedback]);
  useEffect(()=>{if(blockedRef.current)return;const ac=new AbortController();acRef.current=ac;setError('');
   void read<Resources>('incident_resources',{p_incident_id:incidentId,p_acting_organization_id:org,p_history_page:page},ac.signal,account)
-   .then(r=>{if(!ac.signal.aborted&&!blockedRef.current){setView(r);setOwner(v=>r.organizations.some(o=>o.id===v)?v:r.organizations[0]?.id??'');}})
-   .catch(e=>{if(!ac.signal.aborted){setView(null);fail(e);}});
+   .then(r=>{if(!ac.signal.aborted&&!blockedRef.current&&positionScopeRef.current===positionScope){setView(r);setPositionReadScope(positionScope);setOwner(v=>r.organizations.some(o=>o.id===v)?v:r.organizations[0]?.id??'');}})
+   .catch(e=>{if(!ac.signal.aborted&&positionScopeRef.current===positionScope){setView(null);fail(e);}});
   return()=>ac.abort();
  },[account,org,incidentId,refresh,page,reload,read]);
  useEffect(()=>{
@@ -78,7 +85,7 @@ export function IncidentResources({crewOutcomes,locale,account,org,incidentId,re
      <p>{simulation?.data?.positions.some(position=>position.incident_unit_id===unit.id&&position.source==='SIMULATED')?incidentText(locale)('simPositionKnown'):incidentText(locale)('workspaceNoPosition')}</p>
      {navigation?.data?.rows.filter(assignment=>assignment.unit_id===unit.id).map(assignment=><p key={assignment.id}>{locale==='de'?assignment.label_de:assignment.label_sl} · {tt(assignment.status)} · {assignment.task_id}</p>)}
      {navigation?.data?.session?.incident_unit_id===unit.id&&<p>{nt(navigation.data.session.effective_status)}</p>}
-<p>{unit.sector_name??t('none')} · {t('UNIT_LEADER')}: {unit.leader?.name??t('none')}</p><button onClick={()=>workspace?.select({kind:'INCIDENT_UNIT',id:unit.id})}>{incidentText(locale)('copSelect')}</button></article>)}
+{positionBadge(unit.id)}<p>{unit.sector_name??t('none')} · {t('UNIT_LEADER')}: {unit.leader?.name??t('none')}</p><button onClick={()=>workspace?.select({kind:'INCIDENT_UNIT',id:unit.id})}>{incidentText(locale)('copSelect')}</button></article>)}
    </WorkspaceSection>}
    {scopedSector&&<WorkspaceSlot name="selectedPane"><WorkspaceSection title={t('resourcesTitle')} open>
     <p>{incidentText(locale)('explicitSectorRelations')}</p>
@@ -96,9 +103,9 @@ export function IncidentResources({crewOutcomes,locale,account,org,incidentId,re
     aria-pressed={rts?.recipients.some(r=>r.type==='INCIDENT_UNIT'&&r.id===u.id)??false}
     onClick={e=>{workspace.select({kind:'INCIDENT_UNIT',id:u.id});const row=selectableUnits.find(r=>r.id===u.id);
      if(row&&rts?.enabled)rts.pick({...row,assignmentId:rts.recipients.find(r=>recipientKey(r)===recipientKey(row))?.assignmentId??crypto.randomUUID()},selectableUnits.map(r=>({...r,assignmentId:rts.recipients.find(p=>recipientKey(p)===recipientKey(r))?.assignmentId??crypto.randomUUID()})),{list:'units:'+page,toggle:e.ctrlKey||e.metaKey,range:e.shiftKey});}}>
-    <strong>{u.callsign} · {u.name}</strong><span>{t(u.status)} · {u.sector_name??t('none')}</span>
+    <strong>{u.callsign} · {u.name}</strong><span>{t(u.status)} · {u.sector_name??t('none')}</span>{positionBadge(u.id)}
     <small>{t('crew')}: {u.crew.length} · {t('UNIT_LEADER')}: {u.leader?.name??t('none')}</small></button>)}
-   {view.units.filter(u=>!workspace||(workspace.selected?.kind==='INCIDENT_UNIT'&&workspace.selected.id===u.id)).map(u=><WorkspaceSlot name="selectedPane" key={u.id}><div><p>{incidentText(locale)('workspaceNoPosition')}</p><UnitCard key={u.id+':'+u.version} unit={u} view={view} locale={locale} locked={locked} account={account} scope={scope} read={read} ask={ask} onError={fail}/><TeamCrewTemplate key={u.id} locale={locale} account={account} org={org} incidentId={incidentId} unit={u} locked={locked} read={read} ask={ask} outcomes={crewOutcomes}/></div></WorkspaceSlot>)}
+   {view.units.filter(u=>!workspace||(workspace.selected?.kind==='INCIDENT_UNIT'&&workspace.selected.id===u.id)).map(u=><WorkspaceSlot name="selectedPane" key={u.id}><div>{positionBadge(u.id)}<UnitCard key={u.id+':'+u.version} unit={u} view={view} locale={locale} locked={locked} account={account} scope={scope} read={read} ask={ask} onError={fail}/><TeamCrewTemplate key={u.id} locale={locale} account={account} org={org} incidentId={incidentId} unit={u} locked={locked} read={read} ask={ask} outcomes={crewOutcomes}/></div></WorkspaceSlot>)}
    <h3>{t('RESOURCE')}</h3>{!view.allocations.length&&<p>{t('empty')}</p>}
    {workspace&&view.allocations.map(a=><button className="web-row" key={a.id} onClick={()=>workspace.select({kind:'ALLOCATION',id:a.id})}>
     <strong>{a.name}</strong><span>{a.quantity} {t(a.unit_of_measure_code)} · {t(a.status)}</span><small>{a.unit_name??a.organization_name}</small></button>)}

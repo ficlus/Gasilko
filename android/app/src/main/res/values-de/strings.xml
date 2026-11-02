@@ -750,4 +750,18 @@
     <string name="idg_issue_network">Gespeicherte letzte Kategorie — unsichere Übertragung: %1$s</string>
     <string name="idg_issue_busy">Gespeicherte letzte Kategorie — vorübergehend ausgelastet: %1$s</string>
     <string name="idg_issue_storage">Gespeicherte letzte Kategorie — Speicher: %1$s</string>
+    <string name="c3_title">REALE Einheitenpositionen</string>
+    <string name="c3_unavailable">POSITION NICHT VERFÜGBAR</string>
+    <string name="c3_locked">Positionszugriff nicht verfügbar</string>
+    <string name="c3_source">Eine verlässliche Quelle geteilter REALER Positionen ist noch nicht verfügbar. Daher werden keine Einheitenpositionen auf der Karte gesetzt.</string>
+    <string name="c3_no_time">Beobachtungszeit: unbekannt</string>
+    <string name="c3_no_accuracy">Genauigkeit: nicht angegeben</string>
+    <string name="c3_distinction">Position bedeutet weder Einheitenstatus noch Ankunft, Einsatzbereitschaft oder Auftragsabschluss. Route, Ziel und lokaler blauer Punkt sind keine geteilte Einheitenposition.</string>
+    <string name="c3_sim">SIM bleibt eine getrennte, ausdrücklich simulierte Quelle und bedeutet niemals REAL GPS.</string>
+    <string name="c3_legend">Frischeregeln — erst für eine genehmigte REALE Beobachtung</string>
+    <string name="c3_current">AKTUELL — grün, unter %1$s Min., nur mit aktueller Quellenbestätigung</string>
+    <string name="c3_last_known">ZULETZT BEKANNT — orange, ab %1$s bis unter %2$s Min.; offline niemals aktuell</string>
+    <string name="c3_expired">NICHT VERFÜGBAR — grau, ab %1$s Min. oder ohne Rechte, Quelle bzw. vertrauenswürdige Zeit; kein Pin</string>
+    <string name="c3_retention">Gültige Berechtigung und erlaubte Aufbewahrung können die Anzeige früher begrenzen. Alter wird nicht aus Lesezeit oder Route berechnet.</string>
+    <string name="c3_partial">Liste unvollständig. Höchstens 100 bereits erlaubte Einheiten des aktuellen Einsatzabbilds werden angezeigt.</string>
 </resources>

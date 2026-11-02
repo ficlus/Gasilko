@@ -14,6 +14,7 @@ import type {ContextHydrant} from '../../lib/hydrants/viewport';
 import {useRts} from './rtsSession';
 import {MapOverlaySlot,useWorkspace,WorkspaceSlot,WorkspaceSection,ContextActions} from './workspace';
 import {IncidentLiveStatus} from './IncidentLiveStatus';
+import {RealUnitLocationNotice} from './RealUnitPosition';
 import {useIncidentLive} from './IncidentLiveProvider';
 import {HydrantDetailsAction} from './HydrantDetailsAction';
 import {useHydrantContext} from './useHydrantContext';
@@ -161,6 +162,7 @@ export function IncidentCop({locale,account,org,incidentId,refresh,feedback,disa
     <p className="workspace-map-legend">{t('workspaceMarkerLegend')}</p><p className="workspace-map-legend">{t('copTacticalLegend')}</p>
    </>}
   </details>
+  <MapOverlaySlot name="mapStatus"><RealUnitLocationNotice locale={locale} locked={!cop||!!error||!!rts?.blocked||live?.status==='ACCESS_LOST'}/></MapOverlaySlot>
   {workspace?.view==='command' ? (
    (initialMapLoading||error||context.error||context.more||saved)&&
    <MapOverlaySlot name="mapStatus"><div className="command-map-feedback" aria-live="polite">

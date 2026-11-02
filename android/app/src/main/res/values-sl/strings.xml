@@ -677,4 +677,18 @@
     <string name="idg_issue_network">Shranjena zadnja kategorija — negotov prenos: %1$s</string>
     <string name="idg_issue_busy">Shranjena zadnja kategorija — začasna zasedenost: %1$s</string>
     <string name="idg_issue_storage">Shranjena zadnja kategorija — shramba: %1$s</string>
+    <string name="c3_title">REAL položaji enot</string>
+    <string name="c3_unavailable">POLOŽAJ NI NA VOLJO</string>
+    <string name="c3_locked">Dostop do položaja ni na voljo</string>
+    <string name="c3_source">Zanesljiv vir deljenih REAL položajev še ni na voljo. Zato enot ne postavljamo na zemljevid.</string>
+    <string name="c3_no_time">Čas opazovanja: neznan</string>
+    <string name="c3_no_accuracy">Natančnost: ni podatka</string>
+    <string name="c3_distinction">Položaj ni status enote ali dokaz prihoda, pripravljenosti oziroma zaključka naloge. Pot, cilj in lokalna modra pika niso deljeni položaj enote.</string>
+    <string name="c3_sim">SIM ostaja ločen, izrecno simuliran vir; nikoli ne pomeni REAL GPS.</string>
+    <string name="c3_legend">Pravila svežine — šele za odobreno REAL opazovanje</string>
+    <string name="c3_current">AKTUALNO — zeleno, manj kot %1$s min, samo s trenutno potrditvijo vira</string>
+    <string name="c3_last_known">ZADNJI ZNANI — oranžno, od %1$s do manj kot %2$s min; brez povezave nikoli aktualno</string>
+    <string name="c3_expired">NI NA VOLJO — sivo, pri %1$s min ali brez pravic, vira oziroma zaupanja vrednega časa; brez pina</string>
+    <string name="c3_retention">Veljavno dovoljenje in dovoljena hramba lahko prikaz omejita še prej. Starosti ne računamo iz časa branja ali poti.</string>
+    <string name="c3_partial">Seznam ni popoln. Prikazujemo največ 100 že dovoljenih enot iz trenutnega incidentnega posnetka.</string>
 </resources>
