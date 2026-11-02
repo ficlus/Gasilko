@@ -48,7 +48,7 @@ internal fun unreconciledReceipt(assignment: JsonObject,op: FieldOperation?): Bo
     return revision>(assignment.text("changed_revision").toLongOrNull() ?: -1L)
 }
 data class IncidentFieldState(val incidents: List<JsonObject> = emptyList(),val operations: List<FieldOperation> = emptyList(),
-    val locked: Boolean=true,val warning: Boolean=false,val verifiedAt: Long?=null)
+    val locked: Boolean=true,val warning: Boolean=false,val verifiedAt: Long?=null,val leaseRemaining: Long=0)
 
 /** Captures one authenticated identity. Scope checks also run after every network suspension. */
 class IncidentRepository(private val context: Context,private val client: SupabaseClient,
@@ -80,10 +80,13 @@ class IncidentRepository(private val context: Context,private val client: Supaba
         return combine(dao.observe(account,org),dao.observeOperations(account,org),ticks,activeDispatches) { row,ops,_,active ->
             try {
                 val left=lease(org,row)
-                if(left<=0)IncidentFieldState() else IncidentFieldState(parse(row!!.payload).rows("incidents"),ops.map { op ->
+                if(left<=0)IncidentFieldState(operations=ops.map(::neutralOperation)) else IncidentFieldState(parse(row!!.payload).rows("incidents"),ops.map { op ->
                     if(op.operation.state=="SENDING" && "$account/$org/${op.operation.operationId}" !in active)op.copy(operation=op.operation.copy(state="OUTCOME_UNKNOWN")) else op
-                },false,left<=7_200_000,row.verifiedAt)
-            } catch(e: CancellationException) { throw e } catch(_: Exception) { IncidentFieldState() }
+                },false,left<=7_200_000,row.verifiedAt,left)
+            } catch(e: CancellationException) {
+                if(currentCoroutineContext().isActive && (client.auth.currentUserOrNull()?.id!=account || !scheduler.selected(account,org)))IncidentFieldState() else throw e
+            } catch(_: Exception) { if(client.auth.currentUserOrNull()?.id==account && scheduler.selected(account,org))
+                IncidentFieldState(operations=ops.map(::neutralOperation)) else IncidentFieldState() }
         }
     }
     private suspend fun revoke(org: String)=incidentIdentityAccess.withLock {
@@ -99,7 +102,7 @@ class IncidentRepository(private val context: Context,private val client: Supaba
     private suspend fun rpc(name: String,request: JsonObject): JsonObject = incidentIdentityAccess.withLock {
         scope(request.text("p_acting_organization_id").ifEmpty { request.text("p_organization_id") })
         currentCoroutineContext().ensureActive()
-        client.postgrest.rpc(name,request).decodeAs<JsonObject>()
+        client.postgrest.rpc(name,request).decodeAs<JsonObject>().also { scope(request.text("p_acting_organization_id").ifEmpty { request.text("p_organization_id") });currentCoroutineContext().ensureActive() }
     }
     suspend fun refresh(org: String)=hydrantRemoteAccess.withLock { refreshLocked(org) }
     private suspend fun revokeIncident(org: String,id: String)=incidentIdentityAccess.withLock {
@@ -182,7 +185,7 @@ class IncidentRepository(private val context: Context,private val client: Supaba
                 { name,request -> if(name=="incident_message_page")messageRead(org,request.text("p_incident_id"),name,request)
                     else rpc(name,request).also { scope(org) } },
                 { id -> revokeIncident(org,id) },{id->hideMapRoutes(org,id)})
-            val staged=reconciler.reconcile(previous?.let { parse(it.payload).rows("incidents") }.orEmpty(),dao.cursors(account,org))
+            val staged=reconciler.reconcile(previous?.let { runCatching {parse(it.payload).rows("incidents")}.getOrDefault(emptyList()) }.orEmpty(),dao.cursors(account,org))
             scope(org)
             val payload=buildJsonObject {
                 put("account",account);put("organization",org);put("incidents",JsonArray(staged.incidents))
@@ -220,7 +223,7 @@ class IncidentRepository(private val context: Context,private val client: Supaba
         } catch(e: CancellationException) { throw e }
         catch(e: Exception) {
             val message=e.message.orEmpty()
-            val denied=(e is RestException && e.statusCode in listOf(401,403)) || "NOT_AUTHORIZED" in message
+            val denied=fieldFailure(e)=="NOT_AUTHORIZED"
             if(denied)revoke(org)
             refreshFailure.value=when {
                 denied -> "ACCESS"
@@ -243,11 +246,14 @@ class IncidentRepository(private val context: Context,private val client: Supaba
         dao.state(account,org,op.operation.sequence,"NEEDS_ATTENTION")
     }
     private suspend fun request(org: String,op: FieldOperation): String? {
-        op.request?.let { return it } // Already prepared: never rebase, including an unknown outcome.
         val body=payload(op)
         val parent=op.parent?.let { id -> dao.operations(account,org).find { it.operation.sequence==id } }
         if(op.parent!=null && parent==null) { attention(org,op,"DEPENDENCY_MISSING");return null }
         if(parent!=null && parent.operation.state!="SERVER_CONFIRMED")return null
+        if(parent!=null && runCatching {parent.result?.let(::parse)?.let {fieldReceiptMatches(parent,it)}}.getOrNull()!=true) {
+            attention(org,op,"DEPENDENCY_CHANGED");return null
+        }
+        op.request?.let { return it } // Frozen forever, after the original dependency proof.
         val expected=if(parent!=null) {
             // Canonical receipt confirms the operation, but contains aggregate versions,
             // not assignment.version. Read it authoritatively; never guess expected + 1.
@@ -273,105 +279,286 @@ class IncidentRepository(private val context: Context,private val client: Supaba
             put("p_operation",op.operation.operationId);put("p_acting_organization_id",org)
             put("p_incident_id",body.text("incident"));put("p_expected_version",JsonPrimitive(BigInteger(expected).longValueExact()))
             put("p_payload",body.obj("payload"))
-        }.toString().also { dao.prepare(op.operation.sequence,it) }
+        }.toString().also { original->
+            incidentIdentityAccess.withLock {
+                scope(org);currentCoroutineContext().ensureActive()
+                db.withTransaction {dao.prepare(op.operation.sequence,original);scope(org);currentCoroutineContext().ensureActive()}
+            }
+        }
     }
-    suspend fun transition(org: String,incident: String,assignment: String,status: String,reason: String) =
+    suspend fun transition(org: String,incident: String,assignment: String,status: String,reason: String,
+        reviewedRejection: String?=null,reviewedVersion: String?=null) =
         hydrantRemoteAccess.withLock {
             scope(org)
+            if(reviewedRejection!=null)refreshLocked(org)
             val row=dao.snapshot(account,org)
             require(lease(org,row)>0)
             val i=parse(row!!.payload).rows("incidents").single { it.text("id")==incident }
             val a=i.rows("assignments").single { it.text("id")==assignment }
             require(a.flag("can_execute"))
-            val previous=dao.operations(account,org).lastOrNull { it.operation.entityId==assignment }
-            require(previous?.operation?.state!="NEEDS_ATTENTION")
-            val pending=previous?.takeIf { it.operation.state!="SERVER_CONFIRMED" || unreconciledReceipt(a,it) }
+            val history=dao.operations(account,org).filter {it.operation.entityId==assignment && payload(it).text("rpc")=="incident_transition_task_assignment"}
+            val previous=history.lastOrNull()
+            if(reviewedRejection!=null) {
+                val original=history.single {it.operation.operationId==reviewedRejection}
+                require(original.correctable() && a.text("version")==reviewedVersion && payload(original).text("incident")==incident)
+                require(history.none {it.uncertain() || it.operation.state in listOf("LOCAL_PENDING","SENDING","DRAFT")})
+            } else require(previous?.operation?.state!="NEEDS_ATTENTION")
+            val pending=previous?.takeIf {reviewedRejection==null}?.takeIf { it.operation.state!="SERVER_CONFIRMED" || unreconciledReceipt(a,it) }
             val effective=pending?.let { payload(it).obj("payload").text("status") } ?: a.text("status")
             require(status in transitions(effective,a.obj("task").obj("configuration").flag("requires_acknowledgement")))
             require(reason.length<=2000 && (status !in listOf("BLOCKED","UNABLE") || reason.isNotBlank()))
             val intent=buildJsonObject {
                 put("incident",incident);put("task",a.obj("task").text("id"));put("expected",a.text("version"))
+                reviewedRejection?.let {put("corrects_operation",it)}
                 put("rpc","incident_transition_task_assignment")
                 put("payload",buildJsonObject { put("id",assignment);put("status",status);put("reason",reason.trim()) })
             }
+            incidentIdentityAccess.withLock {
+            scope(org);currentCoroutineContext().ensureActive()
             db.withTransaction {
                 val sequence=db.registry().enqueue(PendingHydrantChange(operationId=UUID.randomUUID().toString(),account=account,
                     organization=org,entityId=assignment,operation="INCIDENT_TASK",payload=intent.toString(),baseVersion=null,
                     createdAt=System.currentTimeMillis(),state="LOCAL_PENDING"))
                 dao.dispatch(IncidentDispatch(sequence,pending?.operation?.sequence,null))
+                scope(org);currentCoroutineContext().ensureActive()
+            }
             }
             scheduler.enqueue(account,org)
         }
-    /** Same existing WorkManager/mutex. One failed assignment never stalls an independent assignment. */
+    /** Bounded bulk lookup of original immutable requests; never a command. */
+    private suspend fun reconcileReceiptsLocked(org: String,operation: String?,automatic: Boolean=false,incidentFilter: String?=null) {
+        scope(org)
+        val selectedRows=dao.operations(account,org).filter {op->
+            runCatching {payload(op).text("rpc") in recoverableFieldRpcs}.getOrDefault(false) && op.request!=null &&
+                (incidentFilter==null || payload(op).text("incident")==incidentFilter) &&
+                if(operation!=null)op.operation.operationId==operation && op.operation.state!="DRAFT"
+                else op.uncertain() && (!automatic || (op.error !in setOf("RECEIPT_ABSENT","SCOPE_UNAVAILABLE","IDENTITY_MISMATCH","OPERATION_REUSED") && op.error?.startsWith("UNKNOWN_REJECTED:")!=true))
+        }.take(25)
+        val candidates=mutableListOf<FieldOperation>()
+        for(op in selectedRows) {
+            if(fieldRequestMatches(op,org,op.request!!))candidates.add(op)
+            else incidentIdentityAccess.withLock {
+                scope(org);currentCoroutineContext().ensureActive()
+                db.withTransaction {
+                    dao.outcome(op.operation.sequence,op.result,"IDENTITY_MISMATCH")
+                    if(op.operation.state!="SERVER_CONFIRMED")dao.state(account,org,op.operation.sequence,
+                        if(op.uncertain())"OUTCOME_UNKNOWN" else "NEEDS_ATTENTION")
+                    scope(org)
+                }
+            }
+        }
+        incidentLoop@ for((incident,ops) in candidates.groupBy {payload(it).text("incident")}) {
+        for(batch in ops.chunked(4)) {
+            val result=try {
+                rpc("incident_field_operation_receipts",buildJsonObject {
+                    put("p_acting_organization_id",org);put("p_incident_id",incident)
+                    put("p_requests",JsonArray(batch.map {op->buildJsonObject {
+                        put("rpc",payload(op).text("rpc"));put("request",parse(op.request!!))
+                    }}))
+                })
+            } catch(c: CancellationException){throw c}
+            catch(ex: Exception) {
+                if(ex is RestException && ex.statusCode==401 && fieldFailure(ex)=="NOT_AUTHORIZED")revoke(org)
+                else if(ex is RestException && ex.statusCode==403 && fieldFailure(ex)=="NOT_AUTHORIZED") {
+                    revokeIncident(org,incident)
+                    incidentIdentityAccess.withLock {
+                        scope(org);currentCoroutineContext().ensureActive()
+                        db.withTransaction {
+                            for(op in batch)if(op.uncertain()) {
+                                dao.outcome(op.operation.sequence,op.result,"SCOPE_UNAVAILABLE")
+                                dao.state(account,org,op.operation.sequence,"OUTCOME_UNKNOWN")
+                            }
+                            scope(org)
+                        }
+                    }
+                    // Directory distinguishes global membership loss from one incident.
+                    // No repeated batch storm for this denied incident.
+                    try {refreshLocked(org)}catch(c: CancellationException){throw c}catch(_: Exception){throw ex}
+                    continue@incidentLoop
+                }
+                throw ex
+            }
+            check(result.text("account")==account && result.text("organization")==org && result.text("incident_id")==incident)
+            val cursor=dao.cursors(account,org).find {it.incident==incident}
+            if(result.text("scope_fingerprint")!=cursor?.fingerprint) {
+                revokeIncident(org,incident);throw FieldProtocolFailure("SCOPE_CHANGED")
+            }
+            val rows=result.rows("rows")
+            check(rows.size==batch.size && rows.map {it.text("operation_id")}.toSet()==batch.map {it.operation.operationId}.toSet())
+            check(rows.all {it.text("status") in listOf("FOUND","ABSENT","SCOPE_UNAVAILABLE","IDENTITY_MISMATCH")})
+            incidentIdentityAccess.withLock {
+                scope(org);currentCoroutineContext().ensureActive()
+                db.withTransaction {
+                    for(op in batch) {
+                        val current=dao.operations(account,org).single {it.operation.operationId==op.operation.operationId}
+                        check(current.request==op.request && current.operation.payload==op.operation.payload)
+                        val row=rows.single {it.text("operation_id")==op.operation.operationId}
+                        if(row.text("status")=="FOUND" && fieldReceiptMatches(op,row.obj("result"))) {
+                            val instant=java.time.Instant.parse(row.text("confirmed_at"))
+                            val receipt=JsonObject(row.obj("result")+("_d1_confirmed_at" to JsonPrimitive(instant.toString())))
+                            dao.outcome(op.operation.sequence,receipt.toString(),null)
+                            dao.state(account,org,op.operation.sequence,"SERVER_CONFIRMED")
+                        } else if(current.operation.state!="SERVER_CONFIRMED" && (current.uncertain() || row.text("status")=="FOUND")) {
+                            val error=when(row.text("status")) {
+                                "SCOPE_UNAVAILABLE"->"SCOPE_UNAVAILABLE"
+                                "IDENTITY_MISMATCH"->"IDENTITY_MISMATCH"
+                                "FOUND"->"RECEIPT_UNCERTAIN"
+                                else->if(current.error?.startsWith("UNKNOWN_REJECTED:")==true || current.error in setOf("IDENTITY_MISMATCH","OPERATION_REUSED"))
+                                    current.error else "RECEIPT_ABSENT"
+                            }
+                            dao.outcome(op.operation.sequence,current.result,error)
+                            dao.state(account,org,op.operation.sequence,"OUTCOME_UNKNOWN")
+                        }
+                    }
+                    scope(org);currentCoroutineContext().ensureActive()
+                }
+            }
+        }
+        }
+    }
+    suspend fun inspectRecovery(org: String,operation: String?=null,incident: String?=null)=hydrantRemoteAccess.withLock {
+        refreshLocked(org);reconcileReceiptsLocked(org,operation,incidentFilter=incident)
+        // A canonical projection refresh is separate from proof of command receipt.
+        refreshLocked(org)
+    }
+    suspend fun retryRecovery(org: String,operation: String)=hydrantRemoteAccess.withLock {
+        refreshLocked(org);reconcileReceiptsLocked(org,operation)
+        val op=dao.operations(account,org).single {it.operation.operationId==operation}
+        if(op.operation.state=="SERVER_CONFIRMED")return@withLock
+        require(op.uncertain() && op.error=="RECEIPT_ABSENT") { "SCOPE_UNAVAILABLE" }
+        require(payload(op).text("rpc") in listOf("incident_transition_task_assignment","incident_message_send"))
+        val original=op.request ?: error("COMPATIBILITY")
+        op.parent?.let {sequence->
+            val parent=dao.operations(account,org).single {it.operation.sequence==sequence}
+            require(parent.operation.state=="SERVER_CONFIRMED" && parent.operation.entityId==op.operation.entityId &&
+                payload(parent).text("incident")==payload(op).text("incident") &&
+                parent.result?.let(::parse)?.let {fieldReceiptMatches(parent,it)}==true) { "DEPENDENCY_CHANGED" }
+        }
+        require(dispatchAllowed(org,op,original)) { "STALE_VERSION" }
+        send(org,op,original)
+        try {refreshLocked(org)}catch(c: CancellationException){throw c}catch(_: Exception){ }
+    }
+    /** Same worker/mutex; online read authorization before any dispatch. Unknowns
+     * are receipt-checked, never blindly retried by a background worker. */
     suspend fun synchronize(org: String): Boolean=hydrantRemoteAccess.withLock {
         scope(org)
         if(dao.snapshot(account,org)==null && dao.operations(account,org).isEmpty())return@withLock false
+        try {refreshLocked(org)}catch(c: CancellationException){throw c}catch(_: Exception){return@withLock true}
         var retry=false
+        var receiptsReady=true
+        try { reconcileReceiptsLocked(org,null,true) } catch(e: CancellationException){throw e}
+        catch(_: Exception){retry=true;receiptsReady=false}
+        var handled=0
         for(op in dao.operations(account,org)) {
+            if(runCatching {payload(op)}.getOrNull()==null) {attention(org,op,"COMPATIBILITY");continue}
             if(payload(op).text("rpc")=="incident_attachment_prepare") {
                 if(op.operation.state !in listOf("SERVER_CONFIRMED","NEEDS_ATTENTION","DRAFT"))
                     if(!syncAttachment(org,op))retry=true
                 continue
             }
-            if(op.operation.state in listOf("SERVER_CONFIRMED","NEEDS_ATTENTION") ||
+            if(!receiptsReady || op.operation.state in listOf("SERVER_CONFIRMED","NEEDS_ATTENTION","DRAFT") || op.uncertain() ||
                 payload(op).text("rpc") !in listOf("incident_transition_task_assignment","incident_message_send"))continue
-            val parent=op.parent?.let { id -> dao.operations(account,org).find { it.operation.sequence==id } }
+            if(++handled>25){retry=true;break}
+            val parent=op.parent?.let {id->dao.operations(account,org).find {it.operation.sequence==id}}
             if(parent?.operation?.state=="NEEDS_ATTENTION") {
-                dao.state(account,org,op.operation.sequence,"NEEDS_ATTENTION")
-                dao.outcome(op.operation.sequence,null,"DEPENDENCY_REJECTED");continue
+                attention(org,op,"DEPENDENCY_REJECTED");continue
             }
             try {
                 val prepared=request(org,op) ?: continue
+                if(!fieldRequestMatches(op,org,prepared)){attention(org,op,"COMPATIBILITY");continue}
+                if(!dispatchAllowed(org,op,prepared)) {attention(org,op,"LOCAL_STALE");continue}
                 if(!send(org,op,prepared))retry=true
-            } catch(e: CancellationException) { throw e }
-            catch(_: RestException) { retry=true } // A failed reconciliation is not a rejected child command.
-            catch(_: java.io.IOException) { retry=true }
-            catch(_: io.ktor.client.plugins.HttpRequestTimeoutException) { retry=true }
-            catch(_: Exception) { retry=true }
+            } catch(e: CancellationException){throw e}
+            catch(_: Exception){retry=true}
         }
-        try { refreshLocked(org) } catch(e: CancellationException) { throw e }
-        catch(e: RestException) { if(e.statusCode>=500 || e.statusCode in listOf(408,429))retry=true }
-        catch(_: Exception) { retry=true }
+        try {refreshLocked(org)} catch(e: CancellationException){throw e} catch(_: Exception){retry=true}
         retry
     }
+    private suspend fun dispatchAllowed(org: String,op: FieldOperation,request: String): Boolean {
+        val row=dao.snapshot(account,org)
+        if(lease(org,row)<=0)return false
+        val i=parse(row!!.payload).rows("incidents").find {it.text("id")==payload(op).text("incident")} ?: return false
+        if(i.text("status") !in listOf("ACTIVE","STABILIZED"))return false
+        if(payload(op).text("rpc")=="incident_transition_task_assignment") {
+            val a=i.rows("assignments").find {it.text("id")==op.operation.entityId} ?: return false
+            val r=parse(request)
+            return a.flag("can_execute") && a.obj("task").text("id")==payload(op).text("task") &&
+                a.text("version")==r.text("p_expected_version") &&
+                r.obj("p_payload").text("status") in transitions(a.text("status"),a.obj("task").obj("configuration").flag("requires_acknowledgement"))
+        }
+        if(payload(op).text("rpc")=="incident_message_send") {
+            val data=payload(op).obj("payload")
+            return i.obj("message_page").rows("targets").any {target->
+                target.text("kind")==data.text("audience_kind") && when(target.text("kind")) {
+                    "UNIT"->target.text("id")==data.text("audience_unit_assignment_id")
+                    "ORGANIZATION"->target.text("id")==data.text("audience_org_id")
+                    else->true
+                }
+            }
+        }
+        return false
+    }
     private suspend fun send(org: String,op: FieldOperation,request: String): Boolean {
-        scope(org)
-        dao.state(account,org,op.operation.sequence,"SENDING")
+        require(fieldRequestMatches(op,org,request)) { "OPERATION_REUSED" }
         val dispatchKey="$account/$org/${op.operation.operationId}"
-        activeDispatches.update { it+dispatchKey }
-        val result=try {
-            rpc(payload(op).text("rpc"),parse(request))
-        } catch(e: CancellationException) { throw e }
-        catch(e: Exception) {
-            val rejected=e is RestException && e.statusCode in 400..499 && e.statusCode !in listOf(408,429)
-            db.withTransaction {
-                dao.state(account,org,op.operation.sequence,if(rejected)"NEEDS_ATTENTION" else "OUTCOME_UNKNOWN")
-                dao.outcome(op.operation.sequence,null,if(rejected) {
-                    if(payload(op).text("unit").isNotEmpty())leaderError(e.message) else if(op.operation.state in listOf("SENDING","OUTCOME_UNKNOWN"))"RECOVERY_REJECTED" else "SERVER_REJECTED"
-                } else "TRANSPORT_UNCERTAIN")
-            }
-            if(e is RestException && e.statusCode==401)revoke(org)
-            else if(e is RestException && e.statusCode==403) {
-                val unit=payload(op).text("unit")
-                if(unit.isNotEmpty())invalidateLeader(org,payload(op).text("incident"),unit) else revoke(org)
-            }
-            return rejected
-        } finally { activeDispatches.update { it-dispatchKey } }
-        // A receipt proves this operation committed, not a fabricated current assignment
-        // state/version. Cache reconciliation failures must never turn success into rejection.
-        if(result.text("operation_id")!=op.operation.operationId || result.text("incident_id")!=payload(op).text("incident") ||
-            (payload(op).text("rpc")=="incident_transition_task_assignment" && result.text("task_id")!=payload(op).text("task")) ||
-            (payload(op).text("rpc")=="incident_message_send" && result.text("message_id")!=op.operation.entityId) ||
-            (payload(op).text("rpc")=="incident_issue_task" && result.text("task_id")!=op.operation.entityId)) {
-            dao.state(account,org,op.operation.sequence,"OUTCOME_UNKNOWN")
-            dao.outcome(op.operation.sequence,null,"RECEIPT_UNCERTAIN")
-            return false
+        incidentIdentityAccess.withLock {
+            scope(org);currentCoroutineContext().ensureActive()
+            check(dao.operations(account,org).single {it.operation.operationId==op.operation.operationId}.request==request)
+            activeDispatches.update {it+dispatchKey}
+            try {dao.state(account,org,op.operation.sequence,"SENDING")}catch(e: Exception){activeDispatches.update {it-dispatchKey};throw e}
         }
-        db.withTransaction {
-            dao.outcome(op.operation.sequence,result.toString(),null)
-            dao.state(account,org,op.operation.sequence,"SERVER_CONFIRMED")
+        try {
+            val result=try {rpc(payload(op).text("rpc"),parse(request))}
+            catch(e: CancellationException){throw e}
+            catch(e: Exception) {
+                val code=fieldFailure(e)
+                val ambiguous=op.uncertain() || code !in firstRejections || code=="OPERATION_REUSED"
+                incidentIdentityAccess.withLock {
+                    scope(org);currentCoroutineContext().ensureActive()
+                    db.withTransaction {
+                        dao.state(account,org,op.operation.sequence,if(ambiguous)"OUTCOME_UNKNOWN" else "NEEDS_ATTENTION")
+                        dao.outcome(op.operation.sequence,op.result,
+                            if(op.uncertain() && code in firstRejections)"UNKNOWN_REJECTED:"+code else if(!ambiguous)"REJECTED:"+code else code)
+                        scope(org);currentCoroutineContext().ensureActive()
+                    }
+                }
+                if(e is RestException && e.statusCode==401 && code=="NOT_AUTHORIZED")revoke(org)
+                else if(e is RestException && e.statusCode==403 && code=="NOT_AUTHORIZED") {
+                    if(payload(op).text("unit").isNotEmpty())invalidateLeader(org,payload(op).text("incident"),payload(op).text("unit"))
+                    else if(payload(op).text("rpc")=="incident_message_send")invalidateMessages(org,payload(op).text("incident"),"DENIED")
+                    else try {refreshLocked(org)}catch(c: CancellationException){throw c}catch(_: Exception){ }
+                }
+                return !ambiguous
+            }
+            incidentIdentityAccess.withLock {
+                scope(org);currentCoroutineContext().ensureActive()
+                db.withTransaction {
+                    if(!fieldReceiptMatches(op,result)) {
+                        dao.state(account,org,op.operation.sequence,"OUTCOME_UNKNOWN")
+                        dao.outcome(op.operation.sequence,op.result,"RECEIPT_UNCERTAIN")
+                    } else {
+                        dao.outcome(op.operation.sequence,result.toString(),null)
+                        dao.state(account,org,op.operation.sequence,"SERVER_CONFIRMED")
+                    }
+                    scope(org);currentCoroutineContext().ensureActive()
+                }
+            }
+            return fieldReceiptMatches(op,result)
+        } finally {activeDispatches.update {it-dispatchKey}}
+    }
+    private suspend fun legacyReplayAllowed(org: String,op: FieldOperation): Boolean {
+        val body=payload(op);val i=dao.snapshot(account,org)?.let {parse(it.payload).rows("incidents")
+            .find {row->row.text("id")==body.text("incident")}} ?: return false
+        if(i.text("status") !in listOf("ACTIVE","STABILIZED") || i.text("version")!=body.text("expected"))return false
+        return when(body.text("rpc")) {
+            "incident_update_unit_status"->i.rows("units").any {u->u.text("id")==body.obj("payload").text("id") &&
+                u.flag("can_return") && u.text("version")==body.obj("payload").text("version")}
+            "incident_issue_task"-> {
+                val row=catalog(org).singleOrNull {catalogVersion(it)==body.obj("payload").text("action_version_id")}
+                validIssueDraft(row,body.obj("payload"),i)
+            }
+            else->false
         }
-        return true
     }
     suspend fun returnUnit(org: String,incident: String,unit: String,operation: String): Boolean=hydrantRemoteAccess.withLock {
         scope(org)
@@ -391,6 +578,12 @@ class IncidentRepository(private val context: Context,private val client: Supaba
                 dao.dispatch(IncidentDispatch(sequence,null,null))
             }
             op=dao.operations(account,org).single { it.operation.operationId==operation }
+        }
+        if(op.uncertain()) {
+            refreshLocked(org);reconcileReceiptsLocked(org,operation)
+            op=dao.operations(account,org).single {it.operation.operationId==operation}
+            if(op.operation.state=="SERVER_CONFIRMED")return@withLock true
+            require(op.error=="RECEIPT_ABSENT" && legacyReplayAllowed(org,op)) { "STALE_VERSION" }
         }
         if(op.operation.state=="NEEDS_ATTENTION")return@withLock false
         if(op.operation.state=="SERVER_CONFIRMED")return@withLock true
@@ -556,6 +749,12 @@ class IncidentRepository(private val context: Context,private val client: Supaba
             op=dao.operations(account,org).single { it.operation.operationId==operation }
         }
         require(payload(op).obj("payload")==requestPayload)
+        if(op.uncertain()) {
+            refreshLocked(org);reconcileReceiptsLocked(org,operation)
+            op=dao.operations(account,org).single {it.operation.operationId==operation}
+            if(op.operation.state=="SERVER_CONFIRMED")return@withLock true
+            require(op.error=="RECEIPT_ABSENT" && legacyReplayAllowed(org,op)) { "STALE_VERSION" }
+        }
         if(op.operation.state=="NEEDS_ATTENTION")return@withLock false
         if(op.operation.state=="SERVER_CONFIRMED")return@withLock true
         val sent=send(org,op,request(org,op)!!)
@@ -879,7 +1078,13 @@ class IncidentRepository(private val context: Context,private val client: Supaba
         val u=i.rows("units").single { it.text("id")==unit }
         require(isCurrentLeader(i,u) && leaderStamp(u)==intent.text("leader")) { "NOT_AUTHORIZED" }
         if(op.operation.state=="SERVER_CONFIRMED")return@withLock op
-        if(op.operation.state=="DRAFT") {
+        if(op.uncertain()) {
+            reconcileReceiptsLocked(org,operation)
+            val recovered=dao.operations(account,org).single {it.operation.operationId==operation}
+            if(recovered.operation.state=="SERVER_CONFIRMED")return@withLock recovered
+            require(recovered.error=="RECEIPT_ABSENT") { "SCOPE_UNAVAILABLE" }
+        }
+        if(op.operation.state=="DRAFT" || op.uncertain()) {
             val ownIncident=JsonObject(i+("units" to JsonArray(listOf(u))))
             try {
                 require(i.text("version")==intent.text("expected") && u.text("version")==intent.text("unit_version")) { "STALE_VERSION" }
@@ -889,7 +1094,7 @@ class IncidentRepository(private val context: Context,private val client: Supaba
                     require(validIssueDraft(row,intent.obj("payload"),ownIncident)) { "STALE_VERSION" }
                 }
             } catch(e: IllegalArgumentException) {
-                attention(org,op,"STALE_VERSION");throw e
+                if(!op.uncertain())attention(org,op,"STALE_VERSION");throw e
             }
         }
         // Unknown outcomes intentionally replay the original expected version, even

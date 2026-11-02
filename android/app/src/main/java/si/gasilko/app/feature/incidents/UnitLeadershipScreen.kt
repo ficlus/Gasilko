@@ -95,7 +95,7 @@ internal fun LeaderReview(model: IncidentViewModel,incident: JsonObject,unit: Js
 }
 @Composable
 internal fun UnitLeadershipScreen(model: IncidentViewModel,incidentId: String,unitId: String,
-    openAssignment: (String)->Unit,issue: ()->Unit,openMap: (String?)->Unit,back: ()->Unit) {
+    openAssignment: (String)->Unit,issue: ()->Unit,openMap: (String?)->Unit,back: ()->Unit,openRecovery: ()->Unit={}) {
     val data by model.state.collectAsStateWithLifecycle()
     val i=data.incidents.find { it.text("id")==incidentId }
     val unit=i?.rows("units")?.find { it.text("id")==unitId }
@@ -103,12 +103,12 @@ internal fun UnitLeadershipScreen(model: IncidentViewModel,incidentId: String,un
         Column(Modifier.padding(16.dp)) { TextButton(onClick=back){Text(stringResource(R.string.h_back))};FieldBanner(stringResource(R.string.field_locked),FieldTone.WARNING) }
         return
     }
-    key(model,incidentId,unitId,leaderStamp(unit)) { UnitLeadershipContent(model,data,i,unit,openAssignment,issue,openMap,back) }
+    key(model,incidentId,unitId,leaderStamp(unit)) { UnitLeadershipContent(model,data,i,unit,openAssignment,issue,openMap,back,openRecovery) }
 }
 @Composable
 @OptIn(ExperimentalLayoutApi::class)
 private fun UnitLeadershipContent(model: IncidentViewModel,data: IncidentFieldState,incident: JsonObject,unit: JsonObject,
-    openAssignment: (String)->Unit,issue: ()->Unit,openMap: (String?)->Unit,back: ()->Unit) {
+    openAssignment: (String)->Unit,issue: ()->Unit,openMap: (String?)->Unit,back: ()->Unit,openRecovery: ()->Unit={}) {
     val busy by model.busy.collectAsStateWithLifecycle()
     val stale by model.stale.collectAsStateWithLifecycle()
     val syncFailure by model.syncFailure.collectAsStateWithLifecycle()
@@ -155,8 +155,11 @@ private fun UnitLeadershipContent(model: IncidentViewModel,data: IncidentFieldSt
         if(!leader)FieldBanner(stringResource(R.string.ul_read_only))
         if(busy)LinearProgressIndicator(Modifier.fillMaxWidth())
         error?.let { FieldBanner(leaderErrorText(it),FieldTone.WARNING) }
-        TextButton(onClick=model::sync,enabled=!busy){Text(stringResource(R.string.h_sync_now))}
-        TextButton(onClick={openMap(null)}){Text(stringResource(R.string.field_map))}
+        FlowRow {
+            TextButton(onClick=model::sync,enabled=!busy){Text(stringResource(R.string.h_sync_now))}
+            TextButton(onClick={openMap(null)}){Text(stringResource(R.string.field_map))}
+            TextButton(onClick=openRecovery){Text(stringResource(R.string.ir_title))}
+        }
         LazyColumn(Modifier.weight(1f),state=listState,verticalArrangement=Arrangement.spacedBy(12.dp)) {
             item { OperationalCard {
                 SectionHeading(stringResource(R.string.ul_status))
