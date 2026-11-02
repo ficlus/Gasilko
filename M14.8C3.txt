@@ -1,0 +1,626 @@
+# GASILKO — M14.8C3
+# REAL UNIT LOCATION READ MODEL, FRESHNESS & LAST-KNOWN PRESENTATION
+# CODEX IMPLEMENTATION ASSIGNMENT — NEW, SEPARATE PR
+# Prepared: 2026-11-02
+#
+# IMPORTANT STATUS:
+# Owner reports PR #90 M14.8D2 MERGED. Confirm against the live branch.
+# Prior SQL migrations from PR #82 onward were NOT deployed as of the
+# latest owner handoff; no deployment is authorized by this assignment.
+# The owner alone merges, applies migrations, deploys and signs off.
+
+MISSION
+-------
+Implement a privacy-safe, authoritative, READ-ONLY presentation of REAL
+incident-unit positions and freshness on the existing Web command map and
+Android C1 incident map, without inventing positions or enabling any new
+GPS acquisition/transmission. If no pre-existing authorized REAL position
+source exists, the system MUST honestly show "POSITION UNAVAILABLE" and
+the milestone must document that GPS telemetry/last-known coordinates
+will only appear after a separately authorized source milestone.
+
+This task is intentionally separate from M14.8C1, M14.8D1 and M14.8D2.
+Do not reopen their already merged PRs. Create exactly ONE new PR for this
+milestone; use the same PR/branch for all subsequent corrections.
+
+The user's explicit display agreement:
+  * CURRENT: green, when verified REAL fix is fresh.
+  * LAST KNOWN / STALE: amber/orange, with measured age.
+  * UNKNOWN / EXPIRED: grey, with no invented on-map position.
+  * The symbol must remain accessible independently of color.
+  * REAL status must never be confused with SIMULATION, command status,
+    availability, operational readiness, task completion, or route intent.
+  * Last-known position is displayed ONLY while the approved location
+    retention/visibility window allows it.
+
+Scope split:
+  C3 (THIS PR): read model + authorized map/list presentation, bounded
+                freshness, offline and access control, no new telemetry.
+  C2 / M15 (NOT THIS PR): separate, owner-approved consented REAL GPS,
+                phone-to-vehicle pairing, foreground service, "Leave vehicle",
+                ingestion, opt-out and retention lifecycle.
+  Command Map UX (NOT THIS PR): broad refactor of marker/clustering/RTS
+                overlays and general map performance.
+  SIM performance (NOT THIS PR): runner, batch, SQL 57014/STALE_VERSION
+                investigations, polling re-architecture.
+
+NON-NEGOTIABLE RULES
+--------------------
+1. Read AGENTS.md, docs/SPEC.md,
+   docs/SPEC-M14-INCIDENT-OPERATIONS.md and all relevant M14.5 NAV,
+   M14.6 SIM, M14.7B1/B2, M14.8B/C1/D1/D2 documents BEFORE changes.
+2. Inspect ACTUAL current GitHub main and active PRs first. Confirm #90
+   merged and use current main HEAD, not the stale queue.json/reference.
+3. Inventory ROOT milestone prompts and SPECS/ before implementing; do
+   not duplicate a feature already delivered under another milestone.
+4. Write a concise as-found contract matrix, including REAL location
+   sources, permissions, read contracts, field cache, and MapLibre layers.
+5. Treat missing REAL source as a functional/data limitation, NOT a reason
+   to create guessed coordinates, silently reinterpret route origins or
+   add a location writer without consent. Do not use SIM coordinates.
+6. Incident, organization, unit-assignment and actor identity always use
+   canonical UUIDs. Use only current exact-org and incident authorization;
+   organization hierarchy/ADMIN status is not blanket command/position
+   read permission.
+7. Preserve COMMAND INTENT != ROUTE/PLAN != OBSERVED REAL TELEMETRY.
+8. Do NOT implement, start or suggest background tracking, foreground
+   GPS service, location permissions prompts, device binding, new GPS
+   Edge Functions, location uploads, location history/trails, or tracking
+   of personnel in this PR.
+9. Preserve Room16, original operation UUID/request/receipt identity,
+   B1 atomic cursor projections, D1/D2 recovery, M10 notification
+   transport, existing worker, registry, photos, inspections and
+   existing realtime fallback.
+10. No deployment; human release remains separate.
+
+PHASE 0 — VERIFY THE REAL SOURCE BEFORE DESIGN
+----------------------------------------------
+Inspect actual current definitions and call sites, rather than inventing
+newly named tables/functions or assuming an old draft was implemented.
+
+Relevant starting points (verify names in current branch):
+  supabase/migrations/
+  public.incident_units
+  public.incident_task_assignments
+  public.incident_navigation_sessions/routes
+  private.field_projection
+  private.field_map_projection
+  private.field_unit_visible
+  private.navigation_visible
+  public.incident_cop
+  public.incident_field_directory
+  incident_snapshot_manifest/page and incident_field_entities
+  web/features/incidents/CopMap.tsx
+  web/features/incidents/IncidentCop.tsx
+  web/features/incidents/SimulationMapLayer.tsx
+  web/features/incidents/IncidentLiveProvider.tsx
+  web/features/incidents/CommandMapProvider.tsx
+  web/features/incidents/MapOverlapStacks.tsx
+  web/features/incidents/RtsMapInteraction.tsx
+  android/app/src/main/java/si/gasilko/app/feature/incidents/
+    IncidentRepository.kt, IncidentMapData.kt, IncidentMapScreen.kt
+  android/app/src/main/java/si/gasilko/app/feature/map/
+    IncidentMapLayers.kt
+  docs/M14.8C1-android-incident-map-task-navigation.md
+  docs/M14.8D2-field-reliability-metrics-review-readiness.md
+
+For EACH suspected "unit location" datum classify:
+  SOURCE_KIND = OBSERVED_REAL | SIMULATED | MANUAL_PLANNING_POINT |
+                ROUTE_ORIGIN | DEPLOYMENT_ADDRESS | TASK_TARGET |
+                MAP_OBJECT | UNKNOWN
+  Provenance/authority, owning unit/incident/org, actor, time,
+  permission, expiry/retention, update mechanism and validation.
+
+Only source_kind=OBSERVED_REAL, with server-verifiable authority,
+positive consent/legal basis where applicable, and permitted retention,
+may be rendered as a current/last-known REAL unit position.
+
+EXPLICIT DECISION GATE:
+A. If there is a CURRENT, AUTHORIZED, EXISTING observed REAL source,
+   integrate it read-only. Document exact table/function/types and
+   rationale. No new ingestion.
+B. If there is no such source, do NOT fabricate a replacement and do NOT
+   define an unauthorized location store merely to populate a map.
+   Implement the bounded availability/provenance/freshness presentation
+   contract and truthful no-position UX on Web + Android, so the later
+   approved source can plug in without authority redesign. Document that
+   no actual REAL coordinate will appear until C2/M15 or another
+   separately approved genuine source exists.
+C. If existing data is ambiguous or privacy grants cannot be proven,
+   fail closed, report the blocker and keep that source excluded.
+Do not block on owner clarification or silently expand to C2; make a
+sensible source-backed partial implementation and document missing bits.
+
+BACKGROUND AND PRODUCT REQUIREMENTS (MoSCoW)
+---------------------------------------------
+MUST
+ M1. An authorized firefighter/leader/IC sees only incident units that
+     are actually in their permitted operational scope.
+ M2. Show a map marker only with a genuine, permitted, finite WGS84
+     observation and a valid observed-at timestamp.
+ M3. Green/current, orange/stale-last-known and grey/unknown-expired
+     semantics with explicit text/time; not color alone.
+ M4. A missing/expired coordinate must NEVER fall back to incident center,
+     hydrant, command post, assignment target, route end, last route origin
+     or arbitrary country center.
+ M5. A stale/last-known coordinate must not imply real-time tracking or
+     authorize automatic movement/ETA/arrival/ACK.
+ M6. No source from SIMULATION is used as REAL. Training scenarios keep
+     their established simulated marker labels and provenance.
+ M7. No cross-incident, cross-org, revoked-member or denied-unit leakage,
+     including cached coordinates after scope change.
+ M8. Existing C1 Android map, B1 snapshot atomicity and Room16 remain
+     compatible with old server/client versions.
+ M9. No per-unit RPC fan-out, new high-frequency poller or expensive
+     overview/timeline joins. Bounded, bulk-authorized reads.
+ M10. SI/DE/default localization, accessible labels and offline honesty.
+
+SHOULD
+ S1. Reuse existing C1 map feature/layer and Web COP/RTS selection
+     semantics; do not duplicate MapLibre instances.
+ S2. Show last observation source ("REAL GPS" or equivalent approved
+     source), observed server time, relative age and uncertainty.
+ S3. When feature is not on map, list it as "Position unavailable" with
+     last-known time ONLY if disclosure of that metadata is authorized.
+ S4. Make clustered/overlapping features separately selectable and
+     preserve selected-unit highlighting, with minimal changes.
+ S5. Keep app current-location device dot distinct from unit telemetry.
+
+COULD
+ C1. Add narrow, read-only same-scope legend and sortable visible-unit
+     list, provided it does not become a personnel monitoring screen.
+ C2. Add an explicit "location data unavailable" capability card.
+
+WILL NOT
+ N1. No consent UI or opt-in enrollment for tracking; C2/M15 only.
+ N2. No location writer, GPS stream, foreground service, background
+     permission, periodic trail, device registration/pairing, tracking
+     endpoint, new telemetry worker, route replanning, new FCM category.
+ N3. No copying SIM position into REAL records.
+ N4. No automatic updating of `incident_units` location from NAV intent.
+ N5. No new personal-performance, driver ranking or attendance analytics.
+ N6. No changes to lifecycle/task/resource/incident commands.
+
+APPROVED FRESHNESS AND RETENTION SEMANTICS
+-----------------------------------------
+Respect the authoritative M14 incident SPEC section "COP, geometry,
+routing and location sharing": a future opt-in source was envisaged as
+  - stale after 2 minutes
+  - latest position expires after 15 minutes
+  - no permanent GPS trail initially
+  - observation includes observed time, accuracy and provenance.
+These are an existing architectural default, NOT proof that the source
+already exists or that sharing consent has been granted.
+
+Proposed C3 view classification (read-only, source-driven):
+  - AVAILABLE_CURRENT:
+      observation is presently authorized, source=OBSERVED_REAL,
+      timestamp trustworthy, 0 <= age < 120 seconds, no expired sharing
+      episode and no stale/offline/revoked read condition.
+  - AVAILABLE_LAST_KNOWN:
+      observation presently authorized, source=OBSERVED_REAL,
+      120 <= age < 900 seconds, sharing episode still valid and source
+      retention allows the coordinate; never a "LIVE" claim.
+  - UNAVAILABLE:
+      no genuine/authorized observation, invalid coordinate, invalid
+      time/provenance, expired source, age >= 900 seconds, source denied,
+      or the source deliberately withholds its coordinates.
+  - LOCKED/ACCESS_LOST:
+      scope invalid; no coordinates or other protected detail rendered.
+  - STALE_SNAPSHOT/OFFLINE:
+      user has no current server confirmation. Existing authorized cache
+      can be shown ONLY within an unexpired current offline lease AND
+      source retention window, styled as last-known/uncertain, never green;
+      instantly hide on revocation/lease expiry.
+
+Use server observed_at plus validated server time / bounded clock offset
+for online classification where possible; Android elapsedRealtime for
+local age growth in a single boot. A changed device wall clock, new boot,
+missing trust anchor or future observation must never turn old data
+into green. Never reset age because a JSON projection was refetched.
+Use explicit source-reported precision/accuracy constraints if present;
+do not manufacture accuracy meters. E.g. "Last seen 12 min ago" needs
+known observed_at; no timestamp -> "time unknown", not invented age.
+
+Do not preserve/show a coordinate beyond its authorized retention
+window even if the user says "last known": after expiry, show grey
+"Location unavailable" with non-sensitive last_seen metadata only when
+separately permitted. Never extend the retention period without an
+explicit SPEC/policy decision and owner approval.
+
+CONCEPTUAL VIEW CONTRACT (NOT A CLAIM ABOUT EXISTING SQL)
+--------------------------------------------------------
+Before implementing choose the minimal additive shape compatible with
+current RPC / B1 schema and document EXACT actual names/signatures.
+
+Example sanitized per-unit display DTO (illustrative, not permission):
+{
+  "unit_assignment_id": "<canonical UUID>",
+  "incident_id": "<canonical UUID>",
+  "acting_organization_id": "<current exact org>",
+  "unit_label": "<already permitted label>",
+  "availability": "CURRENT|LAST_KNOWN|UNAVAILABLE",
+  "coordinate": [longitude, latitude] | null,
+  "position_origin": "OBSERVED_REAL" | null,
+  "observed_at": "<ISO 8601 UTC>" | null,
+  "accuracy_m": number | null,
+  "source_revision": "<server-safe monotonic identifier>" | null,
+  "scope": "<existing authorized B1 scope fingerprint or binding>",
+  "server_as_of": "<trusted timestamp>"
+}
+
+This object is NOT an upload contract and must not be trusted merely
+because it appears in JSON. Filter on the server BEFORE projection.
+No client-provided organization_id/role/incident can authorize reads.
+
+Prefer an OPTIONAL nested extension of an already authenticated,
+bounded projection or a narrow server-controlled bulk read, preserving
+the old public RPC signature and clients. Never overload existing
+`simulation_unit_positions` or inject position fields into mutable
+task/assignment/incident rows as authority.
+
+Only create a versioned migration if actual existing read behavior
+requires one; migration MUST be forward-only and must follow
+`20261102120000_incident_field_reliability.sql` after verifying the real
+main migration order. Name using the next chronological available
+timestamp; do not assume suggested names are available.
+Do not modify previously applied historical migrations.
+
+When there is NO existing REAL source, use a source-independent
+availability contract returning explicit unavailable for all scoped
+units and source-unavailable reason; do not add a fake table or persist
+null "position rows". Schema/RPC compatibility must be documented
+honestly. Avoid creating a useless new polling endpoint.
+
+SERVER AND PRIVACY
+------------------
+1. Inspect existing `private.field_unit_visible`/current exact-org
+   active membership/incident participation, and current terminal
+   visibility. Position read permission may be NARROWER than basic unit
+   name visibility; apply the stricter canonical predicate.
+2. Any new `SECURITY DEFINER` function must use `set search_path=''`,
+   fully qualified objects, explicit owner, exact signature grants,
+   REVOKE from PUBLIC/anon/service_role unless strictly justified,
+   authenticated EXECUTE only, and no direct table DML grants.
+3. Exclude units from another incident, including historical/released
+   assignments unless the original visibility policy explicitly permits
+   those particular historical observations. Terminal incident access
+   does NOT imply permission to fetch historic GPS coordinates.
+4. Do not include coordinates in timeline events, audit detail, M10/FCM,
+   realtime hint payloads, diagnostics, exception text, URLs, analytics,
+   browser local storage or persistent exported logs.
+5. Do not return personal/device owner identifiers, raw device tokens,
+   precise home locations or tracking consent metadata to general
+   incident readers.
+6. Exact source attribution is server-generated. No role, source flag,
+   observed_at or accuracy is accepted as authority from a browser.
+7. Page and response bounds: reuse approved limits; if exceeding, use
+   predictable paging/scope-fingerprint behavior. A partial batch must
+   be explicitly INCOMPLETE, not presented as complete.
+8. If an authoritative positioning source later becomes available,
+   reject any observation beyond its retention/consent window and
+   apply time, accuracy and anti-replay rules in the SOURCE milestone,
+   not an unapproved new ingest here.
+9. No broad "service_role" shortcuts from browser/Android.
+
+WEB COMMAND MAP
+---------------
+Inspect `CopMap.tsx`, `IncidentCop.tsx`, `SimulationMapLayer.tsx`,
+`MapOverlapStacks.tsx`, `RtsMapInteraction.tsx`, `workspace`, RTS state
+and existing MapLibre symbol/source ownership.
+
+Implement ONLY a dedicated, authorized REAL unit-position presentation
+that does not conflict with existing SIM layers or point selectors.
+
+- Separate, namespaced GeoJSON source/layer when necessary.
+- Source/layer name must be stable and released on map unmount/scope loss.
+- REAL marker distinctly shaped/labeled, not the SIM circular styling.
+- User-agreed visual cues: GREEN current, AMBER dashed last-known,
+  GREY unavailable in list (not a grey fabricated pin).
+- Keep marker diameter compact; no big overlapping group bubbles.
+- Clustering/grouping only when genuinely overlapping in screen space,
+  without hiding selected or priority targets.
+- Do NOT rewrite general marker clustering system: if broader
+  enhancements are needed, document a separate Command Map UX PR.
+- Clicking marker opens bounded allowed-unit card: call sign, source,
+  accurate "observed at" and age, freshness, accuracy if provided,
+  incident/unit identity; never raw private telemetry metadata.
+- If location absent, unit remains in authorized list with explicit
+  unavailable state. Do not place it at incident center.
+- SIM mode: preserve current SIM representation; never mix REAL and
+  SIM sources/clusters nor allow accidental selection as REAL unit.
+- Preserve existing RTS selected-unit identity, command hierarchy,
+  map drawing, navigation picking, zoom/camera behavior and links.
+- Do not make presence on map a command-eligibility predicate.
+- A stale marker never implies unit stopped, arrived, available,
+  missing or in danger.
+- Hide on revoked access, identity/org/incident switch, source expiry,
+  permission mismatch or denied refresh; no flash of previous org.
+- Reuse existing IncidentLive/F4 refresh coordinator. Do not add new
+  interval, one RPC per unit or unbounded route geometry refresh.
+
+ANDROID C1 INCIDENT MAP
+-----------------------
+Inspect actual Room16 scope/cursor architecture and the C1 map source.
+
+- Prefer extending the already atomic, authorized C1 projection.
+- Preserve all existing `field_map` schema and C1 checks; if a new
+  optional revisioned field is needed, old clients must fail safely
+  and still show task targets; do NOT break field_map.schema=1
+  compatibility without explicit owner-approved contract change.
+- Do not create Room17 or a new DAO/table merely for position UI.
+- On Android, unit list shows CURRENT / LAST KNOWN / UNAVAILABLE with
+  localized status plus observed age only when authorized.
+- Map point ONLY for CURRENT or permitted LAST_KNOWN; unit-with-no-
+  coordinate remains in list, not the map.
+- Reuse MapLibre MapView/style lifecycle, existing incident map
+  selection/cards, collision-handling, accessibility and camera state.
+- Device own location (Android local GPS) remains a separate blue dot,
+  and MUST NEVER be treated as a unit's shared position.
+- No runtime location permission request for observing OTHER units.
+- Offline cached position becomes stale/uncertain; local lease and
+  retention expiry gate display; avoid creating a perceived live marker
+  merely because Room emitted its cached row.
+- Account/org switch, logout, change of effective leader/crew,
+  read denial, or incident lease expiry hides old protected coordinates.
+  Preserve pending D1 evidence and unrelated hydrant cache.
+- Reconciliation must use existing B1 atomically installed scope:
+  never publish a position from an older generation alongside a
+  newer incident/unit assignment. If data is missing/unsupported,
+  keep C1 tasks and navigation available, with honest unavailable UX.
+- Localization: default, Slovenian and German; short callsign labels,
+  timestamps, accuracy, stale/privacy descriptions; screen reader
+  communicates current-vs-last-known verbally, not color alone.
+- No new background worker, no shared-person location recording,
+  no GPS broadcast, no Room schema change.
+
+DATA QUALITY & ALGORITHMS
+-------------------------
+Point validation:
+ - shape exactly Point [longitude, latitude], finite numbers,
+   -180 <= lon <= 180, -90 <= lat <= 90.
+ - Do not mistake [lat, lon] for WGS84 [lon, lat].
+ - No NaN, Infinity, null/empty strings, silent zero-zero, or
+   invalid "default" coordinates.
+ - Do not use `0,0` unless it is a genuinely verified allowed
+   observation with provenance; never generate it as a fallback.
+ - Observed timestamp must be timezone-aware and sourced from
+   authorized observation; never substitute read/refetch time.
+ - Reject future observed_at > configured tolerance; any timestamp
+   ambiguity -> unavailable.
+ - Accuracy is informational; if known invalid/unbounded, do not
+   represent it as "precise". Do not infer heading or speed from route.
+
+Classify in a pure presentation function, conceptually:
+ classify(observation, trustedNow, scope, sourcePolicy, onlineState):
+   if !scopeAuthorized: return LOCKED
+   if source != OBSERVED_REAL || !validPoint || !trustedTime:
+      return UNAVAILABLE
+   if !sourceConsentOrLegalRead || !withinRetention: return UNAVAILABLE
+   age := max(0, trustedNow - observed_at)
+   if age >= 900s: return UNAVAILABLE
+   if readIsOfflineOrStale || age >= 120s:
+      return LAST_KNOWN
+   return CURRENT
+Keep server/source policy authoritative and fail closed. Timestamp
+thresholds and semantics follow SPEC defaults unless owner explicitly
+approves a policy revision.
+
+Avoid per-frame `Date.now()` as authority: schedule only UI label
+updates on an already mounted, active view; use existing refresh state.
+No extra network requests just to update an age label.
+
+SOURCE BINDING / CHANGE FEED
+----------------------------
+If there is an authorized REAL data source:
+ - identify its immutable source identity and monotonic revision.
+ - integrate data into an existing B1 snapshot or equivalent narrow
+   bounded read with a source-specific watermark.
+ - a location-only source revision must not masquerade as an incident
+   task/assignment version or trigger timeline rebuilds.
+ - permit authorized refresh without a high-frequency re-fetch of
+   ALL task/history/route geometry; document current limitations.
+ - on missing source/revocation return explicit absence and clear only
+   that source's cached coordinates; keep tasks, receipts, evidence,
+   and independently authorized C1 data intact.
+ - use same-incident and exact scope binding end-to-end.
+If no source: do not add a synthetic watermark that changes on every
+read. "Unavailable" may be stable.
+
+REVIEW OF SIM AND ROUTING BOUNDARIES
+------------------------------------
+- SIM positions: `public.simulation_unit_positions`, `SIMULATED`,
+  per scenario/incident; leave as SIM only.
+- Manual `incident_navigation_routes.origin_snapshot` and C1 NAV
+  route geometry represent route planning, not observation.
+- RTS selection is command-intent selection, not GPS proof.
+- Incident command map and task targets are not location tracking.
+- Do not migrate a guessed position from assignment target or
+  navigation projection into a canonical REAL location store.
+- If REAL telemetry is not yet available, do not label SIM as an
+  adequate workaround.
+
+ROLL OUT / MIGRATION DEPENDENCIES (OWNER-ONLY)
+---------------------------------------------
+The owner reports PRs #82–#90 merged in code but SQL migrations
+starting #82 have not been manually applied.
+
+Before any future operator rollout:
+ - inspect actually applied SQL through PR #81, including manual hotfixes.
+ - apply corrected #82..#87 in order.
+ - apply corrected C1 PR #88 `20261030200000_incident_field_map.sql`.
+ - apply D1 PR #89 `20261102100000_incident_field_receipt_recovery.sql`.
+ - apply D2 PR #90 `20261102120000_incident_field_reliability.sql`.
+ - apply new C3 migration IF created, after prerequisite schema.
+ - independently review/deploy `incident-evidence` Edge function and
+   private Storage policy/20MiB bucket/config requirements.
+ - verify #84 private Realtime channels/RLS/polling fallback.
+ - deploy compatible Web/API, then install Android Room16 client.
+ - run human controlled TRAINING acceptance with appropriate
+   authenticated IC, UNIT_LEADER and responder; do not treat this
+   as a live operational approval.
+Owner explicitly deferred all these steps until "greva na lokal".
+The coding agent MUST NOT execute any of them.
+SQL Editor migration history can be incomplete; do not blindly rerun
+scripts on missing ledger entries.
+
+MANUAL ACCEPTANCE MATRIX — ALL UNEXECUTED BY CODEX
+-------------------------------------------------
+Document at least the following cases in an explicit owner-run table,
+with setup/expected observation and authoritative evidence where possible.
+Mark all "UNEXECUTED" and do not claim build/runtime verification.
+
+01. Authorized REAL unit with genuine fresh position shows green.
+02. Fresh observation shows call sign, timestamp, provenance.
+03. Fresh observation shows accuracy only when genuine and valid.
+04. At exactly 120s marker becomes amber, not green.
+05. At 119s marker remains current when source is live.
+06. At 14m59s permitted last-known marker is amber.
+07. At >=15m coordinate disappears and status becomes grey unavailable.
+08. No position source: unavailable list entry, no map pin.
+09. Unknown time: unavailable, no invented relative age.
+10. Unknown accuracy: "not supplied", never fake precision.
+11. Device clock jumps forward: does not revalidate data.
+12. Device clock jumps backward: does not make stale data fresh.
+13. Android reboot: no false green due to missing uptime anchor.
+14. Future observed_at: rejected/hidden.
+15. ISO timestamps include UTC offset and parse consistently.
+16. Valid [lon,lat] maps at correct point.
+17. Swapped [lat,lon] is never silently corrected.
+18. NaN/Infinity/not-numeric coordinate rejected.
+19. Missing coordinates: no incident-center fallback.
+20. 0,0 placeholder is not invented; genuine verified 0,0 permitted.
+21. Invalid provenance is rejected.
+22. `SIMULATED` row cannot enter REAL layer.
+23. TRAINING SIM markers keep explicit SIM label.
+24. REAL unit/route task selection remains unchanged.
+25. Stale position does not imply unit stopped/arrived.
+26. Stale position does not confirm task completion.
+27. User location blue dot never becomes shared unit dot.
+28. No source GPS permission prompt is shown in read-only viewer.
+29. Web IC authorized list shows only allowed units.
+30. Android responder sees only authorized own/eligible units.
+31. Effective unit leader loses role: protected positions hide.
+32. Removed crew member loses scope and old positions hide.
+33. Incident role transfer does not retain forbidden coordinates.
+34. Organization switch hides prior position immediately.
+35. Account logout/relogin never leaks prior account.
+36. Incident switch does not carry old marker into new map.
+37. Revoked B1 fingerprint invalidates derived positions.
+38. Expired Android incident lease hides protected positions.
+39. Terminal incident does not automatically disclose old GPS.
+40. Unapproved sharing/source denies precise position.
+41. No hierarchy-only org permission leaks coordinates.
+42. Unauthorized backend read returns indistinguishable safe error.
+43. No private location data in FCM.
+44. No raw coordinates in general timeline/audit/diagnostics.
+45. No location query parameters leak through external links.
+46. No location persisted in sessionStorage/localStorage/Web cache.
+47. No wide public table grants or service-role client fetch.
+48. Read of one incident cannot see another incident's unit.
+49. Read of one org cannot see another org's units without authority.
+50. Changing server source revision refreshes permitted position only.
+51. A stale previous async read cannot overwrite current scope.
+52. Simultaneous C1 tasks/maps remain coherent at same B1 revision.
+53. Snapshot gap/reset preserves durable pending operations.
+54. Offline cached position becomes LAST_KNOWN/uncertain, never live.
+55. Offline coordinate disappears on retention expiry.
+56. Offline cache and lease expiry do not destroy D1 evidence.
+57. Offline stale position remains visibly labeled.
+58. Unsupported server capability shows honest no-location state.
+59. Old Android Room16 client continues existing tasks.
+60. New Android Room16 client handles old server safely.
+61. Web map still shows tasks/hydrants/sectors without position data.
+62. Android map still shows C1 targets without position data.
+63. Routes do not become source of position.
+64. Routing metadata never becomes implied GPS heading/speed.
+65. Compact marker selection works when points overlap.
+66. Selected/priority task target remains accessible under grouping.
+67. Overlapping SIM and REAL layers are distinguishable, not conflated.
+68. Camera remains stable after position refresh.
+69. Background hidden map does not start a new independent poller.
+70. Large authorized unit list respects bounded read/partial status.
+71. Missing data reports source-unavailable not "all units idle".
+72. One denied unit does not cause unrelated cached tasks deletion.
+73. No new location/telemetry worker, DB write path or foreground service.
+74. No new Android runtime location permission request.
+75. SI messages for three freshness states and denial are correct.
+76. DE messages for three freshness states and denial are correct.
+77. Screen reader distinguishes states without relying on color.
+78. Source revocation cancels/blocks in-flight UI updates.
+79. No REAL GPS trail or history retention added.
+80. Existing hydrant/inspection/photos/pending queue unaffected.
+
+If no source exists, mark cases requiring an actual REAL observation as
+"BLOCKED: genuine source not yet implemented; C2/M15 required", rather
+than claiming PASS. This distinction is central to an honest release.
+
+IMPLEMENTATION PROCESS
+----------------------
+1. Confirm main/head, PR90 merged, no overlapping open PR.
+2. Read AGENTS, both SPECs, exact current code/docs and relevant
+   original/root/SPECS prompts.
+3. Produce short plan and as-found source/authority matrix.
+4. Decide and document whether a genuine authorized REAL observation
+   source exists (A/B/C decision gate above).
+5. Implement a bounded additive display contract + Web + Android
+   presentation with least possible scope; no GPS capture.
+6. If SQL is required, create a new forward-only migration with a
+   precise signature/grants/ownership/search_path, after D2.
+7. Localize default/SI/DE, add accessibility and safe offline states.
+8. Update the M14 SPEC appendix only for implemented behavior.
+9. Create `docs/M14.8C3-real-unit-location-freshness.md`, covering:
+   - source evidence table (positive or negative)
+   - implemented/not-implemented behavior
+   - threat model and exact authorization
+   - DTO/SQL contract (if added)
+   - trusted timestamps/retention/last-known algorithm
+   - map/Room lifecycle and compatibility
+   - all 80 manual acceptance scenarios, UNEXECUTED
+   - manual rollout order (including deferred earlier migrations)
+   - rollback limitations, scope-revocation cleanup and future C2 hook
+10. Create exactly one new PR from current merged main with `[skip ci]`
+    implementation commits, no automatic merge.
+11. Report changed files and specific line ranges; distinguish source
+    facts, assumptions, unverified risks and operator actions.
+
+STRICT NO-EXECUTION RULES
+-------------------------
+DO NOT RUN OR ADD:
+  - automated tests or test fixtures
+  - build, lint, typecheck, CI, Gradle sync, instrumentation, emulator
+  - SQL migration execution or Supabase remote queries
+  - Web/Edge/Android deployment or runtime verification
+  - automated acceptances, monitoring or telemetry collection
+
+DO NOT CHANGE:
+  - Gradle, KAPT, KSP, dependency graph or generated Room schemas
+  - unrelated local developer files/settings
+  - historic already applied migrations
+  - global organization/hydrant RLS or existing command hierarchy
+  - lifecycle/assignment/resource/route mutation semantics
+  - M10 notification worker, Cron, simulation runner or RoadProvider
+
+Do not claim a task was performed unless actually performed.
+No developer test or deployment status may be described as PASS.
+Only the owner merges and performs rollout.
+
+FINAL CODEX REPORT REQUIRED
+---------------------------
+1. Base SHA and confirmed PR90 merge/overlap status.
+2. As-found REAL location source and whether it is truly usable.
+3. Explicit decision-gate branch: A, B or C.
+4. Exact effective server permissions and privacy-retention rules.
+5. Implemented Web map/list source and freshness behavior.
+6. Implemented Android C1 map/list/offline integration.
+7. SQLite/Room version and compatibility.
+8. Migration filename/signature/order if SQL added; otherwise why none.
+9. SI/DE/default labels and accessibility.
+10. Count and location of UNEXECUTED manual acceptance scenarios.
+11. Remaining C2/M15 GPS source and vehicle phone-pairing dependencies.
+12. Actual file/line changes and new PR link/commit.
+13. Explicit declaration that NO tests/build/lint/typecheck/CI, SQL,
+    deployment, monitoring or runtime verification were performed.
+14. STOP. Do not merge.
+
+END OF ASSIGNMENT
