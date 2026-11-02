@@ -1,0 +1,632 @@
+GASILKO — DETAILED CODEX IMPLEMENTATION PROMPT
+M14.8D2 — FIELD RELIABILITY METRICS, REVIEW QUEUE & READINESS DASHBOARD
+Date: 2026-11-02 | Priority: P1 | Repository: https://github.com/ficlus/Gasilko
+New standalone PR; source implementation ONLY; user-facing Slovenian/German.
+
+========================================================================
+0. OWNER DECISIONS AND HARD GATES
+========================================================================
+
+The owner reports PR #89 M14.8D1 is MERGED. Corrected head:
+3510b625f35d33e6187c32c919c3d78f837260c8.
+PR #88 M14.8C1 was merged previously. Check ACTUAL latest main
+and open PRs before implementing. If #89 is not an ancestor of main
+or an overlapping active PR exists, STOP and report. Do not repeat D1.
+
+Manual rollout of SQL migrations from PR #82 onward is DEFERRED.
+Merging does not mean SQL applied or Web/Android/Edge deployed.
+The owner alone merges, applies SQL, deploys, builds, installs and
+performs operational verification. Do not request rollout now.
+
+ALLOWED: read source/docs; design and implement D2 within merged
+architecture; create forward-only migration if necessary; update
+documentation/localization; commit [skip ci]; open exactly ONE new PR
+on verified main and STOP.
+
+PROHIBITED: adding, modifying or running tests; build, lint,
+typecheck, CI, Gradle sync, Room schema export, emulator/browser
+runtime, Docker, Supabase local, SQL execution, migration application,
+Web/Android/Edge deployment, live notifications, Cron, secrets.
+Do not touch Gradle/KAPT/KSP/dependency catalogs, generated Room
+schemas or local developer files. Do not change historical migrations.
+Do not merge PR or claim runtime readiness.
+Report any conflict with AGENTS.md's verification expectations;
+the owner's explicit per-task no-tests rule governs this handoff.
+
+OUT OF SCOPE: M14.8C2 consented REAL GPS; last-known-location
+colored markers; phone-to-vehicle pairing; SIM physics; navigation
+capacity change NAV3; Command Map UX; M14.6J simulator performance
+fixes; M14.10 closure/reporting; new FCM or Realtime transports.
+
+========================================================================
+1. SOURCE DISCOVERY AND EXACT CONTRACT MATRIX
+========================================================================
+
+Read current:
+AGENTS.md; docs/SPEC.md; docs/SPEC-M14-INCIDENT-OPERATIONS.md;
+docs/M14.8D1-field-offline-reliability-conflict-ux.md;
+docs/M14.7B1-incident-snapshots-change-feed.md;
+docs/M14.7B2-secure-private-realtime.md;
+docs/M14.7C-operational-scoped-messages.md;
+docs/M14.7D-private-incident-attachments-evidence.md;
+docs/M14.8B-android-unit-leader-command.md;
+docs/M14.8C1-android-incident-map-task-navigation.md;
+SPECS/prompts/10_m14-8d2-reliability-metrics-review-queue-and-readiness-dashboard.md.
+Inspect M10 notification SQL, relevant canonical incident migrations,
+Web and Android sources. Historical SPECS/automation/queue.json and
+reference state may still say #82 OPEN: do not treat them as current.
+
+Before edits, produce an AS-FOUND contract matrix: actual file,
+class/function signature, actor/org/incident authority, source of
+truth, actual timestamps, existing version/receipts, D2 extension.
+Confirm whether D2 already exists under another name.
+
+Prioritize:
+Android:
+  feature/incidents/IncidentRepository.kt, IncidentRecovery.kt,
+  IncidentRecoveryScreen.kt, IncidentViewModel.kt,
+  IncidentReconciliation.kt, IncidentScreen.kt,
+  UnitLeadershipScreen.kt.
+  core/database RegistryDatabase Room16, IncidentFieldDao,
+  incident_field_cache, incident_sync_cursor,
+  pending_hydrant_changes (INCIDENT_TASK),
+  incident_operation_dispatch.
+  Existing HydrantSyncScheduler, HydrantSyncWorker,
+  SupabaseAuthGateway, KeystoreSessionManager.
+Web:
+  web/features/incidents/IncidentArea.tsx,
+  IncidentLiveProvider, command/timeline/task components,
+  web/app/api/incidents/route.ts, SSR auth/org scope,
+  existing SI/DE incident translations.
+SQL:
+  B1 field directory/manifest/pages/feed/entities/timeline;
+  D1 public.incident_field_operation_receipts(uuid,uuid,jsonb);
+  private.incident_operation_receipts and immutable timeline/audit;
+  M10 private.notification_events/deliveries;
+  B2 private hints and existing polling fallback.
+
+Keep Android Compose -> ViewModel -> Repository -> Room ->
+existing sync engine/WorkManager -> authenticated Supabase.
+Do not create another queue, worker, sync scheduler, audit or
+notification transport. Android realtime WebSocket is NOT installed.
+Canonical actor auth.uid() and exact acting organization are always
+server-checked. Org ADMIN/MANAGER is not incident command authority.
+
+========================================================================
+2. PRODUCT GOAL AND TWO DISTINCT EVIDENCE SOURCES
+========================================================================
+
+Build operationally useful, BOUNDED, privacy-conscious reliability
+summaries after D1, with actual evidence and honest UNKNOWN states.
+
+A. Android "My diagnostics": locally derived current user/account/org
+   queue state, lease/read freshness, D1 UNKNOWN, blocked dependency,
+   confirmed result and user-review actions. Extend EXISTING D1
+   Sinhronizacija/Synchronisierung, not a second recovery inbox.
+
+B. Web controller "Incident reliability": only data backed by
+   canonical SERVER receipts/timeline/B1 and allowed M10 transport
+   records for the currently authorized incident/controller. Cannot
+   see unsent local queues on users' phones; do NOT fabricate a
+   total pending Android operation count for the whole incident.
+
+C. Human review: own D1 operations on Android versus permitted
+   server-derived incident exceptions on Web; never merge them into
+   a fake unified event queue.
+
+D. Pilot evidence checklist: owner records verification manually.
+   No metric or "green" badge declares emergency readiness.
+
+Never equate: local queued intent, network request sent, HTTP 200 from
+unrelated read, receipt found, authorized field refresh, push provider
+ACCEPTED, human ACK, task completion, or REAL vehicle movement.
+
+No personnel scoring, rankings, telemetry GPS trails or covert
+monitoring. Keep REAL and TRAINING/SIM strictly distinct.
+
+========================================================================
+3. PROVENANCE-FIRST METRIC CATALOG
+========================================================================
+
+For every metric define key, unit, source, time basis, visibility,
+sample completeness, cap/index, error state and localization.
+
+M01 OWN_LOCAL_PENDING_COUNT: actually durable Room pending rows in
+    exact account/org/(incident where known); not server backlog.
+M02 OWN_UNKNOWN_COUNT: D1 OUTCOME_UNKNOWN and orphan SENDING
+    including prior ambiguous request; ABSENT receipt remains UNKNOWN.
+M03 OWN_ATTENTION_COUNT: proven first rejection, blocked dependency,
+    stale target, local storage problem, scope lock in distinct buckets.
+M04 OWN_OLDEST_INTENT_AGE: true local createdAt; warn when clock
+    rollback/reboot makes age unreliable. Never claim server latency.
+M05 AUTHORIZED_LAST_READ_AGE: B1 verifiedAt + actual scoped lease;
+    authorization and lease status must be explicit.
+M06 SERVER_OPERATION_PROOFS: bounded actual matching canonical
+    receipts only, actor/org/incident scoped, no raw request/payload.
+M07 SERVER_RECENT_ACTIVITY: bounded authorized incident revisions/
+    timeline summary; no inference of human action from hints.
+M08 M10_TRANSPORT_STATUS: where authorized, PENDING/LEASED/
+    ACCEPTED/FAILED/SUPPRESSED counts, labeled "transport only".
+    No device/user IDs, tokens or audience.
+M09 LOCAL_READ_FAILURE_CATEGORY: only observed safe codes like
+    ACCESS/SCOPE/MANIFEST/CAPACITY/PROTOCOL/BUSY/STALE/NETWORK/SERVER.
+M10 SIGNAL_COMPLETENESS: AVAILABLE/UNKNOWN/NOT_COLLECTED,
+    distinguishing old client, missing/empty signal and denied access.
+
+Conditional only if source actually supports it:
+  retry_count, last_attempt_at, commit->authorized fetch latency,
+  push->human seen latency, client version distribution, B1 resets.
+D1 docs say retry_count and last_attempt_at are NOT persisted:
+do not invent them. No guessing old retry counts from operation age.
+FCM provider accepted is NOT delivery to human and NOT task ACK.
+Do not show numeric SLAs without controlled pilot evidence.
+Never turn absence of samples into green or zero failure.
+Do not use personal identity or small-cell responder dimensions.
+
+========================================================================
+4. SQL DESIGN, PERFORMANCE, AND CURRENT AUTHORIZATION
+========================================================================
+
+First prove that the new read is not already available from canonical
+RPCs. Strong preference: derive bounded aggregates without persistent
+new client events. If a new SQL RPC is necessary, suggested PROPOSED
+signature (verify naming and exact schema at HEAD):
+
+  public.incident_field_reliability_summary(
+    p_acting_organization_id uuid,
+    p_incident_id uuid,
+    p_window text default '24h'
+  ) returns jsonb
+
+Do not assume this exists. Avoid unnecessary broad organization-wide
+or cross-incident diagnostics. Allowlist bounded time windows (e.g.
+'1h','24h','7d' only if justified), fixed row/payload caps and indexed
+incident/org/time predicates. No dynamic SQL from user input.
+
+Server derivation:
+  auth.uid() -> ACTIVE profile -> exact acting-org ACTIVE membership ->
+  current incident read AND current controller authority where needed.
+  Do NOT authorize through org MANAGER/ADMIN position alone.
+  Caller cannot supply an arbitrary actor identity.
+  If field participant only has self permissions, do not widen it
+  to controller's or whole-org metrics.
+  Distinguish current controller, effective unit leader and responder
+  in explicit role/capability matrix.
+
+Read only the least data necessary:
+  immutable incident operation receipt metadata, timeline/revision
+  sources, and permitted M10 notification delivery states. Do not
+  surface full receipts, original requests, task text, recipient
+  episodes, message bodies, Storage paths, user IDs, device IDs,
+  GPS or private SIM hazards/instructor details.
+  Restrict any count by current incident and current role, not just
+  an entity's organization.
+  Do not turn private tables into direct SELECT APIs.
+
+If using SECURITY DEFINER: set search_path='', qualify identifiers,
+use narrowly reviewed owner, revoke PUBLIC/anon/service_role/
+authenticated direct table privileges and only grant a reviewed
+function execute to authenticated. Check helper invocation ownership
+and role availability in actual Supabase code. Avoid SQL alias/PLPGSQL
+variable collisions and malformed dollar-quoted delimiters that
+previously broke Gasilko migrations.
+
+Suggested response contract, adapt based on actual sources:
+{
+  "incident_id": "<uuid>",
+  "acting_organization_id": "<uuid>",
+  "as_of_server": "<UTC timestamp>",
+  "window": "24h",
+  "authority": "CURRENT_INCIDENT_CONTROLLER",
+  "metrics": [
+    {"key":"SERVER_OPERATION_PROOFS","value":7,"unit":"count",
+     "source":"CANONICAL_RECEIPTS","completeness":"AVAILABLE"},
+    {"key":"HUMAN_PUSH_ACK_LATENCY","value":null,"unit":"seconds",
+     "source":"NONE","completeness":"NOT_COLLECTED"}
+  ]
+}
+Do not create placeholder rows which look authoritative or counts
+derived from unavailable data. Use explicit missing-source status.
+
+Review the real indexes/row volumes in source before choosing
+aggregation. Avoid trigger hooks on critical incident command writes,
+long-lived locks, per-actor loops, N+1 queries, full map enrichment,
+or SIM runner dependency. No increase of statement timeouts. Keep
+normal stale-version/lock/timeout error classification distinct.
+
+Telemetry ingestion policy:
+  NO silent background upload or personally identifying diagnostics.
+  If actual current sources cannot provide an approved metric, mark it
+  NOT_COLLECTED. Only propose a new private field_sync_observations
+  table if justified by necessary functionality and existing privacy
+  approval, documenting PK/constraints/actor scope, indexes, retention,
+  size limits and how retention works WITHOUT new Cron. If privacy
+  approval does not exist, do NOT enable collection; implement the
+  source-backed subset and clearly disclose the limitation. No
+  unapproved tracking of responders.
+
+Use server time for cross-device windows; distinguish Android local
+clock and last authorized read time. A diagnostic read is NEVER a
+state-changing canonical incident command; it must not insert a
+command receipt or append a fake incident timeline event.
+
+========================================================================
+5. ANDROID: D1 DIAGNOSTICS INTEGRATION
+========================================================================
+
+Reuse D1 Sinhronizacija screen, operation list, filters and explicit
+Check/Retry/Review actions. Add a concise "Diagnostics / Diagnostika"
+area, not another top-level Sync module or new dispatch architecture.
+
+- Own scoped local counters from Room operation/dispatch rows.
+- Last authorized read age from existing B1 cache verifiedAt.
+- Lease warning (2h), <=24h hard lock and post-reboot/clock mismatch.
+- Original frozen operation identity, dependency and confirmed result
+  remain unchanged; D2 never rewrites a queued request.
+- Bounded list/pagination (D1 uses 50-row screen pages); avoid deriving
+  an unbounded 100k-row list on each recomposition.
+- Every new UI-derived phase uses the canonical D1 classification,
+  including exact P0001+4xx first-rejection and preservation of
+  previous SENDING/UNKNOWN. Other typed errors remain uncertain.
+- "Check" reads state and receipt; it does not transmit mutation.
+  "Retry exact" continues through D1, not a D2 one-click global replay.
+- No "clear unknown", "discard original evidence", "reset queue".
+- When scope is revoked/expired, mask all protected private details,
+  but preserve neutral immutable local operation correlation.
+- Account/org/incident/assignment switch fences in-flight results.
+- After storage/Keystore/Room failure report unavailable rather than
+  claiming queue/synchronization success.
+- No direct UI Supabase commands; Repository/Room remain the source.
+- No additional background timers, WorkManager unique work, sockets,
+  foreground services, device location permissions or dependencies.
+- Existing hydrant/inspection/photo offline flows remain unchanged.
+- Default/sl/de copy, screen reader labels, explicit timestamp source.
+- User-initiated redacted diagnostic export is OPTIONAL only if it can
+  be done safely without permissions/dependency changes. No automatic
+  upload/sharing/cleartext incident payload.
+
+Clearly label DEVICE LOCAL and SERVER CONFIRMED / LAST READ, not
+a single vague "Synced" state. A local clock age cannot become server
+receipt age. A timeline item is not an operation receipt.
+
+========================================================================
+6. WEB: AUTHORIZED INCIDENT RELIABILITY OVERVIEW
+========================================================================
+
+Implement a compact section in existing IncidentArea/workspace for
+current command-authorized viewer, preferably using existing scoped
+IncidentLiveProvider/head lifecycle. Review actual current roles and
+capabilities from canonical SQL; don't duplicate auth in Web.
+
+Include:
+- time of last server sample and exact incident/org context;
+- true server-backed aggregate status;
+- category-level review queue for current incident where safe;
+- differences between operation receipt and M10 transport;
+- B1 read freshness where Web already has authoritative timing;
+- EMPTY, NOT_COLLECTED, SCHEMA_UNAVAILABLE, STALE, BUSY/57014,
+  DENIED, ERROR states; never a false healthy banner.
+- Server vs Android device-only operation note, no invented queue.
+- Bounded manual refresh, cancellation on account/org/incident switch,
+  no extra high-frequency polling or fetching entire full map.
+- Safe links to existing incident/task/command/timeline details, not
+  automatic mutating actions.
+- Existing /api/incidents RPC allowlist update if adding a read RPC;
+  no arbitrary RPC exposure, preserve origin/session/X-Gasilko-Account.
+- No full request objects, error stack traces or SQL payload logs.
+- SI/DE translations, accessible labels and safe timestamps.
+- Prioritize small, readable cards; diagnostic categories should not
+  obscure tactical map or normal command workspace.
+
+Controller dashboard does NOT see unsent Android intents; it may only
+summarize server-acknowledged canonical events and sources actually
+authorized to the controller. Do not show individual responder ranking,
+user/device installation data or unauthorized private recipient lists.
+
+If no server source supports a requested indicator, show not collected
+and explain it, or omit that indicator with explicit documentation.
+
+========================================================================
+7. HUMAN REVIEW QUEUE AND READINESS CHECKLIST
+========================================================================
+
+ANDROID review queue:
+  D1 local operations for this device/account/org/incident only.
+  Categories: OUTCOME_UNKNOWN, DEFINITIVE_FIRST_REJECTION,
+  BLOCKED_DEPENDENCY, LOCAL_STALE_VERSION, AUTH/LEASE_UNAVAILABLE,
+  PROTOCOL/NETWORK/BUSY. Keep original ID and immutable parent/request.
+
+WEB review:
+  evidence that actually exists on the server and is visible in the
+  current incident permission scope; no claim of offline device state.
+  Safe category, provenance, server event timestamp where available,
+  bounded pages, and links to authorized incident read details.
+  No indiscriminate broad receipt search by arbitrary UUID.
+
+Do not join both into invented "all firefighter operations".
+A server absent receipt is not proof that local intent never committed.
+Only matching canonical receipt confirms original operation.
+
+Readiness:
+  this is a human-run pilot CHECKLIST, not a new command authority.
+  List deployment/evidence states individually:
+    CODE_MERGED, SQL_APPLIED, EDGE_DEPLOYED, STORAGE_CONFIGURED,
+    REALTIME_CONFIGURED, WEB_DEPLOYED, ANDROID_INSTALLED,
+    HUMAN_VERIFIED, OPERATIONAL_RELEASED.
+  Do not auto-mark these from repository code, schema names,
+  metric value or migration ledger (SQL Editor may bypass it).
+  If authoritative signed-off persistence does not already exist,
+  leave sign-off as an operator document rather than inventing an
+  unaudited approval table.
+
+Checklist covers: #82–#89 migration order plus D2, private evidence
+Storage/incident-evidence Edge, private B2 Realtime, matching Web/API,
+Android Room16 upgrades, Web IC+leader+responder TRAINING validation,
+D1 UNKNOWN/receipt-first behavior, B1 atomic paging/cursors, REAL/SIM
+guards, radio/voice fallback and manual authorization/privacy review.
+
+No false "READY FOR REAL EMERGENCIES" banner or numeric SLA derived
+from unverified code. No automated escalation, SMS, FCM worker or
+Cron task for diagnostics.
+
+========================================================================
+8. SECURITY, FAILURE MODES, AND BACKWARDS COMPATIBILITY
+========================================================================
+
+- Exact actor/current membership/current incident command authority.
+- Organization ADMIN/MANAGER cannot borrow incident command power.
+- Narrow incident/role/user scope at SQL, Web and Android.
+- Revocation and cancellation fence late async responses; neutral
+  own queue evidence remains but protected incident content hides.
+- No actual GPS/last-known vehicle positions, no fake SIM telemetry,
+  no private hazard configuration or instructor briefing.
+- No medical/patient information, no personal performance analytics.
+- No service key in browser/Android. No public/broad table grants.
+- SI/DE copy and UTC server timestamps; WGS84 irrelevant because
+  diagnostics MUST NOT emit location.
+- Preserve immutable audit and original request UUID and receipt.
+- No destructive Room migration, Room stays version 16 if possible.
+- Old clients should keep working with existing B1/D1 APIs; additive
+  SQL only. New client against unavailable D2 RPC is safely degraded.
+- Do not reorder/change existing canonical task/leader commands.
+- Do not change M10 notification worker, existing FCM, B2 Web hints.
+- Preserve SIM/TRAINING vs REAL separation and field access leases.
+
+Failure matrix and expected behavior:
+  Offline -> local D1 queue visible under lease, server metrics unknown.
+  No data -> NOT_COLLECTED, not green/success.
+  Unknown outcome -> original UUID retained, receipt-first review.
+  First P0001 business denial -> D1 definitive rejection rules.
+  Previous ambiguity -> remains UNKNOWN despite subsequent denial.
+  57014/55P03/40P01/40001 -> busy/uncertain, no automatic retry storm.
+  401/403/42501 -> permission/scope, protected data hidden.
+  PGRST202/42883/42703/42P01 -> COMPATIBILITY, no fake fallback success.
+  Auth refresh/account switch -> cancel stale results.
+  Stale B1 scope fingerprint -> reset/rescope; do not expose old cache.
+  Missing M10 timestamp -> no delivery latency calculation.
+  Huge server rows -> bounded aggregated response, not full dump.
+
+Performance:
+  Avoid incident map/NAV/full projection joined into every D2 refresh.
+  Query bounded windows/caps; document actual indexing in new migration.
+  No polling per indicator/per list row, no added timer, no bulk scans.
+  No changing statement_timeout or NAV/SIM scheduling to hide slow reads.
+
+========================================================================
+9. IMPLEMENTATION PLAN / REVIEWABLE COMMITS
+========================================================================
+
+1. Establish verified merged main and #89 ancestry. Check open PRs.
+2. Inspect actual current D1, B1, M10, Web and authorization code.
+3. Produce source contract matrix and metric provenance inventory.
+4. Explicitly document unavailable inputs (retry count, last attempt,
+   human-seen timestamp, offline unsent rows on Web).
+5. Select smallest acceptable database read extension; one forward
+   SQL migration only if genuinely necessary. Document real helper
+   grants and query-index assumptions. No SQL execution.
+6. Implement safe server-backed bounded aggregate and typed response,
+   preserving canonical receipt/membership semantics and no private
+   payload. Do not add upload telemetry without privacy permission.
+7. Connect Web controller with original authenticated API and
+   authorization-scope cancellation, no new poller.
+8. Extend Android D1 screen with Room-derived diagnostics and
+   attention categorization, original D1 actions only.
+9. Add default/SI/DE translations and accessible labels.
+10. Add read-only pilot readiness evidence/checklist and scoped
+    milestone documentation. No automatic sign-off.
+11. Perform SOURCE REVIEW ONLY on changes; do not execute tests,
+    compilation, SQL, runtime, or automated validation.
+12. Commit [skip ci], open one PR, STOP.
+
+Recommended documentation:
+  docs/M14.8D2-field-reliability-metrics-review-readiness.md
+
+Update docs/SPEC-M14-INCIDENT-OPERATIONS.md with narrow D2 progress
+section. Do not rewrite already merged history, SPEC roots or
+2026-10-28 queue snapshot to imply something newly merged/deployed.
+
+Forward-only migration candidate, ONLY if not colliding with HEAD:
+  20261102120000_incident_field_reliability.sql
+It must follow:
+  20261102100000_incident_field_receipt_recovery.sql (PR #89).
+Review latest file names before selecting timestamp.
+Do not edit previous migration, D1 receipt function or RLS policies
+unrelated to D2.
+
+Document any minimum viable subset that genuinely cannot be implemented
+without privacy consent or runtime proof as NOT IMPLEMENTED. Do not
+include mock metrics or TODOs masquerading as complete functionality.
+
+========================================================================
+10. MANUAL ROLLOUT ORDER — FOR OWNER LATER, NOT NOW
+========================================================================
+
+Before any apply, owner verifies actual database state through #81.
+Then human runs applicable UNAPPLIED, corrected main migrations in order:
+
+#82 20261027100000_incident_android_field_pilot.sql
+#83 20261030100000_incident_snapshot_protocol.sql
+#84 20261030120000_incident_private_realtime.sql
+#85 20261030140000_incident_scoped_messages.sql
+#86 20261030160000_incident_private_attachments.sql
+#87 20261030180000_android_unit_leadership.sql
+#88 20261030200000_incident_field_map.sql
+#89 20261102100000_incident_field_receipt_recovery.sql
+D2  forward-only migration IF authored after #89.
+
+No blind re-runs after error or unknown outcome. Supabase SQL Editor may
+not record applies in supabase_migrations.schema_migrations. Record
+manual filename/time/result and inspect existing objects before replay.
+
+Owner separately configures private evidence bucket and deploys
+incident-evidence Edge as actually required by #86; checks Storage
+global 20 MiB limit and MIME/policies; checks private B2 Realtime;
+deploys compatible Web/API; human builds/exports/installs Android
+Room16, validates 14->15->16 path; then controlled TRAINING pilot
+with actual separately authorized Web commander, unit leader and
+responder. No unapproved REAL resource stock transitions. Maintain
+radio/voice fallback. This package is NOT emergency-release verified.
+
+No D2 new Edge, Storage, Realtime, Cron or dependency if avoidable.
+Update manual rollout docs for D2 objects/API compatibility.
+The owner said rollout is deferred until "greva na lokal".
+
+========================================================================
+11. HUMAN-RUN ACCEPTANCE MATRIX — ALL UNEXECUTED
+========================================================================
+
+In the milestone document, retain these scenario IDs. Add specific
+expected UI, canonical evidence source and scope/permission assertions
+for each. These are FUTURE HUMAN actions; do not run them, create
+automated tests from them, seed live data or mark them PASSED.
+
+- [ ] D2-01: Before branch: PR #89 corrected head is ancestor of main and no overlapping D2 PR.
+- [ ] D2-02: Old D1 Android client continues to work without D2 RPC.
+- [ ] D2-03: New D2 against old SQL shows SCHEMA_UNAVAILABLE, not healthy.
+- [ ] D2-04: Local Room remains version16 and hydrant/inspection/photo pending data survive.
+- [ ] D2-05: Offline launch opens own recovery screen and diagnostic summary under lease.
+- [ ] D2-06: Local pending counter exactly matches current scoped durable Room rows.
+- [ ] D2-07: UNKNOWN includes orphaned SENDING after process death.
+- [ ] D2-08: Receipt ABSENT never converts UNKNOWN to REJECTED.
+- [ ] D2-09: Matching receipt proves original UUID and updates confirmed status only.
+- [ ] D2-10: Mismatched actor/org/payload or UUID receipt never confirms wrong operation.
+- [ ] D2-11: First typed P0001+4xx allowlisted rejection is definitive only if truly first.
+- [ ] D2-12: P0001 rejection after earlier ambiguous send remains UNKNOWN_REJECTED.
+- [ ] D2-13: 57014 timeout categorized busy/uncertain, not proof of failed command.
+- [ ] D2-14: 55P03/40P01/40001 lock/deadlock/serialization are not confirmed.
+- [ ] D2-15: PGRST202/42883/42703/42P01 are compatibility problems, not retryable success.
+- [ ] D2-16: 401/403/42501 scope denial masks private diagnostics.
+- [ ] D2-17: Account switch while RPC in-flight cannot show prior account summary.
+- [ ] D2-18: Organization switch cannot reuse same-title incident metrics.
+- [ ] D2-19: Incident change invalidates previous metric read result.
+- [ ] D2-20: Current unit-leader role loss hides old own-unit controller data.
+- [ ] D2-21: Ordinary crew cannot see another crew member's private task or metrics.
+- [ ] D2-22: Organization ADMIN/MANAGER without incident authority is denied commander view.
+- [ ] D2-23: Inactive member/profile gets no incident metric disclosure.
+- [ ] D2-24: Caller cannot choose arbitrary actor in SQL RPC.
+- [ ] D2-25: TRAINING data remains clearly labeled TRAINING not REAL.
+- [ ] D2-26: Local createdAt and server receipt created_at are separately labeled.
+- [ ] D2-27: B1 verifiedAt labeled last authorized read, not ACK.
+- [ ] D2-28: Lease 2h warning appears correctly without treating cache as confirmation.
+- [ ] D2-29: Expired >24h incident lease masks private data and retains neutral evidence.
+- [ ] D2-30: Clock rollback/reboot/Keystore invalid cannot make cached data appear fresh.
+- [ ] D2-31: B1 manifest retry/reset/gap preserves original pending queue.
+- [ ] D2-32: Field scope fingerprint changes invalidate protected prior projection.
+- [ ] D2-33: Web shows only server-backed aggregate, not unsubmitted Android intents.
+- [ ] D2-34: Zero observations show NOT_COLLECTED/UNKNOWN rather than zero failures.
+- [ ] D2-35: No user ranking, performance scoring or names in aggregate.
+- [ ] D2-36: No task text, message body, recipient IDs or GPS in diagnostics output.
+- [ ] D2-37: M10 PENDING and LEASED labeled transport status only.
+- [ ] D2-38: M10 ACCEPTED is not human acknowledgment.
+- [ ] D2-39: M10 FAILED/SUPPRESSED cannot directly fail/complete a task.
+- [ ] D2-40: FCM duplicate or missed hint does not change canonical status.
+- [ ] D2-41: Android has no unsupported WebSocket subscription claim.
+- [ ] D2-42: Map diagnostic read does not scan full NAV route geometry.
+- [ ] D2-43: Server windows reject invalid/unbounded periods.
+- [ ] D2-44: Server query and response remain bounded with many incident events.
+- [ ] D2-45: Rapid dashboard openings do not create additional polling workers.
+- [ ] D2-46: Background account change cancels stale Web promise results.
+- [ ] D2-47: Offline Web marks unavailable rather than showing prior data as live.
+- [ ] D2-48: Return online uses authorized refreshed data; no stale cross-scope reuse.
+- [ ] D2-49: Web has explicit empty, denied, busy, schema unavailable, error states.
+- [ ] D2-50: Android review queue links to D1 details without resending.
+- [ ] D2-51: There is no Retry All, Discard Unknown or Resolve All action.
+- [ ] D2-52: Dependent child still requires original parent receipt and new authorized version.
+- [ ] D2-53: D2 does not rewrite frozen original request or operation UUID.
+- [ ] D2-54: No second worker, Cron, notification pipeline, Edge or dependency introduced.
+- [ ] D2-55: All default/Slovenian labels accurately describe provenance.
+- [ ] D2-56: German UI keeps unknown, rejection, scope and stale distinctions.
+- [ ] D2-57: Screen reader can identify every status without only colors.
+- [ ] D2-58: Disabled privileged button explains lack of permission.
+- [ ] D2-59: Optional diagnostic export is explicit, bounded and fully redacted.
+- [ ] D2-60: No automatic persistent personal telemetry upload occurs.
+- [ ] D2-61: Current controller grants only exact incident scope.
+- [ ] D2-62: Security definer has safe search_path and restricted function EXECUTE.
+- [ ] D2-63: Private table direct SELECT remains revoked.
+- [ ] D2-64: No operational message audience/personal delivery details leaked.
+- [ ] D2-65: Cross-device timing uses actual server time, not fake device-clock SLA.
+- [ ] D2-66: No imaginary push received/seen timestamp or retry count.
+- [ ] D2-67: Readiness checklist does not mark verified because code is merged.
+- [ ] D2-68: Human sign-off required for SQL/Edge/Web/Android deployment records.
+- [ ] D2-69: Pilot readiness still UNKNOWN before human manual acceptance.
+- [ ] D2-70: Controlled TRAINING pilot validates Web commander, leader, responder separately.
+- [ ] D2-71: Known historic errors are separated from current service availability.
+- [ ] D2-72: Previous 57014/STALE_VERSION patterns do not trigger timeouts increase.
+- [ ] D2-73: Real-world performance/SQL planner is expressly unverified before rollout.
+- [ ] D2-74: M14.8D1 receipt resolution remains independently functional.
+- [ ] D2-75: Unapproved GPS, phone pairing and location freshness features absent.
+- [ ] D2-76: Owner reconciles all deferred SQL from #82 through #89 then D2 in order.
+- [ ] D2-77: Storage/incident-evidence Edge and B2 Realtime separately documented.
+- [ ] D2-78: Any rollback/forward-fix retains original receipts and pending rows.
+- [ ] D2-79: Navigation arrival/map tap/FCM alert cannot auto-ACK/complete task.
+- [ ] D2-80: PR summary explicitly states NOT TESTED / NOT APPLIED / NOT DEPLOYED.
+
+
+========================================================================
+12. DOCUMENTATION AND FINAL CODEX RESPONSE
+========================================================================
+
+Author or update docs/M14.8D2-field-reliability-metrics-review-readiness.md
+with:
+  - title/background, requirements in MoSCoW priority, METHOD with
+    component sequence/data-flow diagram (PlantUML or Mermaid if useful),
+    actual database/RPC schema, algorithms and evidence provenance;
+  - AS-FOUND contract matrix with exact current file/signature and
+    verified main commit;
+  - canonical actor/role permission matrix;
+  - metric/source dictionary and unsupported signals;
+  - app UX flow and failure-state matrix;
+  - additive migration/grant/index design if applicable;
+  - no-new-source D2 implementation choices and clear constraints;
+  - implementation steps, milestones, manual acceptance/checklist;
+  - privacy/exposure decisions, retention and exclusions;
+  - deferred manual rollout order and backward compatibility;
+  - all 80 UNEXECUTED human-run checks;
+  - clear SOURCE REVIEW ≠ RUNTIME VERIFIED ≠ OPERATIONAL RELEASE.
+
+Do not rewrite old incident history or reset official audit/timeline.
+New specs must remain compatible with current authoritative sources.
+
+Final response from Codex must provide, in this order:
+1) PR URL and new branch name, base main SHA and commit SHA.
+2) Confirmation PR#89 corrected commit is an ancestor of base.
+3) Exact code/source contracts inspected and potential collisions.
+4) Confirmed source gaps vs implemented solutions.
+5) Changed files and key changed line ranges.
+6) Added SQL signatures, auth/grants and migration order OR why SQL
+   migration was not required.
+7) Which metrics are SERVER, DEVICE LOCAL and NOT COLLECTED.
+8) D1/Room16/queue/receipt compatibility.
+9) Web controller permission and safe failure-state behavior.
+10) Default/SI/DE localization and accessible diagnostics.
+11) Human checklist, performance assumptions and privacy limitations.
+12) Owner-only deferred SQL/Edge/Storage/Realtime/Web/Android steps.
+13) Explicit statement: no tests added/changed/run; no build, lint,
+    typecheck, CI, Gradle sync, SQL, deploy, runtime, or manual checks.
+14) Exactly one PR, not merged; STOP.
+
+NO automatic background implementation, no claim that task was sent
+or verified unless a real tool actually performed and reported it.
+Owner alone performs merge and future rollout.
+
+END OF M14.8D2 CODEX IMPLEMENTATION PROMPT
