@@ -13,7 +13,7 @@ import {loadAccount} from '../../../lib/auth/load';
 import {mutationNames} from '../../../lib/incidents/model';
 import {copErrors} from '../../../lib/incidents/cop';
 
-const reads = ['incident_attachment_prepare','incident_attachment_page','incident_message_page','incident_message_history','incident_message_send','incident_sync_head','simulation_operational_command','simulation_operations_read','simulation_operational_actions','simulation_operation_resolve','simulation_hazard_history',...hazardRpcs,'simulation_map_sample',...scenarioEventRpcs,...templateRpcs,'simulation_automation_feed','simulation_agents_read','simulation_agent_command',...navigationReads,...simulationReads,'simulation_command',...taskReads,'incident_resource_selection_page','incident_team_template','incident_entry','incident_list','incident_context','incident_timeline_page','incident_candidates','incident_command_candidates','incident_command_view','incident_command_inbox','incident_cop','incident_cop_hydrants','incident_resources','incident_unit_candidates','incident_resource_candidates','incident_crew_candidates','incident_crew_history','incident_unit_leader_candidates'];
+const reads = ['incident_field_reliability_summary','incident_attachment_prepare','incident_attachment_page','incident_message_page','incident_message_history','incident_message_send','incident_sync_head','simulation_operational_command','simulation_operations_read','simulation_operational_actions','simulation_operation_resolve','simulation_hazard_history',...hazardRpcs,'simulation_map_sample',...scenarioEventRpcs,...templateRpcs,'simulation_automation_feed','simulation_agents_read','simulation_agent_command',...navigationReads,...simulationReads,'simulation_command',...taskReads,'incident_resource_selection_page','incident_team_template','incident_entry','incident_list','incident_context','incident_timeline_page','incident_candidates','incident_command_candidates','incident_command_view','incident_command_inbox','incident_cop','incident_cop_hydrants','incident_resources','incident_unit_candidates','incident_resource_candidates','incident_crew_candidates','incident_crew_history','incident_unit_leader_candidates'];
 const safeErrors = new Set(['ATTACHMENT_TYPE_UNSUPPORTED','ATTACHMENT_TOO_LARGE','ATTACHMENT_MALFORMED','ATTACHMENT_NOT_READY','ATTACHMENT_REJECTED','ATTACHMENT_LIMIT','SCOPE_CHANGED','MESSAGE_SCOPE_LIMIT',...operationalErrors,'INVALID_TEMPLATE','INVALID_EVENT_PLAN','INVALID_HAZARD_PLAN','SCHEMA_MISMATCH','REQUEST_TOO_LARGE','TEMPLATE_SETUP_REQUIRED',...agentErrors,...navigationErrors,...simulationErrors,'NOT_AUTHORIZED','STALE_VERSION','INVALID_TRANSITION','INVALID_COMMANDER','INVALID_PARTICIPANT','INCIDENT_TERMINAL','OPERATION_REUSED','VALIDATION_FAILED','INVALID_STATE',
  'INVALID_COMMAND_HIERARCHY','INVALID_COMMAND_ROLE','INVALID_COMMAND_CANDIDATE','TRANSFER_NOT_CURRENT','TRANSFER_EXPIRED','TRANSFER_ALREADY_PENDING','LEAD_TRANSFER_REQUIRES_CONSENT','COMMANDER_STILL_VALID','PARTICIPANT_HAS_ACTIVE_COMMAND',...copErrors,...resourceErrors,...taskErrors]);
 export async function POST(request:Request) {
@@ -39,6 +39,13 @@ export async function POST(request:Request) {
   }
   const {data,error}=await client.rpc(input.name,input.args);
   if(error){
+   if(input.name==='incident_field_reliability_summary'){
+    const schema=['PGRST202','PGRST203','PGRST204','42883','42703','42P01'].includes(error.code??'')||error.code==='P0001'&&error.message==='SCHEMA_MISMATCH';
+    const busy=['57014','55P03','40P01','40001'].includes(error.code??'');
+    const code=schema?'SCHEMA_UNAVAILABLE':busy?'BUSY':error.code==='42501'?'NOT_AUTHORIZED':
+     error.code==='P0001'&&error.message==='VALIDATION_FAILED'?'VALIDATION_FAILED':'SERVER';
+    return NextResponse.json({error:code},{status:code==='NOT_AUTHORIZED'?403:code==='VALIDATION_FAILED'?400:503,headers});
+   }
    const correlation=crypto.randomUUID();
    const schema=['PGRST202','PGRST203','42883','42703','42P01'].includes(error.code??'');
    const code=schema?'SCHEMA_MISMATCH':safeErrors.has(error.message)?error.message:error.code==='42501'?'NOT_AUTHORIZED':/^22|^23/.test(error.code??'')?'VALIDATION_FAILED':'SERVER';
