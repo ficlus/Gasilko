@@ -1,0 +1,913 @@
+GASILKO — M14.8C2 / M15 — CONSENTED REAL VEHICLE GPS
+ANDROID PHONE ↔ INCIDENT VEHICLE / UNIT PAIRING
+AUTHORITATIVE LATEST OBSERVATION, PRIVACY, WEB + ANDROID MAPS
+CODEX IMPLEMENTATION ASSIGNMENT — ONE NEW PR ONLY
+Prepared: 2026-11-02
+Repository: https://github.com/ficlus/Gasilko
+
+================================================================================
+0. CURRENT CONTEXT — CONFIRM, DO NOT ASSUME
+================================================================================
+
+The owner reports:
+- PR #90 (M14.8D2) MERGED.
+- PR #91 (M14.8C3, REAL location unavailable/freshness UI) created from main
+  at commit 07f51406a0a3898f6dcac35f63a68ce493b79aea and reviewed.
+  A merge of #91 has NOT been explicitly confirmed in the conversation.
+- C3 found NO actual authorized OBSERVED_REAL producer in repository contracts.
+  NAV rejects ACTUAL_POSITION; SIM coordinates are SIMULATED only.
+  C3 renders position unavailable / conditional freshness legend, not GPS.
+- PR #82–#85 SQL were reportedly applied manually.
+- PR #86 `20261030160000_incident_private_attachments.sql` FAILED on owner's
+  Supabase project with SQL syntax error at/near line 109; initial schema
+  inspection returned NULL/false for several evidence objects.
+- SQL #87–#90, incident-evidence Edge deployment, Storage/Realtime validation
+  and compatible Web/Android rollout remain UNCONFIRMED/NOT COMPLETED.
+- Only the OWNER merges PRs, runs SQL, deploys Edge/Web, builds Android and
+  performs runtime/manual acceptance. The agent must not do any of these.
+
+BEFORE CODING: inspect ACTUAL GitHub main, open PRs, #91 status and
+dependencies. If #91 is open, do not open an overlapping PR based on an old
+main. First produce a source-reviewed implementation plan and report that
+the dependency is unmerged; stop rather than branching over the open PR.
+When #91 is merged, branch from its merged current main. Do not auto-merge.
+
+This is a NEW milestone. Do not modify C1 / D1 / D2 / C3 historical PRs.
+Later corrections to THIS new PR go on the SAME branch and SAME PR.
+
+Exact relationship to existing roadmap:
+  M14.8C2: consented REAL unit-position source.
+  M15 requirement from previous user architecture discussion:
+    a driver's Android phone can represent a firefighting VEHICLE's
+    real position while the driver is in that vehicle, including use with
+    the screen locked, with explicit "Zapustil sem vozilo / Leave vehicle".
+This assignment implements the narrow vehicle-phone session slice of M15
+inside one bounded C2 milestone only if the canonical vehicle/deployment
+identity and privacy policy can be established. Do not build a new global
+fleet-tracking platform or permanently associate personal phones with users.
+
+This is NOT an authorization to ACTIVATE tracking in production.
+Prepare privacy/retention controls, implement reviewed feature with
+DEFAULT-OFF server and client capability gates. Owner approval of
+the data-sharing policy, retention cleanup and real-world human acceptance
+is a HARD GATE before any remote tracking deployment/enablement.
+If an unknown privacy decision materially affects safe implementation,
+document the decision and leave that capability disabled; never guess.
+
+================================================================================
+1. MANDATORY SOURCE INSPECTION / NO INVENTED CONTRACTS
+================================================================================
+
+READ FIRST:
+- AGENTS.md
+- docs/SPEC.md
+- docs/SPEC-M14-INCIDENT-OPERATIONS.md (especially §7 "COP, geometry,
+  routing and location sharing", §retention, command hierarchy)
+- current M14.4 unit resources/deployments, M14.5 NAV, M14.6 SIM
+- docs/M14.7B1-incident-snapshots-change-feed.md
+- docs/M14.7B2-secure-private-realtime.md
+- docs/M14.8B-android-unit-leader-command.md
+- docs/M14.8C1-android-incident-map-task-navigation.md
+- docs/M14.8C3-real-unit-location-freshness.md (from #91 when merged)
+- docs/M14.8D1-field-offline-reliability-conflict-ux.md
+- docs/M14.8D2-field-reliability-metrics-review-readiness.md
+- source prompts in repo ROOT and SPECS/; note archived queues are snapshots.
+- existing SQL migrations, `supabase/config.toml`, relevant Android manifests,
+  current APIs, database auth policies, MapLibre lifecycle and Web workspace.
+
+Inspect actual live source contracts and record a matrix:
+  canonical vehicle registry UUID / resource type and owner organization;
+  incident-unit deployment UUID and same-incident FK;
+  current crew/driver/effective UNIT_LEADER mapping and authority;
+  incident ACTIVE/STABILIZED state and REAL vs TRAINING separation;
+  selected acting organization / account and verified active membership;
+  existing device registration, device ID semantics, authentication,
+  revocation and Keystore lifecycle;
+  actual Android GPS APIs/libs already present, current targetSdk/manifest;
+  Room 16 and existing field/notification workers;
+  B1 read/scope fingerprint, C1 map, C3 unavailable-state adapter;
+  Web COP / RTS, existing refresh and private Realtime hints;
+  server-side operation receipts and exact-request idempotency;
+  existing Cron/retention infrastructure, if any.
+
+Do not invent function signatures/tables/capabilities in the as-found matrix.
+If a canonical "vehicle" cannot be identified for a chosen incident-unit
+deployment, DO NOT pair arbitrary crew/sector/task/incident to a fake vehicle.
+Use a narrow disabled/no-capability result and report the missing contract.
+
+Sources to inspect by role (verify files exist before citing):
+  supabase/migrations/*
+  android/app/src/main/AndroidManifest.xml
+  android/app/src/main/java/si/gasilko/app/feature/incidents/*
+  android/app/src/main/java/si/gasilko/app/feature/map/*
+  android/app/src/main/java/si/gasilko/app/core/*
+  web/app/api/incidents/route.ts
+  web/features/incidents/IncidentCop.tsx
+  web/features/incidents/CopMap.tsx
+  web/features/incidents/IncidentResources.tsx
+  web/features/incidents/IncidentLiveProvider.tsx
+  web/lib/incidents/realUnitPosition*.ts
+  existing workspace, RTS and training map sources
+
+The source-review plan MUST explicitly distinguish:
+  VERIFIED as found / NEW implementation / OWNER POLICY APPROVAL REQUIRED.
+
+================================================================================
+2. NON-NEGOTIABLE SEMANTIC / SAFETY BOUNDARIES
+================================================================================
+
+A. COMMAND INTENT != EXECUTION PLAN != OBSERVED REAL TELEMETRY.
+   Task targets, route origin, manual planning point, incident center,
+   vehicle station address, hydrant position, and SIM coordinates are
+   NOT GPS observations. No extrapolated positions or fake movement.
+B. REAL and TRAINING/SIM are strictly separate. This feature must reject
+   TRAINING/SIM tracking enrollment even if the same vehicle/deployment
+   appears in another incident. Never write simulation_unit_positions.
+C. Joining an incident, being dispatched, getting an assignment, opening
+   Android or granting Android system location permission DOES NOT equal
+   permission to share live unit/vehicle location.
+D. Sharing MUST be voluntarily started by an authenticated, currently
+   authorized human tied to the chosen real deployed vehicle.
+E. A commander or organization admin cannot silently activate tracking
+   on somebody else's phone; broad organization hierarchy is not a
+   replacement for current incident/location visibility authority.
+F. No precise GPS in FCM, generic realtime hints, timeline, audit payloads,
+   notification bodies, logs, analytics, URLs or error traces.
+G. No personal location trail, driving performance report, attendance
+   monitoring, background collection after explicit stop or global
+   historical fleet-tracking system.
+H. A source's most recent observation must expire, not become permanent
+   "last known" coordinates or an inferred task-completion signal.
+I. Preserve one canonical identity per incident, deployment, vehicle,
+   user, device registration and immutable operation UUID. Do not clone
+   organizations, vehicles or users.
+J. Retain current command hierarchy, immutable receipts, exact-org
+   scopes, current membership/authorization and audit immutability.
+K. Do not add a general-purpose GPS ingestion API or public table grants.
+L. Treat Android GPS as sensitive personal data despite mapping to a
+   vehicle; association can identify drivers.
+
+================================================================================
+3. APPROVED PREVIOUS SPEC DEFAULTS / POLICY GATES
+================================================================================
+
+Existing M14 SPEC §7 states intended future opt-in defaults:
+  - REAL ACTIVE incident unit, preferably one designated leader device;
+  - updates at most once every 10 seconds AND on meaningful movement
+    >= 10 metres (refine stationary heartbeat separately; never spam);
+  - observed_at, accuracy and position provenance;
+  - stale presentation after 2 minutes (120 seconds);
+  - coordinate expires after 15 minutes (900 seconds);
+  - no GPS trail initially;
+  - sharing stops on opt-out, unit release, org/account switch,
+    authorization loss;
+  - reject timestamp more than 2 minutes in future;
+  - reject out-of-order device sequence;
+  - upon reconnection, send only latest valid coordinate (not a trail);
+  - no background location permission implied by incident membership;
+  - log start/stop events WITHOUT coordinates.
+
+Owner's additional explicit product wishes:
+  - Driver can designate his Android phone as the source for the vehicle.
+  - Continue an explicitly started location-sharing session with the
+    phone locked via user-visible Android foreground location service.
+  - Provide a prominent "Zapustil sem vozilo" / "Leave vehicle" action
+    that stops sharing, unbinds device from the vehicle and revokes
+    coordinate visibility without waiting for a successful network call.
+  - Current marker green, permitted stale last-known orange/amber
+    with age, unknown/expired grey in list and NO made-up map pin.
+  - Compact hydrant-like map markers; grouping only for genuine
+    overlap; preserve selection and command-map usability.
+
+REQUIRED EXPLICIT OWNER PRIVACY APPROVAL BEFORE LIVE ACTIVATION:
+ [ ] purpose, lawful basis, participating organizations and role visibility;
+ [ ] who can start/stop/revoke sharing and which VEHICLE context qualifies;
+ [ ] max active-session lease and offline behavior;
+ [ ] 120s current / 900s last-known timing and physical deletion policy;
+ [ ] driver notice, consent/withdrawal and policy documentation languages;
+ [ ] vehicle ownership / cross-agency access policy;
+ [ ] who may see exact coordinates, timestamps and accuracy;
+ [ ] opt-out/deactivation handling when the client is offline;
+ [ ] live rollout scope and named human sign-off;
+ [ ] how server enforces deletion of expired coordinate rows even with
+     no new traffic (retention job/approved existing mechanism).
+
+Do not treat this request for a CODEX PROMPT as approval of these privacy
+policies. Never silently switch a server capability flag to ON.
+
+================================================================================
+4. PRODUCT REQUIREMENTS — MoSCoW
+================================================================================
+
+MUST:
+ M1. User starts voluntary REAL location-sharing only for eligible deployed
+     vehicle and selected ACTIVE REAL incident; no implicit start.
+ M2. Start explicitly discloses purpose, visible audience, expiration,
+     device/vehicle link, stop behavior and loss-of-signal handling;
+     user affirmatively acknowledges in SI/DE/default.
+ M3. One active authenticated producer session per deployment/vehicle
+     (exact semantics per audited source model); takeover/replacement
+     invalidates previous lease without accepting late old-device samples.
+ M4. Device ownership is bound to auth user, selected exact org, current
+     incident, deployment/vehicle, active sharing session and generation.
+ M5. Android while-in-use location permission is requested only when
+     user starts sharing; coarse-only permission cannot be misrepresented
+     as high-precision. Location disabled/denied means no tracking.
+ M6. Android foreground location service displays persistent notification,
+     can remain active with screen locked if Android allows; user-visible
+     STOP/LEAVE VEHICLE action works immediately.
+ M7. No auto-start on login, dispatch, push, boot, app re-opening or
+     background receiver; user starts from visible Activity.
+ M8. REAL position accepted only by server from that authorized active
+     session, finite WGS84 [longitude, latitude], valid timestamp,
+     accuracy, current membership, permitted vehicle/deployment.
+ M9. Server rejects wrong unit/vehicle/org/incident, invalid session,
+     revoked consent, disabled feature, future and out-of-order samples.
+ M10. Only latest genuine REAL fix is stored, NOT a path/track/history;
+      keep separate from SIM projections, task rows and NAV routes.
+ M11. Show current green (<120s), last-known amber (120..<900s), unknown
+      grey with NO coordinate when aged out or denied. Explicit timestamp,
+      source and age; screen-reader labels; never color alone.
+ M12. On explicit opt-out / Leave vehicle / removal / unit release, stop
+      local GPS immediately, invalidate session and hide precise coordinate
+      from readers at once (server-side as soon as signal reaches it).
+ M13. If opt-out occurs offline, terminate locally immediately, persist
+      only a bounded non-coordinate revocation intent, mark old session
+      unsafe, block any more uploads and retry safe revoke on reconnect.
+ M14. Server lease expiration bounds risk from disconnected/lost device:
+      expired lease cannot upload and must not remain visible as active.
+ M15. Authoritative reader filtering by current role, consent and
+      exact org/incident/unit; revocation hides coordinates on Web/Android
+      and on cached versions.
+ M16. Maintain B1 atomic scope and Room16, D1/D2 offline/recovery, C1/C3
+      map compatibility, existing independent Real/SIM layers.
+ M17. Do not add a per-unit polling loop, second generic incident worker,
+      new unsanctioned Cron or broad RLS policy.
+ M18. Feature flags/capabilities default OFF in all environments until
+      owner privacy policy, retention deletion and operator acceptance.
+ M19. All migrations forward-only after current merged main; no deploy.
+ M20. UI and docs make clear that application is NOT commercially or
+      operationally released merely because GPS code exists.
+
+SHOULD:
+ S1. Active sharing UI explains current vehicle, elapsed session time,
+     GPS accuracy, connection and last acknowledged upload status.
+ S2. Relevant commander sees trustworthy location and its uncertainty;
+     responders see only policy-authorized positions.
+ S3. Selected vehicle remains accessible when markers overlap; no
+     huge bubble stack; no cross-kind SIM/REAL clustering.
+ S4. Graceful OS process death/battery saver/permission revocation:
+     no covert restart; show uncertainty and stop by policy.
+ S5. Reuse existing approved notification, identity and read refresh
+     infrastructure; minimal, metadata-only optional Realtime hint.
+ S6. Concurrency-safe latest-sample writes and idempotent session
+     start/stop using existing receipt and lock conventions.
+
+COULD:
+ C1. Low-power adaptive sampling, only if it doesn't weaken safety.
+ C2. Explicit one-time location fix while sharing service is active,
+     only as part of genuine authorized session.
+ C3. Display a current vehicle marker with accuracy ring when accuracy
+     exists and map readability is preserved.
+
+WILL NOT:
+ N1. No background location permission `ACCESS_BACKGROUND_LOCATION`.
+ N2. No Google Play policy avoidance, stealth tracking, hidden service,
+     remote-start, geofence, boot auto-start, or indefinite relaunch loop.
+ N3. No new navigation algorithm, arrival detection, ETA, auto ACK,
+     task completion, vehicle status changes, move orders or dispatch.
+ N4. No driver scoring, speed analysis, trip history, analytics,
+     replay, police/112/CAD integration, push coordinate payloads.
+ N5. No auto-retasking, position extrapolation, matching by call sign
+     instead of UUID or a new vehicle master registry.
+ N6. No undocumented changes to Room/Gradle/KAPT/KSP/dependencies.
+ N7. No automatic production enablement or owner SQL/deploy actions.
+ N8. No emergency "admin override" that silently activates a phone.
+
+================================================================================
+5. ARCHITECTURE / DATA FLOWS
+================================================================================
+
+Suggested boundaries (ADAPT TO ACTUAL CURRENT CODE, do not assert names):
+
+Android Compose [driver opts in, selects eligible vehicle]
+      -> Incident ViewModel / Repository
+      -> authenticated START_SHARE command, original operation UUID
+      -> server creates short-lived, versioned, actor-scoped session
+      -> Android starts user-visible FGS(location) while app is foreground
+      -> Android validated GNSS sample, no old coordinate backlog
+      -> bounded authenticated WRITE_LATEST(position) RPC
+      -> server revalidates current session + unit/org/actor + sequence
+      -> one ephemeral per-deployment latest REAL observation
+      -> narrow server-authorized bulk READ_CURRENT read model
+      -> existing C3 / C1 Web/Android source-specific map presentation
+      -> user STOP/LEAVE / server revoked / lease expired -> hide + stop
+
+Realtime (if used): minimal revision/invalidation HINT ONLY.
+No coordinates in the hint. Normal scoped authenticated bulk reads are
+authoritative. Existing polling fallback stays.
+
+Proposed on-wire state machines (adapt exact names):
+  Sharing:
+    NOT_ELIGIBLE / OFF / AWAITING_CONSENT / ENROLLING /
+    ACTIVE / INTERRUPTED / STOPPING / STOPPED / REVOKED /
+    LEASE_EXPIRED / OUTCOME_UNKNOWN
+  GPS fix:
+    NO_FIX / RECEIVED_UNVALIDATED / ACCEPTED_SERVER /
+    REJECTED / EXPIRED / NOT_AUTHORIZED
+  Viewer:
+    CURRENT / LAST_KNOWN / UNAVAILABLE / LOCKED /
+    OFFLINE_UNCERTAIN / SCHEMA_UNAVAILABLE
+
+Consent is an app and server session approval separate from Android OS
+runtime location permission. `ACCESS_FINE_LOCATION` by itself is not
+a server sharing grant. A selected acting organization is not proof
+of vehicle or command authority.
+
+START_SHARE must be a true authenticated first-party user action,
+with a caller-bound immutable request/operation_id/receipt; a later
+lost response cannot start another duplicate active share. A cancelled
+or revoked session must not be resurrected by retrying an old UUID.
+If receipts are reused, preserve existing receipt table shape and
+collision/mismatch behavior. Explicit first retry uses same exact
+immutable request; do not silently rebase a frozen operation.
+
+Stop must be effective locally immediately, even if network is down.
+Offline revoke intent should keep only operation/session identifiers
+(not coordinate trail), be durable/authoritatively reconciled in
+existing D1 queue model if the type fits, and never drop merely because
+network/server is unavailable. On server, honor an authenticated stop
+even if incident controller permissions were revoked, provided the
+actor can prove ownership of the share being stopped; stop must not
+require now-missing controller authority.
+
+Concurrent devices: single active producer LEASE per canonical deployed
+vehicle+incident. Server should compare holder/generation/expiry and
+reject stale attempts. New operator takeover requires visible deliberate
+action, current authorization, audited metadata and immediate invalidation
+of old session. Default: fail closed rather than automatic takeover.
+
+Unit-release and incident close lifecycle should make sharing
+non-uploadable and invisible immediately, even if no teardown packet
+arrives. Avoid modifications of canonical incident commands solely to
+start or stop location sharing; use authority predicates and scoped
+invalidation.
+
+================================================================================
+6. DATABASE / RPC DESIGN — PRECISE BUT VERIFY ACTUAL NAMES
+================================================================================
+
+Only add needed forward migration(s) after actual latest merged migration
+(known through #90: `20261102120000_incident_field_reliability.sql`;
+#91 had no SQL). Check main HEAD, avoid timestamp collisions.
+
+Do NOT mutate historic migrations or redefine the unrelated private
+simulation_position/route stores. Do NOT grant table DML to authenticated,
+anon or browser/Android clients.
+
+Recommended *conceptual* tables, names must be selected against real schema:
+
+  private.incident_vehicle_location_sessions
+    id UUID primary key
+    incident_id UUID not null -> canonical incidents
+    incident_unit_id UUID not null -> deployed unit in same incident
+    vehicle_resource_id UUID not null -> genuine owner-managed vehicle
+    acting_organization_id UUID not null
+    actor_user_id UUID not null
+    device_registration_id UUID nullable / existing vetted device identity
+    generation BIGINT not null (monotonic per deployment)
+    session_status TEXT constrained enum ACTIVE/STOPPED/REVOKED/EXPIRED
+    consent_policy_version TEXT not null
+    start_operation_id UUID not null
+    start_receipt_reference UUID nullable
+    started_at TIMESTAMPTZ not null
+    lease_expires_at TIMESTAMPTZ not null
+    stopped_at TIMESTAMPTZ nullable
+    stop_reason TEXT nullable (bounded safe metadata)
+    version BIGINT not null
+    UNIQUE / partial unique active session per incident_unit
+    same-incident, same-org and vehicle-ownership integrity enforced
+
+  private.incident_vehicle_latest_positions
+    incident_id UUID not null
+    incident_unit_id UUID not null
+    current_session_id UUID not null
+    generation BIGINT not null
+    observed_at TIMESTAMPTZ not null
+    received_at TIMESTAMPTZ not null
+    longitude DOUBLE PRECISION NOT NULL
+    latitude DOUBLE PRECISION NOT NULL
+    accuracy_m DOUBLE PRECISION nullable
+    device_sequence BIGINT not null
+    origin TEXT not null default OBSERVED_REAL
+    source_revision BIGINT not null
+    expires_at TIMESTAMPTZ not null
+    PRIMARY KEY(incident_unit_id) or scoped composite key
+    CHECK finite WGS84, nonnegative bounded accuracy,
+      origin='OBSERVED_REAL', received_at and timing policy
+    Same incident, same session/vehicle linkage enforced.
+
+  private.incident_vehicle_share_receipts or canonical receipt reuse:
+    operation UUID + exact actor/org/request payload checksum and
+    stored result. Prefer existing canonical infrastructure. No
+    unbounded second request-audit log with positions.
+
+These are only design sketches; Codex must resolve the real FK and
+type names and propose correct SQL DDL/constraints/indexes.
+
+The latest-position table is EPHEMERAL, not immutable audit history:
+expired, revoked and stopped coordinates must become invisible and
+physically removed within the APPROVED retention guarantee. No open
+retention loophole from "we filter in SELECT" alone.
+
+MANDATORY RETENTION DESIGN GATE:
+  - It is insufficient to hide a row at 15 minutes while leaving exact
+    coordinates persisted indefinitely.
+  - Check for an existing approved scheduler/maintenance framework.
+  - If there is none, DO NOT add a new Cron/worker without explicit owner
+    approval; implement safe disabled-by-default feature plus an
+    owner-decision item for a reliable physical deletion mechanism.
+  - Never rely solely on future GPS writes or page views to delete old
+    positions: a deserted database could retain them indefinitely.
+  - An explicit STOP/OPT_OUT should synchronously revoke access and remove
+    the last coordinate in the authoritative transaction.
+  - A lease timeout is not a replacement for 15-minute retention
+    enforcement.
+  - Do not claim retention compliance until cleanup and restoration/
+    backups/policy implications are approved by owner.
+  - If a safe approved scheduler exists, reuse it narrowly; document
+    database maintenance privileges and idempotent bounded cleanup.
+
+Example RPC surfaces (illustrative; verify and choose exact signatures):
+  public.incident_vehicle_location_start(
+      p_operation_id uuid,
+      p_acting_organization_id uuid,
+      p_incident_id uuid,
+      p_incident_unit_id uuid,
+      p_vehicle_resource_id uuid,
+      p_device_registration_id uuid,
+      p_expected_version bigint,
+      p_consent_policy_version text
+  ) RETURNS jsonb
+
+  public.incident_vehicle_location_latest(
+      p_acting_organization_id uuid,
+      p_incident_id uuid,
+      p_session_id uuid,
+      p_generation bigint,
+      p_sequence bigint,
+      p_observed_at timestamptz,
+      p_longitude double precision,
+      p_latitude double precision,
+      p_accuracy_m double precision
+  ) RETURNS jsonb
+
+  public.incident_vehicle_location_stop(
+      p_operation_id uuid,
+      p_acting_organization_id uuid,
+      p_incident_id uuid,
+      p_session_id uuid,
+      p_reason text
+  ) RETURNS jsonb
+
+  public.incident_vehicle_locations_read(
+      p_acting_organization_id uuid,
+      p_incident_id uuid
+  ) RETURNS jsonb
+
+  public.incident_vehicle_location_capabilities(
+      p_acting_organization_id uuid,
+      p_incident_id uuid
+  ) RETURNS jsonb
+
+Use repo's existing signature patterns, naming conventions and receipt
+argument order. Never claim these are current functions. Keep read and
+write methods separate. A live policy deny must refuse START and SAMPLES.
+
+On server START:
+  1. Auth from auth.uid(), not p_actor_id.
+  2. Profile active, exact-org membership and incident participation
+     current; current actor is eligible assigned driver/leader.
+  3. Incident is ACTIVE REAL; deployment is live, vehicle is genuine
+     and permitted for selected unit, not released/unassigned.
+  4. Client/device registration is genuinely bound to the logged-in
+     account and allowed active session, not forged arbitrary UUID.
+  5. Policy version approved/enabled on server; explicit user consent.
+  6. Acquire scoped advisory/row lock, check current session and
+     expected version, resolve replay by immutable UUID/request.
+  7. Create/return one bounded-lease session; start audit metadata
+     without position/accuracy/trail.
+  8. Never write first coordinate as a side effect of consent alone.
+
+On server GPS sample:
+  1. Check live source capability and auth user/session/device/vehicle.
+  2. Revalidate incident, membership, assignment/vehicle status,
+     session generation, expiry and current opt-in.
+  3. Latitude [-90,90], longitude [-180,180], finite, right order;
+     allowed accuracy measured, no fabricated value; source real.
+  4. Reject future timestamps >2min and any out-of-order device
+     sequence / nonmonotonic observed_at after server correction.
+  5. Enforce max upload frequency, anti-replay, per-session and
+     response size quotas; one active producer only.
+  6. Atomic UPSERT latest only if newer and valid; no append log.
+  7. Server sets received_at, revision and bounded expiry. Never
+     trust client-expires-at or client-supplied role/consent.
+  8. Return ack with authority status and server-confirmed revision.
+  9. Never fall back to spoofed/manual coordinates on failure.
+
+On server STOP:
+  1. Idempotent authentic actor-bound request and/or vetted operator
+     revoke command, with clear distinct authority predicates.
+  2. Expire session, increment generation as necessary, revoke viewer
+     coordinate and physically delete latest row in same transaction.
+  3. Preserve START/STOP action metadata and audit without GPS fixes.
+  4. Reject all in-flight/late old-session samples.
+  5. Exact replay of STOP returns same authoritative result.
+
+On server READ:
+  1. Controller/crew/other participant permissions must be separately
+     evaluated for precise location, narrower than unit-name visibility.
+  2. Return only authorized, unexpired, currently shared REAL fixes
+     scoped to exact incident/org with canonical unit+vehicle UUID.
+  3. Current>=120s stale, >=900s unavailable (and return null point).
+     An explicit STOP/opt-out -> unavailable IMMEDIATELY.
+  4. No cross-org GPS just because linked org/hierarchy can see unit
+     labels, route plans or task targets.
+  5. Return observed_at, accuracy only when measured, source_revision,
+     server_as_of and availability with safe source label, bounded list.
+  6. Do not include phone/driver user identifiers in general map DTOs.
+  7. Strongly scope raw coordinate SELECT to trusted internal owner RPC;
+     no public/anon direct table reads.
+  8. If policy disabled, old source absent or consumer version unknown,
+     return safe unavailable/capability-off semantics.
+  9. Use fixed maximum batch/page size, independent source watermark
+     where needed, preserving B1 cursor atomicity and task/map behavior.
+
+RPC SECURITY:
+ - SECURITY DEFINER set search_path='' and fully qualified names.
+ - Tight EXECUTE grants authenticated only; REVOKE PUBLIC/anon.
+ - RLS private tables with appropriate owner checks, no broad table
+   SELECT grants to clients or service_role client shortcuts.
+ - No unreviewed bypass of parent incident RLS, no trusting client
+   role names in JSON, no command/authorization via map visibility.
+ - Current authorization/revocation rechecked on every write/read.
+ - Explicit SQLSTATE/safe error codes; no coordinate values in error
+   strings, correlation logs, server-side exceptions or audit payloads.
+
+================================================================================
+7. ANDROID DEVICE, LOCATION & PERMISSION LIFECYCLE
+================================================================================
+
+Inspect current compile/target SDK, manifest and existing Android location
+code before implementing. AndroidManifest currently declares coarse/fine
+location permissions; confirm actual current main and do not blindly add
+duplicates. No existing location sharing service is assumed.
+
+Use existing Android framework location APIs / dependencies already in
+project. Do not change Gradle, KAPT, KSP or dependencies without owner
+approval. If existing libraries cannot satisfy requirements without
+unsafe hacks, document the dependency approval blocker.
+
+For Android 10+ (API29) location FGS type is `location`; for API34+
+targeting 34+, declare FOREGROUND_SERVICE_LOCATION permission in
+addition to the ordinary FOREGROUND_SERVICE permission, and ensure
+runtime permission + device location services before service start.
+Check current official Android docs for API-level behavior at the time
+of implementation.
+
+Strict OS rules:
+ - Only start location FGS from VISIBLE user-initiated UI after
+   foreground location permission and consent.
+ - No Android ACCESS_BACKGROUND_LOCATION permission.
+ - Explicitly started location FGS can continue while screen locks,
+   with ongoing user-visible notification. If OS kills service, do
+   NOT secretly restart from BOOT_COMPLETED, push, WorkManager or
+   background broadcast; require deliberate resumed consent/action.
+ - Support approximate-only permission honestly; do not claim
+   centimeter-level GPS when user granted COARSE.
+ - If LOCATION disabled, permission revoked or policy gate changes,
+   immediately stop capture, reflect accurate UI error and request
+   deliberate re-entry.
+ - Notification always identifies vehicle/share state and has STOP
+   action; no coordinates in notification or lock screen.
+ - "Zapustil sem vozilo / Leave vehicle" is prominent in screen and
+   notification when feasible; one tap stops local capture and
+   initiates authenticated revoke.
+ - Do not persist a user's private location in Room cache outside
+   an approved short-lived source projection. No unbounded offline
+   sample queue, screenshot/debug logs or exported track files.
+ - Persist only the minimum secure session binding / latest optional
+   in-memory sample; on reconnect transmit at most ONE newest valid
+   observation with renewed server authorization, never backlog.
+ - After offline Leave/STOP, DO NOT send buffered coordinates even if
+   the server revoke has not yet been acknowledged.
+ - A server lease must expire safely when client cannot communicate;
+   expired offline session must stop local transmission attempts.
+ - Source app must never treat Android local "blue dot" as a server-
+   acknowledged shared vehicle marker until an accepted server fix.
+ - Dedicated lifecycle, cancellation, identity checks and error
+   presentation on org/incident/account switch, logout and lease
+   expiration. If switching account while sharing, capture stops.
+ - Ensure an accidental app/task navigation back doesn't silently
+   end a deliberately started valid FGS, but logout/opt-out always does.
+ - Avoid new generic incident worker; location FGS is a narrow
+   opt-in service, not a second durable command queue.
+
+Suggested single active sharing card:
+  REAL VEHICLE: PGD-... / unit call sign / incident reference
+  Driver sharing: ON/OFF
+  Server session: ACTIVE / EXPIRED / UNKNOWN
+  Last accepted fix: time + precision / UNKNOWN
+  Permission: coarse/fine/denied
+  Network: online/offline / server unknown
+  Actions: START SHARE (with affirmative notice), STOP SHARE,
+           LEAVE VEHICLE (always visible when paired)
+  No silent enabling from route navigation.
+
+================================================================================
+8. WEB AND ANDROID MAP PRESENTATION / C3 INTEGRATION
+================================================================================
+
+C3 implements an explicit "POSITION UNAVAILABLE" display in Web
+unit list/inspector and Android C1 Units dialog; its real coordinates
+are null by design. Extend THIS scoped adapter rather than replacing
+C3 UI with a second map/position subsystem.
+
+ - Source data MUST be server-confirmed OBSERVED_REAL; no "green" from
+   a locally obtained phone fix not accepted by server.
+ - Match source revision/authorization fingerprint in Web/Android;
+   cancel stale in-flight reads on account/org/incident/scope switch.
+ - Show compact icon current green (<120s), amber dashed stale
+   (120..<900s), grey in list when absent/expired/denied.
+ - Respect accuracy and observation time; label "last seen at" in
+   user's locale, not just the receipt/refetch time.
+ - Offline Android cached coordinates are NEVER green merely because
+   they were recently read from Room; show last-known/uncertain and
+   expire within absolute source retention and current authorization.
+ - If Android/Room16 cannot safely cache location without a new schema,
+   prefer nonpersistent bounded in-memory authorized projection; if
+   durable offline cache is needed, document and get approval for
+   a separate Room migration—do not silently alter Room16.
+ - A stop or revocation must immediately remove precise coordinate
+   visibility, even if view otherwise has a cached historic sample.
+ - Preserve C1 task targets, authorized hydrants, sectors, NAV routes
+   and map camera / marker selection as implemented.
+ - REAL and SIM sources/layers must remain distinct; never combine
+   their count bubbles. Group only genuinely overlapping screen-space
+   points; avoid clutter reported in previous screenshots.
+ - Preserve selected/priority target visibility and accessible list
+   fallback. Do not change unrelated general RTS marker architecture.
+ - On map read denial, keep the task/incident data that is
+   independently authorized; remove only the private GPS projection.
+ - Controller can inspect exact unit/vehicle and last observation,
+   not personal phone identity or location trail.
+ - The Android producer UI never grants a reader broader map rights.
+ - Do not call NAV ACTUAL_POSITION "ready" until that original contract
+   is explicitly and narrowly updated to use authorized trusted
+   observations; do not silently make existing navigation sessions
+   rebase or auto-navigate.
+ - No new high-frequency polling on Web; reuse current B1/B2 hints
+   and bounded consumer refresh, or document needed future optimization.
+
+================================================================================
+9. OFFLINE, FAILURE, CONCURRENCY & PRIVACY EDGE CASES
+================================================================================
+
+Handle at minimum:
+  1. Start RPC response lost -> receipt-first recovery / no duplicate share.
+  2. GPS WRITE result uncertain -> next sample uses monotonic sequence;
+     no backfilled trace.
+  3. STOP offline -> local service stops NOW; revoke intent persisted
+     without coordinates; no resurrection on reconnect.
+  4. Server cannot verify authorization -> do not upload / fail closed.
+  5. Org/incident/account switch -> local capture stops; no stale cross-
+     scope UI sample or pending replays in wrong context.
+  6. Driver leaves vehicle but phone remains running -> stop.
+  7. Vehicle released, role lost, org removed, incident closed ->
+     server refuses new samples, hides existing location immediately;
+     local service stops on next safe authority check.
+  8. Another authorized phone tries takeover -> exact generation,
+     compare-and-swap, no dual green producers.
+  9. Old device comes back -> stale session / sequence rejected.
+ 10. Device clock drift/future timestamp -> reject untrusted fix,
+     do not make stale samples current.
+ 11. Android background start restrictions -> no stealth fallback.
+ 12. Device reboots/OS kills app -> no automatic sharing restart.
+ 13. GPS service loses permission/location provider -> local stop,
+     safe UI warning, server lease eventually expires.
+ 14. Low quality location -> display source accuracy, never make
+     a spoofed precise fix.
+ 15. Zero/NaN/WGS84 lat-lon confusion -> fail-closed validation.
+ 16. Two active incident contexts on one account/device -> enforce
+     explicit single pairing/session policy, no accidental dual source.
+ 17. Offline lease expires during capture -> stop/deny uploads.
+ 18. Stop command races with queued GPS upload -> stop wins under
+     server lock and session generation; old sample rejected.
+ 19. No incoming traffic after last sample -> physical retention
+     still must be eventually enforced by approved cleanup.
+ 20. Read after consent withdrawn -> no exposure even if 15-minute
+     last-known period was not exhausted.
+ 21. Same unit in TRAINING and REAL -> no SIM conversion.
+ 22. Position age computed from actual observed_at, not server read
+     time, login, push hint or route creation.
+ 23. B1 gap/reset and D1 UNKNOWN do not lose task/attachment evidence.
+ 24. Web/Android older version -> capability absent is explicit and
+     no secret field leaks; new client old server fails safely.
+ 25. No permission to see other unit precise GPS based solely on
+     unit label visibility.
+
+Privacy distinctions:
+ - GPS capture while user's screen is OFF via a visible FGS is allowed
+   only for the already user-started active, consented session; this is
+   NOT stealth location monitoring or automatic location permission.
+ - If the org's policy forbids personal-phone vehicle tracking,
+   the capability remains DISABLED, not enabled by a code default.
+ - Stop/opt-out must never keep displaying a last-known marker under
+   the normal disconnected-GPS stale exception. They are different
+   states: voluntary withdrawal vs temporary signal loss.
+ - "No trail" includes analytics, operation receipts payloads,
+   backend logs, retries, exception reports and unbounded local
+   queues. Audit only bounded metadata for start/stop without
+   longitude/latitude.
+ - Trusted timestamp/accuracy and retention must be verifiable
+   on server, not just visually assumed by Android.
+ - Record server-owned generation, received_at and revision to
+   prevent clock skew and replay.
+
+================================================================================
+10. UI / COPY / ACCESSIBILITY
+================================================================================
+
+SI examples (adapt terminology to existing app):
+  "Deli lokacijo vozila"
+  "Poveži telefon z vozilom"
+  "Zapustil sem vozilo"
+  "Ustavi deljenje lokacije"
+  "Lokacija ni na voljo"
+  "Zadnja znana lokacija — pred 6 min"
+  "GPS je izklopljen"
+  "Deljenje lokacije ni dovoljeno"
+  "Povezava s strežnikom ni potrjena"
+  "Lokacija je bila poslana in potrjena ob ..."
+  "Deljenje lokacije je zaključeno"
+
+DE equivalents required in translations, plus default-language strings.
+Do not disclose personal name/phone identifier unnecessarily on a
+shared commander display; use canonical vehicle callsign only.
+
+Always supply accessible shape/text/icon plus color (green current,
+amber/hatch stale, grey unavailable). Device GPS accuracy is not
+vehicle movement certainty; do not show predictive arrow unless a
+measured and authorized bearing exists.
+
+Consider a short explanatory first-use consent screen:
+  - which vehicle is linked;
+  - which incident and organization;
+  - who may see current position;
+  - sharing begins only after explicit START;
+  - screen lock behavior and persistent system notification;
+  - when sharing stops and what is retained;
+  - "Leave vehicle" and offline-stop effects;
+  - no permanent drive history or anonymous public map feed.
+Content must reflect OWNER-APPROVED actual policy, not guessed
+assurances.
+
+================================================================================
+11. DOCUMENTATION AND 100 HUMAN ACCEPTANCE CASES
+================================================================================
+
+Create:
+  docs/M14.8C2-consented-vehicle-phone-real-gps.md
+(or align with actual current SPEC numbering after inspecting repo).
+
+Include:
+  A. As-found contracts matrix and actual source/permission evidence.
+  B. Current PR #91 merge status and single-PR dependency.
+  C. MoSCoW scope, explicit exclusions and privacy-owner gate.
+  D. Threat model: spoofing, impersonation, privilege escalation,
+     replay, stale producer, session takeover, lost phone, location
+     leakage through logs/caches, privacy deletion.
+  E. Actual SQL schema/RPC names/signatures, FKs, grants, RLS and
+     source generation sequence, transaction boundaries and locks.
+  F. Android manifest/FGS/permission/notification/stop lifecycle.
+  G. Web/Android C3 current/last-known/unknown read integration.
+  H. Offline/no-trail behavior and consent revocation guarantees.
+  I. Retention physical deletion plan and unresolved policy choices.
+  J. Owner-only rollout order with ALL deferred migrations #82–#90,
+     incident-evidence Edge/Storage, Realtime, compatible Web/Android
+     and GPS feature gate disabled by default.
+  K. Compatibility/rollback constraints, including revocation of
+     already persisted latest coordinates.
+  L. 100 MANUAL owner-run acceptance cases, all marked UNEXECUTED;
+     cases blocked on privacy signoff marked BLOCKED, never PASS.
+  M. Clear "CODE IMPLEMENTED != POLICY APPROVED != DEPLOYED !=
+     HUMAN VERIFIED != OPERATIONAL RELEASE" labels.
+
+MANDATORY manual acceptance cases (group and enumerate to total >=100):
+  - initial disabled-by-default capability;
+  - privacy policy denied/approved version;
+  - role, org, incident, vehicle, driver and device identity scope;
+  - wrong vehicle / wrong actor / account switch / revoked membership;
+  - explicit opt-in/START/STOP/LEAVE and lost response recovery;
+  - stale/duplicate concurrent START; takeover and source generation;
+  - masked app / locked screen foreground notification;
+  - coarse vs fine / permission denial and provider disabled;
+  - Android API levels and FGS background-start restrictions;
+  - stop without network and durable revocation intent;
+  - no GPS upload after stop even with queued samples;
+  - reconnection only latest sample, never trail backfill;
+  - source sequence/rate limit/received time validation;
+  - invalid longitude/latitude, NaN, time future/out-of-order;
+  - authentic fresh green, 120s orange, 900s unavailable;
+  - empty source never creates a fake map marker;
+  - genuine accuracy shown without fabrication;
+  - server opt-out/release immediately hides coordinate;
+  - physically remove expired coordinate even without traffic;
+  - no coordinate in audit/M10/FCM/Realtime/logs/error/analytics;
+  - authorized Web IC vs responder vs other organization;
+  - TRAINING SIM strict separation / no real stock effects;
+  - old C1 map, old Android Room16, B1/D1/D2 unaffected;
+  - incident/task/NAV command authority unchanged;
+  - no new worker/Cron without approval;
+  - battery saver, OS kill, reboot and force-stop behavior;
+  - user-visible stop notification and localized SI/DE copy;
+  - accessible non-color-only state descriptions;
+  - local cache lease expiry and authorization fingerprint switch;
+  - Web marker overlap/camera/RTS selection preserved;
+  - start/stop idempotency and receipts;
+  - versioned forward-only migration / no applied schema rollback;
+  - cross-tenant hostile RPC calls and privacy leak probes;
+  - performance of bounded bulk read and rate-limited uploads;
+  - human policy approval, Android release and source activation.
+
+These are manual future owner acceptance items. Do not generate/run
+test suites, unit tests, SQL tests, instrumentation or CI for this task.
+
+================================================================================
+12. STRICT OWNER-ONLY EXECUTION / SCOPE PROTECTION
+================================================================================
+
+DO NOT RUN, ADD OR TRIGGER:
+  - tests or automated verification harnesses (including SQL tests)
+  - build, lint, typecheck, CI, Gradle sync, emulator, instrumentation
+  - SQL migration execution or queries against remote Supabase
+  - Supabase function deployment, Web deploy, Android install
+  - runtime experiments, GPS capture, monitoring or background agent work
+  - real-user GPS collection, production policy/feature enablement
+
+DO NOT CHANGE WITHOUT OWNER EXPLICIT PERMISSION:
+  - Gradle, KAPT, KSP, dependencies or generated Room schemas
+  - existing local developer files/settings / uncommitted changes
+  - existing M10/incident-simulation-runner/incident-navigation/plan-routes
+    Edge functions, Cron jobs, global push or routing infrastructure
+  - previously applied SQL migrations, RLS broad scopes or audit immutability
+  - REAL/SIM authorization, canonical resource identity or task commands
+  - global vehicle registry when canonical incident deployment suffices
+
+Caveat: Adding a narrow, explicitly typed Android `location` foreground
+service declaration and its SDK-required MANIFEST permissions is within
+this feature's coding scope; this does NOT authorize new Gradle deps,
+KAPT/KSP changes, `ACCESS_BACKGROUND_LOCATION`, or automatic activation.
+
+If a genuine requirement cannot safely be achieved under these limits
+(especially retention cleanup, canonical vehicle identity, server consent
+or Android SDK constraints), implement only safe source-backed parts,
+document the exact BLOCKER and keep the entire GPS producer DISABLED.
+Do not hack around it or pretend rollout-ready.
+
+Use implementation commits with `[skip ci]`. Do not claim CI, build,
+SQL validation or runtime success. Do not modify unrelated local files.
+
+Only OWNER merges PRs, applies migrations, deploys Edge/Web,
+installs Android and signs off privacy/operations.
+
+================================================================================
+13. FINAL CODEX OUTPUT / ONE PR
+================================================================================
+
+On completion, provide:
+  1. Verified main SHA, #91 status, overlapping PR inventory.
+  2. New branch/PR link and commit SHA; no merge.
+  3. Source contracts discovered: real vehicle, deployment, driver,
+     device identity, role/capability, existing Android location APIs.
+  4. Explicit privacy-policy gates, default-OFF mechanism, unresolved
+     decisions (especially physical location retention).
+  5. Concrete SQL filenames, actual schema/DDL/functions/indexes,
+     authoritative grants and transaction/anti-replay design.
+  6. Android UI, FGS manifest/notification, locked-screen/stop behavior.
+  7. Server read and Web/Android C3 REAL current/last-known/unknown.
+  8. Data-flow diagram, consent/lease/stop state machine.
+  9. NO GPS trail, no fake SIM markers, no implicit tracking or commands.
+ 10. Forward-only owner rollout order starting at blocked SQL #86.
+ 11. Exact files changed and meaningful line references.
+ 12. Count of manual UNEXECUTED cases; blocked policy cases.
+ 13. Dependencies/compatibility, including Room16 and old clients.
+ 14. Explicit status: CODE ONLY, NOT POLICY-APPROVED,
+     NOT DEPLOYED, NOT TESTED/BUILT/RUN, NO GPS ACTUALLY COLLECTED.
+ 15. STOP. No merge or further milestone.
+
+Quality bar: Contractor-implementable code & migration proposal,
+minimal architecture drift, exact authority, safe opt-in and reliable
+stop/revocation. Do not overpromise if a hard privacy gate is unresolved.
+
+END OF M14.8C2 / M15 ASSIGNMENT.
