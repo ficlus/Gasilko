@@ -135,13 +135,26 @@ internal class IncidentMapLayers(private val map: MapLibreMap,private val style:
         val ids=map.queryRenderedFeatures(RectF(p.x-r,p.y-r,p.x+r,p.y+r),*HIT_LAYERS)
             .mapNotNull {it.getStringProperty("id")}.distinct()
         if(ids.isEmpty())return null
-        val selected=ids.flatMap { id->groups[id] ?: scene?.features.orEmpty().filter {it.id==id} }.distinctBy {it.id}
-        val points=selected.flatMap {positions(it.geometry)}
-        if(selected.size>1 && points.distinctBy {it.latitude to it.longitude}.size>1 && map.cameraPosition.zoom<18.0) {
-            focus(selected);return emptyList()
+        val byId=scene?.features.orEmpty().associateBy {it.id}
+        // A containing polygon/route must not turn a single marker tap into an
+        // unrelated area-wide zoom. Center/route geometry is not a task selection.
+        val pointIds=ids.filter {id->groups[id]!=null && byId[id]?.kind !in listOf("ROUTE","INCIDENT_CENTER")}
+        val hitIds=if(pointIds.isNotEmpty())pointIds else ids.filter {id->
+            byId[id]?.kind !in listOf(null,"ROUTE","INCIDENT_CENTER")
+        }
+        val selected=hitIds.flatMap {id->groups[id] ?: listOfNotNull(byId[id])}.distinctBy {it.id}
+        if(selected.isEmpty())return null
+        // Auto-unpack only one actual count badge, not overlapping independent
+        // priority/category markers; those go directly to the accessible chooser.
+        if(hitIds.size==1 && groups[hitIds.first()].orEmpty().size>1 && map.cameraPosition.zoom<18.0) {
+            val points=selected.flatMap {positions(it.geometry)}
+            if(points.distinctBy {it.latitude to it.longitude}.size>1) {
+                focus(selected);return emptyList()
+            }
         }
         return selected.map {it.id}
     }
+
     private fun focus(features: List<IncidentMapFeature>) {
         val points=features.flatMap {positions(it.geometry)}.distinctBy {it.latitude to it.longitude}
         if(points.size==1)map.moveCamera(CameraUpdateFactory.newLatLngZoom(points.first(),maxOf(map.cameraPosition.zoom,16.0)))

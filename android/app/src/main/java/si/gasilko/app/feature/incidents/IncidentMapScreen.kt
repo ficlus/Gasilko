@@ -117,7 +117,14 @@ internal fun IncidentMapScreen(model: IncidentViewModel,registry: HydrantViewMod
     val context=LocalContext.current
     MapScreen(onBack=back,hydrants=emptyList(),
         onOpenHydrant=null,creationEnabled=false,incidentScene=scene,
-        onIncidentSelect={ids->routeFocus=false;if(ids.size==1){selected=ids.first();choices=emptyList()}else {choices=ids;choicePage=0}},
+        onIncidentSelect={ids->
+            // Empty means the native count badge already changed the camera.
+            // Do not restore the old task focus over that intentional unpack.
+            if(ids.isNotEmpty()) {
+                routeFocus=false
+                if(ids.size==1){selected=ids.first();choices=emptyList()}else {choices=ids;choicePage=0}
+            }
+        },
         dataLoading=registryData.loading && background,dataError=registryData.error?.takeIf {background},
         navigationContent={
             Column(Modifier.padding(horizontal=16.dp),verticalArrangement=Arrangement.spacedBy(6.dp)) {

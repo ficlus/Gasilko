@@ -38,7 +38,7 @@ internal fun fieldGeometry(g: JsonObject,route: Boolean=false): Boolean {
 
 internal fun fieldMapData(i: JsonObject): FieldMapData {
     val context=i.obj("field_map")
-    val supported=!i.flag("leader_reset") && context.text("source").length==32 && context.text("schema")=="1" && context.text("revision")==i.text("revision")
+    val supported=!i.flag("leader_reset") && context.text("_scope").length==32 && context.text("source").length==32 && context.text("schema")=="1" && context.text("revision")==i.text("revision")
     if(!supported)return FieldMapData(emptyList(),emptyList(),false,false,false)
     val limited=context.text("status")!="COMPLETE" || context.rows("features").size>200 || context.rows("routes").size>25 ||
         context.toString().toByteArray().size>786_432

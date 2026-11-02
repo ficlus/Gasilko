@@ -3111,3 +3111,13 @@ explicit coordinate-only external handoff; areas never gain a synthetic destinat
 See [M14.8C1 contracts, limitations, rollout and70 unexecuted human checks](M14.8C1-android-incident-map-task-navigation.md).
 Missing backend capability gates the new map. Owner deferred SQL82–87 and this
 migration; no tests/build/CI/SQL/runtime/deployment/merge performed.
+
+M14.8C1 / PR88 focused hardening (source only): map-enriched projection is limited
+to B1 manifest/entities; timeline keeps the core-only read path. Existing NAV read
+authority is reused consistently by route head/watermark/projection; linked hydrant
+disclosure explicitly reuses registry read authorization. Approved limits, Room16,
+operation identities/receipts and REAL/SIM boundaries remain unchanged.
+Marker taps inside polygons and same-identity authorization-scope camera changes
+are hardened. NO current or last-known REAL unit positions are rendered:
+POSITION UNAVAILABLE remains honest. Location freshness and consented vehicle-phone
+GPS work require separate later PRs. No tests/build/SQL/runtime/deploy/merge ran.

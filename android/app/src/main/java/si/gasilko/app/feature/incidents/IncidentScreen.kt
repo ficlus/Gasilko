@@ -91,7 +91,17 @@ fun IncidentScreen(model: IncidentViewModel,registry: HydrantViewModel,organizat
     var evidence by remember(model,navigationEvent,incidentId) { mutableStateOf<EvidenceTarget?>(null) }
     var incidentMap by remember(model,navigationEvent,incidentId) { mutableStateOf(false) }
     var mapAssignment by remember(model,navigationEvent,incidentId) { mutableStateOf<String?>(null) }
-    val mapStates=rememberSaveableStateHolder()
+    val mapStates=key(model){rememberSaveableStateHolder()}
+    val cameraKeys=remember(model){mutableMapOf<String,String>()}
+    val liveCameraKeys=data.incidents.filter {it.obj("field_map").text("_scope").length==32}.associate {
+        it.text("id") to ("map/"+model.repository.account+"/"+model.organization+"/"+it.text("id")+"/"+it.obj("field_map").text("_scope"))
+    }
+    LaunchedEffect(model,liveCameraKeys,data.locked) {
+        cameraKeys.toMap().forEach { (id,key)->
+            if(data.locked || liveCameraKeys[id]!=key){mapStates.removeState(key);cameraKeys.remove(id)}
+        }
+        if(!data.locked)cameraKeys.putAll(liveCameraKeys)
+    }
     val assignmentScroll=rememberSaveable(model,incidentId,assignmentId,saver=LazyListState.Saver){LazyListState()}
     val incident=data.incidents.find { it.text("id")==incidentId }
     val assignment=incident?.rows("assignments")?.find { it.text("id")==assignmentId }
@@ -118,7 +128,7 @@ fun IncidentScreen(model: IncidentViewModel,registry: HydrantViewModel,organizat
         return
     }
     if(incidentMap && incident!=null) {
-        key(model,incidentId) { mapStates.SaveableStateProvider("map/"+model.repository.account+"/"+model.organization+"/"+incident.text("id")) {
+        key(model,incidentId,incident.obj("field_map").text("_scope")) { mapStates.SaveableStateProvider("map/"+model.repository.account+"/"+model.organization+"/"+incident.text("id")+"/"+incident.obj("field_map").text("_scope")) {
             IncidentMapScreen(model,registry,incident.text("id"),mapAssignment,
                 {id->assignmentId=id;incidentMap=false},{incidentMap=false})
         } }

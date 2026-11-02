@@ -182,7 +182,7 @@ internal class IncidentReconciliation(
         for(entry in entries) {
             val id=entry.text("id");val old=previous.find { it.text("id")==id }
             val cursor=saved.find { it.incident==id && it.account==account && it.organization==org }
-            val compatible=old!=null && old.text("leadership_schema")=="1" && old.obj("field_map").text("schema")=="1" && !old.flag("leader_reset") && cursor!=null && cursor.schemaVersion==1 &&
+            val compatible=old!=null && old.text("leadership_schema")=="1" && old.obj("field_map").text("schema")=="1" && old.obj("field_map").text("_scope")==cursor?.fingerprint && !old.flag("leader_reset") && cursor!=null && cursor.schemaVersion==1 &&
                 old.text("revision")==cursor.revision.toString() && entry.text("scope_fingerprint")==cursor.fingerprint
             // Missing/old protocol metadata is a data reset, not evidence of access loss.
             if(old!=null && cursor!=null && entry.text("scope_fingerprint")!=cursor.fingerprint)
@@ -241,6 +241,10 @@ internal class IncidentReconciliation(
                     pair=JsonObject((pair.first-"message_access")+("message_page" to kept)) to pair.second
                     }
                 }
+                // UI camera/saveable scope comes from this validated B1 cursor,
+                // not the independent NAV data watermark or incident UUID alone.
+                if(pair.first["field_map"] is JsonObject)pair=JsonObject(pair.first+("field_map" to JsonObject(
+                    pair.first.obj("field_map")+("_scope" to JsonPrimitive(pair.second.fingerprint))))) to pair.second
                 result+=pair.first;cursors+=pair.second
             } catch(e: CancellationException) { throw e }
             catch(e: Exception) {
