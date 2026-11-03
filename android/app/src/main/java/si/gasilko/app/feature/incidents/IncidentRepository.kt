@@ -111,6 +111,21 @@ class IncidentRepository(private val context: Context,private val client: Supaba
         currentCoroutineContext().ensureActive()
         client.postgrest.rpc(name,request).decodeAs<JsonObject>().also { scope(request.text("p_acting_organization_id").ifEmpty { request.text("p_organization_id") });currentCoroutineContext().ensureActive() }
     }
+    /** Optional online capability read. Never renews a lease, changes a cursor or revokes field data. */
+    internal suspend fun vehicleLocationCapability(org: String,incident: String): VehicleLocationCheck = withTimeoutOrNull(5_000L) { hydrantRemoteAccess.withLock {
+        suspend fun authorizedProjection() {
+            scope(org);currentCoroutineContext().ensureActive()
+            val row=dao.snapshot(account,org)
+            require(lease(org,row)>0 && row!=null) { "NOT_AUTHORIZED" }
+            require(parse(row.payload).rows("incidents").any {it.text("id")==incident && !it.flag("leader_reset")}) { "NOT_AUTHORIZED" }
+        }
+        authorizedProjection()
+        val result=rpc("incident_vehicle_location_capabilities",buildJsonObject {
+            put("p_acting_organization_id",org);put("p_incident_id",incident)
+        })
+        authorizedProjection()
+        if(disabledVehicleCapability(result,account,org,incident))VehicleLocationCheck.DISABLED else VehicleLocationCheck.UNAVAILABLE
+    } } ?: VehicleLocationCheck.UNAVAILABLE
     suspend fun refresh(org: String)=hydrantRemoteAccess.withLock { refreshLocked(org) }
     private suspend fun revokeIncident(org: String,id: String)=incidentIdentityAccess.withLock {
         val key="$account/$org/$id"

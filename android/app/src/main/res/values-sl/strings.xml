@@ -691,4 +691,10 @@
     <string name="c3_expired">NI NA VOLJO — sivo, pri %1$s min ali brez pravic, vira oziroma zaupanja vrednega časa; brez pina</string>
     <string name="c3_retention">Veljavno dovoljenje in dovoljena hramba lahko prikaz omejita še prej. Starosti ne računamo iz časa branja ali poti.</string>
     <string name="c3_partial">Seznam ni popoln. Prikazujemo največ 100 že dovoljenih enot iz trenutnega incidentnega posnetka.</string>
+    <string name="c2_off">Deljenje lokacije vozila je izklopljeno</string>
+    <string name="c2_blocked">Pred povezovanjem telefona morajo biti potrjeni pravila zasebnosti, varen dokaz vezave naprave in zanesljiv izbris poteklih koordinat.</string>
+    <string name="c2_no_capture">Ta možnost ne zajema ali pošilja GPS. Dovoljenje za lokacijo telefona ni soglasje za deljenje.</string>
+    <string name="c2_check">Preveri razpoložljivost deljenja</string>
+    <string name="c2_server_off">Strežnik potrjuje: deljenje je izklopljeno. To ni dovoljenje za zajem ali ogled položaja.</string>
+    <string name="c2_unverified">Razpoložljivosti ni mogoče potrditi. Deljenje ostaja izklopljeno; naloge in zemljevid lahko uporabljate naprej.</string>
 </resources>

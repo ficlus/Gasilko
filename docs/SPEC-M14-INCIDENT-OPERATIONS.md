@@ -3178,3 +3178,19 @@ Positive REAL observation/freshness/retention/map cases are BLOCKED pending
 separately approved C2/M15 source, permission/consent, trusted time and expiry.
 See [C3 source evidence and all80 UNEXECUTED owner cases](M14.8C3-real-unit-location-freshness.md).
 No tests/build/SQL/deployment/runtime/monitoring/manual acceptance performed.
+
+### M14.8C2 / M15 source-only partial: vehicle GPS capability remains OFF
+
+Root `M14.8C2.txt` §6/12 permits a safe subset while mandatory privacy,
+no-traffic physical retention and vetted sharing-device binding are unresolved.
+Adds only an authenticated constant-size disabled capability RPC and manual
+Android/Web check within the existing C3 unavailable notice. Server/client
+producer gates are structurally OFF; no setting or response can activate capture.
+This is **not** completed vehicle-phone pairing or live location sharing.
+
+Canonical vehicles/deployments/driver episodes exist; M10 notification registration
+is not repurposed as proof of sharing-device ownership. No coordinate store,
+START/SAMPLE/STOP, FGS, permission, GPS cache/marker, worker or Cron is added.
+C3 stays null-only; REAL/SIM, B1/cursors/leases, Room16, D1/D2 receipts and
+pending operations remain unchanged. No deployment or approval is inferred.
+See [C2 blockers, capability contract and100 UNEXECUTED owner cases](M14.8C2-consented-vehicle-phone-real-gps.md).

@@ -1,4 +1,5 @@
 'use client';
+import type {ReactNode} from 'react';
 import type {Locale} from '../../lib/i18n';
 import {realUnitPositionView,type RealUnitBinding} from '../../lib/incidents/realUnitPosition';
 import {realUnitPositionText} from '../../lib/incidents/realUnitPositionText';
@@ -10,10 +11,10 @@ export function RealUnitPositionBadge({locale,binding,authorized}:{locale:Locale
   □ REAL · {t(view.availability==='LOCKED'?'locked':'unavailable')}
  </small>;
 }
-export function RealUnitLocationNotice({locale,locked=false}:{locale:Locale;locked?:boolean}) {
+export function RealUnitLocationNotice({locale,locked=false,children}:{locale:Locale;locked?:boolean;children?:ReactNode}) {
  const t=realUnitPositionText(locale);
  return <details className="admin-notice" style={{pointerEvents:'auto'}}><summary>□ {t('title')} · {t(locked?'locked':'unavailable')}</summary>
-  {!locked&&<><p>{t('source')}</p><p>{t('noTime')} · {t('noAccuracy')}</p><p>{t('distinction')}</p><p>{t('sim')}</p>
+  {!locked&&<>{children}<p>{t('source')}</p><p>{t('noTime')} · {t('noAccuracy')}</p><p>{t('distinction')}</p><p>{t('sim')}</p>
    <h4>{t('legend')}</h4><ul>
     <li style={{color:'#166534'}}>{t('current')}</li>
     <li style={{color:'#92400e',borderLeft:'3px dashed #92400e',paddingLeft:6}}>{t('lastKnown')}</li>
