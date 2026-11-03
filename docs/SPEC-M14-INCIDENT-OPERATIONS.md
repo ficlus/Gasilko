@@ -3212,3 +3212,21 @@ grant, queue, worker or Cron. Room16, B1 field/cursors/leases, pending immutable
 operations/receipts, M10, NAV and REAL/SIM remain unchanged. Privacy approval,
 device assurance, independent retention/backups, reported #86 rollout blocker
 and future owner acceptance remain unresolved; no deployment/release is inferred.
+
+### M15A.1 — local device-proof primitives; no server binding or GPS
+
+Adds internal Android-only P-256 AndroidKeyStore create/open/sign primitives,
+a strict M15A-v1 transcript encoder, canonical SPKI and DER/raw-signature format
+helpers, scoped identity-epoch revocation and isolated local-key cleanup APIs.
+There are no runtime UI/auth/map/notification/worker callers or automatic keys.
+Local signing/correspondence verification is NOT trusted server validation,
+driver authorization, attestation, consent or an inactive binding receipt.
+
+Existing C2 server/client capabilities remain DISABLED with all six flags false.
+No credential/challenge schema/RPC/verifier, active consent, GPS capture/viewer,
+permission/service, queue/worker/Cron or migration is added; Room16/B1/D1/D2,
+M10/NAV/SIM, pending original operations/receipts and current permissions remain
+unchanged. P01–P14/A01 remain UNAPPROVED. Server one-use challenge consumption,
+binding/lease, policy, physical-retention/backups and rollout remain future work.
+See [M15A.1 implemented versus proposed boundaries and75 UNEXECUTED owner cases](M15A1-secure-device-proof-inactive-binding.md).
+No build/test/SQL/runtime/deployment/merge or real key/GPS exercise performed.
