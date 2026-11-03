@@ -1,0 +1,1808 @@
+
+GASILKO — CODEX IMPLEMENTATION ASSIGNMENT
+
+M15A.3 — TRUSTED CHALLENGE & CREDENTIAL LIFECYCLE
+INACTIVE DEVICE SECURITY FOUNDATION
+
+Date: 2026-11-03
+Repository: https://github.com/ficlus/Gasilko
+Target: ONE NEW PULL REQUEST
+Status: GPS DISABLED — NO TRACKING ACTIVATION
+
+============================================================
+0. PURPOSE
+============================================================
+
+Implement the next server-side security foundation after
+M15A.2 / PR #95.
+
+The owner reports that PR #95 has been MERGED.
+
+Previous milestones:
+
+PR #92:
+  Disabled vehicle GPS capability.
+  No genuine REAL location source.
+
+PR #93:
+  M15A privacy and secure-device-binding design.
+  All P01–P14/A01 policy decisions UNAPPROVED.
+
+PR #94:
+  Android local device-proof primitives.
+  P-256 Android Keystore.
+  Nonexportable private key.
+  SHA256withECDSA signing.
+  Exact 27-line signed transcript.
+  DER/raw64 encoding.
+  Identity-episode protections.
+
+PR #95:
+  Pure server-side TypeScript/WebCrypto verifier.
+  Exact Android-v1 transcript reconstruction.
+  P-256 SPKI validation.
+  Public-key SHA-256 fingerprint verification.
+  P1363 raw64 signature verification.
+  Strict scope/version/generation checks.
+  Result limited to SIGNATURE_VALID_ONLY.
+
+WHAT IS STILL MISSING:
+
+1. Authoritative device credential storage.
+2. Trusted server-controlled challenge issuance.
+3. Durable challenge identity and lifecycle.
+4. One-time challenge claim/consumption.
+5. Credential revocation and generation handling.
+6. Original-operation idempotency and receipts.
+7. Trusted JWT and live authority checks.
+8. Safe transaction boundary around verification.
+9. Server proof that no stale request can reactivate
+   a revoked or superseded credential.
+
+MISSION:
+
+Implement as much of this server-side security
+infrastructure as is SAFE and genuinely enforceable
+without approved GPS privacy policy.
+
+This milestone MUST NOT activate GPS tracking,
+device-to-vehicle sharing, or consent.
+
+The deliverable must be actual narrowly scoped
+implementation where source contracts permit it,
+not merely another speculative architecture document.
+
+If any privileged finalization or public enrollment
+path cannot be made secure, leave that path BLOCKED,
+rather than shipping a false-success implementation.
+
+============================================================
+1. OWNER RESTRICTIONS
+============================================================
+
+The repository owner alone:
+
+- merges pull requests;
+- approves privacy and retention policies;
+- applies SQL migrations;
+- deploys Supabase Edge Functions;
+- configures secrets;
+- builds and installs Android;
+- performs runtime acceptance;
+- authorizes operational releases.
+
+CODEX MUST NOT:
+
+- execute tests;
+- add new automated tests;
+- run Android/Next.js builds;
+- run lint or typecheck;
+- start CI workflows;
+- run Gradle sync;
+- modify Gradle, KAPT, KSP or generated Room schemas;
+- run the emulator;
+- execute SQL locally or remotely;
+- inspect production Supabase data;
+- deploy Edge Functions;
+- change production secrets;
+- configure live Cron jobs;
+- install applications;
+- perform GPS tracking;
+- merge pull requests.
+
+Do not modify unrelated local developer files.
+
+Implementation commits must include [skip ci].
+
+Create exactly ONE PR.
+
+If corrections are necessary, add commits to that
+SAME branch and PR.
+
+Do not create overlapping PRs.
+
+============================================================
+2. VERIFY BASELINE BEFORE CODING
+============================================================
+
+Check current GitHub main.
+
+Verify PR #95 is merged and its commit:
+
+3a958735e9907e0775f4d6c5d45c9432a7670d60
+
+is contained in current main history.
+
+Inspect all currently open PRs for overlap.
+
+Do not rely solely on stale GitHub page labels.
+Confirm using current commit ancestry.
+
+Use the latest main as the new branch base.
+
+If PR #95 is not actually in main, STOP and
+report the dependency instead of cherry-picking
+or opening an overlapping PR.
+
+Read:
+
+AGENTS.md
+docs/SPEC.md
+docs/SPEC-M14-INCIDENT-OPERATIONS.md
+
+docs/M15A-gps-privacy-device-binding.md
+docs/M15A1-secure-device-proof-inactive-binding.md
+docs/M15A2-server-device-verification-inactive-binding.md
+
+docs/M14.8C2-consented-vehicle-phone-real-gps.md
+docs/M14.8C3-real-unit-location-freshness.md
+
+Relevant B1/B2, C1, D1/D2, unit leadership,
+M10, NAV and REAL/SIM specifications.
+
+Inspect existing source:
+
+supabase/functions/_shared/deviceProofV1.ts
+
+android/app/src/main/java/si/gasilko/app/
+core/security/deviceproof/
+
+supabase/config.toml
+
+supabase/functions/incident-evidence/
+
+supabase/migrations/
+
+web/app/api/incidents/route.ts
+
+Android IncidentRepository and IncidentViewModel.
+
+Identify exact current database contracts.
+
+DO NOT invent existing table/function names
+or assume design-only objects are deployed.
+
+============================================================
+3. AS-FOUND CONTRACT INVENTORY
+============================================================
+
+Before editing, document the following.
+
+CANONICAL VEHICLE:
+
+public.operational_vehicles
+
+Inspect exact:
+id
+organization_id
+active
+availability
+version
+composite uniqueness
+foreign keys
+
+CANONICAL INVENTORY UNIT:
+
+public.operational_units
+
+Inspect:
+id
+organization_id
+vehicle_id
+active
+version
+
+INCIDENT DEPLOYMENT:
+
+public.incident_units
+
+Inspect:
+id
+incident_id
+participation_id
+organization_id
+unit_id
+status
+version
+changed_revision
+
+IMPORTANT:
+Incident deployment UUID != inventory unit UUID.
+
+DRIVER AUTHORITY:
+
+public.incident_crew_members
+
+Inspect:
+id
+incident_id
+unit_assignment_id
+user_id
+membership_organization_id
+crew_role
+status
+version
+
+Only an actually ACTIVE assigned DRIVER is a
+candidate for future phone-to-vehicle binding.
+
+UNIT_LEADER or ADMIN is not automatically
+authorized for precise GPS or device binding.
+
+EXISTING AUTHORIZATION:
+
+private.incident_acting_member
+private.is_active_user
+private.can_read_incident
+private.field_unit_visible
+private.field_unit_leader
+public.incident_sync_head
+
+Inspect exact parameters and return semantics.
+
+EXISTING RECEIPTS:
+
+private.incident_operation_receipts
+
+Inspect:
+operation_id
+actor_user_id
+acting_organization_id
+incident_id
+command_code
+request
+result
+created_at
+
+Review immutability triggers and lock ordering.
+
+CURRENT GPS CAPABILITY:
+
+public.incident_vehicle_location_capabilities
+
+Confirm all six flags remain false:
+
+enabled
+producer_available
+reader_available
+policy_approved
+retention_ready
+device_binding_ready
+
+NOTIFICATION DEVICES:
+
+private.notification_devices
+
+Do not reuse notification registration as GPS
+credential enrollment.
+
+ANALYSIS OUTPUT:
+
+Create a table:
+
+Contract
+Actual source file/line
+Exact existing schema/signature
+Trusted authority
+Current guarantee
+Missing requirement
+M15A.3 action
+
+============================================================
+4. NONNEGOTIABLE SECURITY INVARIANTS
+============================================================
+
+M15A.3 MUST NOT IMPLEMENT:
+
+- active phone-to-vehicle GPS pairing;
+- driver consent approval;
+- START location sharing;
+- GPS sample submission;
+- GPS coordinate storage;
+- live vehicle position retrieval;
+- GPS history;
+- new realtime GPS channels;
+- new Android location permissions;
+- foreground/background tracking services;
+- new GPS notification channels;
+- GPS-related Android workers;
+- map markers or last-known REAL coordinates;
+- data derived from SIM location as REAL GPS;
+- a location retention worker without owner approval.
+
+All P01–P14/A01 remain UNAPPROVED.
+
+No code may treat these as approved merely because
+the owner merged the PR.
+
+A valid P-256 signature is NOT:
+
+- proof of driver identity;
+- proof of current incident assignment;
+- proof of active organization membership;
+- proof of informed consent;
+- approval of vehicle binding;
+- permission to upload GPS;
+- permission to view another person's position.
+
+Maintain this strict separation:
+
+USER AUTHENTICATION
+       |
+       v
+CURRENT AUTHORITY CHECK
+       |
+       v
+DEVICE KEY POSSESSION
+       |
+       v
+INACTIVE SECURITY RECORD
+       |
+       X
+NO GPS ACTIVATION
+
+============================================================
+5. TARGET ARCHITECTURE
+============================================================
+
+Preferred components:
+
+A. PRIVATE POSTGRES CREDENTIAL REGISTRY
+
+Stores a minimal server-authoritative snapshot
+of an inactive public-key credential.
+
+B. PRIVATE CHALLENGE REGISTRY
+
+Stores server-generated challenge identity,
+scope, expiry and one-time state.
+
+C. TRUSTED ISSUE / CLAIM / FINALIZE BOUNDARY
+
+Implements immutable requests, concurrency
+protection and live authorization.
+
+D. EXISTING WEBCRYPTO VERIFIER
+
+Reuse:
+
+supabase/functions/_shared/deviceProofV1.ts
+
+Do not duplicate cryptography.
+
+E. CREDENTIAL REVOCATION
+
+Prevents further acceptance of revoked or
+superseded credentials.
+
+F. PRIVILEGED AUTHORIZATION ADAPTER
+
+Verifies authenticated actor and live
+incident/unit/vehicle/driver relationships.
+
+G. DISABLED OPERATIONAL CAPABILITY
+
+Existing GPS capability always returns DISABLED.
+
+IMPORTANT:
+
+The trusted verifier and database transactions
+must have an explicitly reviewed boundary.
+
+A generic HTTP endpoint accepting:
+
+{ verified: true }
+
+is NOT an acceptable architecture.
+
+============================================================
+6. PROPOSED DATABASE SCHEMA
+============================================================
+
+Inspect actual migration history and canonical keys.
+
+The following structures are technical design targets.
+Adjust names and constraints to real repository contracts.
+
+Use a unique forward-only migration timestamp after:
+
+20261102140000_incident_vehicle_location_capability.sql
+
+Never edit an old migration.
+
+------------------------------------------------------------
+6.1 private.vehicle_device_credentials
+------------------------------------------------------------
+
+Suggested columns:
+
+credential_id UUID PRIMARY KEY
+
+actor_user_id UUID NOT NULL
+
+acting_organization_id UUID NOT NULL
+
+incident_id UUID NOT NULL
+
+deployment_id UUID NOT NULL
+
+vehicle_id UUID NOT NULL
+
+authority_episode_id UUID NOT NULL
+
+protocol_version INTEGER NOT NULL
+
+public_key_spki_der BYTEA NOT NULL
+
+public_key_sha256 TEXT NOT NULL
+
+generation BIGINT NOT NULL
+
+lifecycle_status TEXT NOT NULL
+
+created_at TIMESTAMPTZ NOT NULL
+
+revoked_at TIMESTAMPTZ NULL
+
+revoked_reason TEXT NULL
+
+IMPORTANT:
+
+No private key.
+
+No latitude/longitude.
+
+No GPS sample.
+
+No consent approval.
+
+No active sharing lease.
+
+Allowed credential states:
+
+INACTIVE
+REVOKED
+
+Use CHECK constraints so ACTIVE/SHARING
+cannot be stored.
+
+Bind exact actor/org/incident/deployment/vehicle
+using actual verified foreign keys and canonical joins.
+
+Do not add a foreign key to a nonexistent
+composite unique key.
+
+Prevent arbitrary org/incident reassignment.
+
+Use restrictive length and format checks.
+
+For SPKI:
+P-256 SPKI must match actual Android v1 encoding.
+
+Avoid storing duplicate or unbounded keys
+without an explicit uniqueness policy.
+
+Define an appropriate generation/rotation model.
+
+If existing schema cannot establish the correct
+authority episode, do NOT invent a UUID value.
+Report the gap and block enrollment.
+
+------------------------------------------------------------
+6.2 private.vehicle_device_challenges
+------------------------------------------------------------
+
+Suggested columns:
+
+challenge_id UUID PRIMARY KEY
+
+credential_id UUID NOT NULL
+
+actor_user_id UUID NOT NULL
+
+acting_organization_id UUID NOT NULL
+
+incident_id UUID NOT NULL
+
+deployment_id UUID NOT NULL
+
+vehicle_id UUID NOT NULL
+
+authority_episode_id UUID NOT NULL
+
+issue_operation_id UUID NOT NULL
+
+confirm_operation_id UUID NOT NULL
+
+nonce BYTEA NOT NULL
+
+issued_at TIMESTAMPTZ NOT NULL
+
+expires_at TIMESTAMPTZ NOT NULL
+
+transcript_sha256 TEXT NOT NULL
+
+immutable_request_sha256 TEXT NOT NULL
+
+expected_incident_version BIGINT NOT NULL
+
+expected_deployment_version BIGINT NOT NULL
+
+expected_vehicle_version BIGINT NOT NULL
+
+reserved_generation BIGINT NOT NULL
+
+recovery_epoch UUID NOT NULL
+
+policy_version TEXT NOT NULL
+
+policy_document_sha256 TEXT NOT NULL
+
+precise_audience_sha256 TEXT NOT NULL
+
+audience TEXT NOT NULL
+
+state TEXT NOT NULL
+
+claim_id UUID NULL
+
+claim_expires_at TIMESTAMPTZ NULL
+
+consumed_at TIMESTAMPTZ NULL
+
+created_at TIMESTAMPTZ NOT NULL
+
+Allowed states:
+
+ISSUED
+CLAIMED
+VERIFIED_INACTIVE
+REJECTED
+EXPIRED
+REVOKED
+
+Never ACTIVE or SHARING.
+
+Store and compare the original immutable
+request identities.
+
+Require one-time nonce/challenge use.
+
+Bound challenge lifetime.
+
+Current Android contract requires exactly
+120 seconds from issuance to expiry.
+
+No interpretation of expired as physically deleted.
+
+Reject challenges with untrusted policy hashes
+being presented as approved consent.
+
+Do not create fake approved policy values to
+satisfy a nonnullable column.
+
+------------------------------------------------------------
+6.3 private.vehicle_device_proof_receipts
+------------------------------------------------------------
+
+First determine whether existing
+incident_operation_receipts can safely be reused.
+
+If not, design an isolated receipt table.
+
+Suggested fields:
+
+operation_id UUID PRIMARY KEY
+
+actor_user_id UUID NOT NULL
+
+acting_organization_id UUID NOT NULL
+
+challenge_id UUID NOT NULL
+
+request_sha256 TEXT NOT NULL
+
+outcome_code TEXT NOT NULL
+
+result JSONB NOT NULL
+
+created_at TIMESTAMPTZ NOT NULL
+
+Rules:
+
+The same original operation UUID and immutable
+request must recover the same authoritative result.
+
+A different request using the same UUID must fail.
+
+Never use signature bytes as the idempotency key.
+
+Never change a previously confirmed result.
+
+Unknown transport outcome is not automatically
+rejected and not automatically accepted.
+
+Use real DB constraints/triggers to enforce
+immutability if the repository requires it.
+
+============================================================
+7. SQL AUTHORIZATION AND GRANTS
+============================================================
+
+Private credential and challenge tables must not
+be directly accessible to application clients.
+
+No broad SELECT, INSERT, UPDATE or DELETE for:
+
+anon
+authenticated
+PUBLIC
+
+Prefer narrow SECURITY DEFINER functions,
+if justified by actual existing patterns.
+
+Every SECURITY DEFINER function must:
+
+- set search_path = '';
+- use fully qualified SQL identifiers;
+- have explicitly reviewed ownership;
+- apply strict actor and exact-org checks;
+- preserve least-privilege EXECUTE;
+- reject foreign scope and stale authority;
+- avoid leaking unrelated credential existence;
+- use bounded inputs and outputs;
+- use proper transaction locking;
+- avoid SQL injection/dynamic name construction.
+
+Do not grant direct access to private data
+through PostgREST schema exposure.
+
+Do not add the private schema to exposed schemas
+merely to make an Edge client query easier.
+
+Do not place a service-role key in Android
+or browser code.
+
+Review all source-specific grant conventions.
+
+============================================================
+8. AUTHENTICATION AND DEVICE AUTHORITY
+============================================================
+
+The trusted server must authenticate the actual
+user rather than accept actor_user_id from JSON.
+
+Do not trust client-supplied:
+
+- actor identity;
+- organization membership;
+- crew role;
+- vehicle ownership;
+- approved privacy-policy status;
+- credential verification status;
+- consent state;
+- active sharing state.
+
+Authorization checks at challenge ISSUE
+and again at FINALIZE must include:
+
+1. Valid authenticated user.
+2. Current active account.
+3. Exact acting organization.
+4. Current incident participation.
+5. REAL incident, not TRAINING/SIM.
+6. Incident remains operationally eligible.
+7. Exact incident deployment.
+8. Exact inventory unit association.
+9. Current canonical assigned vehicle.
+10. Current ACTIVE DRIVER membership.
+11. Unchanged authority episode.
+12. Unchanged expected entity versions.
+13. Credential belongs to current actor.
+14. Credential is not revoked.
+15. No newer generation supersedes the claim.
+16. Challenge has not expired or been consumed.
+
+If the actual schema represents authority episodes
+differently than the M15A proposal,
+document and use the real authoritative model.
+
+Do not create a synthetic authority episode
+that can remain valid after driver reassignment.
+
+For any unresolved policy requirement that could
+authorize pairing or GPS, fail closed.
+
+============================================================
+9. CRYPTOGRAPHIC COMPATIBILITY
+============================================================
+
+Use the exact existing v1 protocol.
+
+Android source:
+
+DeviceProofProtocol.kt
+DeviceProofEncoding.kt
+LocalDeviceProofKeys.kt
+
+Server source:
+
+supabase/functions/_shared/deviceProofV1.ts
+
+Signed transcript:
+
+27 ordered lines.
+UTF-8.
+LF separator.
+Exactly one trailing LF.
+
+No JSON canonicalization.
+No trimming.
+No CRLF conversion.
+No field reordering.
+
+Signed lines:
+
+01 GASILKO-VEHICLE-PHONE-BINDING-V1
+02 audience
+03 recoveryEpoch
+04 BIND_INACTIVE
+05 scope.account
+06 scope.organization
+07 scope.incident
+08 REAL
+09 scope.deployment
+10 scope.vehicle
+11 scope.authorityEpisode
+12 DRIVER
+13 credentialId
+14 publicKeySha256
+15 policyVersion
+16 policyDocumentSha256
+17 preciseAudienceSha256
+18 issueOperationId
+19 confirmOperationId
+20 challengeId
+21 nonceBase64Url
+22 issuedAtSeconds
+23 expiresAtSeconds
+24 expectedIncidentVersion
+25 expectedDeploymentVersion
+26 expectedVehicleVersion
+27 reservedGeneration
+
+Use exactly the existing Android and M15A.2
+validation conventions:
+
+- lowercase canonical UUIDs;
+- 32-byte nonce;
+- 43-character unpadded base64url;
+- 120-second expiry;
+- positive version/generation values;
+- canonical decimal epoch seconds;
+- P-256 / secp256r1;
+- SHA-256;
+- canonical 91-byte public-key SPKI;
+- exact SHA-256 key fingerprint;
+- 64-byte raw P1363 ECDSA signature;
+- no DER-as-raw fallback.
+
+Reuse verifyDeviceProofV1.
+
+Do not implement another verifier with different
+parsing rules.
+
+Never convert a signature-valid result into
+proof of authorized device enrollment.
+
+============================================================
+10. TRUSTED CHALLENGE ISSUANCE
+============================================================
+
+Implement only where the unapproved policy gate
+and current server authority can be respected.
+
+Proposed future API:
+
+ISSUE_INACTIVE_DEVICE_CHALLENGE
+
+Input:
+
+original_issue_operation_uuid
+original_confirm_operation_uuid
+acting_organization_uuid
+incident_uuid
+deployment_uuid
+vehicle_uuid
+credential_uuid
+registered_key_fingerprint
+
+All other fields must be sourced from trusted
+server state.
+
+Do not permit the client to choose:
+
+nonce
+server timestamps
+policy authorization
+audience authorization
+expected entity versions
+reserved generation
+
+Algorithm:
+
+1. Authenticate real caller.
+2. Resolve exact active organization.
+3. Resolve current REAL incident.
+4. Resolve active deployment and current vehicle.
+5. Resolve current ACTIVE DRIVER episode.
+6. Confirm credential actor and scope.
+7. Check credential generation/revocation.
+8. Check approved policy prerequisite.
+
+IMPORTANT:
+For M15A.3 policy is UNAPPROVED.
+
+Do NOT produce an operational pairing challenge
+by substituting dummy policy hashes.
+
+A reusable internal challenge constructor may
+be implemented and kept inaccessible from
+public client paths.
+
+9. Atomically reserve unique challenge identity.
+10. Generate cryptographically secure nonce.
+11. Bind full immutable request and context.
+12. Persist challenge and timestamps.
+13. Return the exact canonical signed transcript.
+
+If step 8 remains unresolved, the callable path
+must return a safe POLICY_UNAPPROVED state.
+
+Do not claim challenge issuance is functional
+when this boundary is disabled.
+
+============================================================
+11. ONE-TIME CLAIM AND VERIFICATION
+============================================================
+
+A naive sequence:
+
+SELECT challenge
+await crypto.verify()
+UPDATE challenge
+
+is not transactionally safe.
+
+Supabase Edge invocation and PostgreSQL RPC
+calls do not automatically share one transaction.
+
+Design an explicit and safe boundary.
+
+Recommended model:
+
+TX-A: CLAIM
+
+Database transaction:
+
+1. Verify current actor.
+2. Lock challenge row.
+3. Lock credential/generation as needed.
+4. Recheck current authority.
+5. Compare immutable request identity.
+6. Require challenge state ISSUED.
+7. Require trusted current time < expires_at.
+8. Confirm credential is INACTIVE, not REVOKED.
+9. Allocate an unpredictable claim identifier.
+10. Set short claim lease.
+11. Transition ISSUED -> CLAIMED.
+12. Commit.
+
+OFF-DB:
+
+Trusted verifier retrieves an authoritative
+credential snapshot and challenge snapshot.
+
+Never take these snapshots from untrusted client
+replacement fields.
+
+Call existing verifyDeviceProofV1.
+
+No request may send a client-controlled
+verified=true boolean to finalize.
+
+TX-B: FINALIZE
+
+Database transaction:
+
+1. Identify original claim.
+2. Verify caller is privileged trusted verifier,
+   not the user/client claiming success.
+3. Lock challenge and credential.
+4. Recheck current authority.
+5. Recheck role/deployment/vehicle versions.
+6. Recheck revocation and generation.
+7. Recheck expiry and original request hash.
+8. Verify claim is current and not superseded.
+9. Accept genuine verifier result only through
+   the protected verifier trust boundary.
+10. Set VERIFIED_INACTIVE at most once.
+11. Store immutable authoritative receipt.
+12. Commit.
+
+A successful result may only mean:
+
+PROOF_VALIDATED_INACTIVE
+
+NOT:
+
+BOUND_ACTIVE
+CONSENT_APPROVED
+GPS_READY
+LOCATION_SHARING
+TRACKING_ACTIVE
+
+If there is no safe means for the database to
+distinguish the real verifier from an HTTP client,
+DO NOT expose FINALIZE.
+
+This is a HARD blocker, not an optional warning.
+
+============================================================
+12. EDGE FUNCTION TRUST BOUNDARY
+============================================================
+
+Review the current official Supabase Edge
+authentication model and installed dependencies.
+
+Inspect existing incident-evidence patterns.
+
+If adding a new Edge Function, prefer an explicit
+authenticated-user boundary.
+
+Requirements:
+
+- validate the live user JWT;
+- use an established current SDK/auth pattern;
+- keep caller and privileged DB authority separate;
+- never trust user-controlled role or UID;
+- never accept an arbitrary successful verifier result;
+- keep the verifier-to-finalizer privilege private;
+- do not expose service-role keys;
+- do not rely on service_role bypassing RLS
+  as evidence of authorization;
+- preserve gateway JWT verification unless a
+  specifically reviewed architecture requires otherwise.
+
+A privileged DB finalizer needs a genuine trusted
+server-only identity or capability.
+
+A service-role token available only to the Edge
+runtime is not sufficient by itself if the
+finalization RPC can be invoked using an
+untrusted user's credentials.
+
+Document:
+
+- exact function path;
+- allowed HTTP methods;
+- body-size limit;
+- JWT audience/issuer validation;
+- permitted RPC signatures;
+- privilege model;
+- allowed errors;
+- replay limits;
+- rate limits;
+- logging redaction;
+- timeout/unknown outcome behavior.
+
+Do NOT change Supabase configuration merely
+to work around a 401.
+
+Do NOT deploy.
+
+If the trust model cannot be established from
+source, implement only safe internal primitives
+and report the executable endpoint as BLOCKED.
+
+============================================================
+13. CONCURRENCY AND IDEMPOTENCY
+============================================================
+
+Handle these cases explicitly.
+
+CASE A:
+Two clients attempt to consume the same challenge.
+
+Result:
+At most one authoritative successful finalization.
+
+CASE B:
+The same original issue UUID is retried.
+
+Result:
+Return the existing authoritative response,
+provided the normalized request is identical.
+
+CASE C:
+The same operation UUID has different payload.
+
+Result:
+OPERATION_CONFLICT.
+
+CASE D:
+Verifier crashes after CLAIM.
+
+Result:
+No false success.
+Challenge remains claimed or becomes
+recoverable according to bounded lease policy.
+
+CASE E:
+Verifier crashes after FINALIZE commit but before
+HTTP response reaches the client.
+
+Result:
+Retry discovers the authoritative receipt.
+No duplicate state transition.
+
+CASE F:
+Credential revoked between CLAIM and FINALIZE.
+
+Result:
+Revocation wins.
+Finalize rejects the claim.
+
+CASE G:
+Incident deployment or vehicle reassigned
+between ISSUE and FINALIZE.
+
+Result:
+Live scope/version check rejects confirmation.
+
+CASE H:
+Driver role removed between ISSUE and FINALIZE.
+
+Result:
+Confirmation denied.
+
+CASE I:
+Device key rotated.
+
+Result:
+Older generation cannot finalize.
+
+CASE J:
+Expired challenge is retried.
+
+Result:
+EXPIRED or the same already-confirmed
+authoritative receipt, never a fresh consent.
+
+CASE K:
+Two different devices claim the same vehicle.
+
+Result:
+No operational binding occurs in M15A.3.
+Future one-device-per-vehicle arbitration
+remains blocked pending policy.
+
+CASE L:
+Old Android instance retries a saved request
+after organization/account switch.
+
+Result:
+Do not retarget the original operation.
+Reject the stale identity context.
+
+CASE M:
+A signature is mathematically valid but
+current actor is unauthorized.
+
+Result:
+Reject authorization, regardless of signature.
+
+CASE N:
+A forged proof result is supplied by a client.
+
+Result:
+Never accepted by trusted FINALIZE.
+
+============================================================
+14. CREDENTIAL REVOCATION
+============================================================
+
+Implement safe INACTIVE credential revocation
+if supported by actual source contracts.
+
+Proposed command:
+
+REVOKE_INACTIVE_DEVICE_CREDENTIAL
+
+Inputs:
+
+original_operation_uuid
+credential_uuid
+acting_organization_uuid
+
+The actor must be authorized for this exact
+credential, without receiving foreign
+credential information.
+
+A revocation must:
+
+- be authoritative and idempotent;
+- set revoked_at;
+- advance or invalidate generation as appropriate;
+- prevent new challenges;
+- invalidate outstanding claims;
+- prevent late finalization;
+- preserve original receipts;
+- never restore an earlier generation;
+- never enable GPS;
+- never rewrite historical request identity.
+
+If server revocation is inaccessible due to
+unapproved policy/authority, implement private
+state constraints and keep the public revocation
+path blocked with documented reasoning.
+
+Do not claim Android local key deletion confirms
+server revocation.
+
+Offline STOP/leave-vehicle GPS behavior remains
+outside this milestone.
+
+============================================================
+15. RETENTION AND DATA MINIMIZATION
+============================================================
+
+M15A.3 may store only minimal security metadata.
+
+Never store:
+
+GPS latitude
+GPS longitude
+GPS path
+GPS speed
+GPS trail
+GPS accuracy
+real-time position sample
+consent approval flag
+private key
+refresh token
+FCM token as proof credential
+
+Do not log:
+
+raw user JWT
+signed challenge body
+private key
+full public-key dumps
+raw device signature
+unredacted incident/location context
+
+Clearly distinguish:
+
+AUTHORIZATION EXPIRY
+from
+PHYSICAL DELETION.
+
+An expired challenge is invalid even when
+its row still physically exists.
+
+However, a time predicate is not an erasure job.
+
+Document exact metadata retention open questions:
+
+- challenge storage lifetime;
+- revoked credential lifetime;
+- immutable receipt retention;
+- database backups/PITR/WAL;
+- restoration after revocation;
+- monitoring/error logs;
+- failure of future cleanup job.
+
+Do not create an unapproved Cron worker.
+
+If permanent credential/challenge retention
+cannot be justified safely, prefer a smaller
+inert schema and mark live issuance BLOCKED.
+
+============================================================
+16. FAIL-CLOSED ERROR CONTRACT
+============================================================
+
+Use bounded stable error categories.
+
+Suggested codes:
+
+INVALID_INPUT
+INVALID_ENCODING
+UNSUPPORTED_PROTOCOL
+UNAUTHORIZED
+NOT_ELIGIBLE
+POLICY_UNAPPROVED
+CREDENTIAL_NOT_FOUND
+CREDENTIAL_REVOKED
+CREDENTIAL_GENERATION_CHANGED
+CHALLENGE_EXPIRED
+CHALLENGE_CONSUMED
+CHALLENGE_CLAIMED
+CLAIM_EXPIRED
+SCOPE_CHANGED
+ENTITY_VERSION_CONFLICT
+OPERATION_CONFLICT
+VERIFIER_UNAVAILABLE
+OUTCOME_UNKNOWN
+
+These names are proposed.
+Reuse existing repository conventions if
+appropriate.
+
+Do not leak whether a foreign user's credential
+or incident exists.
+
+Avoid returning full database exceptions
+to untrusted clients.
+
+Never translate a server error into
+GPS_ENABLED or BINDING_APPROVED.
+
+============================================================
+17. ANDROID AND WEB SCOPE
+============================================================
+
+M15A.3 is primarily server-side.
+
+Do not add Android GPS capture.
+
+Do not automatically call LocalDeviceProofKeys.
+
+Do not add enrollment to:
+
+- login;
+- incident loading;
+- unit map;
+- background worker;
+- notification handling;
+- task navigation.
+
+Do not add a clickable "Start location sharing"
+button.
+
+Do not add Web MapLibre GPS layers.
+
+Do not add new realtime location channels.
+
+Existing disabled capability remains the
+single source of user-facing truth.
+
+If a client-facing contract is required for
+future use, create narrowly scoped data types,
+not a live feature toggle.
+
+Existing clients must continue to work when
+the new server code is not deployed.
+
+Preserve:
+
+Room16
+B1 snapshot/cursor atomicity
+B2 private realtime permissions
+C1 map/task navigation
+C3 unavailable positions
+D1 offline reliability
+D2 metrics
+M10 notifications
+existing receipts
+REAL/SIM isolation
+
+============================================================
+18. REQUIRED IMPLEMENTATION DECISIONS
+============================================================
+
+At the start of the new M15A.3 documentation,
+provide a decision table.
+
+For every item choose:
+
+IMPLEMENT_NOW
+DESIGN_ONLY
+BLOCKED_BY_POLICY
+BLOCKED_BY_INFRASTRUCTURE
+
+Items:
+
+1. Private credential schema.
+2. Private challenge schema.
+3. Server key registration.
+4. Authenticated challenge issuance.
+5. Atomic challenge claim.
+6. WebCrypto verification integration.
+7. Privileged finalization.
+8. Immutable receipt recovery.
+9. Credential revocation.
+10. Rotation/generation changes.
+11. Metadata physical cleanup.
+12. Public Android enrollment.
+13. Vehicle pairing.
+14. GPS producer.
+15. GPS viewer.
+
+For each BLOCKED item give the exact missing
+contract or owner approval.
+
+Do not merely mark "unsafe" without explaining
+what prevents safe implementation.
+
+Prefer one small secure implementation PR over
+a large surface with unverifiable guarantees.
+
+============================================================
+19. REQUIRED SOURCE FILES
+============================================================
+
+Suggested new server documentation:
+
+docs/M15A3-trusted-challenge-credential-lifecycle.md
+
+Update:
+
+docs/SPEC-M14-INCIDENT-OPERATIONS.md
+
+Actual source files depend on verified contracts.
+
+If the SQL design is enforceable:
+
+supabase/migrations/
+<NEW_UNIQUE_TIMESTAMP>_vehicle_device_proof_lifecycle.sql
+
+Potential internal Edge modules:
+
+supabase/functions/_shared/deviceProofLifecycle.ts
+
+Potential new handler:
+
+supabase/functions/device-proof/index.ts
+
+BUT:
+
+Do not create a public HTTP handler if its
+privileged verification boundary cannot be
+secured properly.
+
+Do not modify the existing pure verifier's
+v1 byte contract.
+
+Do not edit previously applied migrations.
+
+Do not modify existing incident-evidence behavior.
+
+============================================================
+20. MANUAL ACCEPTANCE — 40 DIFFERENT SCENARIOS
+============================================================
+
+Write these as real acceptance cases in the
+milestone documentation.
+
+For each case include:
+
+PRECONDITION
+ACTION
+EXPECTED SERVER/CLIENT OUTCOME
+IMPLEMENTATION STATUS
+
+All remain UNEXECUTED.
+
+Mark cases requiring unavailable policy or
+infrastructure as BLOCKED.
+
+GROUP A — BASELINE
+
+A01.
+Inspect actual main history.
+Expected: PR #95 included in branch base.
+
+A02.
+Read #92 vehicle capability RPC.
+Expected: all six readiness flags false.
+
+A03.
+Review new database schema.
+Expected: no coordinate fields, active GPS
+state or location history.
+
+A04.
+Review grants.
+Expected: authenticated/anon cannot directly
+read or modify private proof records.
+
+GROUP B — CREDENTIAL STORAGE
+
+B05.
+Register an authorized inactive public key
+where that path is implemented.
+Expected: stored public SPKI and fingerprint
+match without storing private key.
+
+B06.
+Attempt to replace a stored credential's
+actor or organization.
+Expected: rejected.
+
+B07.
+Attempt to use an already revoked credential.
+Expected: rejected regardless of signature.
+
+B08.
+Rotate a credential generation.
+Expected: old generation cannot confirm.
+
+B09.
+Attempt to store malformed P-256 SPKI.
+Expected: strict rejection or explicitly blocked
+unimplemented registration path.
+
+B10.
+Attempt to reuse another user's public key
+as a new authorized credential.
+Expected: possession/actor boundary rejects
+or enrollment remains unavailable.
+
+GROUP C — CHALLENGES
+
+C11.
+Issue a challenge with exact valid scope.
+Expected: trusted nonce, canonical fields
+and 120-second expiry, only when approved.
+
+C12.
+Attempt client-selected nonce.
+Expected: server refuses to trust it.
+
+C13.
+Retry original issue operation UUID.
+Expected: existing challenge, same nonce.
+
+C14.
+Reuse issue UUID with changed vehicle.
+Expected: OPERATION_CONFLICT.
+
+C15.
+Use expired challenge.
+Expected: never accepted as new proof.
+
+C16.
+Change authorityEpisode or recoveryEpoch.
+Expected: original signature/scope becomes
+invalid.
+
+GROUP D — CRYPTOGRAPHIC PROOF
+
+D17.
+Compare Android and server transcript bytes.
+Expected: 27 ordered lines, one final LF.
+
+D18.
+Submit correct Android P-256 signature.
+Expected: SIGNATURE_VALID_ONLY mathematical
+evidence, not GPS consent.
+
+D19.
+Submit malformed raw64 signature.
+Expected: INVALID_ENCODING.
+
+D20.
+Submit wrong registered-key fingerprint.
+Expected: rejected before finalization.
+
+D21.
+Modify expected vehicle version.
+Expected: signed context mismatch.
+
+D22.
+Send valid signature using revoked key.
+Expected: current server lifecycle check rejects.
+
+GROUP E — CONCURRENCY
+
+E23.
+Two parallel claims of same challenge.
+Expected: at most one authoritative claim.
+
+E24.
+Two parallel finalizations.
+Expected: at most one confirmed result.
+
+E25.
+Crash after CLAIM before verification.
+Expected: no false success; bounded recovery.
+
+E26.
+Crash after committed FINALIZE but before reply.
+Expected: replay retrieves original receipt.
+
+E27.
+Revoke credential while verification is pending.
+Expected: revocation wins.
+
+E28.
+Retry with different confirm operation UUID.
+Expected: no new acceptance of consumed challenge.
+
+GROUP F — AUTHORIZATION
+
+F29.
+Remove current DRIVER role before confirm.
+Expected: authorization denied.
+
+F30.
+Reassign incident vehicle before confirm.
+Expected: entity version/scope rejection.
+
+F31.
+Attempt proof from another organization.
+Expected: exact-org rejection.
+
+F32.
+Attempt from TRAINING/SIM incident.
+Expected: rejected for REAL device ceremony.
+
+F33.
+Attempt proof as UNIT_LEADER without DRIVER
+eligibility or approved fallback.
+Expected: denied.
+
+F34.
+Close incident before finalization.
+Expected: confirmation denied.
+
+GROUP G — TRUST AND PRIVACY
+
+G35.
+Submit verified=true from public client.
+Expected: never authoritative.
+
+G36.
+Attempt privileged FINALIZE using ordinary
+authenticated or anon credentials.
+Expected: no access.
+
+G37.
+Inspect logs and timeline.
+Expected: no JWT, private key, raw signature,
+nonce dump or coordinates.
+
+G38.
+Leave challenge expired in database without
+new traffic.
+Expected: unusable, but no false physical
+deletion claim.
+
+GROUP H — COMPATIBILITY AND ROLLOUT
+
+H39.
+Inspect Android/Web changes.
+Expected: Room16 and existing worker unchanged;
+no GPS producer or new location permission.
+
+H40.
+Review owner rollout order.
+Expected: #86 remains unresolved, later migrations
+not silently applied, new schema not deployed,
+all acceptance cases UNEXECUTED.
+
+Do NOT pad the list to a larger number.
+
+Each case must have its own meaningful
+precondition, action and expected outcome.
+
+============================================================
+21. OWNER SQL MIGRATION BLOCKER
+============================================================
+
+The owner previously reported:
+
+#82–#85 SQL applied.
+
+#86 migration:
+
+20261030160000_incident_private_attachments.sql
+
+FAILED with:
+
+SQLSTATE 42601
+syntax error at end of input
+near line 109.
+
+The owner explicitly confirmed that the entire
+SQL file was copied and pasted correctly.
+
+DO NOT blame truncation or the clipboard.
+
+DO NOT rerun this migration automatically.
+
+DO NOT modify it as part of M15A.3.
+
+This blocker remains separate from the current PR.
+
+The owner must resolve #86 before continuing
+the chronological migration rollout.
+
+#87–#90, #92 and any newer migration are not
+confirmed applied in production.
+
+The incident-evidence Edge Function is also
+not confirmed deployed.
+
+Do not infer deployment from GitHub merges.
+
+If M15A.3 adds a migration, document its exact
+filename and ordering AFTER existing migrations.
+
+Never deploy or execute it.
+
+============================================================
+22. REQUIRED DESIGN DIAGRAMS
+============================================================
+
+Document exact interaction flow using PlantUML
+or a similarly explicit sequence diagram.
+
+Actors:
+
+Android
+Supabase Auth
+Authenticated Edge boundary
+Private Postgres
+Trusted WebCrypto verifier
+Immutable receipt storage
+
+Sequence:
+
+1. Authenticated user requests inactive proof.
+2. Current exact authority is checked.
+3. Trusted challenge is created.
+4. Android signs immutable transcript.
+5. Trusted claim transaction begins and commits.
+6. Verifier validates actual signature.
+7. Trusted finalize transaction rechecks authority.
+8. Immutable receipt is committed.
+9. Android recovers original outcome on retry.
+
+Mark unimplemented arrows as FUTURE/BLOCKED.
+
+Also document a credential state machine:
+
+UNREGISTERED
+INACTIVE
+REVOKED
+
+and challenge state machine:
+
+ISSUED
+CLAIMED
+VERIFIED_INACTIVE
+REJECTED
+EXPIRED
+REVOKED
+
+No ACTIVE_SHARING state exists in this milestone.
+
+============================================================
+23. DOCUMENTATION QUALITY
+============================================================
+
+The documentation must answer:
+
+What was actually implemented?
+
+Which functions are callable?
+
+Which remain internal only?
+
+Which database objects are created by migration?
+
+Which permissions are granted?
+
+Where does trusted actor identity come from?
+
+How does the verifier get the authentic public key?
+
+Where is the nonce generated?
+
+Which transaction prevents duplicate claims?
+
+What happens if the Edge Function crashes?
+
+What happens if the driver's role disappears?
+
+What happens after key revocation?
+
+How is the original UUID preserved?
+
+How is a replay distinguished from a changed request?
+
+Why is mathematical proof not consent?
+
+Why are GPS flags still false?
+
+What must the owner approve before real tracking?
+
+What is the exact SQL deployment order?
+
+What can be rolled back safely?
+
+What is not verified at runtime?
+
+Do not claim source inspection proves runtime safety.
+
+============================================================
+24. FINAL PR REQUIREMENTS
+============================================================
+
+Create exactly ONE new PR.
+
+Suggested branch:
+
+codex/m15a3-trusted-challenge-credential-lifecycle
+
+Suggested PR title:
+
+M15A.3 — Trusted Challenge & Credential
+Lifecycle (GPS Disabled)
+
+Use [skip ci] commit messages.
+
+The final report must include:
+
+1. Main base SHA.
+2. Verification that PR #95 is merged.
+3. Open-PR overlap inspection.
+4. Exact as-found source contract matrix.
+5. Changed source files and line ranges.
+6. New migration name and objects, if any.
+7. Actual SQL signatures, constraints and grants.
+8. Exact implementation of trusted challenge
+   issuance, or reason it remains blocked.
+9. Actual claim/finalize concurrency guarantee,
+   or reason it remains unimplemented.
+10. Reuse of existing WebCrypto verifier.
+11. Device credential revocation behavior.
+12. Original operation UUID and receipt semantics.
+13. Trust boundary and remaining security risks.
+14. Privacy decisions still UNAPPROVED.
+15. Proof that GPS capability remains DISABLED.
+16. Room16 and REAL/SIM compatibility.
+17. All 40 manual scenarios UNEXECUTED.
+18. Owner rollout dependencies and #86 blocker.
+19. Exact branch, commit SHA and PR URL.
+20. Explicit record of no tests/build/lint/CI,
+    SQL execution, deployment or runtime checks.
+
+DO NOT MERGE.
+
+STOP AFTER OPENING THE PR.
+
+END OF M15A.3 CODEX ASSIGNMENT
