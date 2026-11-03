@@ -3194,3 +3194,21 @@ START/SAMPLE/STOP, FGS, permission, GPS cache/marker, worker or Cron is added.
 C3 stays null-only; REAL/SIM, B1/cursors/leases, Room16, D1/D2 receipts and
 pending operations remain unchanged. No deployment or approval is inferred.
 See [C2 blockers, capability contract and100 UNEXECUTED owner cases](M14.8C2-consented-vehicle-phone-real-gps.md).
+
+### M15A — privacy/device-binding design foundation, permanently disabled GPS
+
+Adds `docs/M15A-gps-privacy-device-binding.md`: a source-verified contract matrix,
+P01–P14/A01 decision sheet (all UNAPPROVED), proposed one-use device-key proof,
+inactive-binding schema/transaction/grant design, consent/lease/revocation state
+machine, physical-deletion/backup requirements and80 UNEXECUTED owner cases.
+All proposed credentials, signing, enrollment RPCs and DDL are **UNIMPLEMENTED**;
+no migration, production code or operational capability is added.
+
+PR #92 is confirmed merged. Its authenticated disabled capability RPC, Android/
+Web false producer gates and existing localized OFF UI remain unchanged.
+M15A cannot collect GPS, activate pairing, consent or sharing, request permission,
+start a service, write coordinates or render REAL markers. No new key, table,
+grant, queue, worker or Cron. Room16, B1 field/cursors/leases, pending immutable
+operations/receipts, M10, NAV and REAL/SIM remain unchanged. Privacy approval,
+device assurance, independent retention/backups, reported #86 rollout blocker
+and future owner acceptance remain unresolved; no deployment/release is inferred.
