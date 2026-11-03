@@ -1,0 +1,1139 @@
+
+GASILKO — CODEX ENGINEERING ASSIGNMENT
+M15A.2 — SERVER-VERIFIED DEVICE PROOF & INACTIVE BINDING
+DETAILED IMPLEMENTATION PROMPT
+2026-11-03
+
+Repository: https://github.com/ficlus/Gasilko
+
+OWNER RULES
+===========
+The owner alone merges PRs, approves policies, executes SQL,
+deploys Supabase Edge Functions, builds Android, installs
+applications and accepts runtime behavior.
+
+Create exactly ONE PR.
+Do not merge it.
+Do not run or add tests.
+Do not run build, lint, typecheck, CI, Gradle sync, emulator,
+SQL migrations, Supabase deployment, Edge deployment,
+Android installation or production verification.
+Use [skip ci] in implementation commits.
+
+===========================================================
+1. MISSION
+===========================================================
+
+Implement M15A.2 as the next technical security milestone
+after M15A.1, PR #94.
+
+M15A.1 added local Android cryptographic primitives:
+
+- P-256 key creation in Android Keystore
+- nonexportable private keys
+- SHA256withECDSA signing
+- exact canonical challenge transcript
+- DER and raw64 signature conversion
+- identity-context protection
+- local key invalidation and cleanup
+
+M15A.1 did NOT implement:
+
+- server-side signature verification
+- trusted challenge issuance
+- one-time challenge consumption
+- server device credential enrollment
+- inactive device binding
+- driver consent
+- any GPS location collection or sharing
+
+M15A.2 should implement the smallest safe server-side
+verification foundation that can genuinely be built using
+existing repository contracts.
+
+The result must NOT activate device-to-vehicle GPS tracking.
+
+Security distinctions:
+
+AUTHENTICATED USER
+  != AUTHORIZED DRIVER
+
+AUTHORIZED DRIVER
+  != VERIFIED DEVICE POSSESSION
+
+VERIFIED DEVICE POSSESSION
+  != APPROVED VEHICLE BINDING
+
+APPROVED VEHICLE BINDING
+  != INFORMED LOCATION CONSENT
+
+LOCATION CONSENT
+  != ACTIVE SERVER SHARING LEASE
+
+ACTIVE SHARING LEASE
+  != GENUINE OBSERVED REAL GPS POSITION
+
+No milestone may skip these boundaries.
+
+===========================================================
+2. REQUIRED STARTING CHECKS
+===========================================================
+
+Before editing:
+
+1. Check current GitHub main.
+2. Verify PR #94 is merged.
+3. Verify its commit is an ancestor of current main.
+4. Inspect other open PRs for overlap.
+5. Use a new branch from current main.
+6. Do not overwrite owner local modifications.
+
+Read:
+
+- AGENTS.md
+- docs/SPEC.md
+- docs/SPEC-M14-INCIDENT-OPERATIONS.md
+- docs/M15A-gps-privacy-device-binding.md
+- docs/M15A1-secure-device-proof-inactive-binding.md
+- docs/M14.8C2-consented-vehicle-phone-real-gps.md
+- docs/M14.8C3-real-unit-location-freshness.md
+- relevant M14.7B1/B2, M14.8C1, M14.8D1/D2,
+  M14.8B, M10 and NAV specifications
+
+Inspect actual Kotlin implementation:
+
+android/app/src/main/java/si/gasilko/app/core/security/deviceproof/
+
+- DeviceProofProtocol.kt
+- DeviceProofEncoding.kt
+- LocalDeviceProofKeys.kt
+
+Inspect actual Supabase code:
+
+- existing migrations and SQL security functions
+- incident_sync_head
+- incident_vehicle_location_capabilities
+- incident organization and membership authority
+- incident deployment, vehicle and crew relationships
+- immutable operation receipts
+- existing Supabase Edge Functions
+- supabase/config.toml
+- current authentication and JWT patterns
+
+Inspect Web and Android integration only where necessary.
+
+Do not use undocumented or assumed schema names.
+
+Produce an AS-FOUND CONTRACT MATRIX:
+
+Object
+Exact source location
+Existing signature/columns
+Authorization source
+Current security guarantees
+Missing capability
+Planned modification
+
+===========================================================
+3. ABSOLUTE SAFETY CONDITIONS
+===========================================================
+
+GPS MUST REMAIN DISABLED.
+
+These capability fields must remain false:
+
+enabled
+producer_available
+reader_available
+policy_approved
+retention_ready
+device_binding_ready
+
+No implementation may:
+
+- collect real GPS coordinates
+- upload GPS samples
+- store latitude or longitude
+- store location history
+- enable Android location permissions
+- add a foreground GPS service
+- begin sharing after device verification
+- establish an approved location consent
+- create active GPS sessions
+- add real vehicle position markers
+- reinterpret SIM data as REAL GPS
+- add location polling
+- authorize GPS because a signature verifies
+
+No new Room version.
+Room remains 16.
+
+No Gradle, KAPT, KSP, dependency or generated schema
+changes without explicit owner approval.
+
+Do not modify existing notification device registration.
+FCM tokens and installation IDs are not proof of ownership.
+
+All owner decisions P01–P14 and A01 remain UNAPPROVED.
+
+Never fabricate privacy-policy approval.
+
+===========================================================
+4. REQUIRED SERVER VERIFIER
+===========================================================
+
+Prefer implementing a small isolated server-side
+cryptographic verification module using existing
+Supabase Edge/Deno capabilities, if justified by the
+actual source architecture.
+
+Use standards-based WebCrypto where supported.
+
+Expected algorithm:
+
+P-256 / secp256r1
+ECDSA
+SHA-256
+
+Public key:
+
+RFC 5480 SubjectPublicKeyInfo
+DER encoding
+P-256 named curve
+91-byte canonical public key representation
+
+Signature:
+
+Android JCA SHA256withECDSA returns ASN.1 DER.
+
+Android DeviceProofEncoding provides DER-to-raw64 conversion.
+
+WebCrypto verification should use exactly:
+
+r[32] || s[32]
+
+A verifier must check:
+
+- exact SPKI encoding
+- correct P-256 curve
+- public point validity
+- public-key fingerprint
+- valid signature encoding
+- signature length
+- r and s scalar bounds
+- exact challenge transcript
+- supported protocol version
+- matching registered credential
+- matching authenticated identity
+
+Reject:
+
+- wrong curve
+- malformed SPKI
+- private key material
+- altered transcript
+- unknown protocol version
+- zero or out-of-range ECDSA scalars
+- truncated signature
+- wrong signature encoding
+- incorrect credential fingerprint
+
+No fallback to a weaker algorithm.
+
+No client-provided "verified=true" flag may count as proof.
+
+Do not pretend PostgreSQL pgcrypto provides an
+ECDSA/SPKI verifier without verifying its actual API.
+
+If a trusted server verifier cannot be securely exposed,
+implement a pure cryptographic module and document
+the blocked callable path.
+
+Do not create a dummy accept-all verifier.
+
+===========================================================
+5. EXACT ANDROID V1 SIGNED TRANSCRIPT
+===========================================================
+
+The current Android DeviceProofChallengeV1.bytes()
+implementation is authoritative.
+
+The signed transcript consists of exactly 27 ordered lines.
+
+Use UTF-8, LF between lines and a final trailing LF.
+
+Line 01: GASILKO-VEHICLE-PHONE-BINDING-V1
+Line 02: audience
+Line 03: recoveryEpoch
+Line 04: BIND_INACTIVE
+Line 05: scope.account
+Line 06: scope.organization
+Line 07: scope.incident
+Line 08: REAL
+Line 09: scope.deployment
+Line 10: scope.vehicle
+Line 11: scope.authorityEpisode
+Line 12: DRIVER
+Line 13: credentialId
+Line 14: publicKeySha256
+Line 15: policyVersion
+Line 16: policyDocumentSha256
+Line 17: preciseAudienceSha256
+Line 18: issueOperationId
+Line 19: confirmOperationId
+Line 20: challengeId
+Line 21: nonceBase64Url
+Line 22: issuedAtSeconds
+Line 23: expiresAtSeconds
+Line 24: expectedIncidentVersion
+Line 25: expectedDeploymentVersion
+Line 26: expectedVehicleVersion
+Line 27: reservedGeneration
+
+Strict requirements:
+
+- Exactly 27 lines
+- Exactly one final LF
+- No CRLF
+- No BOM
+- No JSON serialization
+- No automatic field sorting
+- No whitespace trimming
+- No extra empty lines
+- No locale-sensitive number formatting
+- No alternate timestamp formats
+
+UUIDs must have the canonical lowercase representation
+required by Android.
+
+SHA-256 hashes must use the expected 64-character
+lowercase hexadecimal representation.
+
+Nonce:
+
+32 random bytes generated by the trusted server.
+Canonical unpadded base64url.
+43 characters.
+
+Issued and expiry timestamps:
+
+Trusted server epoch seconds.
+Inspect Android v1 for the exact expiry constraint;
+the existing design specifies a 120-second interval.
+
+Version and generation fields must be checked as the
+Android protocol expects.
+
+Issue operation UUID and confirm operation UUID must
+remain separate immutable identities.
+
+IMPORTANT:
+
+The transcript contains policyVersion,
+policyDocumentSha256 and preciseAudienceSha256.
+
+Because policy is NOT approved, the server must
+not fabricate an approved document hash or silently
+enable real enrollment.
+
+A pure verifier can be implemented before approval.
+Operational challenge issuance may have to remain blocked.
+
+Document that distinction explicitly.
+
+===========================================================
+6. CREDENTIAL AND CHALLENGE DATA MODEL
+===========================================================
+
+Only introduce a new SQL migration if the resulting
+schema is genuinely safe and immediately useful.
+
+Place it chronologically after:
+
+20261102140000_incident_vehicle_location_capability.sql
+
+Use a unique new timestamp after inspecting all
+migrations on current main.
+
+Never edit historical migrations.
+
+Suggested private structures are design targets,
+NOT blindly executable SQL.
+
+A. private.vehicle_device_credentials
+
+Suggested fields:
+
+credential_id UUID PRIMARY KEY
+actor_user_id UUID NOT NULL
+acting_organization_id UUID NOT NULL
+public_key_spki_der BYTEA NOT NULL
+public_key_sha256 TEXT NOT NULL
+proof_protocol_version INTEGER NOT NULL
+credential_generation BIGINT NOT NULL
+lifecycle_status TEXT NOT NULL
+created_at TIMESTAMPTZ NOT NULL
+revoked_at TIMESTAMPTZ NULL
+
+Allowed lifecycle states:
+
+INACTIVE
+REVOKED
+
+Never permit ACTIVE or SHARING in this milestone.
+
+Requirements:
+
+- no private key stored
+- exact owner and organization scope
+- validated SPKI length and fingerprint
+- immutable identity
+- explicit credential revocation
+- no GPS fields
+- no public credential listing
+
+B. private.vehicle_device_proof_challenges
+
+Suggested fields:
+
+challenge_id UUID PRIMARY KEY
+credential_id UUID NOT NULL
+actor_user_id UUID NOT NULL
+acting_organization_id UUID NOT NULL
+incident_id UUID NOT NULL
+deployment_id UUID NOT NULL
+vehicle_id UUID NOT NULL
+issue_operation_id UUID NOT NULL
+confirm_operation_id UUID NOT NULL
+nonce BYTEA NOT NULL
+transcript_sha256 TEXT NOT NULL
+policy_version TEXT NOT NULL
+policy_document_sha256 TEXT NOT NULL
+precise_audience_sha256 TEXT NOT NULL
+expected_incident_version BIGINT NOT NULL
+expected_deployment_version BIGINT NOT NULL
+expected_vehicle_version BIGINT NOT NULL
+reserved_generation BIGINT NOT NULL
+issued_at TIMESTAMPTZ NOT NULL
+expires_at TIMESTAMPTZ NOT NULL
+state TEXT NOT NULL
+consumed_at TIMESTAMPTZ NULL
+
+Only add authority_episode and recovery_epoch fields
+if actual existing source contracts support their values.
+
+Otherwise explicitly document the gap and block
+unsafe challenge issuance.
+
+Allowed challenge states:
+
+ISSUED
+CLAIMED
+VERIFIED_INACTIVE
+REJECTED
+EXPIRED
+REVOKED
+
+No transition to active tracking.
+
+C. Immutable verification receipts
+
+If the existing incident receipt contract can be reused
+without compromising its semantics, prefer reuse.
+
+Otherwise propose a narrowly scoped receipt model:
+
+operation_id
+actor_user_id
+immutable_request_sha256
+challenge_id
+outcome_code
+created_at
+
+Original UUID plus normalized immutable request must
+determine idempotent replay.
+
+The same operation ID with changed arguments must fail.
+
+Never use ECDSA signature bytes as the idempotency key.
+
+===========================================================
+7. DATABASE AUTHORIZATION
+===========================================================
+
+Inspect existing canonical relations before SQL coding:
+
+- acting organization
+- incident organization
+- incident deployment
+- operational unit
+- inventory vehicle
+- incident crew member
+- effective driver role
+- current authorization episode
+- incident lifecycle
+- entity versions
+
+The server must independently verify:
+
+1. Caller is authenticated through trusted JWT.
+2. Caller is a current authorized incident participant.
+3. Acting organization matches the exact incident scope.
+4. Incident is REAL, not SIM or TRAINING.
+5. Incident is eligible and not closed.
+6. Deployment currently exists.
+7. Vehicle belongs to the canonical deployment.
+8. Caller is the current ACTIVE designated DRIVER,
+   unless the owner later approves a different role.
+9. Credential belongs to the authenticated actor.
+10. Credential has not been revoked.
+11. Expected entity versions have not changed.
+12. Challenge has not expired.
+13. Challenge has not already been consumed.
+14. Original operation UUID and immutable args match.
+
+UNIT_LEADER or ADMIN is not automatically sufficient
+to authorize GPS device binding.
+
+No cross-organization authorization by inference.
+
+Do not trust:
+
+- client role labels
+- client-selected driver ID
+- user-supplied auth UID
+- an arbitrary vehicle UUID
+- a client-reported consent flag
+- a device-generated nonce
+- the presence of an FCM token
+
+Private tables require strict permissions.
+
+If SECURITY DEFINER RPCs are used:
+
+- SET search_path = ''
+- qualify every SQL object
+- use explicit narrow EXECUTE grants
+- no PUBLIC or anon broad access
+- no direct authenticated CRUD on credentials
+- reject foreign actor/org data
+- do not leak whether another user's credential exists
+
+Do not expose service_role credentials to Android or Web.
+
+===========================================================
+8. TRUSTED CHALLENGE PROTOCOL
+===========================================================
+
+Implement safely where possible.
+
+STEP 1 — ISSUE CHALLENGE
+
+Authenticate the caller.
+
+Recheck exact live authority in the database.
+
+Reject if policy is unapproved and the requested
+ceremony would constitute operational pairing.
+
+For an authorized future inactive ceremony:
+
+- identify the stored credential
+- use a server-generated 32-byte nonce
+- allocate a challenge UUID
+- bind the exact 27 transcript fields
+- record issued and expiry timestamps
+- record original issue operation UUID
+- record confirm operation UUID
+- enforce request immutability
+- enforce bounded outstanding challenges
+
+Never let a client choose a replacement nonce or
+retarget a challenge to another incident/vehicle.
+
+STEP 2 — ANDROID SIGNS
+
+The client uses the existing M15A.1 signer.
+
+It must:
+
+- check current identity context before signing
+- check again after signing
+- open an existing key without silent regeneration
+- sign exactly the server transcript
+- convert DER signature to raw64 as specified
+- preserve original operation IDs
+- never treat signing as accepted vehicle binding
+
+Do not automatically invoke the signer on login.
+
+STEP 3 — SERVER CRYPTOGRAPHIC VERIFICATION
+
+Retrieve registered SPKI from trusted storage.
+
+Do not accept an arbitrary replacement public key
+supplied by the client.
+
+Build exactly the same transcript bytes.
+
+Verify ECDSA P-256 SHA-256.
+
+Failure means no accepted proof.
+
+A successful mathematical verification only proves
+possession of the matching private key.
+
+It does not approve location sharing.
+
+STEP 4 — ATOMIC FINALIZATION
+
+Consume the challenge exactly once.
+
+Recheck:
+
+- JWT actor
+- exact organization
+- incident and deployment
+- current driver role
+- vehicle assignment
+- credential generation
+- challenge expiration
+- revocation
+- expected versions
+- immutable operation request
+
+Allowed successful result:
+
+PROOF_VALIDATED_INACTIVE
+
+Never return:
+
+GPS_ACTIVE
+SHARING
+PAIRING_APPROVED
+CONSENT_APPROVED
+
+STEP 5 — UNKNOWN OUTCOMES
+
+A network timeout must not be treated as rejection
+or as successful verification.
+
+Original immutable operation UUID is retained.
+
+Same operation ID and same request may recover
+the original authoritative outcome.
+
+Same operation ID and changed request must fail.
+
+Different operation ID on an already consumed
+challenge must fail.
+
+Never allocate a new nonce during an original retry.
+
+===========================================================
+9. REAL CONCURRENCY PROTECTION
+===========================================================
+
+An Edge Function is not automatically part of one
+PostgreSQL transaction.
+
+Do not claim that:
+
+SELECT challenge
+await crypto.verify()
+UPDATE challenge
+
+is atomic.
+
+If implementing an Edge verifier, use a properly
+designed two-transaction claim/finalize protocol.
+
+TX-A: CLAIM
+
+Within an authenticated database boundary:
+
+- lock challenge and credential consistently
+- check authorization and current versions
+- require challenge state ISSUED
+- check trusted expiry
+- check immutable request fingerprint
+- check credential not revoked
+- atomically reserve the challenge
+- create a short-lived claim token/lease
+- commit
+
+OFF-DB: VERIFY
+
+- import registered SPKI
+- validate exact transcript bytes
+- verify the raw64 ECDSA signature
+- classify failure safely
+
+TX-B: FINALIZE
+
+Inside a trusted privileged boundary:
+
+- validate claim identity/token
+- lock the same challenge and credential
+- check exact original request
+- recheck current driver/incident scope
+- recheck entity versions
+- recheck revocation and expiry
+- transition CLAIMED -> VERIFIED_INACTIVE
+  only after genuine signature verification
+- write immutable outcome/receipt
+- commit
+
+If verification fails:
+
+- never produce VERIFIED_INACTIVE
+- use an explicit bounded failure policy
+
+If Edge crashes after CLAIM:
+
+- outcome remains UNKNOWN
+- do not create success
+- claim expiration permits safe recovery
+- no concurrent successful finalizations
+
+If credential is revoked between CLAIM and FINALIZE:
+
+- revocation must win
+- confirmation fails
+- stale requests cannot reactivate it
+
+IMPORTANT TRUST BOUNDARY:
+
+A client must never be able to call a public
+finalize RPC with "signature_valid=true".
+
+If the current infrastructure cannot securely
+distinguish the trusted verifier from a client,
+do not expose the endpoint.
+
+Implement the pure verifier and document
+the missing privileged boundary instead.
+
+===========================================================
+10. JWT AND EDGE FUNCTION SECURITY
+===========================================================
+
+Inspect current Supabase Edge Function patterns and
+actual supported runtime/API versions.
+
+Do not assume documentation from old SDK releases.
+
+The verifier must:
+
+- authenticate a live user JWT
+- obtain trusted actor identity
+- authorize exact current scope
+- avoid accepting arbitrary user IDs
+- avoid service_role bypasses of user permissions
+- avoid client-controlled success flags
+- avoid logging private credentials or raw JWTs
+- return bounded safe errors
+- maintain explicit replay state
+
+A service-role client bypasses RLS.
+
+Therefore service-role access cannot by itself
+stand in for current user's SQL authorization.
+
+If a new Edge Function is necessary, explain its
+privilege boundary, JWT configuration and RPC calls.
+
+Do not turn off verify_jwt merely to bypass an error.
+
+Do not deploy the function.
+
+===========================================================
+11. REVOCATION AND KEY LIFECYCLE
+===========================================================
+
+Design and implement safe inactive credential
+revocation where justified.
+
+Required behavior:
+
+- an inactive credential can be revoked
+- revoked credentials cannot be reused
+- no delayed verification can resurrect them
+- key rotation increments generation
+- original receipt never becomes a new grant
+- local key loss does not silently regenerate identity
+- app restore does not prove possession
+- user logout invalidates active local context
+- switching organization invalidates previous context
+- changing incident or vehicle requires new scope proof
+- stolen FCM token is not proof of possession
+
+Local revoke is NOT equivalent to confirmed
+server-side revocation.
+
+Document offline revocation uncertainty.
+
+Do not create a fake driver "Leave vehicle"
+workflow during this milestone.
+
+===========================================================
+12. DATA RETENTION AND PRIVACY
+===========================================================
+
+M15A.2 may hold only minimal security metadata.
+
+No:
+
+- GPS coordinates
+- GPS accuracy samples
+- route history
+- device movement history
+- travel trails
+- location broadcasts
+- notification payload coordinates
+- private key exports
+
+Challenge expiry prevents authorization after
+expiry even if the database row still exists.
+
+However:
+
+expiry != physical deletion
+
+If challenge/credential metadata requires periodic
+physical cleanup, document the exact future
+scheduler and owner approval requirement.
+
+Do not invent an installed Cron job.
+
+Do not claim a TTL check physically removes data.
+
+Document risks associated with:
+
+- database backups
+- PITR
+- WAL retention
+- application logs
+- Edge logs
+- credential retention
+- restore after revocation
+
+All GPS location deletion policies remain
+unapproved and outside this milestone.
+
+===========================================================
+13. ANDROID AND WEB COMPATIBILITY
+===========================================================
+
+Preserve:
+
+Room 16
+B1 cursor and projection atomicity
+B2 private realtime permissions
+C1 field map
+C3 unavailable positions
+D1/D2 offline recovery and receipts
+M10 notification registration
+NAV authority
+REAL/SIM separation
+
+Do not create new GPS UI controls.
+
+Do not create:
+
+"Start GPS"
+"Connect vehicle"
+"Share location"
+
+buttons that actually perform an action.
+
+Do not automatically generate keys in:
+
+login
+incident loading
+unit dialog loading
+background worker
+notification handling
+
+If an OFF-only diagnostic surface is justified,
+state clearly:
+
+DEVICE PROOF NOT YET OPERATIONAL
+
+It must not report GPS readiness.
+
+Missing backend RPC must mean DISABLED,
+not a successful capability.
+
+Do not add extra GPS polling or MapLibre layers.
+
+Add SI/DE/default localization only if changing UI.
+
+===========================================================
+14. REQUIRED TECHNICAL DOCUMENTATION
+===========================================================
+
+Create:
+
+docs/M15A2-server-device-verification-inactive-binding.md
+
+Update the relevant SPEC with factual progress only.
+
+Document:
+
+1. Exact starting git revision and PR ancestry.
+2. Current source contract matrix.
+3. Files and components actually implemented.
+4. Components still unimplemented.
+5. Exact 27-line signed transcript.
+6. P-256 SPKI and signature encoding rules.
+7. Trusted server verifier implementation.
+8. Authentication and authorization boundary.
+9. SQL tables and constraints, if implemented.
+10. RPC signatures and grants, if implemented.
+11. Challenge issue algorithm.
+12. Atomic claim/verification/finalization.
+13. Concurrent request behavior.
+14. Immutable UUID and receipt recovery.
+15. Revocation and key rotation.
+16. Privacy and metadata retention.
+17. Threat model.
+18. Disabled capability invariant.
+19. Owner-only deployment order.
+20. Remaining dependencies for M15B and M15C.
+
+Include an exact sequence diagram or PlantUML showing:
+
+Android
+Authenticated Supabase boundary
+Private database
+Trusted signature verifier
+Challenge receipt storage
+
+Mark every component either:
+
+IMPLEMENTED
+DESIGN_ONLY
+BLOCKED_BY_POLICY
+BLOCKED_BY_INFRASTRUCTURE
+NOT_VERIFIED_AT_RUNTIME
+
+Never describe a design-only API as already installed.
+
+===========================================================
+15. MANUAL ACCEPTANCE — 36 SPECIFIC CASES
+===========================================================
+
+These are human acceptance specifications.
+
+Do not execute them.
+Do not create automated tests.
+All must initially be UNEXECUTED.
+
+Mark policy-dependent cases BLOCKED_BY_POLICY
+and unavailable implementation cases NOT_IMPLEMENTED.
+
+CRYPTOGRAPHY
+
+A01. Compare Android and server transcript bytes.
+Expected: exact UTF-8 equality, including terminal LF.
+
+A02. Sign canonical transcript with registered P-256 key.
+Expected: valid cryptographic proof, inactive-only result.
+
+A03. Alter organization without regenerating signature.
+Expected: signature/scope rejection.
+
+A04. Alter policyVersion or policy hash.
+Expected: signature rejection; no inferred consent.
+
+A05. Send DER where raw64 is required.
+Expected: INVALID_ENCODING.
+
+A06. Send r=0, s out of range or truncated signature.
+Expected: strict rejection.
+
+A07. Send wrong-curve or noncanonical SPKI.
+Expected: INVALID_PUBLIC_KEY.
+
+A08. Send malformed or padded nonce representation.
+Expected: INVALID_ENCODING.
+
+ONE-TIME CHALLENGES
+
+B09. Repeat issue operation UUID with same request.
+Expected: same authoritative challenge, no new nonce.
+
+B10. Repeat issue UUID with different vehicle/request.
+Expected: OPERATION_CONFLICT.
+
+B11. Confirm same challenge concurrently.
+Expected: at most one successful finalization.
+
+B12. Confirm after expires_at.
+Expected: EXPIRED even if row still exists.
+
+B13. Crash verifier after CLAIM.
+Expected: UNKNOWN; never false success.
+
+B14. Replay consumed challenge under new operation UUID.
+Expected: ALREADY_CONSUMED.
+
+B15. Revoke credential during verification.
+Expected: finalization denied; no resurrection.
+
+B16. Submit invalid signature with valid challenge.
+Expected: no VERIFIED_INACTIVE state.
+
+AUTHORITY AND CONTEXT
+
+C17. Use membership from another organization.
+Expected: exact-org rejection.
+
+C18. Attempt proof without ACTIVE DRIVER role.
+Expected: not authorized merely by leader/admin status.
+
+C19. Remove driver between issue and confirm.
+Expected: confirmation rejected.
+
+C20. Reassign vehicle between issue and confirm.
+Expected: version/scope mismatch.
+
+C21. Switch Android account and switch back.
+Expected: stale identity episode cannot reuse authorization.
+
+C22. Close REAL incident or switch to TRAINING/SIM.
+Expected: authority rejection.
+
+C23. Reuse same vehicle with wrong deployment UUID.
+Expected: exact scope mismatch.
+
+C24. Attempt direct public/anon access to private tables.
+Expected: no access.
+
+DEVICE AND PRIVACY
+
+D25. Restore app without original Keystore private key.
+Expected: KEY_UNAVAILABLE; no silent key regeneration.
+
+D26. Revoke locally while offline.
+Expected: do not falsely report server revocation confirmed.
+
+D27. Present stolen notification token as device proof.
+Expected: rejected; FCM is not a signing credential.
+
+D28. Inspect DB/logs/incident timeline.
+Expected: no GPS coordinates, private keys or JWT leakage.
+
+D29. Call from new client against old backend.
+Expected: DISABLED or UNAVAILABLE, never READY.
+
+D30. Inspect six existing GPS capability flags.
+Expected: all remain false.
+
+D31. Attempt trusted finalization using only verified=true.
+Expected: rejected; server proof mandatory.
+
+D32. Allow expired rows to remain without future traffic.
+Expected: authorization expires; physical deletion not claimed.
+
+COMPATIBILITY AND DEPLOYMENT
+
+E33. Review Android diff and manifest.
+Expected: Room16, no new location permission/FGS,
+no unauthorized Gradle changes.
+
+E34. Review Web/MapLibre/incident capability diff.
+Expected: no live GPS marker, no location poller,
+no private device key exposure.
+
+E35. Review new SQL migration if present.
+Expected: chronological after #92, narrow grants,
+private tables, no edits to old migrations.
+
+E36. Review rollout plan and acceptance records.
+Expected: all 36 cases UNEXECUTED; SQL #86 still
+explicitly blocked until owner confirms resolution.
+
+These scenarios must be documented individually,
+not expanded with repetitive generic sentences.
+
+===========================================================
+16. SQL MIGRATION BLOCKER AND OWNER ROLLOUT
+===========================================================
+
+The owner previously applied migrations #82–#85.
+
+Migration #86:
+
+20261030160000_incident_private_attachments.sql
+
+failed in Supabase SQL Editor with:
+
+SQLSTATE 42601
+syntax error at end of input
+near line 109
+
+The owner confirmed the complete file was copied
+and pasted correctly.
+
+DO NOT blame clipboard truncation.
+
+DO NOT automatically rerun migration #86.
+
+DO NOT execute any SQL.
+
+The next rollout must first determine the actual
+source SQL syntax problem and resolve it safely.
+
+Migration #87–#90 and PR #92 were not confirmed applied.
+
+If M15A.2 creates a migration, it must come after
+all existing migration dependencies.
+
+The `incident-evidence` Edge deployment has also
+not been confirmed.
+
+Git merge does not mean migration or Edge deployment
+has been performed.
+
+All deployment steps remain owner-only.
+
+===========================================================
+17. FINAL DELIVERY REPORT
+===========================================================
+
+Create exactly one PR.
+
+Suggested title:
+
+M15A.2 — Server Device Verification &
+Inactive Credential Foundation
+
+Report:
+
+1. Current main base SHA.
+2. PR #94 merge verified.
+3. Open PR overlap inspection.
+4. Exact source contracts inspected.
+5. Components truly implemented.
+6. Components not implemented and why.
+7. Cryptographic verifier and transcript compatibility.
+8. Real challenge concurrency/replay safeguards.
+9. Trust boundary and authorization checks.
+10. SQL migration file, objects, signatures and grants,
+    or explicit explanation for no migration.
+11. Credential lifecycle and revocation.
+12. Privacy and retention limitations.
+13. Evidence GPS remains disabled.
+14. Room16/REAL/SIM/worker compatibility.
+15. Documentation and 36 UNEXECUTED scenarios.
+16. Changed files and key line ranges.
+17. Branch, commit and PR URL.
+18. Explicit no tests/build/lint/typecheck/CI/SQL/deploy.
+19. STOP — do not merge.
+
+Never mark security or operational readiness PASS
+without owner-controlled runtime verification.
+
+END OF CODEX IMPLEMENTATION PROMPT
