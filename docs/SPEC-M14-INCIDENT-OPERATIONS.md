@@ -3230,3 +3230,23 @@ unchanged. P01–P14/A01 remain UNAPPROVED. Server one-use challenge consumption
 binding/lease, policy, physical-retention/backups and rollout remain future work.
 See [M15A.1 implemented versus proposed boundaries and75 UNEXECUTED owner cases](M15A1-secure-device-proof-inactive-binding.md).
 No build/test/SQL/runtime/deployment/merge or real key/GPS exercise performed.
+
+### M15A.2 — pure server device-signature verifier; no callable binding
+
+Adds an isolated Supabase _shared WebCrypto P-256/SHA-256 verifier and exact
+Android-v1 27-line transcript reconstruction. It strictly checks copied typed
+snapshots, SPKI/point/fingerprint, raw64 scalar/encoding, scope/versions/generation
+and supplied-time window. Success means SIGNATURE_VALID_ONLY, not an inactive
+binding, registered-key origin guarantee, receipt, consent or GPS authorization.
+No runtime Edge/Web/Android caller or endpoint is added; execution is unverified.
+
+Issuance, credential registry/revocation, JWT/live DRIVER boundary, two-transaction
+CLAIM/FINALIZE, one-use consumption and immutable proof receipts remain
+DESIGN_ONLY/BLOCKED_BY_POLICY/BLOCKED_BY_INFRASTRUCTURE. No SQL migration/RPC/
+grant/config, service-role exposure, worker/Cron, location permission/service,
+coordinates/markers or operational activation. All C2 six flags and client gates
+remain false; P01–P14/A01 remain UNAPPROVED. Room16/B1/B2/C1/C3/D1/D2, original
+pending operations/receipts, M10/NAV and REAL/SIM remain unchanged.
+See [M15A.2 source matrix, trust boundary and36 UNEXECUTED owner cases](M15A2-server-device-verification-inactive-binding.md).
+Owner-reported #86 SQL42601 and unconfirmed later rollout remain unresolved.
+No tests/build/typecheck/CI/SQL/runtime/deploy/merge performed.
