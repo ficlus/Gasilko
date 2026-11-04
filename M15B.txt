@@ -1,0 +1,1112 @@
+# GASILKO — M15B: End-to-end REAL vehicle GPS — EXPANDED ENGINEERING EDITION
+
+**Expanded Codex implementation assignment · 2026-11-04 · v2 (implementation blueprint + 64 distinct manual acceptance cases)**  
+**Repo:** https://github.com/ficlus/Gasilko  
+**Delivery:** Exactly ONE new PR from current `main`, **not merged**.  
+**Critical:** Implement the complete feature in source, but **GPS production activation remains OFF** until owner approval, deployment and human acceptance.
+
+## 1. Mission
+
+Implement an integrated, usable workflow rather than more isolated security helpers:
+
+1. Current actively assigned **DRIVER** selects the canonical deployed vehicle in a REAL incident.
+2. Driver explicitly enrolls the phone via P-256 device proof and one-time server challenge.
+3. Driver reads an **approved, versioned** sharing notice, consents and manually presses START.
+4. Server confirms a **bounded** sharing session; only then may Android start its visible location foreground service.
+5. Real Android OS GPS observations are signed, validated and uploaded as latest-only vehicle position; no route/history.
+6. Independently authorized Web and Android readers see fresh (green), approved stale (amber), or unavailable (grey/no marker) position on existing maps.
+7. STOP / “I left the vehicle” halts acquisition immediately; server authorization/reader visibility ends on confirmed revocation, or lease expires when offline.
+8. A separately approved retention worker physically deletes expired coordinates without requiring more reads or traffic.
+
+Make genuine implementation code, not just another architecture-only milestone. Clearly distinguish `IMPLEMENTED_BUT_DISABLED`, `IMPLEMENTED_SAFE`, `BLOCKED_BY_POLICY`, `BLOCKED_BY_INFRASTRUCTURE`, and `NOT_IMPLEMENTED`. Do NOT claim end-to-end complete if crucial wiring is absent. Never fake user approval to make it work.
+
+## 2. Baseline and inspection
+
+Owner reports PR **#96 merged**. Verify current main, ancestry of its reviewed head `efe9a173e07eb57bcf9d476679f4582fba70901f`, and overlapping open PRs. Branch once from current main. Do not overwrite owner local modifications.
+
+Read `AGENTS.md`, `docs/SPEC.md`, `docs/SPEC-M14-INCIDENT-OPERATIONS.md`, and all relevant specs for M14.7 B1/B2, M14.8 C1/C2/C3/D1/D2, M15A/A.1/A.2/A.3, M10, NAV, REAL/SIM. Inspect source:
+
+- Android `core/security/deviceproof/{DeviceProofProtocol,DeviceProofEncoding,LocalDeviceProofKeys}.kt`, current `IncidentRepository`, ViewModel, incident map, manifest, dependencies, Room16 offline queue and auth identity lifecycle.
+- `supabase/functions/_shared/{deviceProofV1,deviceProofLifecycle}.ts`
+- `supabase/migrations/20261103100000_vehicle_device_proof_lifecycle.sql`
+- `supabase/migrations/20261102140000_incident_vehicle_location_capability.sql`
+- Existing vehicle/unit/crew/incident schema, field authority, JWT, private receipts, SQL grants, Edge functions/config.
+- Existing Web IncidentCop, IncidentResources, RealUnitPosition, map/MapLibre, incident API, auth fingerprint and current API caching behavior.
+
+Produce an as-found **contract matrix** (object, actual source/line, exact signature/FKs, current grants, authority, defect/gap, planned change). Verify current official Android SDK/Supabase/Edge APIs before relying on them; no speculative APIs. Do not infer SQL deployed from Git merge.
+
+**Existing invariants:** Room remains 16; B1 cursor/projection atomicity, B2 private realtime, D1/D2 receipts/UUID, M10 notifications, C1/C3 map/NAV and REAL/SIM separation remain intact. The six location capability flags (`enabled`, `producer_available`, `reader_available`, `policy_approved`, `retention_ready`, `device_binding_ready`) start and remain **false** until separately activated by owner-approved gates. #96 private CLAIM is not yet registration, ISSUE or trusted FINALIZE.
+
+## 3. Owner execution restrictions
+
+Owner alone merges, approves privacy/retention, executes SQL/migrations, deploys Supabase Edge/Web/Cron, configures secrets, builds/installs Android and accepts runtime. Codex **must not run or add tests, builds, lint, typecheck, CI, Gradle sync, emulator, SQL, Supabase remote inspection, deployments, monitoring, GPS tracking or runtime verification**. Do not change Gradle/KAPT/KSP/dependencies, generated Room schema or local developer settings without explicit owner permission. Commit `[skip ci]`; exactly one PR, fixes on same branch; do not merge.
+
+## 4. Approval gates — build code, not permission to surveil
+
+All M15A **P01–P14/A01 are UNAPPROVED**. Create an explicit owner decision sheet in `docs/M15B-owner-privacy-activation-decisions.md`, adding P15 legal/privacy and P16 operational approval as needed. Proposed defaults **requiring** approval:
+
+- Only current designated active DRIVER in current exact org/incident/deployment/canonical vehicle may initiate tracking; UNIT_LEADER/ADMIN alone is insufficient.
+- One device/session per deployed vehicle; explicit handover, no silent takeover.
+- No TRAINING/SIM tracking, cross-org inheritance, auto-start or hidden tracking.
+- Explicit understandable notice and opt-in; no prechecked consent.
+- Narrow precise-location reader roles approved separately from ordinary unit/COP visibility.
+- Current age <120s; stale 120–899s **only if allowed**; ≥900s unavailable. STOP/revoke must hide immediately regardless of age.
+- Short server lease; no infinite background sessions; no queued offline GPS history.
+- Physical latest-position deletion independently of requests, with monitoring and a reviewed SLA; PITR/WAL/backups treated accurately.
+- Hardware attestation, legal basis, controller notice, sharing limits and incident close behavior require owner decisions.
+
+All DB policy defaults **DISABLED/UNAPPROVED**. The *existence* of tables, verified signature, app release or one feature flag must never enable GPS. Separate server gates for policy approval, precise reader audience, enrollment/consent, device trust, retention job readiness and manual operational activation. Never fabricate an approved hash or dummy policy. If an action would cross an unapproved legal/security boundary, its public server endpoint must reject safely even while the disabled implementation exists.
+
+## 5. Exact identity and threat boundaries
+
+Distinguish `auth.uid`, acting organization, REAL incident, **incident deployment UUID**, inventory unit UUID, canonical vehicle UUID, active DRIVER crew/authority episode, credential UUID/generation, binding and sharing session UUID. Do not assume deployment equals inventory unit or infer rights from unit name. Re-check exact live actor/org/incident/unit/vehicle/driver role, incident lifecycle, versions, session, credential revocation, consent version and reader audience inside authoritative transactions, **not only in client UI**. No service-role key in clients; service-role bypass of RLS is not current-user authorization. No client-provided `verified`, `policy_approved`, role, actor UUID or session state treated as authoritative.
+
+Security transitions: `AUTHENTICATED -> LIVE DRIVER AUTHORITY -> DEVICE POSSESSION VERIFIED -> INACTIVE BINDING -> APPROVED CONSENT -> SERVER LEASE -> GPS INGESTION`. A prior state alone cannot grant a later state. Ordinary incident read does not grant precise coordinate read. A mathematical signature does not prove physical GNSS authenticity.
+
+## 6. Trusted enrollment and one-time proof
+
+Reuse #94 Android nonexportable P-256 signer, #95 `deviceProofV1.ts` verifier and #96 private lifecycle data/CLAIM. Preserve exact Android V1 27-line UTF-8, LF-only, terminal-LF transcript; do not introduce a second divergent encoding. Read source for exact canonical UUID/hash/nonce (32 bytes / unpadded base64url), server timestamps (120-second expiry), canonical 91-byte SPKI and 64-byte P1363 raw signature.
+
+Implement secure code paths, subject to default OFF policy:
+
+1. Driver explicitly chooses enrollment (never automatic at login or passive loading).
+2. Android generates/opens key in Android Keystore; only SPKI public key leaves device.
+3. Trusted server authenticates actual JWT and resolves live exact org/incident/deployment/vehicle/active DRIVER, current authority episode and versions.
+4. Register minimal public credential in **inactive** state. No client can assert a binding or approval.
+5. Trusted server issues unguessable 32-byte nonce and canonical immutable challenge, with original ISSUE and CONFIRM operation UUIDs. No client-controlled policy hashes/audience/nonce.
+6. Android signs exactly source-defined transcript; server verifies **stored** public key against frozen trusted snapshot.
+7. Trusted TX-A CLAIM atomically locks/reserves challenge; off-DB WebCrypto verification; trusted TX-B FINALIZE re-locks and rechecks JWT actor/current authority/generation/revocation/expiry/versions before consuming and issuing immutable authoritative inactive receipt.
+8. Public client can never call a privileged FINALIZE with `signature_valid=true`. Verify trusted Edge-to-SQL boundary and narrow grants; maintain supported JWT gateway/auth handling.
+9. Same original UUID + identical immutable request recovers same receipt; changed request fails; revocation wins over delayed finalize; no old reply can resurrect revoked generation. Unknown network outcome stays UNKNOWN until authoritative recovery.
+
+Return `PROOF_VALIDATED_INACTIVE`, **not** consent or GPS sharing. If trusted finalizer cannot be genuinely secured, leave public enrollment blocked and document exact missing trust boundary — never add accept-all/fictional RPC.
+
+
+## 7. Server binding, consent and GPS session
+
+Operational binding is distinct from credential registration. Implement a state machine with explicit original UUID and scope at each transition:
+
+`UNBOUND -> ENROLLING -> PROOF_VALIDATED_INACTIVE -> CONSENT_REQUIRED -> BOUND_INACTIVE -> READY_TO_START -> STARTING -> SHARING -> STOP_REQUESTED -> STOPPED`, with `REVOKED`, `LEASE_EXPIRED`, `ERROR_UNKNOWN`, `POLICY_UNAPPROVED` failure/terminal states.
+
+All live operational transitions stay unreachable while policy gates are unapproved.
+
+Consent UI: show real vehicle/REAL incident, purpose, who can read position, stop behavior, freshness/retention, policy version and exact identity; default/SI/DE localized. A nonapproved draft disclosure is **not** effective consent. Driver must deliberately accept an actually approved version.
+
+**START algorithm:** authenticate actor; re-read exact current role and canonical deployment vehicle; verify unrevoked device/binding generation; verify approved policy/audience/retention readiness and exact consent version; lock canonical vehicle slot; refuse another live device/session or require an approved takeover; atomically create bounded sharing lease and immutable START receipt. Only after confirmed START can Android request location permission/start FGS. Failed/unknown START must **not** start collection.
+
+**STOP / I LEFT VEHICLE:** stop local GPS and transmission immediately; idempotent original UUID stop request to server revokes sample and reader authorization atomically. If offline, display `STOPPED_ON_DEVICE / SERVER_CONFIRMATION_PENDING`; no claim of immediate remote STOP; short server lease independently limits exposure. No offline sample backlog. Role loss, account/org switch, incident close, vehicle reassignment, credential revoke, policy withdrawal and service death must all fail closed. No stale retry or receipt can reactivate a revoked session.
+
+### Database, functions and grants
+
+Use a **new forward-only migration after the actual latest source migration**, after `20261103100000_vehicle_device_proof_lifecycle.sql`, with unique timestamp. Inspect exact canonical PK/FK/unique targets rather than copy illustrative DDL. Suggested private tables:
+
+`private.vehicle_location_sessions`:
+`session_id uuid PK`, actor, acting org, REAL incident, deployment, canonical vehicle, credential ID/generation, actual authority episode identifier if supported, approved policy version, consent receipt, original start/stop UUIDs (unique), state CHECK, started/stopped/revoked timestamps, bounded `lease_expires_at`, `last_sequence bigint`, `last_observed_at`, row version. Enforce at most one **effective live session** per deployed vehicle under locks, accounting for expired sessions whose stored state is still `SHARING`.
+
+`private.vehicle_latest_positions`:
+one latest row per live canonical vehicle/deployment/session, signed sample sequence, trusted server `received_at`, genuine observed time, bounded lat/lon fixed-point precision, accuracy, approved `expires_at`, source `ANDROID_GNSS_REAL`, credential ID/generation; **no position history**. Updates must replace latest position, not append route points. Strict same-org/incident FKs/joins and duplicate/older sequence rejection. No public direct table SELECT/CRUD.
+
+Versioned policy/consent, if implemented, must default unapproved with explicit privileged approval and separate activation gates. Do not create approved policy hashes simply to meet NOT NULL constraints. Keep app roles and anon off private tables, narrow `SECURITY DEFINER` functions with `search_path=''`, fully qualified references, exact actor/org authorization and explicitly reviewed grants. Protected trusted Edge path must not allow user-supplied `verified=true` / `policy=true`.
+
+Document actual signatures, SQL migration objects, FKs/indexes/checks, triggers, immutability, locks, rates, data deletion and authorization for:
+- register inactive public key, ISSUE/CLAIM/FINALIZE proof, revoke credential (reuse #96 where possible);
+- record specific versioned driver consent (cannot approve until policy approved);
+- START/RENEW/STOP bounded sharing session with immutable command UUID and receipts;
+- accept signed current GPS sample, with exact trusted permission/sequence checks;
+- narrow incident latest-position query for approved precise readers;
+- retention cleanup invoked by future owner-approved scheduler.
+
+These API names are conceptual, not proof that existing RPC signatures exist. Prefer fewer robust, narrow endpoints over many unsafe public ones. Do not create a broad service_role client API or grant private schema exposure to PostgREST.
+
+## 8. Android real GPS producer / foreground service
+
+Implement a genuinely connected Android foreground location service **in source** without turning it on in production. Inspect checked-in minSdk/targetSdk/permissions and official Android restrictions. Use existing platform `LocationManager` or already installed fused provider; **no Gradle/dependency changes without permission**.
+
+- START only from a visible Activity after explicit approved consent and authoritative server-confirmed lease, never at login/boot/incident open/reconnect.
+- Declare required SDK-appropriate `foregroundServiceType="location"` and foreground service/location permission(s); request minimal runtime location permission at explicit user action. Do not request `ACCESS_BACKGROUND_LOCATION` just to run a user-initiated visible foreground location service with locked screen.
+- Persistent clearly named notification identifying active vehicle/location sharing with STOP. Honor Android notification/FGS restrictions for checked-in target SDK.
+- Keep current account/org/REAL incident/deployment/vehicle/session frozen. No retargeting on navigation or switching organizations.
+- Locally stop on STOP/LEAVE, permission revoke, identity change, invalid lease, role loss or service exception. Server expiry must independently end sharing if process is killed; no boot/background auto-restart.
+- Proposed **DRAFT**, not approved: 20–30 second target reporting (adaptive/battery-aware); accuracy threshold e.g. 100 meters subject to review. Do not promise fixed OS scheduling.
+- Observation must come from actual Android location API, not SIM, NAV, incident map center or manually clicked location. Reject invalid/nonfinite lat/lon, invalid accuracy, untrusted/future/too-old observation. Use `elapsedRealtimeNanos` locally to avoid wall-clock mislabeling; include observed wall time and trusted server receive time. Cached `lastKnownLocation` is not automatically current. Treat mock/suspect locations as untrusted, and document limits of spoof resistance.
+- **No offline movement queue** and no replayed journey. On network restore use a new fresh observation. Keep samples separate from Room16 durable incident operation queue. Original command UUID/receipts continue for consent/START/STOP.
+- UI must distinguish `sharing`, `acquiring_fix`, `poor_accuracy`, `offline`, `stop_pending_server`, `policy_unapproved`, `permission_denied`, `session_expired`, `unavailable`. Clear accessible labels default/Slovenian/German. No misleading START when server capability false.
+
+## 9. Signed sample protocol / ingestion algorithm
+
+Implement a **different domain** from enrollment: e.g. `GASILKO-REAL-VEHICLE-LOCATION-SAMPLE-V1`. Publish exact byte-level encoding and canonicalization (fixed-point lat/lon to avoid floating-point ambiguity; explicit rounding/scale, time units, signature encoding, version). Sign:
+
+`protocol, session_id, actor_id, acting_org, REAL incident, deployment, canonical vehicle, credential_id, generation, policy_version, server-issued session context, monotonically increasing sample_sequence, observed timestamp, lat_fixed, lon_fixed, accuracy_fixed, immutable sample identity`.
+
+Reuse registered nonexportable device key but NOT the enrollment challenge transcript. All fields bound to one current session. The server must never trust a client-supplied verification flag.
+
+Server ingestion:
+1. Live auth and exact current authority, confirmed approved policy/consent, valid active server lease, unrevoked credential, current canonical vehicle/driver generation.
+2. Fetch authoritative public key; verify true P-256/SHA-256 signature over exact canonical sample. Strict bounds and encoded-data limits; reject mock/suspect or invalid quality according to policy.
+3. Recheck trusted server now, observed timestamp and allowed clock skew/freshness; reject ancient GPS observations and future timestamps. Never substitute `received_at` as GNSS observation time.
+4. Lock session row in a transaction; verify it is still SHARING and not stopped/expired/role-invalid; require sequence strictly increasing; update stored `last_sequence` and replace latest position in same atomic unit.
+5. Duplicate/out-of-order submissions cannot regress position, revive STOPPED state, change vehicle, or create travel history. Return bounded ack scoped to original identity.
+
+If signature verification runs outside DB, enforce an honest trusted verifier/transaction boundary (race-safe against STOP, revocation and generation change at final write). No `SELECT → await verify → UPDATE` claim of atomicity.
+
+## 10. Precise readers and existing Web/Android maps
+
+Use existing C3 REAL position and existing Web/Android incident map, not a new unrelated map page. **Normal COP/unit-name visibility is not precise location access.** Write an independent, narrow, policy-approved reader predicate; require current exact org/REAL incident/role and live sharing permission at query time. Never leak through Web API caching, URL parameters, notification text, log, analytics, Realtime public topic or broad RPC. Use `Cache-Control: no-store` and clear Android/browser state on identity switch.
+
+Use trusted observed age and current effective sharing/authorization:
+
+- `CURRENT`: `<120s` with valid accuracy and approved live session → green marker, age/source label.
+- `LAST_KNOWN`: `120s ≤ age <900s` only when policy specifically approves stale display → amber with observed time.
+- `UNAVAILABLE`: `≥900s`, no observation, poor accuracy, denied reader, policy off, STOP/REVOKE/expiry → **no invented marker/pin**, grey unavailable label.
+- On STOP/revoke/reader privilege loss/incident close, hide precise marker immediately even if observed age <120s.
+- REAL GPS source and SIM marker layers must never be conflated. No “moving” claim solely from stale position.
+- Abort in-flight requests on account/org/incident/authorization fingerprint change. Reject responses from old scope; clear old marker before rendering new context.
+- Bounded result size/pagination and current subscription/refresh architecture; do not add per-unit unbounded polling loops. Old clients/backends remain OFF/unavailable.
+
+## 11. Physical erasure, lifecycle and release gates
+
+**Display expiration is not physical deletion.** Implement a bounded owner-deployable retention routine in source with minimal privileges. It deletes expired latest-only coordinates **without any user reads or new uploads**. Provide scheduler setup as **manual owner-only instructions**, monitoring/alerting and failure response. Do NOT deploy or activate Cron. If actual worker isn't independently deployed and verified, `retention_ready=false` and **new collection blocked**. STOP/revoke must independently deny reads and writes even if physical row remains temporarily.
+
+Document backup/PITR/WAL/log/cache retention, restore invalidation of active sessions and revoked credentials, and different lifecycles of credential/challenge/receipt metadata. No coordinates in immutable receipts, incident timeline, M10 notification, attachment, diagnostics or analytics. No covert retention of route history.
+
+Capability readiness must be calculated from **multiple authoritative server gates**, not a user-editable flag. Missing backend RPC, policy, signer, reader permission, cleanup job or owner approval means OFF. Never silently turn six original flags true in the migration.
+
+## 12. Failure and misuse matrix
+
+Explicitly design and document behavior for: two concurrent drivers/devices claiming vehicle; incident closure; vehicle reassignment; role downgrade; wrong-org reader; expired/unknown auth; stale client reply; compromised phone/credential revocation; stolen FCM token; phone reboot/OS service kill; lock screen and Android permission revocation; spoofed/mock GNSS; impossible coordinates and clock skew; concurrent samples; replays after STOP; claimed-but-not-finalized proof; offline STOP with lost server ack; policy withdrawal; retention worker outage; backup restore and pending erasure; old deployed backend; TRAINING/SIM context. No automatic emergency bypass granting tracking access.
+
+
+## 12A. Mandatory engineering blueprint — execute in one PR, do not leave disconnected scaffolding
+
+This appendix is part of the assignment and **takes precedence over vague phrases in the earlier sections**. Deliver running *source code paths* behind an unapproved/off server gate. Do not merely add DTOs or architectural suggestions. Never claim this means installed, verified or policy approved. Every API must have its actual invoker, every server response an actual consumer and every database field a reason to exist. If a trusted piece cannot be constructed, state the precise blocker and leave all production entrypoints rejecting.
+
+### 12A.1 Source inventory and implementation ledger
+
+Before changing files, write a concise contract sheet from actual `main`. The following source facts are verified at preparation time, but re-read because they may change:
+
+- `public.incident_vehicle_location_capabilities(uuid,uuid)` currently delegates to `public.incident_sync_head` and unconditionally returns `state='DISABLED'`, `enabled=false`, `producer_available=false`, `reader_available=false`, `policy_approved=false`, `retention_ready=false`, `device_binding_ready=false`. It also returns `schema_version`, `account`, `organization`, `incident_id`, `scope_fingerprint`, `mode`. **Do not break current C2 callers or simply flip it true.**
+- `private.vehicle_device_credentials` and `private.vehicle_device_challenges` are introduced by `20261103100000_vehicle_device_proof_lifecycle.sql`; those private records are inactive, registration is not callable, privileged claim is private, revocation is private. Review their exact CHECK/FK constraints, transaction locks, ownership, immutability triggers, restrictions and signatures.
+- `supabase/functions/_shared/deviceProofV1.ts` is a pure cryptographic verification library; a successful result is `SIGNATURE_VALID_ONLY` and never a binding, authorization or consent.
+- `supabase/functions/_shared/deviceProofLifecycle.ts` constructs/signature-checks snapshots in memory. It does not authenticate JWT, persist a challenge, allocate approved policy, finalize, publish or ingest GPS.
+- `DeviceProofProtocol.kt`, `DeviceProofEncoding.kt`, `LocalDeviceProofKeys.kt` exist; they do not auto-start or auto-enroll. Reuse the existing 27-line transcript and alias/context validation, not a different ad-hoc implementation.
+- `supabase/config.toml` exposes only `public` / `graphql_public` in PostgREST. Do not change exposure to make private proof tables easier to query.
+- Source inventory must identify exact names/columns for `public.incidents`, `public.incident_units`, `public.incident_crew_members`, `public.operational_units`, `public.operational_vehicles`, `public.organizations`, `public.profiles`, and current approved driver/effective-leader roles. Verify actual composite FKs, not imagined ones.
+- Check how the current Web API authenticates server-side and how Android handles auth refresh, scope/cursor epochs, Room16 and cancellation on organization/account changes.
+- Check MapLibre source/layer ownership in the existing COP and field map; integrate into **those** maps, never duplicate the map or create a second incident reader.
+- Inventory all current migrations chronologically including #96, and any concurrent PRs. No schema change may rely on a migration that owner has not installed.
+
+Provide the following implementation ledger *in the PR document*, not merely the final summary:
+
+| Area | Current source | New entrypoint | DB/API dependency | Caller | OFF behavior | Owner acceptance |
+| --- | --- | --- | --- | --- | --- | --- |
+| Public key enrollment | exact reviewed file | new handler/RPC or blocked | private credential row | explicit Android action | denied | unexecuted |
+| Challenge issue | exact reviewed file | authenticated trusted issue | challenge + receipt | Android enrollment | denied | unexecuted |
+| Crypto verification | M15A.2 shared TS | trusted verifier call | registered SPKI | claim/finalize handler | never grants | unexecuted |
+| Bind & consent | M15A.3 + new schema | candidate session ceremony | exact driver/vehicle/policy | driver screen | denied | unexecuted |
+| Start/heartbeat/stop | new, named API | real server lifecycle | session + receipts | Android FGS | denied | unexecuted |
+| GPS sample ingress | new, named API | authenticated signed sample | latest-only table | Android FGS | denied | unexecuted |
+| Private reader | new, named API | precise audience check | current position projection | Web + Android | empty | unexecuted |
+| Physical delete | source implementation | scheduler/owner-run worker | expiring rows | owner Cron | not installed | unexecuted |
+| Map markers | existing C3 map | actual conditional renderer | authorized read | Web + Android | unavailable | unexecuted |
+
+For each row, put its **actual** implementation status at delivery. Every unfinished row must be explicitly disclosed, not generalized into "complete except deployment."
+
+### 12A.2 Target composition and trust diagram
+
+Deliver a code-grounded PlantUML component/sequence diagram (the following is architectural intent; source findings determine actual component names):
+
+```plantuml
+@startuml
+actor Driver
+participant "Android incident UI" as UI
+participant "Android Keystore" as KEY
+participant "Location foreground service" as FGS
+participant "Supabase authenticated Edge" as EDGE
+participant "Private Postgres RPCs" as DB
+participant "M15A.2 verifier" as VER
+participant "Owner-controlled retention worker" as CLEAN
+participant "Existing Web/Android incident map" as MAP
+
+Driver -> UI: Explicit select vehicle + inspect policy
+UI -> EDGE: Register / issue challenge with JWT + frozen request UUID
+EDGE -> DB: Confirm current REAL/DRIVER/exact org
+DB --> EDGE: Trusted scope + challenge snapshot
+EDGE --> UI: Server challenge
+UI -> KEY: Sign existing 27-line transcript
+KEY --> UI: P-256 signed proof
+UI -> EDGE: Confirm proof, original operation UUID
+EDGE -> DB: TX-A claim challenge
+EDGE -> VER: Verify against registered SPKI
+VER --> EDGE: SIGNATURE_VALID_ONLY
+EDGE -> DB: TX-B recheck authorization + finalize inactive proof
+DB --> EDGE: Authoritative original receipt
+EDGE --> UI: Verified inactive / never consent
+Driver -> UI: Explicit consent + START (only after approval)
+UI -> EDGE: START
+EDGE -> DB: Policy + binding + retention + authority transaction
+DB --> EDGE: Active bounded lease
+EDGE --> UI: START confirmed
+UI -> FGS: Start while Activity visible
+loop during active, renewed lease
+ FGS -> KEY: Sign GPS sample v1, distinct domain
+ FGS -> EDGE: Authenticated signed observation
+ EDGE -> DB: Recheck lease/authority + upsert latest only
+end
+MAP -> EDGE: Authorized precise-reader request
+EDGE -> DB: Exact incident + reader policy + latest positions
+DB --> MAP: Authorized, unexpired data only
+Driver -> UI: STOP / I left vehicle
+UI -> FGS: Stop local acquisition immediately
+UI -> EDGE: Original immutable STOP
+EDGE -> DB: Revoke session + hide current precise location
+CLEAN -> DB: Delete expired raw latest positions independently
+@enduml
+```
+
+Highlight in the final diagram which arrows are implemented but gated, which are unimplemented, and which require owner-deployed infrastructure. Avoid annotating a non-existent event bus, Edge handler, RTC channel or database job as running.
+
+### 12A.3 SQL migration strategy and schema ownership
+
+Use one or a **small, ordered set of forward-only migrations** with unique timestamps after actual `main` latest. A single massive migration is not mandatory; atomicity, dependency order and source review are. Do not edit #82–#96 migrations. For each migration provide: exact file, dependencies, transactional block choice, all created objects, signature/grants, owner-only installation sequence and non-destructive repair strategy. The code may be committed while the remote DB still lacks old migrations, but **do not call** new RPCs in default deployed clients without fail-closed compatibility.
+
+Use `private` schema for raw sensitive data. Do not expose it via PostgREST. Use `public` authenticated wrapper **only where justified** and verified against exact existing auth model; for sample submission and readers an authenticated Edge boundary plus narrowly audited RPCs may be preferable. Never allow direct client `INSERT` into position/session/proof tables, never grant a global `SELECT` for `authenticated`, and never treat an arbitrary client-selected `acting_org` as authorization.
+
+Concrete proposed storage (must be adjusted to existing canonical keys/FKs and actual PostgreSQL types):
+
+```sql
+-- CONTRACT SKETCH ONLY. This is NOT ready-to-run SQL;
+-- Codex must verify all canonical FK targets, function owners,
+-- grant patterns, crypto verifier trust and policy gates.
+private.vehicle_location_policy_versions (
+  policy_id uuid primary key,
+  acting_organization_id uuid not null,
+  version text not null,
+  policy_document_sha256 text not null,
+  exact_reader_audience_sha256 text not null,
+  status text not null check (status in ('DRAFT','APPROVED','REVOKED')),
+  approved_by uuid null, approved_at timestamptz null,
+  effective_at timestamptz null, expires_at timestamptz null,
+  ... checks ensuring no approved row from an untrusted client ...
+);
+private.vehicle_location_bindings (
+  binding_id uuid primary key,
+  actor_user_id uuid not null,
+  acting_organization_id uuid not null,
+  incident_id uuid not null,
+  deployment_id uuid not null,
+  vehicle_id uuid not null,
+  authority_episode_id uuid not null,
+  credential_id uuid not null,
+  credential_generation bigint not null,
+  policy_id uuid not null,
+  state text not null, -- INACTIVE/READY/REVOKED, controlled
+  generation bigint not null, created_at timestamptz not null,
+  revoked_at timestamptz null,
+  ... matching composite FKs, lock-safe unique binder slot ...
+);
+private.vehicle_location_consents (
+  consent_id uuid primary key,
+  actor_user_id uuid not null,
+  binding_id uuid not null,
+  policy_id uuid not null,
+  notice_sha256 text not null,
+  consent_operation_id uuid not null unique,
+  granted_at timestamptz not null,
+  withdrawn_at timestamptz null,
+  ... no implicit acceptance and immutable original request ...
+);
+private.vehicle_location_sessions (
+  session_id uuid primary key,
+  binding_id uuid not null,
+  actor_user_id uuid not null,
+  acting_organization_id uuid not null,
+  incident_id uuid not null,
+  deployment_id uuid not null,
+  vehicle_id uuid not null,
+  credential_id uuid not null,
+  credential_generation bigint not null,
+  policy_id uuid not null,
+  start_operation_id uuid not null unique,
+  stop_operation_id uuid null unique,
+  state text not null,
+  started_at timestamptz not null,
+  lease_expires_at timestamptz not null,
+  stopped_at timestamptz null,
+  revoked_at timestamptz null,
+  accepted_sequence bigint not null default 0,
+  ... state CHECK + active-session unique partial index ...
+);
+private.vehicle_latest_positions (
+  session_id uuid primary key, -- or canonical (deployment_id,vehicle_id)
+  acting_organization_id uuid not null,
+  incident_id uuid not null,
+  deployment_id uuid not null,
+  vehicle_id uuid not null,
+  observed_at timestamptz not null,
+  received_at timestamptz not null,
+  expires_at timestamptz not null,
+  latitude_e7 integer not null,
+  longitude_e7 integer not null,
+  accuracy_cm integer not null,
+  sample_sequence bigint not null,
+  coordinate_source text not null check (coordinate_source='ANDROID_REAL_GNSS'),
+  ... source-proven canonical FK, no history trail ...
+);
+```
+
+There are important design decisions here, not assumptions:
+
+1. If `incident_units` deployment changes vehicle, the prior binding and session must fail authorization; never silently reassign to a new canonical vehicle ID.
+2. Use a unique partial index for active binding/session ownership per canonical incident deployment and vehicle **only after evaluating lease-expiration mechanics**. A stale SHARING row might remain after wall-clock expiry; enforce transition under lock before granting a new slot rather than assuming a partial index with `now()` predicate is valid.
+3. Do not automatically create an `APPROVED` policy row as part of the migration. All new rows are default DRAFT and no session can start until source-verified, owner-approved activation exists.
+4. Store latest observation per active canonical vehicle; use `INSERT ... ON CONFLICT DO UPDATE` with monotonic sequence and trusted time checks, not append-only trip-history tables. Prevent `RETURNING` from leaking raw data through an untrusted wrapper.
+5. Stop/revoke must remove the latest coordinate **or immediately forbid its read even when deleted physically later**; never leave a visible last-known marker after a deliberate STOP.
+6. Do not insert raw coordinates into existing incident audit/events/snapshot/receipts/FCM/Realtime or generic analytics records. Exact receipts may store hashes/outcomes, **not locations**.
+7. Use appropriate `CHECK` constraints for E7 coordinates and accuracy, relational cardinality, timestamp order, policy state and protocol version. Reject NaN/Infinity at the API boundary before integer encoding.
+8. If policy approval/data controller/retention ownership is not defined, implement schema and procedures that are genuinely disabled from production entrypoints. Do not manufacture approval values or a server status PASS.
+9. Provide an explicit deletion-retention lifecycle for policy/consent/security metadata separately from raw precise coordinates. No blind permanent storage just because the table is `private`.
+10. Use `LOCK_TIMEOUT` and bounded transaction times appropriate for the existing project; do not hold PostgreSQL transactions open during network/WebCrypto awaits.
+
+### 12A.4 Proposed function and HTTP API contracts
+
+Resolve exact naming conventions from repository source. Proposed shapes follow; **do not claim these signatures already exist**. Implement typed request/response schemas in TS/Kotlin and exact SQL signatures for the chosen real architecture. Every mutable request carries an original client-generated UUID, an immutable normalized payload hash and a context identity tuple.
+
+**Credential ceremony (distinct from GPS permission)**
+
+- `POST /functions/v1/vehicle-location/device/register` — explicit user action. Body: original registration operation UUID, acting organization, REAL incident, deployment, vehicle, public P-256 SPKI, credential UUID. The server verifies current DRIVER scope and records only an inactive candidate public key; **registration alone is not evidence of possession**. Where policy gate not approved, return a disabled code rather than accept a production binding.
+- `POST .../device/challenge` — original issue and confirm operation UUID, credential ID and frozen scope. Server allocates nonce, challenge row and actual bound 27-line transcript, with 120-second lifetime. Retry of original UUID must retrieve same challenge and nonce, not issue a fresh one.
+- `POST .../device/confirm` — original confirm UUID, raw64 proof and challenge ID. Trusted CLAIM -> WebCrypto -> FINALIZE; return authoritative `PROOF_VALIDATED_INACTIVE` receipt with no sharing authority. Fail closed on JWT, challenge, credential or episode mismatch.
+- `POST .../device/revoke` — owner/actor-scoped immutable revoke, explicit local status; server revocation wins over late confirm, old receipts cannot restore it.
+
+**Consent & sharing (separate policy-gated paths)**
+
+- `POST .../consent` — exact policy ID and immutable version/document/audience hashes, driver-visible notice presentation evidence, explicit user action, original UUID. Never consent via a background refresh.
+- `POST .../sessions/start` — binding + consent + current active driver + REAL incident + vehicle versions + retention readiness + enabled policy + verifier proof; returns server-generated session ID, bounded lease and server time. The client must not start GPS collection if the server refuses.
+- `POST .../sessions/renew` — authenticated bounded renewal using live actor/credential/session and current authority, with no implicit re-consent across policy changes. The server must limit renewals and overall maximum approved sharing duration.
+- `POST .../sessions/stop` — immutable STOP UUID, reason `USER_STOP` / `LEFT_VEHICLE` / `LOGOUT` / `PERMISSION_REVOKED` / `ERROR`; idempotent, revokes live sharing and precise visibility. If the service is offline, stop collection locally immediately and show server outcome as UNKNOWN until acknowledged/lease expires.
+- `POST .../positions/latest` (ingest) — JWT + active session + distinct signed GPS sample + bounded coordinate bytes. Accept only one strictly advancing sequence; never persist unapproved offline backlog.
+- `GET .../positions` — exact acting organization and incident, authenticated current reader with *narrow precise-reader policy*; only nonexpired and not-revoked positions. Return safe stable view DTOs, never full session/key/driver metadata.
+
+Prefer fewer well-secured Edge paths if matching source conventions, but do not consolidate different operations into a handler that silently confuses auth boundaries. Specify request-size maxima and JSON rejection rules; unrecognized fields, duplicate keys, wrong canonical UUIDs and precision anomalies must be rejected consistently. Signature metadata must not be writable in URLs or logs.
+
+**Mandatory response shape** (adapt to actual project API conventions, retain semantics):
+
+```typescript
+type VehicleLocationResult<T> =
+  | { ok: true; schemaVersion: 1; result: T; originalOperationId?: string; serverTime: string }
+  | { ok: false; schemaVersion: 1; code:
+      "CAPABILITY_DISABLED" | "POLICY_UNAPPROVED" | "RETENTION_NOT_READY" |
+      "DEVICE_PROOF_REQUIRED" | "NOT_AUTHORIZED" | "SCOPE_CHANGED" |
+      "CHALLENGE_EXPIRED" | "PROOF_INVALID" | "CREDENTIAL_REVOKED" |
+      "SESSION_EXPIRED" | "OPERATION_CONFLICT" | "OUTCOME_UNKNOWN" |
+      "INVALID_LOCATION" | "RATE_LIMITED" | "BACKEND_UNAVAILABLE";
+      originalOperationId?: string; retryable: boolean };
+```
+
+Do not return whole row objects or opaque SQL exception strings to clients. Correlation IDs must be non-secret and must not contain coordinates. Unknown network outcome stays UNKNOWN; do not translate a timeout into CONFIRMED.
+
+### 12A.5 Registration, challenge and trust bridge: transaction-level procedure
+
+The new handler must be auditable at the boundary between a live user JWT and internal SQL.
+
+**Registration**:
+
+1. Validate actual user JWT and session status using the installed supported Supabase auth pattern; `apikey` is not an actor. Use the official `@supabase/server` documented `auth:'user'` pattern if compatible with checked-in dependencies and project config, or the existing correct JWT pattern. Do not disable gateway JWT validation to bypass 401.
+2. Resolve actor from trusted verified JWT, not request JSON. Confirm account active, exact acting org, active REAL incident, exact deployment/vehicle, current ACTIVE DRIVER episode and authority revision. Only use effective leader fallback if separately approved; default to DRIVER only.
+3. Validate 91-byte P-256 SPKI DER, curve/point and SHA-256 fingerprint, canonical UUID, size and request identity. Possession cannot be proven until the challenge is signed and accepted.
+4. Acquire a consistent row-lock order for relevant credential/generation and binder slot. Do not hold locks across external `await`.
+5. Insert inactive credential, original immutable registration operation and **only** the minimum necessary registration metadata. Return no authorization to share. On replay verify exact request equality.
+6. Never allow app-level `service_role` or arbitrary admin to enroll on behalf of someone else without independently approved policy and impersonation/audit model.
+
+**Challenge issue**:
+
+1. Recompute the exact domain (`GASILKO-VEHICLE-PHONE-BINDING-V1`), actor/org/incident/deployment/vehicle/authority episode from trusted rows.
+2. Determine `audience`, `recoveryEpoch`, `policyVersion`, `policyDocumentSha256`, `preciseAudienceSha256` from *actual approved authoritative records*. If absent, **reject**; do not use fake hashes, zero epochs or a TODO constant to make the transcript compile.
+3. Mint 32 bytes of CSPRNG nonce server side and a new challenge UUID, bound to original issue and confirm operation UUIDs. Enforce `expires_at=issued_at+120s`, unique UUIDs, key generation and entity versions.
+4. Freeze the transcript bytes; store appropriate hash, nonce, policy reference, immutable request hash and issued/expiry in private DB. Use canonical encoding from the existing v1 library.
+5. Idempotent replay of `issue_operation_id` and same normalized request returns the same challenge, not a duplicate. Changed request with reused operation UUID -> OPERATION_CONFLICT. Already expired -> EXPIRED, not silently new nonce for same UUID.
+6. Bound outstanding challenges per actor/credential/org, reject abuse and never leak foreign credential existence.
+
+**Confirm**:
+
+1. Validate JWT, raw64 signature length and claim operation UUID; resolve stored canonical credential and challenge. A caller cannot replace SPKI, challenge nonce, current policy, actor, role, authoritative clock or vehicle versions.
+2. TX-A attempts `ISSUED -> CLAIMED` through the existing private guarded primitive or a verified successor; use same original request hash and claim lease. Under replay return the same current claim where source permits.
+3. Outside TX-A, call `verifyDeviceProofV1` on the exact stored SPKI and stored transcript with raw64. Its only proof is `SIGNATURE_VALID_ONLY`; avoid fresh construction of a transcript from user JSON.
+4. TX-B must have **trusted verifier-only authority**; an ordinary authenticated RPC invoker must be structurally incapable of submitting `verified=true` or a chosen digest and advancing state. Choose and document an actual secure bridge (private server secret + limited DB contract, or dedicated restricted trusted invocation) based on verified source. Avoid treating mere service_role use as evidence of role/actor authorization.
+5. Within TX-B lock/validate claim, current credential generation, revocation, current DRIVER, incident mode/lifecycle, deployment vehicle, unchanged versions, current policy and challenge expiry. On match commit `PROOF_VALIDATED_INACTIVE` and immutable receipt; on revocation/staleness fail without resurrection. No GPS status changes.
+6. A duplicate confirm returns original committed receipt only if immutable args match; changed args with same UUID rejected. A claim timeout may be UNKNOWN, never artificial acceptance.
+
+Document specific failure injection states even though no code execution is authorized: handler crashes before CLAIM, after CLAIM, after verification, during TX-B, after commit and before HTTP response; what exact row/receipt is expected and how a later identical operation recovers.
+
+### 12A.6 GPS sharing lifecycle and safe state transitions
+
+Implement a **real** state machine for operational sharing independent from the proof lifecycle. Suggested states and allowed edges:
+
+```text
+NO_BINDING
+  -> PROOF_VERIFIED_INACTIVE
+  -> AWAITING_CONSENT
+  -> READY_TO_START  [all server policy + retention + authority gates]
+  -> STARTING        [original START UUID frozen]
+  -> SHARING         [server confirms bounded lease]
+  -> STOP_REQUESTED  [local acquisition stops FIRST]
+  -> STOPPED         [server confirms revoke]
+SHARING -> LEASE_EXPIRED / REVOKED / ERROR_UNKNOWN
+STARTING -> ERROR_UNKNOWN / STOPPED / SHARING only on authoritative receipt
+STOP_REQUESTED -> STOPPED or UNKNOWN_REMOTE_STOP (never resume samples)
+```
+
+**No shortcut transitions** from signature verified to SHARING. Consent cannot be inferred from proof, possession, driver role, map visibility, or prior login. A policy version change invalidates previous readiness, never auto-upgrades consent.
+
+For every state define, in the milestone doc:
+
+- server-owned state and any canonical DB `CHECK`/unique constraints;
+- Android UI copy and permitted controls;
+- authoritative original operation UUID and immutable request;
+- terminal transitions and recovery after process death;
+- exact server lease and local acquisition deadline;
+- which authority conditions are re-evaluated;
+- whether a position reader may receive precise coordinates;
+- denial code and cleanup of local mutable references;
+- what a stale Android ViewModel after org switch may display;
+- how it behaves if old server migrations are absent.
+
+**Lease design**: propose an initial short time (for example 90 seconds) subject to P10/P11 owner approval. Sample receipt may or may not renew the lease; make that explicit and ensure renewal cannot continue indefinitely without the approved maximum duration. A server lease is not a substitute for STOP: local GPS acquisition must stop synchronously with STOP, and stale already-issued observations must be rejected by authority/generation/session checks.
+
+**Single device / handover**: enforce exactly one accepted owner for a canonical deployed vehicle at a time using DB locks + unique active-row constraint. When prior lease has expired but row still says SHARING, explicitly retire it under lock before another start; no `now()` in partial unique index. Handover requires an approved owner-visible flow; do not silently transfer on a second phone request.
+
+**Vehicle release or incident close**: even without a proactive trigger, every ingest/read/renew must re-check current authority; service must stop locally on next rejected heartbeat and old latest position must be hidden immediately. Design a server-side invalidation mechanism where possible, but do not claim client push delivery is guaranteed.
+
+**Offline STOP**: on tap, revoke local collection permission inside app first, kill callbacks/service, clear in-memory coordinate, freeze STOP request UUID and attempt server cancel when network exists. No GPS queue or stored trip replay. Remote STOP can remain UNKNOWN until reconnect or server lease expiry; disclose this plainly, do not assert that distant server instantaneously acknowledged an offline action.
+
+### 12A.7 Idempotency model for START, STOP, consent and each sample
+
+Design an explicit immutable request envelope rather than relying on HTTP retries:
+
+```typescript
+type FrozenCommand = {
+  originalOperationId: string; // UUID, never reissued on retry
+  scope: {
+    accountId: string;
+    actingOrganizationId: string;
+    incidentId: string;
+    deploymentId: string;
+    vehicleId: string;
+  };
+  canonicalPayloadHash: string; // hash of immutable normalized fields
+  command: "CONSENT" | "START" | "RENEW" | "STOP" | "LEAVE_VEHICLE" | "SAMPLE";
+};
+```
+
+Scope/model may be adjusted to actual source, but operation identity cannot silently retarget after an organization or selected vehicle changes. Store per-operation receipts with bounded nonlocation metadata. Do **not** store raw lat/lon in receipt JSON, command log or incident audit.
+
+- Duplicate START same original UUID+hash returns the same server-created session and state, **not** a second active session.
+- Same UUID different vehicle, policy hash, consent fields or coordinates -> OPERATION_CONFLICT.
+- STOP can be idempotently repeated even if session expired; do not resurrect it.
+- STOP and SAMPLE racing: lock session row and compare sample lease/generation/sequence; STOP commit must make subsequent or delayed sample reject, never override STOP.
+- SAMPLE unknown result is tricky: if the client did not receive ack and later GPS moved, never reuse original sample UUID to sign new coordinates. Do not queue old samples as an offline trip. Optionally retry a single same frozen in-flight payload **only while live and lease-valid**, with hard bounded delay, or drop it; document exact choice.
+- Keep out-of-order/duplicate sequence from replacing a more recent observation; repeated accepted sample yields same receipt/ack metadata, not another row.
+- If crypto fails after server CLAIM, never finalize an `approved` state. If a network timeout occurs after a successful write, eventual original receipt can confirm exactly what was accepted, not a newly constructed request.
+- Do not change B1 cursor/projection atomicity, D1/D2 command queues or M10 notification payloads. GPS samples must use a dedicated ephemeral, privacy-aware path, **not** the existing durable incident operation queue.
+
+### 12A.8 Signed sample V1: canonical byte-level contract
+
+Add a **new** domain, separate from the 27-line enrollment transcript. Publish the exact byte layout in both Kotlin and TypeScript, preferably as a versioned common contract document. This is an implementation specification; choices below are defaults to be source-reviewed and accepted by owner before activation.
+
+```text
+Domain: GASILKO-REAL-VEHICLE-LOCATION-SAMPLE-V1
+Canonical encoding: UTF-8 LF-delimited ASCII fields, one final LF
+OR a documented binary schema with exact offsets and endian order.
+Do not use JSON.stringify as signed bytes.
+Fields in the EXACT same order:
+  01 domain
+  02 protocol version "1"
+  03 original sample operation UUID
+  04 sharing session UUID
+  05 actor user UUID
+  06 acting organization UUID
+  07 REAL incident UUID
+  08 incident deployment UUID
+  09 canonical vehicle UUID
+  10 credential UUID
+  11 credential generation as positive decimal integer
+  12 policy version
+  13 binding generation
+  14 monotonic per-session sample sequence
+  15 provider observed-at Unix milliseconds (decimal integer)
+  16 latitude_e7 signed integer
+  17 longitude_e7 signed integer
+  18 horizontal_accuracy_cm positive integer
+  19 provider/source code
+  20 session-issued anti-replay context/nonce/version
+```
+
+The server must decide and enforce the final 20-field format exactly. Use lowercase canonical UUIDs; no floating decimals, locale, whitespace, exponent notation or timezone strings. Bound integer ranges in both languages and PostgreSQL; E7 resolution is ~1.1cm at equator and must not be misrepresented as physical GPS accuracy. A provider location with no reliable observation timestamp or accuracy is not suitable for a green live marker.
+
+**Android**: immutable sample UUID, strictly increasing sequence, source GPS observation metadata from platform; use P-256 Keystore key or an equally strong approved session-bound proof; sign the exact canonical bytes (ECDSA SHA-256), DER JCA->raw64 for server. Do not sign a GPS sample with the enrollment challenge domain.
+
+**Server**: reject malformed input early; enforce request body size; authenticated actor and allowed session/credential; reconstruct bytes from normalized scalars, do not blindly trust submitted `transcript` bytes; verify raw64 with stored SPKI, current revoked/generation state and server lease. Recheck exact unit/deployment/vehicle authority on ingest. No signature verification can authorize expired or stopped session.
+
+**Timestamp skew and provider staleness**: use trusted server `received_at` and bounded provider `observed_at`. A client's wall clock may be wrong; compare observed elapsed-realtime source where Android provides it and detect stale cached positions. Define source-specific skew tolerances and stricter freshness checks; do not accept future-stamped points to lengthen TTL. Use server time for expiry and read-time freshness. If a phone reports mock/suspect location flags, do not label it verified physical movement; reject/flag per documented policy. GPS spoofing cannot be definitively prevented by client software.
+
+**Sequence**: accept only `sample.sequence > session.accepted_sequence` and timestamp is not older than stored latest; transactionally advance both and upsert one latest row. Enforce sample rate and no unrealistic leaps as *quality flags*, not as unreviewed emergency routing logic. Reject >1 simultaneous per-session in-flight buffer if that avoids reordering.
+
+### 12A.9 Sample ingestion: exact atomic algorithm
+
+Implement using an actual trusted server pathway that verifies the signature and then invokes a narrow transactional private ingestion routine. The SQL routine must not accept bare client `signature_valid=true`. Sequence for each sample:
+
+1. Parse body with strict schema and bounded 1 request, not an unbounded array/batch.
+2. Authenticate JWT; obtain trusted actor.
+3. Resolve session by opaque UUID *without leaking foreign existence*.
+4. Check state `SHARING`, lease, absolute maximum, consent/policy version, organization, REAL incident, current DRIVER episode, actual deployed vehicle, credential generation and revocation.
+5. Build canonical bytes and verify signature with registered SPKI, using trusted snapshots. Ensure session ID/nonce cannot be taken from an old revoked session.
+6. In DB TX lock session then current latest row (consistent lock order across STOP, SAMPLE, RENEW).
+7. Revalidate all current authority/time and the proof result's claim binding via a trusted server-only path. Reject STOPPED/REVOKED/LEASE_EXPIRED and out-of-order sequence.
+8. Reject invalid quality, lat/lon bounds, impossible observed timestamp, stale cached provider fix and samples from SIM/manual NAV. Do not accept user-supplied `source=GPS` as its own proof; store what can be truthfully known.
+9. Update `accepted_sequence` and `last_sample_at` and upsert exactly one latest vehicle location with `received_at` server time and an owner-approved bounded `expires_at`.
+10. Commit and return only sequence, server-time, freshness/receipt metadata. **Never echo precise lat/lon in public logs or generic receipts.**
+11. On transient retry, exact frozen UUID+hash can recover accepted/nonaccepted result; do not silently accept a new position under the old operation UUID.
+12. No history table, no recent-samples query, no trail rendering, no offline backlog or durable GPS queue.
+
+Document performance budget and rate limits (per session, per user, per organization); avoid read/write amplification and uncontrolled Edge costs.
+
+### 12A.10 STOP and revocation: race-free algorithms
+
+Required dedicated STOP/LEAVE semantics:
+
+```text
+Android STOP button:
+  1. state = STOPPING_LOCAL immediately;
+  2. unregister location callback + cancel in-flight sample scheduler;
+  3. remove visible sharing state and clear in-memory last observation;
+  4. freeze immutable STOP UUID / original session identity;
+  5. stopForeground and stopSelf safely, return user-visible stopped;
+  6. attempt server STOP with bounded retry, display server ACK or UNKNOWN;
+  7. do not resume GPS because retry failed.
+```
+
+```text
+Server STOP transaction:
+  acquire session lock;
+  validate actor OR separately reviewed emergency revoker policy;
+  accept same original STOP UUID idempotently;
+  record state STOPPED/REVOKED and server stop time;
+  invalidate active lease and any binder generation as applicable;
+  make latest position unreadable immediately and delete current
+  raw latest position where legal/possible;
+  commit original command receipt without raw coordinates.
+```
+
+If the server receives a SAMPLE just before STOP, ordering determines whether it was accepted; if STOP commits first, the late sample must reject. If STOP was initiated offline, server may still see the last accepted point until lease and visibility expire, so client must never claim remote confirmation until it exists. Implement a short server lease as bound on that risk, not a replacement for a valid STOP request.
+
+`LEFT_VEHICLE` must also drop the phone→vehicle binding or invalidate its generation according to approved handover policy; it must not simply stop local location callback while leaving server sharing active. On logout, org switch or missing permissions, prioritize stopping local acquisition immediately and invalidate corresponding session when online. Do not silently restart on boot/process recreation; if the OS kills FGS, server lease expiry must stop accepting positions independent of a STOP packet.
+
+### 12A.11 Policy, retention and capability gate implementation
+
+Current C2 capability RPC is deliberately permanently disabled. **Do not edit historical migration `20261102140000...`**. Add an explicitly versioned forward migration and compatible policy authorization source only after determining owner's approval model. Existing older client response must remain recognizable. Keep all readiness flags false on an unapproved/default installation.
+
+A production activation decision must be a conjunction of independent, server-authoritative conditions, not a single `GPS_ENABLED` frontend variable:
+
+```text
+MayStartSharing =
+  approved_named_policy_version
+  AND approved_exact_reader_audience
+  AND active_CURRENT_DRIVER
+  AND valid_REAl_incident_deployment_and_vehicle
+  AND verified_device_key_credential
+  AND nonrevoked_binding
+  AND explicit_current_consent
+  AND working_bounded_session_lease
+  AND owner_approved_retention_worker_evidence
+  AND explicit_owner_activation
+```
+
+The source code may include the policy/activation machinery, but must ship with **no approved policy, no activated matching row and no installed-retention-ready assertion**. The owner must separately review and apply the activation migration/config after successful manual acceptance. No SQL install, Web deploy, app upgrade or incidental credential creation may implicitly satisfy all gates.
+
+To avoid deadlocks at project delivery, clearly provide:
+
+- a draft exact policy decision sheet (purpose, controller/contact, reader roles, driver role, emergency responder scope, incident close, fleet ownership, min sampling, accuracy, session timeout, maximum duration, offline STOP warning, cross-agency boundary, latest-only expiry, immutable audit metadata, physical deletion SLA, backups/PITR scope, mobile OS disclosure);
+- a safe default OFF capability response;
+- a *proposed owner-approved activation procedure* that cannot be run accidentally by Codex, and a rollback/deactivation procedure;
+- measurable readiness checks required before `retention_ready=true` (scheduled job exists, runs without traffic, can delete rows by SLA, alerts on failure);
+- explicit GPS-policy approval and activation represented as owner actions **outside** this PR unless owner has already separately approved them;
+- exact treatment of the current SQL #86 blocker: no later manual migration installation until it is resolved.
+
+If the feature's active data storage schema has deletion triggers or immutable audit requirements that make physical deletion impossible, do NOT write coordinate samples to those tables. Design isolated deletable latest-only raw storage with short retention, privacy-safe receipt metadata, and operations owned by a narrowly scoped role.
+
+### 12A.12 Independent physical deletion infrastructure
+
+Implement code/migration for the deletion process but do not deploy or schedule it automatically. No dependence on user reads, incoming samples or opening a screen.
+
+Candidate design: owner-deployed scheduled Supabase Cron invokes a narrow private deletion routine, or owner-deployed Edge maintenance function that authenticates an installed secret, with DB-side bounded deletes. Review existing project Cron and Edge patterns; reuse existing infrastructure if authorized, otherwise add inert source config/SQL and explicit manual schedule steps. Avoid a new publicly callable cleanup API.
+
+Deletion target and SLA MUST be configurable/approved, with conservative defaults recorded only as DRAFT. Requirements:
+
+- Hard-delete all raw latest-position rows past a short `expires_at` independently of any new traffic.
+- Disable/hide live precise position immediately when session stops/revokes even if scheduler fails.
+- Delete last known coordinates after 15 minutes at latest if owner approves this exact period; do not conflate marker expiry with physical purge completion.
+- Use bounded batches with index on expiry, deterministic progress and no long full table locks.
+- No raw coordinates in receipts, audit, Edge error stacks, logs, Cron job output or metrics.
+- Metrics count only rows cleaned, age of oldest expired row, last successful cleanup, latency and failure count—no location values.
+- Monitor if worker does not run or fails; expose a clear operator-health indicator/alert rule and fail-closed activation readiness.
+- Handle paused Cron, unavailable DB, crash midway, poisoned row, partial batch and retry idempotently.
+- Re-evaluate PITR/WAL/backups retention and restore behavior separately; cannot promise historical backups are immediately erased if infrastructure does not support that.
+- Include a manual disabled/maintenance mode so production cannot resume collection merely because cleaner code was merged.
+
+The README must be explicit: writing a job's source code does **not** prove the job has been installed or is healthy.
+
+### 12A.13 Precise reader / Web / Android query contract
+
+Use a separate, auditable **precise position** authorization policy. `can_read_incident`, visible unit names, membership in an org, UNIT_LEADER in a different crew, notification subscriptions and access to task NAV are not inherently precise-location grants.
+
+For each request, confirm:
+- signed-in actor and exact acting organization;
+- current incident and authorized REAL mode;
+- active permission to read precise vehicle locations under the approved policy version (not general COP reader);
+- current unit deployment, vehicle assignment and sharing status;
+- nonrevoked consent/session and accepted latest GPS observation;
+- unexpired position, even if table still contains an expired row;
+- no SIM positions and no navigational/manual coordinates.
+
+Return a **bounded** list of per-vehicle DTOs only for eligible canonical vehicles, with:
+`vehicleId, deploymentId, incidentId, observedAt, receivedAt, expiresAt, latitudeE7, longitudeE7, accuracyCm, freshnessStatus, coordinateSource` where allowed; never phone device ID, driver identity, signing credential, full JWT, tracker history or path. If no permission, return a proper denial; if permitted but no location, return UNAVAILABLE. Do not leak foreign scopes by number of hidden markers.
+
+**Server age classifier**:
+- `age < 120s` -> `CURRENT`, if policy/session/auth all valid;
+- `120s <= age < 900s` -> `LAST_KNOWN`, only if approved for the current reader and source trustworthy;
+- `age >= 900s`, unknown, revoked, permission lost, STOPPED, invalid clock/accuracy -> `UNAVAILABLE` with **no marker coordinate**.
+
+A 15-minute last-known marker from a stopped session is forbidden even if it was once observed legitimately. Older backend response, no RPC, failed auth, error, missing scope -> deny or unavailable, never a stale cached pin. Return `serverTime`/TTL so clients do not rely solely on untrusted local clock.
+
+**Web integration**:
+- Extend the existing incident API path through authenticated same-origin boundaries; no new anonymously accessible position REST API.
+- Follow existing Web B1 `scope_fingerprint`, identity/revision checks and AbortController cancellation; discard results from an old account/org/incident or no-longer-authorized tab.
+- Add a dedicated bounded location fetch only while active, authorized, visible map; adapt existing C3 overlay, do not issue one RPC per unit or add a permanent global poller.
+- Use existing MapLibre source/layer ownership, unique stable marker IDs, resource cleanup on unmount and no marker duplication after context changes.
+- Include human-readable vehicle/unit label, source, age, accuracy if appropriate; show green/current and amber/last-known plus text/hatch/square icons for color-blind accessibility.
+- On STOP, role loss, policy downgrade, expired last-known, page hidden or fetch fails in a way that invalidates scope, remove coordinates from in-memory state quickly; do not persist to localStorage/IndexedDB or cache responses across users.
+- Set `Cache-Control: no-store`, ensure server/proxy cache privacy, avoid coordinates in GET query string or analytics, consider POST authenticated query if necessary.
+- Use a bounded refresh interval only in the approved viewer context. Any Realtime alternative must enforce private per-incident/per-reader authorization; do not assume a prior subscription auto-revokes after role changes.
+
+**Android viewer**:
+- Extend existing `IncidentMapScreen` and Units dialog, preserving Room16, B1 cursor/projection, D1/D2 offline reliability and C1 task navigation.
+- Use the current field-scope lease fingerprint and current org/account/incident identity. Cancel/ignore stale responses after rotation/recreation/account switch.
+- Never persist other vehicles' precise coordinates into Room incident snapshots, offline tasks or photos; last-known is a display lifecycle, not a durable movement history.
+- Bounds: cap unit list and page appropriately (existing C3 is capped/paged), fetch authorized coordinates as one bounded server response, avoid N+1.
+- Render “position unavailable” truthfully if the backend is not yet deployed or the capability is DISABLED.
+- In TRAINING/SIM, show simulated positions only with existing explicit SIM styling; never merge them into REAL position readers.
+
+### 12A.14 Android concrete implementation plan
+
+Inspect the actual Android package structure before choosing names. Provide dedicated responsibilities rather than putting location callbacks in a Composable or long-running ViewModel.
+
+Suggested components (adapt to source):
+- `feature/incidents/VehicleLocationRepository.kt`: authenticated API types, frozen command UUIDs, session receipt parsing, capability checks, lifecycle rejection codes.
+- `feature/incidents/VehicleLocationViewModel.kt`: authorized UI state, explicit actions, current scope fingerprint and cancellation, never owns long-lived GPS callbacks.
+- `feature/incidents/VehicleConsentScreen.kt`: localized disclosure and explicit user consent, never auto-accept.
+- `core/location/VehicleLocationForegroundService.kt`: Android `Service`, FGS notification, process lifecycle, location callback, local STOP and bounded server lease enforcement.
+- `core/location/RealGpsObservation.kt`: source-quality validation and monotonic timestamp representation.
+- `core/location/SignedSampleV1.kt`: pure canonical 20-field sample encoding and Keystore signing using the existing secure device key.
+- `core/location/VehicleLocationSessionController.kt`: driver-visible session context and local invalidation, no durable trip queue.
+- `feature/incidents/VehicleMapOverlay.kt`: existing map integration for permitted positions.
+- Localized SI/default/DE strings with no “active” indication unless server START receipt exists.
+
+Do not change the Android package/import structure blindly. Check available location-provider APIs and dependencies first. `LocationManager`/platform APIs can be used without new dependencies where suitable; if a fused provider would require new Google Play Services dependency, **do not change Gradle without owner authorization**. Propose a safe platform fallback or explicitly stop that part with a small dependency approval request.
+
+**Manifest / permissions** (verify actual targetSdk, minSdk and Android 14+ requirements):
+- `ACCESS_COARSE_LOCATION` and/or `ACCESS_FINE_LOCATION` as justified by accuracy. Ask users at START, not merely app launch; respect approximate location selection.
+- `FOREGROUND_SERVICE` plus `FOREGROUND_SERVICE_LOCATION` when required by target SDK and declared type.
+- `android:foregroundServiceType="location"` on the service, exported false unless real use case requires otherwise.
+- Notification permission handling on Android 13+; persistent foreground indication still required; do not assume notification denial grants hidden tracking.
+- Do **not** request `ACCESS_BACKGROUND_LOCATION` merely to maintain an already user-started, visible-activity-initiated location FGS while screen locked.
+- Start service from the visible Activity and only after server START ack; obey Android 14+ while-in-use restrictions. Never auto-start FGS from silent boot, push receiver or background worker.
+- Avoid broad “ignore battery optimization” request unless separately justified and approved.
+
+**State transitions**:
+- `DISABLED`: UI explains policy/retention/device readiness; no location permission request.
+- `READY`: real server capability and active-driver proof accepted, still no GPS acquisition.
+- `STARTING`: freeze immutable START UUID; show pending spinner; no FGS until accepted.
+- `SHARING`: visible persistent notification; server lease deadline shown; producer active.
+- `STOPPING`: immediately unregister local location listener before remote I/O; show remote state UNKNOWN until receipt.
+- `STOPPED`: no callbacks, no location buffers, clear per-session secret state.
+- `EXPIRED/REVOKED`: terminate FGS and show safe concise reason.
+- `ERROR`: no silent auto-restart. User may explicitly retry if server allows.
+
+**Service handling**:
+- On `onCreate`/`onStartCommand`, validate a current confirmed session and intended identity episode; reject forged/stale PendingIntent commands.
+- Keep service state associated with actor/org/incident/vehicle/credential/session as an immutable tuple; do not reuse same instance for newly selected vehicles.
+- Reject runtime `Location` callbacks after STOP using generation/state token; cancel network in-flight requests as possible.
+- On location permission revoke, GPS disabled, airplane mode, process kill, power saver or provider unavailable, stop/expire according to documented policy and do not synthesize fixes.
+- On background/lock screen, retain visible FGS and short bounded server lease; stop when lease cannot be renewed by deadline.
+- `START_NOT_STICKY` or an explicit non-auto-restarting policy per actual Android behavior; never promise process resurrection after OS kill.
+- Retain at most a single currently in-flight immutable observation. No Room/sample queue, disk trip log, replay of stored points or telemetry cache.
+- Posting notification STOP must be routed to a secure local service action; should work while app UI is not open. Use correct `PendingIntent` mutability/intent action and avoid exported receiver bypass.
+- Call `stopForeground` and `stopSelf` correctly, release location updates/resources, clear sensitive in-memory state.
+
+**Battery and scheduling**: propose default 30s observation target, movement threshold 20m and 90s lease as draft settings; implement bounded minimums and allow owner revision. Do not claim guarantees about OS delivery interval or battery performance without runtime data. If no location update, heartbeat/lease behavior must be explicit and not make an old point newly "observed."
+
+### 12A.15 Network, lifecycle and recovery matrix
+
+For each listed case implement concrete state handling and document expected DB/UI results:
+
+| Fault | Android local state | Server state | Viewer | Retry |
+| --- | --- | --- | --- | --- |
+| User STARTs while offline | Never starts GPS | No session | No pin | Explicit later START with new operation |
+| START response lost after commit | Stay pending/unknown, no GPS until confirmed | May be active lease | No location yet | Recover original START receipt |
+| Android FGS cannot launch | Stop locally; attempt server STOP | Lease expires if STOP unreachable | No new point | No auto retry |
+| Local GPS permission revoked | Stop acquisition immediately | STOP request or lease expiry | Remove when read auth/session invalid | No auto restart |
+| OS kills service | No auto collection | Lease expires | Eventually unavailable | User START after re-auth |
+| Network drops mid-sharing | Stop by local max offline grace/lease | Server lease expires | Current then stale only while policy allows | No backlog replay |
+| STOP tapped offline | Stop local GPS immediately | Unknown remote until expiry | Last accepted point may remain until server lease expires; disclose risk | Replay same STOP UUID |
+| STOP response lost after commit | Local stopped | STOPPED | No marker | Recover original STOP receipt |
+| Driver role removed | Stop on next auth/renew failure | New samples rejected | No precise read | New approved enrollment only |
+| Vehicle reassigned | Local scope invalidated | Old session rejected | No old vehicle pin | New explicit ceremony |
+| Account/org switches | Cancel old requests and stop sharing | Lease and revocation independent | Purge local map cache | Never retarget old UUID |
+| Coordinate sample replay | Do not rebuild new payload under old UUID | Rejected/idempotent original | No duplicate dot | Bounded identical retry only |
+| GPS inaccurate/stale | No accepted sample; show poor accuracy | No new current position | Marker ages naturally | Wait for real observation |
+| Policy revoked | Local STOP on next acknowledgment | START/ingest/read denied | Remove immediately on authoritative response | No automatic reconsent |
+| DB cleanup delayed | Local state unaffected; new START must respect readiness policy | Expired raw row remains temporarily | Read excludes expired | Alert operator; fail closed if SLA breached |
+| Supabase old migration absent | Capability DISABLED | Missing endpoints | Existing C3 “unavailable” | Owner rollout only |
+
+Do not turn this table into only documentation; map each row to actual handler/controller behavior.
+
+### 12A.16 Visibility and privacy of error/debug information
+
+Define a strict information-flow table:
+
+| Source | May contain raw coordinates? | May contain user/vehicle ID? | Retention |
+| --- | --- | --- | --- |
+| Ephemeral Android `Location` object | Yes, in service process while sharing | Session context only | Stop/expiry clears |
+| Signed sample HTTP request | Yes, encrypted in transit, authorized sender | Yes | Do not log body |
+| `vehicle_latest_positions` | Yes, one current row | Minimal canonical scope | Owner-approved physical deletion |
+| Device proof challenge/receipt | **No** | Minimal actor/operation scope | Separate reviewed metadata retention |
+| Incident timeline / audit / M10 | **No** | Existing non-sensitive audit identifiers | Existing policy |
+| FCM / Realtime payload | **No**, unless separately approved private channel with exact reader gate | Only necessary routing | No raw GPS by default |
+| Web/Android authorized map memory | Yes, only for permitted viewer while active | Vehicle label, not phone identity | No persistent storage |
+| Browser URL, cookies, analytics, error logs | **No** | No identifying location metadata | Existing redaction policy |
+| Metrics and cleanup logs | **No** | Aggregates only | Owner-approved operations policy |
+
+Explain browser dev tools/network visibility for an authenticated recipient: the viewer inherently sees data they are entitled to; access controls and short-lived authorizations reduce the audience, but cannot stop screenshots or a legitimately authorized user from manually recording a displayed position.
+
+Avoid a fake promise of "encrypted GPS end-to-end" if TLS/auth/DB encryption are the actual security controls; describe true threat boundaries accurately.
+
+### 12A.17 SQL concurrency, deadlock and deterministic lock order
+
+Codex must document and implement a single consistent lock order, adjusted to actual tables, covering:
+`credential -> binding slot -> session -> latest position -> receipt`, or a justified canonical alternative consistent with PR #96 existing CLAIM/revoke locks. If #96's existing order conflicts with the proposal, **adapt to #96** rather than introducing a deadlock cycle.
+
+- A STOP must win against delayed finalize/renew/sample when it commits earlier.
+- Revoke credential invalidates live sessions and unconsumed challenges in a consistent transaction or through read-time denial until cleanup; do not assert a background callback is guaranteed.
+- One vehicle can have only one valid active sharing session; leases and expired-but-not-updated rows are retired explicitly under lock.
+- Concurrent START requests from same user are idempotent by original UUID; different UUIDs contend and one must fail or return a safe conflict without creating two sessions.
+- Two different users/devices racing for a vehicle must not get overlapping active leases even if both were formerly designated drivers in stale snapshots.
+- Sample sequence and latest position must update transactionally; no independently committed sequence that loses the accepted coordinate or vice versa.
+- A session renew after STOP or revoke never advances lease.
+- Credential rotation increments/generation locks; stale signer cannot emit valid accepted samples even if a mathematical signature remains valid.
+- Future restore after backup/PITR must not inadvertently resurrect a revoked session with a still-live lease. Document emergency kill switch and reconciliation after restore.
+
+### 12A.18 Cost, capacity, and rate-control design
+
+Provide source-grounded rough budget using the project’s expected incident size (do not invent number of concurrent vehicles as fact). State all estimates as assumptions and let owner change them. For a hypothetical 10 simultaneously shared vehicles at a 30-second interval:
+
+- 20 samples/minute per 10? **Correct calculation:** 10 vehicles × (60 / 30) = **20 samples/minute** total.
+- Per day of uninterrupted operation: 20 × 60 × 24 = 28,800 sample POSTs, illustrating why interval, batching constraints and bounded active incidents matter; this is a hypothetical planning figure, not user traffic.
+- Latest-only store holds ≤ one position per live vehicle and does not grow with sample count, but operation receipts and logs can grow; define their independent retention and avoidance of per-sample heavyweight immutable command receipts if metadata volume becomes excessive.
+- Verify Web/Android reader per-incident request cadence, number of current viewers and number of visible units; bounded list page at existing C3 thresholds. Avoid one HTTP call per unit, a permanent 24/7 poller or unnecessary realtime fanout.
+- Rate limits must operate at trusted user/credential/session and per-vehicle levels, not source IP only.
+- Runtimes must use timeouts, bounded body sizes, bounded concurrency and cancellation to avoid stale auth context.
+- No guaranteed update frequency: network, OS, provider and phone battery can prevent fixes. Client must show accurate observation timestamp and unavailable states rather than a fabricated liveness heartbeat.
+
+### 12A.19 Security and abuse review, required mitigations
+
+Deliver a threat table with at least these distinct attacks, source-grounded technical mitigation and honest remaining risk:
+
+1. Stolen user JWT without private key attempts enrollment or START; require possession ceremony and current authority, but verify initial public-key substitution cannot be authorized with JWT alone.
+2. Stolen unlocked phone and valid driver account; key possession cannot prove driver intention; require explicit visible consent and STOP controls.
+3. Device key copied/misrepresented; Keystore nonexportability reduces some risk but is not automatic hardware attestation. A01 still open.
+4. Replay old challenge or signature; server nonce, original UUID, 120s expiry, atomic claim/finalize.
+5. Concurrent challenge claims; conditional state transition under DB lock, not check-then-update.
+6. Client submits arbitrary `signature_valid=true`; trusted finalize inaccessible to ordinary client.
+7. Key revoked during verify; repeat generation/revocation check in TX-B and ingest.
+8. Current DRIVER removed after START; per-sample/renew/reader reauthorization + short lease, with UI local stop when notified.
+9. Vehicle reassigned; immutable canonical vehicle/deployment/episode binding; deny/stop old session.
+10. Cross-org reader with legitimate general COP access; narrower precise-reader policy and deny by default.
+11. SIM/manual NAV coordinate injected as REAL; only typed real producer/session accepts samples; no manual coordinate endpoint.
+12. Mock provider/GNSS spoofing; detect available mock signals, label trust limitations, do not falsely promise tamper-proof GNSS.
+13. Client sends location with ancient/future observedAt; both monotonic elapsed time checks and server accepted time bounds.
+14. Client swaps signed coordinate bytes after signing; exact canonical scalar encoding in signature, never sign an unrelated representation.
+15. Overlapping START from two phones; locked slot + partial unique index, explicit takeover policy.
+16. Offline STOP; immediate local cutoff, bounded lease, no fictitious instant remote ACK.
+17. OS restarts app after reboot; never restart sharing automatically; server expires without renewals.
+18. Private data in error logs; body redaction and safe structured failure codes.
+19. Realtime subscription survives role change; do not send coordinates on unreviewed channel, reevaluate permission on reads.
+20. Old Web stale response after account switch; AbortController + exact fingerprint and version check before state update.
+21. Leaked signed sample; sequence/nonce/lease checks prevent rebinding to new session or late replay.
+22. Policy version revoked while in flight; enforce effective policy state on START/renew/ingest/read.
+23. Cleanup job silent failure; monitoring, readiness fail-closed and short retention SLA.
+24. Backup restore resurrects old latest position; reader checks server time and live session/authority; run deletion cleanup before reactivation.
+
+For each of these, add a reasoned residual risk and explicit accepted owner decision needed for production.
+
+### 12A.20 Migration-to-runtime compatibility and release switches
+
+Codex must provide a deterministic manual rollout checklist, but may not perform any step:
+
+1. Confirm exact owner-applied #82–#85 status with owner. #86 failed SQLSTATE 42601 near line 109 **despite confirmed complete paste**. Do not attribute the failure to partial copy; inspect the actual SQL source separately and obtain reviewed correction before continuing.
+2. Apply #86 only after verified correction and informed owner authorization; do not run it as part of this PR.
+3. Owner applies #87, #88, #89, #90, #92, #96 and any intervening migrations **in actual chronological order**. Check whether new PRs added migration IDs; never assume source merge equals DB state.
+4. Deploy existing `incident-evidence` Edge when its dependencies are installed; this remains a separate owner action, not permission to deploy GPS.
+5. Apply new M15B schema while all GPS capability flags and policy rows remain OFF. Inspect all migration object grants. Smoke check SQL contract with owner-approved read-only queries before any activation.
+6. Deploy new Edge verifier, enrollment and ingestion/reader handlers with proper JWT/auth while feature OFF. Check that HTTP callers receive disabled responses, not accidental success or 500 leakage. Owner deploys.
+7. Deploy Web UI with graceful old-backend behavior and Android update with no auto-start. Confirm Room16 upgrades / existing offline work unaffected.
+8. Approve and record precise GPS policy and legal notice through explicit owner-controlled change. Confirm no other user's organization is in scope.
+9. Install owner-approved physical deletion scheduler (without incoming traffic) and confirm its alerting/physical delete behavior with controlled synthetic **nonproduction** data, under owner-run manual acceptance. No uncontrolled real position collection.
+10. Confirm Android driver consent, server proof, live session, signed samples, read scopes, offline STOP, revocation and device handover in controlled acceptance. Owner only.
+11. Activate explicitly for limited pilot organization after all gates PASS and monitor redacted health; rollback must disable server START/ingest/read quickly while preserving existing incidents and receipts.
+12. Before expanding rollout, review position staleness, battery, data deletion, logs, backup coverage, support process and availability.
+
+**Rollback**: A server-side kill switch must block new START and ingestion and hide readers immediately (without deleting other incident data); stop signals may be best-effort to Android. On rollback, existing latest raw coordinates remain protected and are deleted by the independent approved cleaner. Do not roll back DB by destroying applied migrations or altering old immutable receipts. Document schema-only rollback separately and never assume `DROP TABLE CASCADE` is safe.
+
+### 12A.21 Exact coding order for Codex (single PR)
+
+Codex should implement in this order, with source inspection evidence and all code committed in one branch:
+
+1. Inspect `main`, PR #96 merge, open PR overlap, source contracts, targetSdk and library versions. Record **actual** names/API shapes.
+2. Write versioned DTOs + state diagrams + authority matrix and policy OFF gate, ensuring no location capture path can run by default.
+3. Create migration(s): private policy/binding/consent/session/latest-only tables, canonical FKs, constraints/indexes, restrictive grants, deny-default functions. Include deletion code without scheduling deployment.
+4. Complete trusted credential registration/ISSUE/claim/signature/finalize using existing PR #94/#95/#96 contracts; no mock authority and no fabricated approved policy.
+5. Build exact owner-policy-dependent consent + START/RENEW/STOP/LEAVE state machine, with receipts and race-safe DB transitions.
+6. Build signed location sample V1 both sides, strict parser, server-time/quality gates and atomic latest-only ingress.
+7. Build separate precise-reader endpoint with narrowly scoped policy/role check and secure DTO. Keep default empty/disabled.
+8. Build Android explicit driver flow and foreground location producer; no auto-start, no backlog. Preserve Room16.
+9. Add Web/Android C3 map rendering with fresh/stale/unavailable and context cancellation; integrate existing map layers.
+10. Add owner-controlled retention maintenance code and redacted health hooks; do not schedule or activate it.
+11. Add SI/default/DE copy and accessibility; reflect every disabled/unknown/permission case truthfully.
+12. Finish 40 existing manual cases plus the detailed edge-case acceptance expansions below. All remain UNEXECUTED.
+13. Report exact implemented versus BLOCKED code paths, source dependencies, migrations, Edge functions, permissions, file/line map and owner release steps. Do NOT merge.
+
+If step 4 cannot be implemented without approving policy, implement the code **up to a fail-closed approval boundary** and do not pretend the rest is operationally callable. Likewise, a complete UI without an authenticated trusted server is not an integrated GPS feature: disclose explicitly.
+
+
+
+### 12A.22 Expanded manual acceptance: 24 focused integration cases
+
+The 40 scenarios in the core assignment remain mandatory. Add the **24 additional, nonduplicative** cases below as **UNEXECUTED**. Each must have precondition, action, expected authoritative state, expected user-visible state, and whether policy/deployment blocks execution. These are **manual acceptance instructions**, not permission to run tests, emulators, migrations or real GPS. Do not inflate the scenario count with generic repeated lines.
+
+**I01 — START refused when policy draft exists, with otherwise valid driver**  
+Precondition: server has a DRAFT policy record and a real driver/device credential candidate. Action: explicit START request. Expected: `POLICY_UNAPPROVED`, no session in SHARING, no GPS callback started, capability OFF. No fabricated approved policy row.
+
+**I02 — Retention health absent after owner marks policy approved**  
+Precondition: source supports approval but independent purge health is missing/unverified. Action: START. Expected: `RETENTION_NOT_READY`, no coordinate ingestion, no automatic `retention_ready=true` merely because cleanup SQL exists.
+
+**I03 — Device proof mathematically valid but driver lost active crew membership**  
+Precondition: previously accepted `SIGNATURE_VALID_ONLY` evidence, crew status now revoked. Action: FINALIZE or START. Expected: trusted DB denies before writing an accepted binding/session. Android shows role-loss reason, not GPS-ready.
+
+**I04 — Two active driver phones race for one vehicle**  
+Precondition: same canonical deployed vehicle, simultaneous distinct START UUIDs, approved pilot policy in an isolated owner-run environment. Action: both START calls. Expected: at most one live session via DB lock and unique slot; other gets stable conflict. No dual collector.
+
+**I05 — START response lost after DB commits**  
+Precondition: valid frozen START UUID; transport disconnect between commit and HTTP response. Action: retry original UUID/payload, not regenerated. Expected: same session receipt; Android starts FGS only after authoritative positive outcome, not on timeout.
+
+**I06 — No location permission after server START accepted**  
+Precondition: server START receipt exists but Android runtime location access is denied. Action: service launch attempt. Expected: no GPS acquisition, immediate STOP best-effort and/or bounded server lease expiry, explicit human-readable error; no fake position.
+
+**I07 — Android user grants approximate rather than precise location**  
+Precondition: permission dialog grants COARSE only, accuracy violates configured precise map threshold. Action: real provider observation. Expected: no false green marker; reject/degrade according to quality contract, preserve user's permission choice, no forced background permission.
+
+**I08 — Start attempted while app Activity not visible**  
+Precondition: Android 14+ background state with while-in-use permission only. Action: late network START callback attempts to launch FGS. Expected: code does not rely on unauthorized background launch; fails safely, stops server lease/requests explicit foreground action, no hidden tracking.
+
+**I09 — User STOP from persistent notification while screen locked**  
+Precondition: confirmed active session with visible FGS. Action: notification STOP PendingIntent. Expected: unregister location updates immediately, notification cleared appropriately, original STOP UUID sent; no Activity required, no auto restart.
+
+**I10 — Foreground service killed by OS without callback**  
+Precondition: confirmed SHARING lease, then process death. Action: no further contact. Expected: server lease expires by trusted clock even without STOP, reader suppresses disallowed old point; no app boot receiver relaunches GPS.
+
+**I11 — Offline STOP followed by reconnection after lease expiry**  
+Precondition: Android offline with active local collector. Action: driver taps "I left vehicle", then reconnects later. Expected: collection stops on tap; same frozen STOP request can be sent later; no stored route backlog uploaded; server authoritative state not falsely shown as confirmed during outage.
+
+**I12 — START again after a confirmed STOP using old session**  
+Precondition: STOP receipt authoritative, previous session generation revoked. Action: old sample/signature or renew. Expected: rejected; new sharing requires fresh explicit policy/consent/start ceremony as applicable, never automatic resurrection.
+
+**I13 — Old sample arrives after STOP commit**  
+Precondition: sample signed before STOP; STOP transaction commits first. Action: submit delayed packet. Expected: reject even with cryptographically valid signature and in-range timestamps; latest row not restored.
+
+**I14 — Out-of-order observations with increasing network arrival time**  
+Precondition: sample sequence 22 received before sequence 21. Action: send 21 later. Expected: strict monotonic sequence rejects 21; latest observation never moves backwards in observed time.
+
+**I15 — Android observation timestamp in future**  
+Precondition: phone clock is significantly ahead of server clock. Action: sign submitted real observation. Expected: server rejects or classifies unavailable per bounded skew; freshness age never negative and marker not falsely current.
+
+**I16 — Provider returns cached ancient OS location**  
+Precondition: GPS provider `lastKnownLocation` with old elapsed-realtime fix. Action: client tries to send. Expected: client rejects; server independently rejects stale observed timestamp; no artificially refreshed last-known dot.
+
+**I17 — GPS source marked mock or suspect**  
+Precondition: platform indicates mock provider or quality anomaly. Action: sample submission. Expected: source-specific policy applies; never label as trusted REAL vehicle GNSS based solely on a client string; no fake coordinates substituted.
+
+**I18 — Last-known age boundary at 119/120/899/900 seconds**  
+Precondition: authorized viewer, current nonrevoked session and real observation with controlled server timestamps in test environment. Action: advance controlled clock through thresholds. Expected: 119 CURRENT, 120 LAST_KNOWN, 899 LAST_KNOWN, 900 UNAVAILABLE/no coordinate, with permitted stale policy. UI expiry updates without requiring a new request.
+
+**I19 — Explicit STOP while last-known marker is orange**  
+Precondition: stale observation at age 200s, then STOP is confirmed. Action: refresh viewer. Expected: marker disappears immediately regardless of 900-second TTL; "last known" does not override revoke.
+
+**I20 — Web actor switches organization during slow position fetch**  
+Precondition: two authorized organizations, in-flight response for org A, viewer now org B. Action: delayed A result arrives. Expected: AbortController/identity fingerprint rejects it; no coordinates from A flash in B's map, no cross-org persistent cache.
+
+**I21 — General incident reader lacks precise GPS audience**  
+Precondition: user may see unit names under B1/C3 but lacks approved precise-reader role. Action: query `/positions`. Expected: denied/redacted, never a coordinate or a distinction revealing another organization's movements; unit badge still truthfully says unavailable.
+
+**I22 — Purge job fails while no traffic exists**  
+Precondition: synthetic expired latest-location rows, scheduled worker intentionally unavailable in owner test environment. Action: wait beyond cleanup SLA without queries/ingest. Expected: metrics alert operator, `retention_ready` cannot be treated healthy, reader rejects expired rows, documented physical-delete failure is not hidden.
+
+**I23 — Database restore includes past revoked data**  
+Precondition: owner-controlled isolated restore snapshot predating STOP. Action: restore + run readiness check. Expected: no accidental sharing activation, no previously revoked session automatically granted a new lease, cleanup/reconciliation required before enabling.
+
+**I24 — Old Web/Android client and incomplete SQL rollout**  
+Precondition: old production DB lacks new M15B migration and `incident_vehicle_location_capabilities` remains C2 DISABLED. Action: load existing Web/Android incident maps and Units dialog. Expected: no crash, no location permission prompt, no active markers, no dead polling, existing NAV/B1/offline receipts and Room16 work unaffected.
+
+### 12A.23 Required artifact layout within the PR
+
+To make source review and contractor implementation reproducible, the PR description and milestone documentation must include **all** of these blocks, with concrete checked-in file names and line ranges:
+
+1. **Dependency ledger** — PR #96 merge ancestry, exact source baseline, old SQL rollout state; no overlap PR.
+2. **Architecture diagram** — exact real components, call paths and trust/authority boundaries; implemented/gated/unimplemented annotations.
+3. **Schema reference** — every new column, type, nullability, primary/candidate/foreign keys, index, CHECK, RLS, function/grant and privacy purpose. Include forward migration ordering and no old migration edits.
+4. **Endpoints** — method/path, JWT/auth mode, request/response JSON schema, immutable UUID fields, stable error codes, size/rate limits, exact DB transaction, and caller on Android/Web.
+5. **Consent and binding** — versioned notice, role policy, server approval gate, specific user actions and revocation/handover.
+6. **Crypto** — enrollment's existing 27 lines, sample's new domain/encoding, DER ↔ P1363 conversion, SPKI pinning and signature verifier trust boundary.
+7. **Session algorithms** — START/RENEW/STOP/LEAVE, lease and expiration, race/lock ordering, original receipts and UNKNOWN handling.
+8. **Android** — manifest permissions with actual targetSdk, source-backed service lifecycle, notification STOP, provider timestamps, observation validation, Keystore integration, state screen and UI strings.
+9. **Maps** — existing MapLibre source/layer touched, new data loader/controller, precise reader audience, TTL classification, role-scope cleanup, normal/sim map separation, disabled fallback.
+10. **Retention** — actual purge function/source, owner-only scheduler installation, monitoring/failure/restore semantics, latest-only row deletion, PITR/backup caveats.
+11. **Threat model and acceptance** — original 40 + extra 24 focused cases, all UNEXECUTED and explicitly blocked where approval missing.
+12. **Deployment handoff** — numbered human commands **only for owner to run later**, expected read-only verification results, rollback/kill switch, precise unresolved #86 SQL blocker.
+13. **Proof of OFF-by-default** — enumerate every production code path and concrete guard; do not rely on a comment saying "disabled."
+14. **Actual completion statement** — state whether end-to-end integration is complete in source; list any security-critical missing implementation separately.
+
+### 12A.24 Deliverable quality bar
+
+Reject as incomplete any of these outcomes:
+
+- A policy/privacy design document plus one UI badge, with no data path.
+- An Android GPS service that stores a route locally or secretly starts before server approval.
+- A public Edge endpoint that accepts JWT and therefore assumes phone possession.
+- A SQL function where `signature_verified` is a client-supplied boolean.
+- A session START that only checks `enabled=true` without current driver, device, consent, reader/privacy and retention gates.
+- A database table that accumulates historical samples while documentation claims "latest only."
+- A scheduled cleanup design that has no executable cleanup source, or code that assumes a Cron job is installed when it isn't.
+- A Web/Android marker based on SIM, manual NAV or incident center.
+- Source claims that 40/64 manual cases PASSED despite no execution.
+- Retrospective modification of previously applied migrations.
+- A receipt of STOP that permits a later sample to revive the stopped row.
+- A background GPS operation which Android may silently auto-start on boot/login.
+- Changing Room16, Gradle/KSP/KAPT, or old field command identities.
+- A working GPS path exposed in production before P01–P14/A01 and retention have been approved.
+- Concealing policy blockers under invented technical "defaults" or fabricated verified statuses.
+
+**Required final decision**: if the secure runtime integration cannot be finished without an owner decision, present implemented source paths, specific unimplemented code and the exact owner decision(s) required. Do not label the code "pilot-ready" merely because source exists. Prefer an honest safe partial deliverable to a privacy breach, but do as much actual implementation as safely possible in this one PR.
+
+
+## 13. Deliverables and documentation
+
+Code in the real repository architecture, with traceable integration:
+
+1. Forward-only SQL migration(s), inactive-by-default: precise credential/enrollment-finalizer fixes (if needed), versioned policy/consent, session, latest-only position, protected RPC and retention entrypoint. Exact FK/grants/locks/receipt mapping.
+2. Trusted server/Edge routes reusing existing crypto and properly scoped JWT and private DB authority, with request/response examples and bounded errors.
+3. Android explicit pairing/consent/START/STOP/LEAVE, OS location foreground service, notification, sample signer, retry policy and lifecycle.
+4. Web/Android current map rendering and independent precise-location reader authorization.
+5. Manual retention job configuration/monitoring instructions; no actual install.
+6. `docs/M15B-end-to-end-real-vehicle-gps.md` detailing as-found matrix, real schema/contracts/signatures, algorithms, security threat model, rollback and deployment.
+7. `docs/M15B-owner-privacy-activation-decisions.md` with all P01–P16/A01 UNAPPROVED by default and explicit sign-off checklist.
+8. Factual SPEC appendix, not claims of verified operation.
+9. PlantUML or explicit sequence + state diagram: `Android Driver → Auth → REGISTER/ISSUE → Keystore SIGN → trusted WebCrypto → CLAIM/FINALIZE → consent/START → Android FGS → signed sample → DB latest → narrow reader → Web/Android map → STOP/revoke → retention`. Mark unimplemented/blocked arrows.
+
+**Every endpoint and table:** report exact source file, type/signature, canonical identity, authority checks, transaction boundary, concurrency guarantees, GRANT/RLS, error categories, data retention/erasure. Avoid exposed `TODO authorize` or fake verification. Prefer a smaller **real and safe** integrated implementation to a falsely complete broad surface.
+
+## 14. Manual acceptance — 40 meaningful scenarios
+
+Document each with **PRECONDITION, ACTION, EXPECTED, STATUS**. All `UNEXECUTED`, further mark `BLOCKED_BY_POLICY`/`NOT_IMPLEMENTED` where applicable. Do not execute/add automated tests. Do not expand with repetitive placeholders.
+
+### Baseline / activation
+
+- **A01:** New migration installed in authorized staging without policy approvals → every GPS capability gate remains false; no START/precise read.
+- **A02:** New Android on old backend → no tracking or crash; honest OFF state.
+- **A03:** Old Android on new backend → incident and Room16 workflows unchanged, no GPS.
+- **A04:** Only generic GPS enable flag present without reader or retention approval → server rejects operational activation.
+- **A05:** TRAINING/SIM source presented as REAL → never accepted as REAL location.
+
+### Device enrollment / signature
+
+- **B06:** Explicit enrollment generates nonexportable Android P-256 private key → only SPKI leaves device.
+- **B07:** Change incident/vehicle on same challenge/signature → rejected.
+- **B08:** Genuine Android V1 signature verified via WebCrypto raw64 P1363 → mathematically valid only; not consent.
+- **B09:** Malformed SPKI/curve/scalars/fingerprint → rejected.
+- **B10:** Concurrent confirmations of same nonce → at most one final authoritative receipt.
+- **B11:** Crash after CLAIM and before verification → unknown/recoverable, not false success.
+- **B12:** Credential revoked between CLAIM/FINALIZE → revoke wins, late finalize denied.
+- **B13:** Original UUID reused with changed request → conflict, never new authorization.
+- **B14:** Client posts `verified=true` to privileged route → cannot finalize.
+
+### Authority and consent
+
+- **C15:** Valid assigned DRIVER, exact org/REAL incident/deployment, owner-approved staging policy → only complete proof/consent can allow START.
+- **C16:** ADMIN or UNIT_LEADER without approved DRIVER eligibility → cannot start merely by role.
+- **C17:** Other org/incident attempts enrollment/ingestion/precise read → denied without existence leak.
+- **C18:** Driver loses role after enrollment but before START → denied.
+- **C19:** Vehicle reassigned while SHARING → stop/invalidate future samples, hide position.
+- **C20:** Policy version changed/unapproved → consent cannot be assumed renewed; START denied.
+- **C21:** Two phones START for same vehicle → only one authoritative active session.
+- **C22:** Account/org switch during pending requests → original frozen identity cannot retarget; old precise location cleared.
+
+### Real Android producer
+
+- **D23:** Merely open incident map without START → no location permission request or FGS.
+- **D24:** Explicit approved START in manual staging → foreground service and visible STOP notification for exact vehicle.
+- **D25:** Lock screen during approved sharing → service can continue only within OS/session/consent constraints; visible notification.
+- **D26:** Revoke Android location permission → local collection ceases, unavailable displayed.
+- **D27:** Device offline during drive → no GPS historical queue; reconnect sends only new observations.
+- **D28:** STOP in notification → immediate local capture stop and idempotent server revoke.
+- **D29:** LEAVE VEHICLE offline → `STOPPED_ON_DEVICE / SERVER_CONFIRMATION_PENDING`; bounded server lease expires.
+- **D30:** Process death or service killed → no silent reboot of sharing; lease expires independently.
+
+### Position ingestion / readers
+
+- **E31:** Valid signed fresh GNSS sample → one latest row updated atomically, monotonic sequence.
+- **E32:** Older/duplicate sample, wrong session/generation or forged signature → no regression or new history.
+- **E33:** Mock/suspect/invalid/poor-accuracy observation → rejected/unavailable; never fabricated REAL.
+- **E34:** Age boundaries 119, 120, 899, 900 seconds → current/stale/unavailable exactly as approved.
+- **E35:** User allowed to see unit name but not precise position → exact coordinate hidden.
+- **E36:** Server confirms STOP/REVOKE with last point only seconds old → precise marker hidden immediately.
+- **E37:** Reader changes org/incident while old response pending → old coordinates never render.
+
+### Erasure / release
+
+- **F38:** No traffic/reads beyond retention deadline with approved independent cleanup installed → expired latest-only row physically removed.
+- **F39:** Retention job unavailable/failed → `retention_ready=false`, collection blocked; alert/incident response documented, no erasure claim.
+- **F40:** Owner source-release review → Room16/B1/B2/C1/C3/D1/D2/M10/NAV/REAL-SIM intact, #86 still blocked until resolved, all cases UNEXECUTED.
+
+## 15. Known migration blocker and manual owner rollout
+
+The owner reported #82–#85 SQL applied. **#86 `20261030160000_incident_private_attachments.sql` failed** with `SQLSTATE 42601` near line 109. The owner explicitly confirmed the SQL file was **fully and correctly pasted**. Do not attribute this to clipboard truncation; do not blindly retry, run or repair SQL as part of M15B. **No following migration or Edge deployment is confirmed installed.** #87–#90, #92, #96, any M15B migrations and `incident-evidence` Edge require separate owner-controlled sequential rollout after #86 correction. Git merge does not mean DB migration applied.
+
+Document an exact chronological rollout, read-only checks, approved privacy/read audience, approved retention scheduler and alerts, explicit staged activation, Android/Web staging pilot, kill switch/rollback and manual acceptance. **Do not execute any of it.**
+
+## 16. Required final Codex report
+
+1. Current-main base SHA and verified #96 merge/overlap status.
+2. As-found exact source/schema/authority matrix.
+3. IMPLEMENTED & WIRED vs IMPLEMENTED BUT DISABLED vs BLOCKED/DESIGN ONLY.
+4. SQL migration names, exact objects/RPC signatures/constraints/grants and ordering.
+5. Trusted JWT/Edge verifier/atomic proof finalization, immutable UUID/receipts and concurrency.
+6. Consent, binding, active lease and STOP/LEAVE state machines.
+7. Android permissions/FGS/notification, real GPS source, sample canonical signature and invalidation.
+8. Precise reader authorization, Web/Android map freshness and no fabricated marker.
+9. Independent deletion code, owner approval gates, PITR/WAL/backup caveats.
+10. Evidence six capability flags stay false in initial deployment.
+11. Room16/B1/B2/C1/C3/D1/D2/M10/NAV/REAL-SIM compatibility.
+12. All 40 acceptance cases `UNEXECUTED` / appropriately blocked.
+13. Exact changed file paths/line ranges, branch, commit and PR URL.
+14. Explicit **no tests/build/lint/typecheck/CI/Gradle sync/SQL/Supabase remote access/deploy/runtime**.
+15. **STOP after opening ONE PR. Do NOT merge.**
+
+**END — M15B CODEX ASSIGNMENT**
