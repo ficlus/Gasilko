@@ -3250,3 +3250,21 @@ pending operations/receipts, M10/NAV and REAL/SIM remain unchanged.
 See [M15A.2 source matrix, trust boundary and36 UNEXECUTED owner cases](M15A2-server-device-verification-inactive-binding.md).
 Owner-reported #86 SQL42601 and unconfirmed later rollout remain unresolved.
 No tests/build/typecheck/CI/SQL/runtime/deploy/merge performed.
+
+### M15A.3 — private inactive security metadata and claim primitives; GPS stays OFF
+
+Adds an unapplied forward migration for empty, RLS-protected private candidate
+credential/challenge tables with immutable scope/operation identity, guarded
+INACTIVE/REVOKED lifecycle, private current-DRIVER CLAIM lease and owner-revoke
+using existing immutable incident receipts. No application/service grants or
+public registration/ISSUE/FINALIZE RPC. Successful proof transition is explicitly
+blocked pending a trusted finalizer. Internal challenge construction/claimed-proof
+adapter reuse unchanged M15A.2 v1 crypto and return SIGNATURE_VALID_ONLY only.
+
+No credential possession/enrollment, policy approval, operational pairing, client
+flow or GPS producer/viewer is activated. P01–P14/A01 remain UNAPPROVED; all six
+C2 flags remain false. No fake policy/epoch seed values. Room16/B1/B2/C1/C3/D1/D2,
+M10/NAV/SIM and existing permissions/queues/receipts remain unchanged.
+See [M15A.3 actual versus blocked boundaries and40 UNEXECUTED owner cases](M15A3-trusted-challenge-credential-lifecycle.md).
+Owner-reported full-file #86 SQL42601 and unconfirmed subsequent rollout remain
+unresolved; no tests/build/SQL/runtime/deploy/merge performed.
