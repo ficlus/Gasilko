@@ -55,6 +55,10 @@ internal class IncidentMapLayers(private val map: MapLibreMap,private val style:
         style.addLayer(CircleLayer("incident-selected","incident-context").withProperties(
             circleColor(Color.TRANSPARENT),circleRadius(12f),circleStrokeColor(Color.BLACK),circleStrokeWidth(3f)
         ).apply {setFilter(all(eq(geometryType(),literal("Point")),eq(get("selected"),literal(true))))})
+        style.addLayer(SymbolLayer("incident-real-label","incident-context").withProperties(
+            textField(get("label")),textSize(12f),textOffset(arrayOf(0f,1.5f)),
+            textColor(Color.BLACK),textHaloColor(Color.WHITE),textHaloWidth(2f)
+        ).apply {setFilter(all(eq(get("kind"),literal("REAL_VEHICLE")),eq(get("count"),literal(1))))})
         map.addOnCameraIdleListener(idle)
     }
     fun close() {map.removeOnCameraIdleListener(idle)}
@@ -70,6 +74,7 @@ internal class IncidentMapLayers(private val map: MapLibreMap,private val style:
         }
     }
     private fun color(f: IncidentMapFeature)=when {
+        f.kind=="REAL_VEHICLE"->if(f.status=="CURRENT")"#16803C" else "#CB8500"
         f.kind=="REGISTRY_HYDRANT"->when(f.status) {
             "WORKING"->"#16803C";"NOT_WORKING"->"#D12828";"NEEDS_INSPECTION"->"#CB8500";else->"#657080"
         }
@@ -122,7 +127,7 @@ internal class IncidentMapLayers(private val map: MapLibreMap,private val style:
                 buildJsonObject {
                     put("type","Feature");put("id",f.id);put("geometry",f.geometry)
                     put("properties",buildJsonObject {
-                        put("id",f.id);put("color",color(f));put("count",group.size)
+                        put("id",f.id);put("kind",f.kind);put("label",f.label);put("color",color(f));put("count",group.size)
                         put("image","incident-count-"+minOf(group.size,100));put("selected",f.id==current?.selected)
                     })
                 }

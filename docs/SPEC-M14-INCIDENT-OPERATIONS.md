@@ -3268,3 +3268,24 @@ M10/NAV/SIM and existing permissions/queues/receipts remain unchanged.
 See [M15A.3 actual versus blocked boundaries and40 UNEXECUTED owner cases](M15A3-trusted-challenge-credential-lifecycle.md).
 Owner-reported full-file #86 SQL42601 and unconfirmed subsequent rollout remain
 unresolved; no tests/build/SQL/runtime/deploy/merge performed.
+
+
+## M15B — connected REAL vehicle GPS source, default OFF (2026-11-04)
+
+Source adds a trusted JWT/real P-256 gateway, atomic proof finalization, private
+inactive binding/explicit versioned consent/finite session, latest-only signed
+sample ingestion, independent precise readers and existing Web/Android MapLibre
+integration. Android has an explicit visible location FGS and notification STOP;
+no background-location permission, auto-start, coordinate history, Room change
+or new field worker/queue. Executable independent cleanup and aggregate health
+are source only; no scheduler, alert, migration or deployment was installed.
+
+All P01–P16/A01 remain UNAPPROVED and all six capability flags initially false.
+Per-key out-of-band approval, exact reader grants, current DRIVER, consent,
+finite lease, owner readiness, external release epoch and healthy independent
+retention are separate fail-closed conditions. Source is unverified and not
+pilot-ready. Existing Room16/B1/B2/D1/D2/M10/NAV and REAL/SIM contracts remain.
+No tests/build/SQL/deploy/runtime checks were run;64 owner cases are UNEXECUTED.
+#86 full-file42601 remains a separate rollout blocker; later installation is
+unconfirmed. See [M15B implementation/contracts/limits](M15B-end-to-end-real-vehicle-gps.md)
+and [unapproved owner decisions](M15B-owner-privacy-activation-decisions.md).

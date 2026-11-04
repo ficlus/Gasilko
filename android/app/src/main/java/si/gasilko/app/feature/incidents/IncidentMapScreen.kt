@@ -26,7 +26,7 @@ private data class ExternalMapIntent(val feature: String,val point: si.gasilko.a
     val revision: String,val version: String)
 
 @Composable internal fun mapKind(kind: String)=stringResource(when(kind) {
-    "TASK_TARGET"->R.string.im_targets;"INCIDENT_SECTOR"->R.string.im_sectors
+    "REAL_VEHICLE"->R.string.gps_title;"TASK_TARGET"->R.string.im_targets;"INCIDENT_SECTOR"->R.string.im_sectors
     "INCIDENT_MAP_OBJECT"->R.string.im_objects;"INCIDENT_LINKED_HYDRANT"->R.string.im_linked
     "ROUTE"->R.string.im_routes;"REGISTRY_HYDRANT"->R.string.im_background;else->R.string.im_center
 })
@@ -61,6 +61,10 @@ internal fun IncidentMapScreen(model: IncidentViewModel,registry: HydrantViewMod
             TextButton(onClick=model::sync){Text(stringResource(R.string.h_sync_now))}
         };return
     }
+    val vehiclePositions=rememberVehiclePositions(model,incidentId,incident.obj("field_map").text("_scope"),state.locked || incident.flag("leader_reset"))
+    val gpsFeatures=vehiclePositions.map {p->IncidentMapFeature("REAL_VEHICLE/"+p.vehicle,"REAL_VEHICLE",(if(p.age()<120)"● " else "▧ ")+p.label,
+        buildJsonObject {put("type","Point");put("coordinates",buildJsonArray {add(p.lonE7/1e7);add(p.latE7/1e7)})},
+        status=if(p.age()<120)"CURRENT" else "LAST_KNOWN")}
     val query=remember(model.organization){HydrantQuery(organization=model.organization)}
     val flow=remember(registry,query){registry.mapHydrants(query)}
     val registryData by flow.collectAsStateWithLifecycle(initialValue=MapHydrantsState(loading=true))
@@ -93,11 +97,11 @@ internal fun IncidentMapScreen(model: IncidentViewModel,registry: HydrantViewMod
                 label=h.code ?: h.id.take(8),version=h.version.toString(),
                 geometry=buildJsonObject {put("type","Point");put("coordinates",buildJsonArray {add(h.longitude!!);add(h.latitude!!)})})
         }
-    }+registryFeatures
+    }+registryFeatures+gpsFeatures
     val selectedFeature=features.find {it.id==selected}
     val assignment=incident.rows("assignments").find {it.text("id")==selectedFeature?.assignment}
     val route=projection.routes.find {it.text("assignment_id")==selectedFeature?.assignment}
-    val visible=features.filter {it.kind in layers || it.kind=="REGISTRY_HYDRANT" || it.id==selected}
+    val visible=features.filter {it.kind in layers || it.kind=="REGISTRY_HYDRANT" || it.kind=="REAL_VEHICLE" || it.id==selected}
     val routeFeature=route?.takeIf {"ROUTE" in layers}?.let {
         IncidentMapFeature("ROUTE/"+it.text("route_id"),"ROUTE",it.text("provider"),it.obj("geometry"),version=it.text("route_revision"))
     }
@@ -144,7 +148,7 @@ internal fun IncidentMapScreen(model: IncidentViewModel,registry: HydrantViewMod
                 if(changedReview)FieldBanner(stringResource(R.string.im_review_changed),FieldTone.WARNING)
                 if(projection.invalid)FieldBanner(stringResource(R.string.im_invalid),FieldTone.WARNING)
                 Text(stringResource(R.string.im_scope),style=MaterialTheme.typography.bodySmall)
-                RealUnitLocationNotice()
+                if(vehiclePositions.isEmpty())RealUnitLocationNotice()
                 FlowRow(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
                     listOf("TASK_TARGET","INCIDENT_SECTOR","INCIDENT_MAP_OBJECT","INCIDENT_LINKED_HYDRANT","ROUTE").forEach {kind->
                         FilterChip(selected=kind in layers,onClick={layers=if(kind in layers)layers-kind else layers+kind},label={Text(mapKind(kind))})
@@ -164,13 +168,20 @@ internal fun IncidentMapScreen(model: IncidentViewModel,registry: HydrantViewMod
         },incidentDetails={
             selectedFeature?.let { f->OperationalCard {
                     Text(f.label,style=MaterialTheme.typography.titleMedium);Text(mapKind(f.kind))
-                    Text(stringResource(if(f.issued)R.string.im_issued else R.string.im_reference))
+                    if(f.kind=="REAL_VEHICLE")Text(stringResource(R.string.gps_source))
+                    else Text(stringResource(if(f.issued)R.string.im_issued else R.string.im_reference))
                     if(f.kind=="REGISTRY_HYDRANT")registryData.rows.find { "REGISTRY_HYDRANT/"+it.id==f.id }?.let {h->Text(stringResource(si.gasilko.app.feature.hydrants.presentation.statusLabel(h.status)))}
                     if(f.version.isNotEmpty())Text(stringResource(R.string.im_version,f.version))
                     assignment?.let {a->Text(a.obj("task").text("title"));Text(stateName(a.text("status")))}
-                    val destination=mapPoint(f.geometry)
-                    if(destination==null)Text(stringResource(R.string.im_nonpoint))
-                    if(route!=null) {
+                    val destination=if(f.kind=="REAL_VEHICLE")null else mapPoint(f.geometry)
+                    if(destination==null && f.kind!="REAL_VEHICLE")Text(stringResource(R.string.im_nonpoint))
+                    if(f.kind=="REAL_VEHICLE") {
+                        vehiclePositions.find {"REAL_VEHICLE/"+it.vehicle==f.id}?.let {point->
+                            Text(stringResource(R.string.gps_position_summary,
+                                stringResource(if(point.age()<120)R.string.gps_current else R.string.gps_last_known),
+                                point.age().toString(),kotlin.math.ceil(point.accuracyCm/100.0).toInt().toString()))
+                        }
+                    } else if(route!=null) {
                         Text(stringResource(R.string.im_route_summary,route.text("provider"),route.text("distance_m"),route.text("duration_s")))
                         Text(stringResource(R.string.im_planning_origin));Text(route.text("calculated_at"))
                         Text(stringResource(R.string.im_route_state,mapNavigationStatus(route.text("status"))))
@@ -206,14 +217,17 @@ internal fun IncidentMapScreen(model: IncidentViewModel,registry: HydrantViewMod
             val units=allUnits.filter {canonicalUuid(it.text("id"))}.distinctBy {it.text("id")}.sortedBy {it.text("id")}.take(100)
             val currentUnitPage=minOf(unitPage,(units.size-1).coerceAtLeast(0)/30)
             RealUnitLocationNotice()
-            VehicleLocationCapabilityCard(model,incidentId,incident.obj("field_map").text("_scope"))
+            VehicleLocationPanel(model,incidentId,incident.obj("field_map").text("_scope"))
             if(allUnits.size!=units.size)FieldBanner(stringResource(R.string.c3_partial),FieldTone.WARNING)
             units.drop(currentUnitPage*30).take(30).forEach {u->
                 val position=realUnitPositionView(RealUnitBinding(model.repository.account,model.organization,incidentId,u.text("id"),
                     incident.obj("field_map").text("_scope")),!state.locked&&projection.supported)
                 OperationalCard {
                     Text(u.text("name"));Text(leaderStatus(u.text("status")))
-                    RealUnitPositionBadge(position)
+                    val precise=vehiclePositions.find {it.deployment==u.text("id")}
+                    if(precise==null)RealUnitPositionBadge(position) else Text(stringResource(R.string.gps_position_summary,
+                        stringResource(if(precise.age()<120)R.string.gps_current else R.string.gps_last_known),
+                        precise.age().toString(),kotlin.math.ceil(precise.accuracyCm/100.0).toInt().toString()))
                 }
             }
             FlowRow {

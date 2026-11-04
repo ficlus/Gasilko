@@ -112,6 +112,21 @@ internal class LocalDeviceProofKeys(private val access: LocalDeviceProofAccess,
         guard();challenge.requireLocallyLive(nowSeconds())
         PreparedLocalDeviceProof(original,bytes,der)
     }
+    /** GPS has its own exact domain; enrollment signing/bytes remain unchanged. */
+    suspend fun signLocationSample(credential: LocalDeviceCredential,sample: DeviceLocationSampleV1): ByteArray=operation {store->
+        guard()
+        val f=sample.fields
+        proofRequire(credential.scope.same(access.scope) && f[2]==access.scope.account && f[3]==access.scope.organization &&
+            f[4]==access.scope.incident && f[5]==access.scope.deployment && f[6]==access.scope.vehicle &&
+            f[7]==credential.id,DeviceProofError.SCOPE_UNAVAILABLE)
+        val original=loadCredential(store,credential.id)
+        proofRequire(original.publicKeySha256==credential.publicKeySha256,DeviceProofError.PUBLIC_KEY_MISMATCH)
+        val entry=store.getEntry(alias(credential.id),null) as? KeyStore.PrivateKeyEntry
+            ?: throw DeviceProofException(DeviceProofError.KEY_UNAVAILABLE)
+        val der=Signature.getInstance("SHA256withECDSA").run {initSign(entry.privateKey);update(sample.bytes());sign()}
+        val raw=DeviceProofEncoding.derToRaw(der)
+        guard();raw
+    }
     /** Immediate local denial; does NOT revoke any server credential/session. */
     fun revokeLocalAccess() {access.revoke()}
     /** Explicit own-namespace cleanup, usable after logout. Never deletes auth AES or pending evidence. */

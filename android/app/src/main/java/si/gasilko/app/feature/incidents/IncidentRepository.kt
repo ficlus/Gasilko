@@ -96,6 +96,10 @@ class IncidentRepository(private val context: Context,private val client: Supaba
             emit(IncidentFieldState(diagnosticsFailure="LOCAL_STORAGE"))
         }
     }
+    internal fun vehicleLocations(org: String)=VehicleLocationRepository(context,client,account,org) {
+        val row=dao.snapshot(account,org)
+        if(lease(org,row)<=0)throw VehicleLocationFailure("NOT_AUTHORIZED")
+    }
     private suspend fun revoke(org: String)=incidentIdentityAccess.withLock {
         for(i in dao.snapshot(account,org)?.let { parse(it.payload).rows("incidents") }.orEmpty()) {
             val key="$account/$org/"+i.text("id")

@@ -14,6 +14,7 @@ import type {ContextHydrant} from '../../lib/hydrants/viewport';
 import {useRts} from './rtsSession';
 import {MapOverlaySlot,useWorkspace,WorkspaceSlot,WorkspaceSection,ContextActions} from './workspace';
 import {IncidentLiveStatus} from './IncidentLiveStatus';
+import {useVehiclePositions,VehicleLocationLegend} from './VehicleLocationLayer';
 import {VehicleLocationCapability} from './VehicleLocationCapability';
 import {RealUnitLocationNotice} from './RealUnitPosition';
 import {useIncidentLive} from './IncidentLiveProvider';
@@ -67,6 +68,7 @@ export function IncidentCop({locale,account,org,incidentId,refresh,feedback,disa
  useEffect(()=>()=>searchController.current?.abort(),[]);
  useEffect(()=>{rts?.setCopEditing(!!draft||!!drawing);return()=>rts?.setCopEditing(false);},[!!draft,!!drawing,rts?.setCopEditing]);
  const locked=disabled||loading||!!rts?.locked||!!rts?.blocked||!!rts?.externalEditing,actionLocked=locked||!!draft||!!rts?.open||(rts?.mode??'NORMAL')!=='NORMAL';
+ const vehicleGps=useVehiclePositions(account,org,incidentId,live?.authorizationFingerprint??'',!cop||!!error||!!rts?.blocked||live?.status==='ACCESS_LOST',read);
  const quick=!!draft?.quick&&workspace?.view==='command';
  useEffect(()=>{
   if(!quick||locked||drawing)return;
@@ -163,10 +165,10 @@ export function IncidentCop({locale,account,org,incidentId,refresh,feedback,disa
     <p className="workspace-map-legend">{t('workspaceMarkerLegend')}</p><p className="workspace-map-legend">{t('copTacticalLegend')}</p>
    </>}
   </details>
-  <MapOverlaySlot name="mapStatus"><RealUnitLocationNotice locale={locale} locked={!cop||!!error||!!rts?.blocked||live?.status==='ACCESS_LOST'}>
+  <MapOverlaySlot name="mapStatus">{vehicleGps.authorized?<VehicleLocationLegend locale={locale} positions={vehicleGps.positions} now={vehicleGps.now}/>:<RealUnitLocationNotice locale={locale} locked={!cop||!!error||!!rts?.blocked||live?.status==='ACCESS_LOST'}>
    <VehicleLocationCapability locale={locale} account={account} org={org} incidentId={incidentId}
     fingerprint={live?.authorizationFingerprint??''} locked={!cop||!!error||!!rts?.blocked||live?.status==='ACCESS_LOST'} read={read}/>
-  </RealUnitLocationNotice></MapOverlaySlot>
+  </RealUnitLocationNotice>}</MapOverlaySlot>
   {workspace?.view==='command' ? (
    (initialMapLoading||error||context.error||context.more||saved)&&
    <MapOverlaySlot name="mapStatus"><div className="command-map-feedback" aria-live="polite">
@@ -177,7 +179,7 @@ export function IncidentCop({locale,account,org,incidentId,refresh,feedback,disa
    </div></MapOverlaySlot>
   ) : classicMapStatus}
   {cop&&<>
-   <CopMap focusRequest={focusRequest} busy={actionLocked} previewRequest={previewRequest} onCreateObject={createAt} onEditObject={id=>begin('object',id)} onDeactivateObject={id=>{const object=cop.objects.find(o=>o.id===id);if(object)deactivate('object',object.id,object.version,object.label);}} selected={selection||shownHydrant||selected==='primary'?selected:''} contextHydrants={mapHydrants} onBounds={setBounds} locale={locale} cop={cop} layers={layers} drawing={locked?null:drawing} draft={draft?.geometry??null} vertices={vertices} onPoint={point} onSelect={setSelected}/>
+   <CopMap vehiclePositions={vehicleGps.positions} focusRequest={focusRequest} busy={actionLocked} previewRequest={previewRequest} onCreateObject={createAt} onEditObject={id=>begin('object',id)} onDeactivateObject={id=>{const object=cop.objects.find(o=>o.id===id);if(object)deactivate('object',object.id,object.version,object.label);}} selected={selection||shownHydrant||selected==='primary'?selected:''} contextHydrants={mapHydrants} onBounds={setBounds} locale={locale} cop={cop} layers={layers} drawing={locked?null:drawing} draft={draft?.geometry??null} vertices={vertices} onPoint={point} onSelect={setSelected}/>
    {selected==='primary'&&<p>{t('copLocation')}: {cop.incident.latitude}, {cop.incident.longitude}</p>}
    <WorkspaceSlot name="selectedPane">
    {selected==='primary'&&<p>{t('copLocation')}: {cop.incident.latitude}, {cop.incident.longitude}</p>}

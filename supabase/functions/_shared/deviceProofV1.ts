@@ -230,9 +230,21 @@ export async function verifyDeviceProofV1(input: unknown): Promise<DeviceSignatu
   validateSpki(k.publicKeySpkiDer); validateSignature(proof.signatureRaw);
   const fingerprint = await sha256(k.publicKeySpkiDer);
   demand(fingerprint === k.publicKeySha256,"CREDENTIAL_MISMATCH");
+  await verifyP256BytesV1({spki:k.publicKeySpkiDer,signature:proof.signatureRaw,transcript});
+  const evidence: DeviceSignatureEvidenceV1 = {kind:"SIGNATURE_VALID_ONLY",protocolVersion:1,credentialId:c.credentialId,challengeId:c.challengeId,
+    issueOperationId:c.issueOperationId,confirmOperationId:c.confirmOperationId,reservedGeneration:c.reservedGeneration,
+    publicKeySha256:fingerprint,transcriptSha256:await sha256(transcript),signatureSha256:await sha256(proof.signatureRaw)};
+  return Object.freeze(evidence);
+}
+
+/** Internal shared math for distinct protocols. No auth, enrollment or GPS permission. */
+export async function verifyP256BytesV1(input: unknown): Promise<void> {
+ const value=record(input,["spki","signature","transcript"]);
+ const spki=bytes(value.spki,91),signature=bytes(value.signature,64),transcript=bytes(value.transcript);
+ validateSpki(spki);validateSignature(signature);
   let key: CryptoKey;
   try {
-    key = await crypto.subtle.importKey("spki",k.publicKeySpkiDer.buffer as ArrayBuffer,
+    key = await crypto.subtle.importKey("spki",spki.buffer as ArrayBuffer,
       {name:"ECDSA",namedCurve:"P-256"},false,["verify"]);
   } catch (error) {
     throw new DeviceProofFailure(error instanceof DOMException && error.name === "NotSupportedError" ?
@@ -241,11 +253,8 @@ export async function verifyDeviceProofV1(input: unknown): Promise<DeviceSignatu
   let valid: boolean;
   try {
     valid = await crypto.subtle.verify({name:"ECDSA",hash:"SHA-256"},key,
-      proof.signatureRaw.buffer as ArrayBuffer,transcript.buffer as ArrayBuffer);
+      signature.buffer as ArrayBuffer,transcript.buffer as ArrayBuffer);
   } catch { throw new DeviceProofFailure("CRYPTO_UNAVAILABLE"); }
   demand(valid,"INVALID_SIGNATURE");
-  const evidence: DeviceSignatureEvidenceV1 = {kind:"SIGNATURE_VALID_ONLY",protocolVersion:1,credentialId:c.credentialId,challengeId:c.challengeId,
-    issueOperationId:c.issueOperationId,confirmOperationId:c.confirmOperationId,reservedGeneration:c.reservedGeneration,
-    publicKeySha256:fingerprint,transcriptSha256:await sha256(transcript),signatureSha256:await sha256(proof.signatureRaw)};
-  return Object.freeze(evidence);
+
 }

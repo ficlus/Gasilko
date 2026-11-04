@@ -26,11 +26,17 @@ import si.gasilko.app.core.ui.*
 @Composable
 fun AuthScreen(model: AuthViewModel = viewModel()) {
     val state by model.state.collectAsStateWithLifecycle()
+    si.gasilko.app.feature.incidents.VehicleLocationPermissionHost()
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { model.refresh() }
     var requests by remember { mutableStateOf(false) }
     var notifications by remember(state.account) { mutableStateOf(false) }
     val registryState by (model.hydrants?.state?.collectAsStateWithLifecycle()
         ?: remember { mutableStateOf(si.gasilko.app.feature.hydrants.presentation.RegistryState()) })
+    SideEffect {
+        // LOADING is not a confirmed identity change; live GPS server leases still apply.
+        if(state.route!=AuthRoute.LOADING)si.gasilko.app.feature.incidents.VehicleLocationRuntime.select(state.account,
+            registryState.organization?.id.takeIf {state.route==AuthRoute.ACTIVE})
+    }
     var fieldOrg by remember(state.account) { mutableStateOf<String?>(null) }
     var fieldIncident by remember(state.account) { mutableStateOf<String?>(null) }
     var fieldNavigation by remember(state.account) { mutableLongStateOf(0L) }
