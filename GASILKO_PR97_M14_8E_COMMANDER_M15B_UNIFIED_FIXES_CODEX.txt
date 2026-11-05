@@ -1,0 +1,1091 @@
+# GASILKO — UNIFIED CODEX CORRECTION ASSIGNMENT
+
+## M14.8E Android Commander Incident Access + M15B PR #97 Security / UX Corrections
+
+**Date:** 2026-11-05  
+**Repository:** https://github.com/ficlus/Gasilko  
+**EXISTING PR:** https://github.com/ficlus/Gasilko/pull/97  
+**EXISTING branch:** `codex/m15b-end-to-end-real-vehicle-gps`  
+**Starting head reported:** `05742f8f8727bcd93aaa5c30f995b5296546dccd`  
+**Base of PR #97 reported:** `78c892c54f48079c04604d9257ad5a5e236e788b`  
+**Owner execution:** NO tests, build, lint, typecheck, CI, Gradle sync, SQL run, Supabase/Edge/Web deployment, emulator, Android installation, GPS collection, or runtime checks.  
+**Output:** ONE additional `[skip ci]` commit (or a small sequence of correction commits) **ON THIS SAME OPEN PR #97**. DO NOT OPEN A NEW PR. DO NOT MERGE.
+
+### Read this supersession rule before anything else
+
+This is a COMBINED CORRECTION request. Part I below is the full original
+M14.8E commander-access assignment, adapted from
+`GASILKO_M14_8E_ANDROID_COMMANDER_ACCESS_CODEX.md`.
+Part II adds FOUR required corrections to the ALREADY IMPLEMENTED
+M15B GPS source in PR #97, with integrated authorization, race,
+retention and rollout requirements.
+
+The prior standalone M14.8E prompt requested a fresh branch/PR
+and excluded M15B. THOSE TWO INSTRUCTIONS ARE NOW SUPERSEDED.
+Everything is to be done in the current PR #97 branch.
+No other constraints are weakened.
+
+### Explicit owner product decision
+
+The user is incident COMMANDER in real Web incidents (REAL/TRAINING,
+ACTIVE/CLOSED) but Android *Intervencije* shows no incidents. They want
+Android commander overview with actually authorized units, assignments,
+existing incident map and historical visibility, even if not member
+of a field unit. Command-write rights are NOT automatically inherited.
+
+M15B #97 implements an end-to-end GPS source behind DEFAULT-OFF
+privacy and readiness gates. It is NOT merged or deployed.
+The owner wants its review issues corrected in the SAME PR.
+
+### Priority order and decision table
+
+1. **P0 — Safety:** Review and fix STOP/sample/server revoke race,
+   ensure no new accepted position after authoritative STOP, and no
+   unauthorized precise-location disclosure to commanders.
+2. **P1 — Real feature usability:** Commander incident directory,
+   B1 snapshot/read authorization, Android command overview; properly
+   selected vehicle when more than one driver-eligible vehicle exists.
+3. **P1 — Cross-feature correctness:** Commander may read only GPS
+   positions independently allowed by the precise-reader policy,
+   while being permitted to read incident units/tasks without GPS.
+4. **P2 — Operational evidence:** Correct stale owner rollout ledger;
+   manually applied #86 had a one-expression syntax fix, source still
+   needs an explicit separate repair plan. All verification UNEXECUTED.
+
+### Hard stop conditions
+
+- If `#97` has already been merged or another agent is actively editing
+  its branch, STOP with overlap/merge report; do not manufacture a new PR.
+- If current source changes substantially from reviewed head, re-read
+  and rebase only under a safe source control strategy that preserves
+  owner changes; never force push without explicit owner approval.
+- If no safe way exists to add commander read audience to B1 without
+  privilege bleed into field commands, implement the non-risky fixes
+  and report the exact commander bridge BLOCKER; DO NOT broaden
+  `private.field_unit_visible`.
+- If accurate GPS reader policy is unavailable/unapproved, keep
+  commander GPS positions empty/UNAVAILABLE, not incident-wide by default.
+- Retain Room16. Never change owner-customized Gradle files, generated
+  schemas, `pnpm-lock.yaml`, or local Android settings.
+- All P01–P16/A01 GPS privacy decisions remain UNAPPROVED.
+- No migration is deployed automatically. An added migration is
+  ordered AFTER existing #97 migration in filename/source dependency
+  order, using a new unique timestamp; never edit the already-applied
+  historical migrations.
+
+### Current reviewed implementation links (verify updated source)
+
+- PR #97: https://github.com/ficlus/Gasilko/pull/97
+- M15B SQL:
+  `supabase/migrations/20261104120000_vehicle_location_end_to_end.sql`
+- M15B Android `VehicleLocationUi.kt`:
+  `android/app/src/main/java/si/gasilko/app/feature/incidents/VehicleLocationUi.kt`
+- M15B Edge:
+  `supabase/functions/vehicle-location/index.ts`
+- M15B server documentation:
+  `docs/M15B-end-to-end-real-vehicle-gps.md`
+- M14.7 B1 snapshot protocol:
+  `supabase/migrations/20261030100000_incident_snapshot_protocol.sql`
+- M14.7 field pilot:
+  `supabase/migrations/20261027100000_incident_android_field_pilot.sql`
+- M15A3 existing device lifecycle:
+  `supabase/migrations/20261103100000_vehicle_device_proof_lifecycle.sql`
+
+The existing M15B `VehicleLocationUi.kt` currently uses
+`vehicles.singleOrNull()` and shows a driver-only/unavailable message
+when more than one eligible row exists. The original M15B SQL
+explicitly DELETEs a latest position on authoritative STOP and
+filters reader results by SHARING sessions. Verify row-lock ordering,
+eligibility rechecks and actual in-flight Android behavior; do not
+assert a confirmed STOP race without tracing the code. The goal is
+to prove the invariant in source, then fix what is missing.
+
+---
+
+# PART I — M14.8E: Android Commander Incident Access & Scoped Overview
+
+**Codex implementation assignment | 2026-11-04 | Repo: https://github.com/ficlus/Gasilko**
+
+**Apply all work to EXISTING OPEN PR #97, branch `codex/m15b-end-to-end-real-vehicle-gps`; no new PR or new branch; use `[skip ci]`; never merge.** Language: English technical docs, default/SI/DE UI labels. The owner alone applies SQL, builds Android, deploys and performs acceptance.
+
+## 0. Product decision and observed failure
+
+The owner is a legitimate commander of multiple Web incidents (REAL and TRAINING, ACTIVE and CLOSED) but Android under *Intervencije → Aktivne* shows *"Ni dostopnih intervencij za izbrani pogled"*. Android successfully built, but those commander incidents are not discoverable. The owner explicitly approved **commander incident visibility and a role-scoped overview of authorized units, tasks and the existing map**, comparable to Web, **without automatically granting field execution rights or precise GPS**.
+
+This is a real implementation task, not a request for another policy-only milestone. Do not create fake role assignments or add the owner as a crew member merely to populate Android.
+
+### Source-backed likely root cause (verify current `main`)
+
+* `supabase/migrations/20261027100000_incident_android_field_pilot.sql` defines `private.field_unit_visible(person,org,unit)`, gated by effective `UNIT_LEADER` or `ACTIVE` crew membership. This is **unit execution-domain visibility**, not generic commander incident read permission.
+* `supabase/migrations/20261030100000_incident_snapshot_protocol.sql` defines `public.incident_field_directory(org)` and `private.field_projection(org,incident)` with a `WHERE EXISTS (... private.field_unit_visible(...))` admission filter. `private.incident_field_scope(org,incident)` throws `NOT_AUTHORIZED` when visible unit count is zero. A commander with no membership in a deployed unit may therefore be excluded before Android ever displays the incident.
+* `android/app/src/main/java/si/gasilko/app/feature/incidents/IncidentScreen.kt` filters `data.incidents` locally; editing chips alone cannot restore records never returned by the directory.
+* Actual Web incident commander-read permission, and active command roles (`INCIDENT_COMMANDER`, `AGENCY_COMMANDER`, `SECTOR_COMMANDER`, deputies or others), must be established from present canonical code. The user's colloquial “commander” is not authorization evidence by itself.
+* The above is a **source-based likely explanation**, not runtime-proven. Confirm that organization selection, authorization lease, active effective role, cache and network status are correct.
+
+**Success:** An authorized commander (even without crew/unit membership) sees their incident(s) on Android and can read their **real scope of authorized units/tasks/targets**, but cannot ACK, complete or change another responder's task merely because it is visible.
+
+## 1. Absolute execution and edit restrictions
+
+CODEX MUST NOT run/add: tests, Android builds, Web builds, lint, typecheck, CI, Gradle sync, emulator, SQL, Supabase cloud checks/mutations, Edge deploy, Web deploy, installation, monitoring or live validation. No automatic merges. The owner alone performs all runtime checks.
+
+NEVER change without explicit owner permission: `android/build.gradle.kts`, `android/app/build.gradle.kts`, `android/gradle.properties`, KAPT/KSP, dependencies, generated Room schemas, `android/app/schemas/`, `local.properties`, `.env*`, `pnpm-lock.yaml`, `web/next-env.d.ts` or other owner-modified files. Do not clean, reset, discard or stash user's local work.
+
+Preserve: **Room16**, account/org lease guards, B1 snapshot/manifest/page/change-feed and atomic cursor projection, B2 private realtime, C1 map/navigation, C3 REAL-position-unavailable, D1/D2 recovery, immutable operation UUIDs and receipts, M10 notification worker, Web NAV/command authority, hydrants, inspections, photos and strict REAL/SIM separation. No GPS tracking work or activation. One PR, subsequent fixes on SAME branch.
+
+## 2. Required source inventory before edits
+
+1. Verify latest `main` and EXISTING OPEN PR #97 head/branch ancestry. Owner reports #96 merged and SQL migrations #82–#90, #92, #96 applied; `incident-evidence` Edge ACTIVE. M15B is in open #97, NOT merged or deployed. The present task updates THAT PR, not a fresh PR.
+2. Read `AGENTS.md`, `docs/SPEC.md`, `docs/SPEC-M14-INCIDENT-OPERATIONS.md`, and M14.7A/B1/B2/C, M14.8B/C1/C3/D1/D2 incident specs. Inspect canonical roles and Web COP roles/permissions, not just old docs.
+3. Examine SQL contracts: `private.field_unit_visible`, `private.field_unit_leader`, `private.field_assignment_visible`, `private.incident_assignment_effective`, `private.incident_acting_member`, `private.can_read_incident` (if present), `private.can_manage_incident_unit`, `private.can_issue_task`, `private.can_execute_task`, `private.incident_field_scope`, `private.field_projection`, `public.incident_field_directory`, `public.incident_snapshot_manifest`, `public.incident_snapshot_page`, `public.incident_change_feed`, `public.incident_field_entities`, `public.incident_field_timeline`, `public.incident_sync_head`, and map/scope helpers.
+4. Inspect canonical tables: `incidents`, `incident_participants`, `incident_role_assignments`, `incident_units`, `incident_crew_members`, `incident_tasks`, `incident_task_assignments`, `incident_sectors`, `incident_timeline` and links to operational units and organizations. Confirm exact column names, FK, active-state enum and effective command episode rules from code.
+5. Inspect Android `IncidentScreen`, `IncidentViewModel`, `IncidentRepository`, `IncidentReconciliation`, `IncidentMapScreen`, `IncidentRecoveryScreen`, Room16 DAO, field cache identity/lease and command queue. Confirm source of `data.incidents` and every `_scope` fingerprint check.
+6. Inspect Web's actual authorized command overview so Android grants read parity **only for the same effective role/agency/sector**, not generalized Web-admin permissions.
+
+Produce as-found matrix: function/file/line, signature, authority, read audience, bounds, DTO shape, mutation gate, observed gap, planned change. Cite exact source locations in the PR docs.
+
+## 3. Requirements — MoSCoW
+
+### MUST
+M01. Commander-only visibility: genuinely effective incident commander, agency commander, sector commander (and deputy only where explicit current read policy permits) can discover appropriately authorized incidents with **zero** field-visible unit memberships.
+M02. Scope: incident commander incident-wide *only as canonical allowed*; agency own participating agency; sector explicitly delegated sector/resources, never by polygon containment; unit leader/crew retain prior field scope.
+M03. REAL and TRAINING are both supported when authorized and unmistakably labeled. TRAINING cannot leak into real dispatch, GPS or commands.
+M04. Active/STABILIZED in Active and authorized CLOSED/CANCELLED in History. Historic access must follow existing historical-read authority, not historical role presence alone.
+M05. Existing filters unchanged semantically: "Dodeljeno meni" means truly personally assigned tasks, "Moja enota" means actual unit membership/leadership, and "Usposabljanje" means authorized TRAINING. Add "Moje poveljevanje" or equivalent separate commander view.
+M06. Commander overview shows authorized units, statuses, legitimate crew/leader summaries where permitted, task summaries, target/map and actual role+scope. Distinguish "incident exists but no units" from "no incident access".
+M07. Read ≠ execute. Do not turn commander-read into `field_unit_visible`, `can_execute`, `can_return`, `leader`, `can_manage_crew` or crew `can_issue`. Canonical command RPC checks stay mandatory.
+M08. All B1 functions share the same revision and authorization fingerprint; old manifests/cursors cannot leak after role revocation.
+M09. No unauthorized cached data after logout, account/org switch, actor deactivation, role expiry/transfer, participant release, effective delegation change, B1 scope revocation or lease expiry.
+M10. Explicit DTO allowlists and independent permission for messages/evidence/precise coordinates. No blanket `SELECT *` or timeline JSON leak.
+M11. Preserve bounded snapshot and finite pages; never silently truncate >50 incidents or >100 units/tasks. Use stable keyset pagination or honest incomplete status.
+M12. Keep Room16, existing Compose→ViewModel→Repository→Room pipeline and worker. No second sync engine, no direct UI RPC.
+M13. Backward-compatible old clients and old servers fail closed; no implicit role escalation via old schema_version.
+M14. Default, Slovenian and German translations, screen-reader-readable scope/status and read-only action labels.
+M15. Add unique forward-only SQL migration only if needed; never rewrite already applied historical migration.
+M16. Report exact root-cause predicate and show correction source-wise; no claim of runtime PASS without owner manual acceptance.
+
+### SHOULD
+S01. Role-aware incidents summary counters; counts labeled **partial** when scoped or paged.
+S02. C1 existing map with actual authorized task targets and unit summaries; C3 honest "position unavailable" persists.
+S03. Mixed roles shown distinctly and limited to same acting org.
+S04. Differentiated error states for empty, offline, stale, revoked, unsupported and oversized snapshot.
+S05. Commander-readable incident with no deployed units is still listed if authorized.
+S06. Map camera state tied to account/org/incident/current role `_scope`.
+S07. No separate evidence, message or GPS reader grants.
+
+### WON'T
+W01. No field/crew membership fabrication or generic organization ADMIN shortcut.
+W02. No global `field_unit_visible()` broadening to commanders.
+W03. No permission to ACK/COMPLETE someone else's tasks merely as issuer.
+W04. No new operational command permissions. Do not broaden M15B device-binding or GPS producer privileges; review and fix existing #97 GPS code only as required in Part II. Keep production GPS OFF.
+W05. No full Web COP rewrite or new MapLibre engine; do not add a SECOND GPS polling/notification mechanism beyond existing #97. Scope commander reads and preserve its existing bounded polling.
+
+---
+
+## 4. Server architecture: two read audiences, one B1 protocol
+
+### 4.1 Separate commander-read from field execution
+
+**CRITICAL:** The existing `private.field_unit_visible` is used in task/crew execution-domain logic and notification scope. DO NOT add an unconditional branch such as `OR has_incident_commander_role()` to it. Such a shortcut could let commanders read recipient-private content, impersonate unit leaders, or change unit/task state.
+
+Instead inspect existing canonical read helpers and introduce **a distinct effective commander-read predicate** only where needed, for example:
+- `private.field_commander_incident_readable(actor, org, incident)` (illustrative signature).
+- `private.field_commander_unit_readable(actor, org, incident, deployment)` with agency/sector scope checks.
+- `private.field_commander_assignment_readable(actor, org, assignment)` controlling read-only task summaries.
+- A safe `private.field_incident_readable` (optional) that expresses admission: old unit-member field read **OR** effective commander read. It must not be reused as permission to execute.
+
+Actual function names/signatures and role constants MUST come from the inspected repository, not this sample.
+
+Validate `auth.uid()`, active profile and exact org membership; active incident participation; `private.incident_assignment_effective`; role episode/version; parent delegation/agency/sector IDs; scope expiration; current incident lifecycle. An existing Web helper may be reused **if** its read semantics are narrow enough. Avoid reimplementing authorization differently from canonical command system.
+
+For a terminal CLOSED incident, make a specific decision: Web may offer authorized historic read while command episodes are no longer live. Reuse documented **historic access** policy if present. If none exists, do not simply ignore role expiry; document and leave that scenario blocked until a safe contract exists.
+
+### 4.2 Directory admission
+
+Current B1 `public.incident_field_directory(p_acting_organization_id uuid)` filters on `EXISTS(incident_units u WHERE private.field_unit_visible(auth.uid(),org,u.id))`, ordering by incident UUID, limit 51 and raising if >50. Extend it in a **new forward-only migration** or add a versioned directory RPC if backwards compatibility demands.
+
+Required:
+- admit commander-only authorized incident even with zero visible field units;
+- preserve existing field-unit users unchanged;
+- do not admit unrelated/role-expired org admins;
+- keep id, revision, timeline_sequence and 32-character private `scope_fingerprint` contract if possible;
+- optional read-mode metadata must be server-derived;
+- bound directory and provide stable paging or explicit incompleteness;
+- no client-supplied `commander=true`/`organization_role=ADMIN` authority.
+
+Make the directory, scoped manifest and data collections agree. A directory listing that still fails at `incident_snapshot_manifest` is an incomplete implementation.
+
+### 4.3 Scope fingerprint and authority resets
+
+B1's existing `private.incident_field_scope` currently aggregates visible units/crew, role states, actor/org/incident and salt, and explicitly throws if `v_count=0`. Generalize to a **read audience descriptor** built from trusted state:
+- actor user, acting organization, incident and effective read type (`FIELD`, `COMMANDER_INCIDENT`, `COMMANDER_AGENCY`, `COMMANDER_SECTOR`, supported combinations);
+- effective command assignment UUIDs, statuses, versions, validity/expiry;
+- participant-org states, lead/agency/sector delegation;
+- authorized unit/crew/task scope and redaction level;
+- current relevant profile/org membership state;
+- the server-private salt.
+
+If source allows a hybrid scope for mixed actor roles, ensure it represents the **union of independently authorized read audiences** but not union of unrelated command capabilities or other organizations. A scope narrowing must produce a different fingerprint **even if the incident revision has not advanced**.
+
+Preserve B1 fingerprint shape, account/org lease checks and all old clients where possible. On fingerprint mismatch invalidate stale manifest, cursor, map camera/routes, message/evidence pages and protected cached projection before showing newly reduced scope. Do not accept stale cached commander content on network error.
+
+### 4.4 Projection and data disclosure
+
+Current `private.field_projection(org,incident)` exposes explicit bounded JSON with `"units"`, `"assignments"`, `"history"` and `"mode"` (`TRAINING` if scenario linked, else `REAL`), maximum 3 MiB response and up to 100 units/tasks. Extend it **with explicit role-scoped read branches**, not a universal `canReadAll`.
+
+**Core:** permitted incident reference, title, status, REAL/TRAINING mode, location of incident (if existing canonical readable), revision, timeline sequence, effective role and **scope description**. No precise phone/vehicle GPS granted.
+
+**Units:** only incident deployments authorized to this command actor, with callsign, name, operational status, version, and *permitted* leader/crew identity. If full crew identity is only allowed to unit leaders, use a redacted count/role summary for commanders instead. For a commander-only audience `leader` must not be `true` unless user also holds effective unit leadership. Existing `can_return`, `can_manage_crew`, `can_issue` and unit status must still derive from original canonical permission helpers.
+
+**Tasks:** include authorized assignment summaries (title, status, priority, issuing party, targets, unit, version) with explicit audience redactions. Preserve `"mine"` == actual recipient, not "I issued it". Preserve `"can_execute"` == actual authorized executor. A commander may see tasks issued to others but cannot ACK/COMPLETE them by default. If commander has issue permission for a target, check `private.can_issue_task` (or actual source) separately at time of command.
+
+**Timeline:** old allowlist of task events, with `"reason"` visible only under current recipient/leader or separately explicitly authorized command-audit policy. Do not expose private event JSON (`e.data`) wholesale. Keep bounded chronological paging and redaction by event type.
+
+**Map:** the existing C1 field map, task-target points, approved visible features; never infer GPS from incident center, navigation destination, SIM geometry or unit names. Keep no actual REAL marker until genuine approved M15 producer.
+
+**Messages/attachments:** separate scoped request remains authoritative; do not let commander incident-read automatically bypass message audience or evidence download authority.
+
+**Security:** Read-mode descriptors and UI action affordances are purely hints. Every mutation RPC must independently authenticate actor/org, check current version, issuer/target scope, command role and receipts.
+
+### 4.5 Preserve all B1 APIs and atomic paging
+
+Inspect/edit coordinated semantics for:
+- `public.incident_field_directory(uuid)`
+- `private.incident_field_scope(uuid,uuid)`
+- `private.field_projection(uuid,uuid)`
+- `public.incident_snapshot_manifest(uuid,uuid)`
+- `public.incident_snapshot_page(uuid,uuid,uuid,text,bigint,integer)`
+- `public.incident_change_feed(uuid,uuid,text,bigint,integer,integer)`
+- `public.incident_field_entities(uuid,uuid,text,bigint)`
+- `public.incident_sync_head(uuid,uuid)`
+- `public.incident_field_timeline(uuid,uuid,bigint)`
+
+Preserve manifest ownership, account/org/incident checks, revision pinning, counts, 5-minute manifest lifetime, `limit 1..25` pages, snapshot quotas, change horizon, monotonic revision/ordinal and `SCOPE_RESET` behavior. New role audience must not break C1 field-map schema 1/lease nor D1/D2 role change recovery.
+
+**Failure cases:**
+- commander without unit: no `NOT_AUTHORIZED` solely due to `v_count=0`;
+- commander with many units: cap or paginate with explicit partial state, never silently drop tasks;
+- two role changes during pages: new scope invalidates all prior pages;
+- old client: original field-only projection (or fail-closed versioned endpoint) so it cannot accidentally interpret commander-wide units as unit membership;
+- old server: new Android gives honest role-view-unavailable, not generic "0 incidents";
+- concurrent `manifest`/`change_feed`: same pinned version/scope; no unauthorized stale merge.
+
+If versioned B1 is required, document exact new RPC names, old-client dispatch and server feature detection; use one reconciliation architecture, not a parallel data fetch followed by client merging.
+
+### 4.6 SQL security rules
+
+Choose next unique migration filename after ALL current `supabase/migrations/*` files (not necessarily #96 if later PRs merged). Example only: `20261104100000_android_commander_incident_read.sql`.
+
+- One additive forward-only migration. Never alter existing applied #82/#83/etc or repair #86 here.
+- `SECURITY DEFINER SET search_path = ''`, fully qualified relation/function refs.
+- Owner, `REVOKE` and narrow `GRANT EXECUTE TO authenticated` per current conventions. No public/anon table access, no exposed private schema, no client service-role.
+- Current auth identity via `auth.uid()`, active membership/profile and exact org; order locks org→actor→incident as established in `private.incident_sync_lock`, no new lock order inversions.
+- Bound JSON outputs, stable ordering, read-only security; no new command permissions.
+- No trust in client-presented role, sector, vehicle, incident participant or task recipient.
+- Document exact replaced function signatures/dependencies, grants, RLS and rollback implications.
+- Do not add GPS grants or change `incident_vehicle_location_capabilities` from DISABLED.
+
+---
+
+## 5. Android implementation specifics
+
+### 5.1 Existing UI entry and navigation
+
+Use `IncidentScreen.kt`, `IncidentViewModel.kt`, `IncidentRepository.kt`, `IncidentReconciliation.kt` and existing `IncidentMapScreen.kt`.
+
+Current chips in Android are *Aktivne*, *Dodeljeno meni*, *Moja enota*, *Zgodovina*, *Usposabljanje*; they filter `data.incidents` locally. Implement **Moje poveljevanje** as a distinct filter/commander section, but do not change the meaning of the existing chips.
+
+- `Aktivne`: all currently authorized ACTIVE/STABILIZED rows, regardless of role, with REAL/TRAINING badges.
+- `Moje poveljevanje`: incidents in the server-authoritative active command read set; title/callsign/etc. Do not infer from user org admin.
+- `Dodeljeno meni`: actual assigned recipient's tasks only.
+- `Moja enota`: genuine assigned crew/unit-leader unit, never command-only.
+- `Zgodovina`: authorized CLOSED/CANCELLED read-only entries.
+- `Usposabljanje`: authorized TRAINING rows, not SIM fake REAL positions.
+
+Use existing Compose responsive chips (FlowRow/scroll) for emulator and small devices. Ensure no list duplicated when actor holds both commander and crew roles; one incident ID, possibly multiple view scopes. Existing back, lifecycle refresh and selected incident navigation remain stable.
+
+### 5.2 Commander overview
+
+Within existing detail, add a clear **Poveljniški pregled** / **Commander overview** when a current effective command read mode is present. It should show:
+
+1. Incident reference/title, REAL/TRAINING, lifecycle status and scope/command role.
+2. Authenticated acting organization; never mix between agencies automatically.
+3. Status counts for authorized units and tasks; counts labelled “scope-only” if agency/sector subset, or “incomplete” if capped.
+4. **Enote:** list authorized units with callsign, status, leader/crew summary where allowed, work in progress, and their targets.
+5. **Naloge:** all authorized assignments in scope with priority/status/target and role-separated actions.
+6. **Zemljevid:** existing C1 map with task targets and permitted feature context, not a new map engine.
+7. Historical/terminal read-only styling. Controlled empty states (“Ni razporejenih enot”, “Ni nalog”) versus “Dostop ni dovoljen”.
+
+Unit and task command affordances:
+- A commander seeing a task cannot set `can_execute=true` by default.
+- Only current actual recipient/unit-leader can execute actions per existing RPC.
+- Offering commander-issued task commands requires existing canonical issuer scope + target eligibility; do not add write RPCs to get “Web parity”.
+- No hidden fallback to edit other agency sector or private evidence.
+- No GPS START/STOP, pairing, or location data.
+
+### 5.3 Identity, Room and offline safety
+
+- Compose calls ViewModel; ViewModel uses Repository; repository uses B1 reconciliation and Room16 cache. **Do not call Supabase directly from Compose.**
+- Before and after network suspensions verify account, selected acting organization, incident ID, authorized lease and current scope fingerprint.
+- Role loss/transferred command invalidates persisted commander-only projection, manifests, field-map `_scope` camera, message/evidence pages; retain immutable command receipts and queued operation payload for guarded recovery, not unauthorized dispatch.
+- Never restore revoked commander-only data from old Room snapshot while network is unavailable.
+- UI must distinguish: no incidents vs stale sync vs server role access unavailable vs unauthorized vs temporary capacity.
+- Keep B1 cursor/projection transactionally atomic. No Room version bump or extra worker.
+- On app process death after fetching commander data, resume only under current lease and role fingerprint, not a previously cached optimistic UI flag.
+
+### 5.4 Localization/accessibility
+
+Implement string resources default, SI, DE (at least):
+
+- Commander overview / Poveljniški pregled / Führungsübersicht
+- My command incidents / Moje poveljevanje / Meine Einsatzführungen
+- Incident commander / Poveljnik intervencije / Einsatzleiter
+- Agency commander / Poveljnik organizacije / Organisations-Einsatzleiter
+- Sector commander / Poveljnik sektorja / Abschnittsleiter
+- Read only / Samo pregled / Nur ansehen
+- No authorized units / Ni dovoljenih enot / Keine freigegebenen Einheiten
+- No authorized tasks / Ni dovoljenih nalog / Keine freigegebenen Aufgaben
+- Data incomplete / Podatki niso popolni / Daten unvollständig
+- Role access changed / Dovoljenja so se spremenila / Berechtigungen geändert
+- Commander view unavailable / Poveljniški pregled ni na voljo / Führungsübersicht nicht verfügbar
+
+Use correct translations in context; let repository localization conventions win. Scope roles require text+icon/status, not badge color alone. Screen-reader semantics and >=48dp relevant touch targets. No hardcoded Slovene in Kotlin.
+
+---
+
+## 6. Authorization matrix — fill with actual source truth
+
+| Effective caller | Incident discover | Unit read | Task read | Task ACK/COMPLETE | Unit/crew mutation | Precise GPS |
+|---|---|---|---|---|---|---|
+| INCIDENT_COMMANDER (effective) | own authorized incident | canonical incident read audience | authorized scope | only actual assigned recipient authorization | original canonical RPC only | NO NEW GRANT |
+| AGENCY_COMMANDER (effective) | incident with own agency | own agency's permitted deployments | corresponding tasks | actual recipient only | original canonical RPC only | NO NEW GRANT |
+| SECTOR_COMMANDER (effective) | incident with assigned sector | expressly delegated units | delegated tasks | actual recipient only | original canonical RPC only | NO NEW GRANT |
+| Deputy with existing read grant | only explicitly delegated | source-authorized | source-authorized | actual recipient only | original canonical RPC only | NO NEW GRANT |
+| UNIT_LEADER | original B1 | own effective unit | own unit/crew tasks | existing scoped recipient rules | existing leader rules | NO NEW GRANT |
+| ACTIVE crew | original B1 | own unit | own assignments | own only | none by visibility alone | NO NEW GRANT |
+| Org ADMIN/MANAGER without command role | only existing separate read rights | not by org role | not by org role | not by org role | no expansion | NO NEW GRANT |
+| Inactive/foreign/inherited-only | DENY | DENY | DENY | DENY | DENY | DENY |
+
+The matrix is a verification target, not permission to invent roles. For each row cite the actual canonical grant and note if Web shows a narrower/greater explicit read scope. Never grant all agencies' crew names just to imitate Web UX.
+
+---
+
+## 7. Implementation stages — completed code, not just documentation
+
+**Stage A — As-found diagnosis.** List exact source predicate(s), current commander role codes, Web read contract, Android sync/filters, and why a commander with no field unit is currently excluded. Distinguish source evidence from unverified runtime hypotheses.
+
+**Stage B — Forward SQL.** Implement secure commander-read audience with effective role/participant/sector scoping. Connect directory, fingerprint, projection and B1 paging/feeds. Address the zero-unit case. Add only minimal new helpers and explicit grants. Preserve field execution permission helpers untouched.
+
+**Stage C — Android data path.** Teach the existing repository/reconciler to represent commander-read scope without treating units as assigned to the phone owner. Preserve B1 schema or explicitly safe versioning; no Room17. Update ViewModel and existing screen with commander overview/filter; preserve current C1 map.
+
+**Stage D — Revocation and data minimization.** Review account/org switch, role expiry/transfer, manifest invalidation, persisted scope/cursor, private messages/evidence and offline queued commands. On scope loss the result is failure/locked/invalidation, never stale privileged content.
+
+**Stage E — Documentation.** Create `docs/M14.8E-android-commander-incident-access.md`; append factual status to `docs/SPEC-M14-INCIDENT-OPERATIONS.md`. Explain exact data flow, authorization matrix, SQL diff/grants, Android new DTOs, pagination, rollback and human acceptance. No runtime claims.
+
+---
+
+## 8. Manual acceptance — 45 unique scenarios (all UNEXECUTED)
+
+For every scenario, document **precondition**, **human action**, **expected server/UI outcome**, **status UNEXECUTED** and, if implementation is blocked, an accurate `BLOCKED_BY_IMPLEMENTATION/POLICY` note. Do not add/run automated tests. Do not inflate counts with repeated placeholder descriptions.
+
+### A. Directory and role visibility
+
+**E01 — Incident commander without crew membership.** Given valid current effective incident command but zero member/leader units, open Android Active. Expect incident listed and a commander overview, with no fake crew membership.
+
+**E02 — Same actor Web vs Android.** Given one named eligible incident on Web, refresh Android with identical account/acting org. Expect same authorized incident ID/mode/status, within field-specific data redactions.
+
+**E03 — Agency commander.** Given two agencies in one incident, A-commander opens Android. Expect incident visible; only agency A authorized resources/tasks unless independently delegated.
+
+**E04 — Sector commander.** Given sector S and an unrelated unit, open overview. Expect only units explicitly delegated to S, not everything physically inside its geometry.
+
+**E05 — Ordinary organization ADMIN.** Given no effective command/crew assignment, open Android. Expect no commander-specific incident or task access.
+
+**E06 — Unit leader only.** Given old field-unit scope, refresh. Expect old visibility, unit mutation flags and behavior unchanged.
+
+**E07 — Crew member only.** Given active crew, refresh. Expect own authorized units/tasks, no commander view.
+
+**E08 — Mixed commander and crew.** Given both roles in same organization, open all filters. Expect one incident ID, explicit commander/own-unit sections, no duplicate tasks or false `mine`.
+
+**E09 — Role in a different organization.** Given command in org B but selected org A, refresh. Expect no B role/incident leakage.
+
+**E10 — TRAINING active incident.** Given permitted command assignment in TRAINING, open Usposabljanje. Expect visible TRAINING badge and never REAL/vehicle GPS semantics.
+
+**E11 — REAL active incident.** Given permitted command assignment, open Active. Expect REAL badge and existing approved map info only.
+
+**E12 — Closed incident with legitimate historical reader rights.** Open History. Expect read-only incident and no operational action buttons.
+
+**E13 — Closed incident with only expired role and no historical entitlement.** Expect no unauthorized read; no treating an old assignment as a current command grant.
+
+**E14 — Commander with no personal assigned tasks.** Open Dodeljeno meni. Expect empty personal tasks, even if commander overview shows many subordinate tasks.
+
+**E15 — Commander without unit membership.** Open Moja enota. Expect no false unit assignment; commander overview remains separate.
+
+**E16 — Incident with zero deployed units.** Expect authorized commander can view incident metadata and an honest “no units” state, no B1 rejection solely for zero units.
+
+**E17 — More than 50 authorized incidents.** Expect stable bounded navigation or explicit incomplete/capacity indicator; no silent omission or cross-revision mix.
+
+### B. Scope and redaction
+
+**E18 — Incident commander across participating units.** Expect only source-authorized participating units, not unrelated incidents/organizations.
+
+**E19 — Agency commander attempts direct read of other agency's private unit or crew info.** Expect denied/redacted.
+
+**E20 — Sector commander selects nondelegated unit outside their actual scope.** Expect not visible; geography alone no authority.
+
+**E21 — Commander sees a task assigned to firefighter X.** Expect readable authorized summary, `mine=false` and `can_execute=false` for commander Y.
+
+**E22 — Current unit leader uses existing command.** Expect unchanged canonical version and target/recipient authorization.
+
+**E23 — Commander opens assignment event with recipient-private reason.** Expect redaction unless precise current policy explicitly authorizes that reason.
+
+**E24 — Incident summary visible but evidence/message recipient scope denied.** Expect respective APIs reject; no leak through old cached pages.
+
+**E25 — Commander map uses C3 unavailable REAL positions.** Expect no synthesized unit location marker and no new precise GPS access.
+
+**E26 — Commander-only view attempts unit-return/crew-status as nonleader.** Expect UI not to offer it; direct canonical RPC rejects without actual status/crew capability.
+
+**E27 — Commander with independently authorized task-issue scope issues permitted target command (owner manual case).** Expect original operation UUID, version/canonical RPC and durable receipt semantics, not a new privileged shortcut.
+
+### C. Authorization changes, B1 and offline
+
+**E28 — Revoke active incident commander while incident stays ACTIVE.** Expect next scope change; old snapshot and privileged camera state invalidated.
+
+**E29 — Narrow sector delegation with unchanged incident revision.** Expect scope fingerprint changes; old B1 cursor rejected.
+
+**E30 — Command handover.** Expect new commander gains independently authorized view; old commander loses it after confirmed transfer, never two grants via stale cache.
+
+**E31 — Deactivate the actor's profile.** Expect read blocked and protected local cache locked.
+
+**E32 — Switch acting organization.** Expect old organization scope, map state, messages/evidence pages and dispatcher guard revoked.
+
+**E33 — Expire offline authorization lease while viewing commander overview.** Expect locked/stale screen, no indefinitely visible protected data.
+
+**E34 — Try snapshot_page from manifest minted before role revocation.** Expect rejected or scope reset; old page never returned as current.
+
+**E35 — Request change_feed using old fingerprint.** Expect MANIFEST_SCOPE_CHANGED equivalent, no old audience results.
+
+**E36 — Old network reply after account switch.** Expect discarded by account/org/identity episode check, not saved into new account cache.
+
+**E37 — Realtime hint for unauthorized incident.** Expect B1 follow-up authorization denies, no data materialized from the hint.
+
+**E38 — Existing queued operation after loss of unit leadership.** Expect no unauthorized dispatch/replay; immutable request and receipt preserved for bounded recovery.
+
+### D. Compatibility, bounds and rollout
+
+**E39 — Older Android build against new server.** Expect original unit-field functionality or explicit fail-closed unsupported mode; no broad commander unit DTO accepted as own-unit access.
+
+**E40 — New Android build against old server.** Expect honest unavailable commander view, not false “zero authorized incidents” or client-side bypass.
+
+**E41 — Duplicate titles across REAL and TRAINING.** Expect correct separate incident UUIDs, badges and no mode confusion.
+
+**E42 — Snapshot over 100 authorized units/tasks or 3 MiB.** Expect safe bounded response/pagination/incomplete status, not half a mixed-revision overview.
+
+**E43 — SI/DE/default screen reader and small phone.** Expect labels and scope accurately announced, accessible chip/action layout without color-only state.
+
+**E44 — Changed-files review.** Expect Room16 and Gradle/worker/queue untouched; hydrants, inspections, registry photos and other unrelated modules intact.
+
+**E45 — Owner rollout checklist.** Expect migration strictly after latest `main`, all scenarios UNEXECUTED, no claim of runtime PASS and no automatic SQL/app installation.
+
+---
+
+## 9. Known owner rollout and compatibility context
+
+The owner reports migrations **#82–#90, #92 and #96 applied**. Migration #86 initially hit real SQLSTATE `42601` despite correct full paste; owner successfully applied it from a corrected SQL text with `CASE` wrapped in parentheses. Its uncorrected historical source remains a separate GitHub consistency issue. **Do not edit it in M14.8E and do not rerun it.**
+
+Owner checked seven key objects: all `true`. `incident-evidence` Edge function deployed **ACTIVE v1** using Supabase CLI 2.122.1. Storage private bucket cap 20 MiB; global cap 50 MB; Edge `Verify JWT` ON. There is no reason for this PR to deploy or change those components.
+
+The owner manually built their Android app; build succeeded with two nonblocking Kotlin warnings. Android displayed empty incident directory even though they report Web command involvement in active/historic REAL/TRAINING incidents. That is the human observation driving this task. The result is **not** automatically a runtime-proven root cause; validate the current actual role/org and B1 claims when human acceptance is performed.
+
+M15B source implementation is ALREADY in existing open PR #97. This combined assignment must harden it and add Android commander incident access in THAT SAME PR. Do not deploy, enable, simulate or run GPS. All six capability flags remain false until explicit owner policy and runtime approval.
+
+---
+
+---
+
+
+# PART II — REQUIRED PR #97 GPS CORRECTIONS AND CROSS-FEATURE INTEGRATION
+
+## 10. Fix G1 — Explicit choice among authorized vehicles
+
+**Confirmed source location:** `VehicleLocationUi.kt`, around the
+`VehicleLocationPanel` `data?.let` block, currently:
+
+```kotlin
+val vehicles = current.rows("vehicles")
+val vehicle = vehicles.singleOrNull()
+if (vehicle == null) Text(stringResource(R.string.gps_driver_only))
+```
+
+This wrongly conflates `vehicles.size > 1` with "not authorized driver."
+It prevents an actual eligible driver selecting a vehicle when two or
+more authorized candidates are present. Implement all of the following.
+
+### Server contract and row validation
+
+- Verify exact structure and fields returned by existing `context`
+  RPC and `VehicleLocationRepository`, including vehicle, deployment,
+  unit, incident, actual organization and active DRIVER episode.
+- Treat the SERVER-provided candidate list as an untrusted *display
+  snapshot* until a live server mutation validates the selected ID.
+- Ensure stable row identifiers: `(incident, organization,
+  deployment, vehicle, authorityEpisode, credential generation if
+  present)`. A label, displayed position or list index is NEVER
+  a vehicle identifier.
+- Deduplicate or explicitly handle multiple rows for the same
+  canonical vehicle; do not silently choose the first.
+- Zero eligible rows: show "no authorized vehicle" with the genuine
+  reason. Exactly one: select explicitly or preselect for display
+  only if the user confirms the action. Two or more: render an
+  accessible radio/list choice with a vehicle label AND stable
+  identifier, not a misleading error.
+- A selection must never implicitly start location capture, create
+  a key or enroll a device.
+- Whenever the server context, actor, acting organization, incident,
+  deployment/driver assignment, policy version or role-lease changes:
+  invalidate selection, current key fingerprint, proof readiness,
+  consent and pending START ticket. Never retarget a signed transcript,
+  original UUID, or previously issued challenge to a different vehicle.
+- Every REGISTER → ISSUE → CONFIRM → CONSENT → START must bind the
+  SAME frozen chosen tuple through trusted RPCs. Reject stale server
+  versions/vehicle reassignment; no client-side trust substitute.
+- On rotate/revoke/logout/incident switch, cancel in-flight operations,
+  discard old UI success and clear precise location cache.
+- No shared mutable selected-vehicle pointer read asynchronously after
+  a pending operation starts: snapshot immutable intent per operation.
+- Enforce lock-out of selection changes during an unconfirmed binding
+  or consent/start operation, or cancel the old ceremony decisively.
+  Do not silently reuse old credential for a newly selected vehicle.
+- Preserve current STOP access even if selected vehicle disappears
+  from fresh candidate list; active session STOP must work by its
+  frozen session, not whatever vehicle is currently selected.
+- If owner policy is unapproved, the flow remains visibly OFF and
+  does NOT permit real sharing; the selection UI may be present
+  without activation.
+
+### UX, translation and accessibility
+
+- Default/SI/DE: "Select vehicle / Izberi vozilo / Fahrzeug auswählen";
+  "Multiple authorized vehicles / Več dovoljenih vozil"; "No eligible
+  vehicle / Ni vozila, za katero si trenutno upravičen voznik";
+  "Selected vehicle changed; review again / Izbira se je spremenila";
+  use actual project localization naming and conventions.
+- Screen-reader states must announce which vehicle is selected and
+  that no GPS collection has started.
+- Long vehicle labels, empty callsigns, 100+ rows: bound display count
+  or honest pagination/truncation; no unbounded UI state.
+- No visual trick that makes `accepted = true` after switching vehicle.
+
+## 11. Fix G2 — Commander incident overview and GPS reader independence
+
+Part I makes commander-only incidents reachable on Android without
+a unit/crew membership. M15B Android currently reads precise
+positions using the existing B1 field `fingerprint`, which may be
+unavailable to commander-only incidents.
+
+**Do NOT solve this by setting `private.field_unit_visible=TRUE` for
+a commander.** That helper is used by broader field execution
+contracts and could escalate task/unit actions.
+
+### Required independent readers
+
+1. **Commander summary audience** (Part I):
+   - Read authorized incident/agency/sector units, tasks, appropriate
+     map objects, statuses and history via bounded role-aware B1.
+   - No extra authority to ACK/COMPLETE, change unit status, read
+     private evidence/messages or view a person's precise position.
+2. **GPS precise reader audience** (#97):
+   - Independently approved by an explicit current policy/reader
+     enrollment and live exact-org/scope checks in the GPS RPC.
+   - No precise coordinate simply because an actor is incident
+     commander, agency commander, unit leader, admin or can read Web.
+   - If explicit precise-reader grant is absent, return `UNAVAILABLE`
+     without fabricating a coordinate; unit names/tasks remain readable
+     if commander B1 authority exists.
+   - Precise grants restricted to exact incident/organization/
+     authorized vehicles and audience; the server is authoritative.
+   - Do not union separate agency/sector scopes into all incidents
+     when a user has more than one role.
+3. **Authenticated route and fingerprinting**:
+   - Inspect `VehicleLocationRepository`, `rememberVehiclePositions`,
+     `vehicle-location` Edge `context`/`positions`, SQL
+     `vehicle_location_positions`, Web same-origin incident API.
+   - For commander-only Android, derive the new trusted role-aware
+     B1 fingerprint if that is the verified read token, rather than
+     requiring a crew-based fingerprint. However that alone is NOT
+     precise-reader authorization; keep independent GPS RPC check.
+   - If the GPS RPC treats B1 fingerprint as a requirement, adapt the
+     exact scope contract to role-aware access without expanding
+     underlying GPS reader grants. Never fake the fingerprint.
+   - Error channels: "incident read permitted, GPS unavailable" vs
+     "not authorized to incident" vs "network/offline" vs
+     "policy unapproved" vs "server unsupported".
+   - Context/fingerprint change must clear old coordinates, abort
+     in-flight requests, reset UI and close role-specific map layers.
+4. **Web/Android parity**:
+   - Reuse existing MapLibre and C3 real position UI.
+   - Green <120s; amber only authorized 120–900s last-known; unknown
+     or denied grey without marker. After STOP/REVOKE/role loss,
+     never keep displaying old last-known just because observation
+     age <900s. Use observed timestamp, not fetch time.
+   - The C3 legend is not permission. Do not expose positions via
+     incident summaries, serialized B1 payload or browser logs.
+   - For delayed remote revocation, preserve bounded freshness/poll
+     and explicitly note remote displays may take an existing
+     10–15 second refetch/clearing window in online conditions.
+   - Review source existing 10s polling, TTL and lifecycle; do not
+     add a second unbounded GPS poller.
+5. **Scope of actual policy approval**:
+   - No new seeded GPS reader approvals, no owner consent inference.
+   - SQL #97 new GPS policy tables remain draft/unseeded.
+   - Six capability flags remain false until owner-approved activation.
+   - Missing policy/reader grants are expected during manual
+     source-review; keep honest user-facing OFF state.
+
+## 12. Fix G3 — STOP vs in-flight GPS samples and stale remote visibility
+
+Review AND CORRECT the actual race and cancellation behavior. Do not
+claim the code is wrong if the existing SQL already guarantees a
+particular invariant: demonstrate the lock order and sequence in the
+implementation doc.
+
+### The safety contract is three distinct moments
+
+- **Local STOP tap**: revoke location callbacks and cancel any future
+  sampling/signing/sending immediately on device, clear local position
+  and mark server withdrawal PENDING until acknowledged. On devices
+  with an in-flight request, the network packet may already have left
+  before STOP. Do not promise physical interception.
+- **Authoritative STOP commit**: within a single DB transaction
+  transition session from SHARING to terminal, clear the latest
+  coordinate, invalidate binding/reader visibility as required,
+  preserve original STOP operation identity and outcome receipt.
+  After this COMMIT, no GPS sample may insert/update that session's
+  latest position, no RENEW may extend it, and `positions` cannot
+  return a cached coordinate from that session.
+- **Remote viewer receipt**: remote Android/Web screens must revalidate
+  authorization and session state, clear at next authorized refresh
+  (and within documented online 15-second maximum if source supports),
+  independently discard locally expired fixes. An offline remote
+  screen cannot be promised immediate notice of STOP; time-bounded
+  lease/expiry and cache clearing remain required.
+
+### SQL concurrency requirements
+
+Inspect existing PR #97:
+
+- `public.vehicle_location_control(... p_action='STOP')`
+- `public.vehicle_location_sample(...)`
+- `private.vehicle_latest_positions`
+- `private.vehicle_location_sessions`
+- `public.vehicle_location_positions(...)`
+- `private.vehicle_location_live(...)`
+- any `REVOKE`, `LEFT_VEHICLE`, lease-expiry cleanup and reader policy.
+
+Check whether STOP and sample locks use a **consistent global order**:
+organization → actor → incident → canonical vehicle → session/binding/
+credential → position (adapt exactly to source's existing lock order).
+Do not introduce a deadlock by changing one path only.
+
+In exact scenario:
+A. SAMPLE verifies signature outside DB.
+B. STOP obtains lock and commits terminal state + deletes row.
+C. SAMPLE attempts final DB commit.
+Expected: SAMPLE rejects terminal state; no latest row resurrected.
+
+Reverse:
+A. SAMPLE commits new position.
+B. STOP commits.
+Expected: STOP deletes it and revokes reader eligibility.
+
+Other cases:
+- SAMPLE and STOP both waiting on the same vehicle/session row.
+- Revoke and old raw signed sample.
+- Expired session / changed policy / lost DRIVER.
+- RENEW racing with STOP.
+- Out-of-order packet and old monotonic sequence.
+- Duplicate/replayed sample identity after STOP.
+- DELETE latest row vs UPSERT latest row under concurrent transactions.
+- SLIDE: sample passed a read check before awaiting crypto; recheck
+  LIVE session/current actor/device/policy/versions in final SQL commit.
+- A receipt replay must not reactivate SHARING or repopulate position.
+- `LEFT_VEHICLE` should revoke own credential/consent/binding as
+  established, not merely hide the UI.
+
+Use server trusted time for all lease and expiry decisions.
+When STOP cannot reach the server, local status is
+`STOP_PENDING_SERVER` or equivalent; do not display "server stopped".
+Retain same frozen original STOP UUID/reason until confirmed/recovered.
+No offline GPS backlog or coordinate queue. Never replay a trip after
+network return. STOP retry queue/journal may persist only nonlocation
+minimal metadata and never enable auto-START.
+
+### Android lifecycle requirements
+
+Inspect `VehicleLocationService`, `VehicleLocationRuntime`,
+`VehicleLocationRepository`, notification STOP action, account/org
+switch, permission revocation, process death, state restoration.
+
+- Immediately unregister location updates on local STOP even if
+  server/network request hangs.
+- Ensure callbacks already enqueued cannot initiate new sample
+  after local stop generation/token has changed.
+- Distinguish "sampling stopped locally" vs "server STOP acknowledged".
+- Avoid background-start or next-login reactivation; do not launch
+  FGS from stale Activity state.
+- Foreground notification STOP must work without navigating to Web.
+- Cancel pending job and clear local marker instantly on STOP/LEAVE.
+- Server session expires without new traffic if process dies; no
+  GPS queued retry producer after restart.
+- A user switching organization/incident cannot accidentally STOP
+  a different active session or send sample from stale account.
+
+### Manual STOP proof matrix (source-review, not executed)
+
+| Ordering | Expected postcommit state |
+|---|---|
+| STOP committed before delayed SAMPLE finalize | sample rejected; no row |
+| SAMPLE committed before STOP | STOP deletes row |
+| RENEW waiting after STOP | lease not renewed |
+| signature math valid but session revoked | sample rejected |
+| offline local STOP | no new local GPS; remote pending/lease-expiring |
+| restored app with pending STOP journal | same UUID, no auto-restart |
+| remote reader after STOP online refresh | empty/hidden result |
+| prior valid sample replay | no resurrection |
+| two concurrent STOP retries same UUID | authoritative same outcome |
+| STOP UUID reused with changed reason/session | immutable conflict |
+
+## 13. Fix G4 — Correct rollout ledger and SQL source drift
+
+The PR #97 report/docs were written BEFORE the owner finished the
+November 4 local rollout. Their old claim that #86 still blocks later
+migrations and `incident-evidence` is undeployed is stale. Update:
+- `docs/M15B-end-to-end-real-vehicle-gps.md`
+- any separate M15B owner activation/readiness decision sheet;
+- the factual M14 SPEC appendices as needed;
+- the new M14.8E commander doc and this combined PR's release notes.
+
+**Owner reported completed:**
+1. SQL #82–#85.
+2. SQL #86 with a locally substituted parenthesized `CASE`
+   expression following PostgreSQL 42601 (complete paste was
+   correct). This fix was applied to SQL Editor input, not
+   committed to the original #86 migration source.
+3. SQL #87–#90, #92 and #96.
+4. A read-only SQL probe showed 7/7 target objects `true`.
+5. `incident-evidence` Edge deployed `ACTIVE` v1 via CLI 2.122.1.
+6. Storage bucket `incident-evidence` PRIVATE 20 MiB,
+   global Storage file limit 50 MB, `Verify JWT` ON.
+7. Owner pulled main locally and manually built Android, with only
+   two Kotlin warnings. Commander incident list was empty despite
+   owner seeing assigned Web incidents.
+
+**Not completed or unverified:**
+- PR #97 M15B SQL migration
+  `20261104120000_vehicle_location_end_to_end.sql`: NOT APPLIED.
+- `vehicle-location` Edge: NOT DEPLOYED.
+- GPS privacy approvals P01–P16/A01: UNAPPROVED.
+- GPS retention scheduler and independent monitoring: NOT DEPLOYED.
+- M15B Android/Web GPS runtime: UNVERIFIED; collection remains OFF.
+- New M14.8E commander read SQL (if added): NOT APPLIED.
+- Complete end-to-end attachment upload/download permission/manual
+  acceptance: NOT YET VERIFIED despite Edge ACTIVE.
+- Historical #86 source discrepancy: still present on GitHub until
+  separately reviewed correction.
+- Existing local Gradle/Room schemas/pnpm-lock Web generated user
+  modifications: owner-local and MUST NOT be reset.
+
+**Source drift requirement:**
+Do not silently rewrite an already-applied #86 migration in this
+large #97 PR, and never reapply #86. Document an explicit separate
+owner-reviewed source-correction strategy (e.g. a focused PR adjusting
+only SQL source syntax for future fresh environments, with careful
+migration-ledger consequences). The owner-applied DB differs from
+the checked-in unpatched source; report it as drift, not as a broken
+current production deployment.
+
+**Supabase CLI compatibility:**
+CLI 3.0.0 refused old `[inbucket]` config; 2.122.1 deployed
+`incident-evidence` successfully with deprecation warning.
+Do not change `supabase/config.toml` or deploy unrelated functions.
+Do not propose auto-updating local tooling just to complete this PR.
+
+## 14. SQL migration ordering / single-PR integration
+
+Existing PR #97 contains:
+`supabase/migrations/20261104120000_vehicle_location_end_to_end.sql`
+(UNAPPLIED; included in #97, not on merged main).
+
+Commander B1 bridge almost certainly needs an ADDITIONAL forward-only
+migration. Use a distinct timestamp AFTER M15B migration, e.g.
+`20261105100000_android_commander_incident_read.sql` ONLY if unused
+in current repo. Inspect actual list before naming. Do not combine
+commander RPC changes into #97 GPS migration if it complicates
+rollback/review. The owner must later apply migrations in order:
+existing #96 already applied → #97 M15B → new commander migration.
+No SQL execution by Codex.
+
+If source review establishes serious SQL defects inside the NEW,
+UNAPPLIED #97 migration, Codex may fix that migration in-place on
+THE SAME OPEN PR #97 because it has not been installed; note any
+schema/FK/grant/lock-order modifications in final report.
+Do not apply this flexibility to already-applied #86/#92/#96.
+
+GPS remains OFF even after any migration. New policy/readiness tables
+must be empty/draft/not approved; no seeded consent, reader grants,
+device trust, explicit release epoch or scheduled cleanup. Avoid
+turning an already-authenticated commander into an implicit location
+reader via broad `can_read_incident`.
+
+B1 scope changes must not unintentionally grant GPS producer rights.
+M15B existing Edge `vehicle-location` must enforce independently:
+REAL incident, current active DRIVER for producer; precise-reader grant
+for reader; current approved policy, exact org, current role/lease.
+
+For old Android versions, old B1 schema version 1 and current Room16
+cache, plan an additive backward-compatible commander projection or
+a versioned endpoint with safe old-client fail-closed behavior.
+
+## 15. Cross-feature implementation order (SAME PR #97)
+
+1. Read PR #97 diff/head, actual repository main/branch state and
+   existing B1/Web commander/Android/source contracts.
+2. Write short AS-FOUND diagnosis: why owner sees Web incidents but
+   Android directory is empty (likely no `field_unit_visible` unit).
+   Do not claim runtime proof from source alone.
+3. Trace precise-location viewer authorization and source `fingerprint`
+   dependence, then define two distinct audiences.
+4. Define and implement commander-only B1 read source with appropriate
+   role effectiveness, role-specific allowed rows, no `field_unit_visible`
+   broadening and stable fingerprint. Use additive migration.
+5. Wire Android commander overview/filter, incident units/tasks/map,
+   cache/scope resets, default/SI/DE labels, without Room17.
+6. Fix multiple-eligible-vehicles selection with frozen identity,
+   exact server validation and in-flight ceremony invalidation.
+7. Audit STOP/SAMPLE/RENEW/REVOKE concurrency with transactional
+   proofs. Make bounded corrections to #97 SQL/Edge/Android where
+   a real gap exists; update code and documentation together.
+8. Review Web/Android map auth: no unauthorized stale positions,
+   no false "GPS allowed" from commander read; scoped cache clear.
+9. Update owner rollout ledger and #86 drift in M15B/M14 SPEC.
+10. Add manual cases below, ALL UNEXECUTED, no tests/CI.
+11. Commit `[skip ci]` to EXACT SAME BRANCH, update EXACT SAME
+    PR #97. No second PR and no merge. Stop.
+
+## 16. Additional human-only manual scenarios (25 distinct)
+
+All are `UNEXECUTED`. Existing Part I E01–E45 remain required.
+Existing M15B 64 acceptance cases remain UNEXECUTED and must not be
+erased or marked PASS. Add these without generic repeated boilerplate.
+
+**G01 — Zero eligible vehicle.**
+PRE: authorized incident context but no active current DRIVER vehicle.
+ACTION: open GPS panel.
+EXPECTED: explicit no eligible vehicle, no enroll/START/FGS.
+
+**G02 — Exactly one eligible vehicle.**
+PRE: one authorized candidate.
+ACTION: inspect selection and start intent.
+EXPECTED: correct vehicle identity shown, manual user review still
+required; no auto-start.
+
+**G03 — Two eligible vehicles.**
+PRE: two distinct authorized deployment/vehicle tuples.
+ACTION: open selector and choose second.
+EXPECTED: second explicitly chosen, no false "not driver" label.
+
+**G04 — Change selection after generating key/proof.**
+PRE: candidate A proof initialized.
+ACTION: select candidate B.
+EXPECTED: old proof, key hash for A's flow, consent and pending ticket
+not reused for B; fresh server authorization required.
+
+**G05 — Change deployment during enrollment.**
+PRE: server authorized A, new effective deployment B.
+ACTION: try to confirm A's old challenge.
+EXPECTED: stale scope/version rejected, no reassignment.
+
+**G06 — Same label, distinct vehicle UUIDs.**
+PRE: two eligible similarly named vehicles.
+ACTION: choose one.
+EXPECTED: stable server UUID controls pairing, accessible disambiguation.
+
+**G07 — Commander-only has no field units.**
+PRE: effective incident command assignment, zero field-unit membership.
+ACTION: sync Android incidents.
+EXPECTED: incident visible; unit/task overview authorized and scoped.
+
+**G08 — Commander can read incident, no GPS reader grant.**
+PRE: commander B1 scope valid, no approved precise-reader entry.
+ACTION: open existing map.
+EXPECTED: unit/task data visible, GPS unavailable/grey without dot.
+
+**G09 — Commander has explicit eligible reader grant after
+OWNER-approved activation, but no crew fingerprint.**
+ACTION: open Android map.
+EXPECTED: independently authorized GPS position can be read using
+current authenticated role-aware B1 identity and precise reader;
+does not gain unit command rights.
+
+**G10 — Agency commander tries another agency's GPS.**
+PRE: own-agency command role and foreign participating vehicle.
+ACTION: read foreign precise position.
+EXPECTED: denied; cannot derive foreign dot via incident summary.
+
+**G11 — Sector delegation narrowed.**
+PRE: commander viewer session and cached map.
+ACTION: narrow current delegated sector.
+EXPECTED: old B1 read scope and GPS cache invalidated; foreign
+sector/vehicle locations disappear.
+
+**G12 — Commander sends another firefighter's task completion.**
+PRE: commander overview includes subordinate task.
+ACTION: attempt ACK/COMPLETE.
+EXPECTED: canonical existing command RPC denies, even if task read.
+
+**G13 — STOP tap during active sample callback.**
+PRE: Android service active and observation callback in progress.
+ACTION: STOP.
+EXPECTED: callbacks unregistered immediately, no subsequent sample
+scheduling; server STOP may be pending honestly.
+
+**G14 — Delayed signed sample after STOP COMMIT.**
+PRE: sample verification in flight, STOP commit first.
+ACTION: delayed sample attempts DB commit.
+EXPECTED: rejected, latest position remains deleted.
+
+**G15 — Reverse race, sample COMMIT then STOP.**
+EXPECTED: STOP deletes the row and terminalizes session atomically.
+
+**G16 — Concurrent renew and stop.**
+ACTION: send renew and stop together.
+EXPECTED: serializable session result; no lease extension after
+authoritative stop.
+
+**G17 — STOP offline.**
+PRE: network outage while vehicle sharing locally.
+ACTION: "I left vehicle".
+EXPECTED: local capture OFF immediately, STOP_PENDING_SERVER,
+frozen STOP UUID/reason, no offline location backlog.
+
+**G18 — Delayed STOP recovery.**
+PRE: in-flight STOP timeout or process death.
+ACTION: reconnect.
+EXPECTED: immutable STOP retry and receipt recovery; never restart GPS.
+
+**G19 — Stale remote viewer.**
+PRE: online Web/Android has green or amber position.
+ACTION: authorized STOP commits.
+EXPECTED: no server position thereafter; remote clears within
+documented bounded online refresh; offline cannot claim instant ACK.
+
+**G20 — Old session replay.**
+PRE: previous session STOPPED and new session created later.
+ACTION: replay old valid signed sample.
+EXPECTED: old generation/session rejected, no replacement of new
+vehicle current position.
+
+**G21 — Policy not approved after applying source migrations.**
+PRE: #97 SQL (owner-only) present but no policy/reader approval.
+ACTION: query capabilities or attempt START.
+EXPECTED: all six flags false, disabled, no coordinates.
+
+**G22 — New commander B1 migration with old Android app.**
+EXPECTED: old unit-field authorization semantics unchanged;
+no commander-wide sensitive payload presented to old client.
+
+**G23 — Current source and deployed rollout ledger.**
+ACTION: read latest docs after Codex correction.
+EXPECTED: #86 successfully applied with local syntax patch,
+#87–#90/#92/#96 installed, incident-evidence ACTIVE v1;
+#97 SQL and vehicle-location Edge NOT deployed; no false readiness.
+
+**G24 — GPS map with no approved precise audience.**
+EXPECTED: no green/orange marker in either Android/Web even
+if role is incident commander, and no GPS lat/lon in B1 snapshots.
+
+**G25 — New SQL vs owner-local modifications.**
+ACTION: inspect PR diff and rollout notes.
+EXPECTED: no changes to Gradle/KAPT/KSP, Room16 schema/generator,
+owner local settings, no new test/build/deployment, no re-run #86.
+
+## 17. Unified documentation deliverables
+
+Modify/update these, with actually checked file names:
+
+- `docs/M14.8E-android-commander-incident-access.md` — actual SQL
+  commander-read authority, B1 scope/projection/cursors, Android
+  UI/filter/permission differences, 45 E01–E45 UNEXECUTED cases.
+- `docs/M15B-end-to-end-real-vehicle-gps.md` — G1–G4 fixes, code
+  references, exact real live restrictions, 25 G01–G25 cases,
+  STOP/sample lock-race matrix, vehicle identity contract, role-aware
+  precise reader, owner deployment ledger.
+- `docs/M15B-owner-privacy-activation-decisions.md` if present:
+  all P01–P16/A01 remain UNAPPROVED; no activation recorded.
+- `docs/SPEC-M14-INCIDENT-OPERATIONS.md` — factual progress that
+  #97 remains open, current owner SQL/Edge evidence and source
+  corrected commander design; no runtime PASS.
+- SQL: new unique forward-only M14.8E commander B1 migration AFTER
+  existing M15B migration, plus safely necessary corrections to
+  new/unapplied M15B migration only.
+- Existing Web and Android source files in #97 as minimally necessary:
+  `VehicleLocationUi.kt`, `VehicleLocationRuntime.kt` /
+  `VehicleLocationService.kt`, `VehicleLocationRepository.kt`,
+  existing incident screen/reconciliation/map, Web COP/context/API,
+  Edge `vehicle-location`, B1 SQL, localization.
+  **Check actual paths; do not invent an entire new subsystem.**
+
+Keep PR #97 original manual acceptance 64 cases all UNEXECUTED.
+Keep Part I 45 E cases; append 25 G cases for combined review.
+The count is not a reason to pad more scenarios. Every case must
+have a distinct expected failure/success path. Any case needing
+approved GPS activation is BLOCKED_BY_POLICY.
+
+## 18. Final Codex report — required proof and STOP
+
+Report in THIS order:
+
+1. Existing PR #97 URL, head before/after, current main SHA, other
+   open PR conflict check. Confirm no new PR was opened.
+2. Exact current source-based root cause for commander incident
+   invisibility; alternate runtime causes not excluded.
+3. Web command role matrix, B1 actual read predicates and newly
+   added commander read predicates, with source references.
+4. SQL migration filenames, function signatures, grants, role
+   checks, schema/DTO versioning, scope reset/zero-unit and paging.
+5. Android commander overview, filters, authorized units/tasks/map;
+   separate command-write guards and Room16 compatibility.
+6. Vehicle chooser fix: zero/one/many, stable selected tuple, binding
+   immutability and cancellation on account/org/incident switch.
+7. Independently authorized GPS precise-reader access on Android
+   commander B1 scope; explicit no-grant -> unavailable result.
+8. STOP vs SAMPLE/RENEW/REVOKE lock order, read-time session gate,
+   source proof that delayed sample cannot repopulate after STOP.
+   Identify precisely which races were already guarded and which
+   code corrections were added.
+9. Android local STOP immediate, server ACK pending/unknown semantics,
+   offline lease recovery and no background restart.
+10. New and old SQL migrations order, current owner rollout evidence
+    and #86 GitHub source drift; #97 migrations and vehicle-location
+    Edge still NOT applied/deployed.
+11. GPS activation disabled: all six C2 capability fields false and
+    all P01–P16/A01 pending owner approval. No automatic tracking.
+12. Security disclosure/rate/backups/retention lifecycle and precise
+    audiences remain bounded. No seeded active reader/policy.
+13. Docs updated, 45 commander + 25 new GPS correction acceptance
+    cases all UNEXECUTED, original 64 M15B cases unchanged.
+14. Exact changed file list, source lines, commits `[skip ci]`,
+    existing branch and same PR #97 URL.
+15. Explicit NO tests added/run, builds, lint/typecheck, CI,
+    Gradle sync, SQL, Supabase cloud access, deployment, GPS collection,
+    emulator, app installation or runtime acceptance.
+16. STOP. Do NOT merge. Owner reviews the fresh commit.
+
+**Success for the owner after later manual deployment/acceptance:**
+A correctly authorized commander can read legitimately scoped Android
+incidents, units and tasks even without crew membership; Web/Android
+will not expose precise GPS unless separately authorized; an eligible
+driver can select among multiple actual vehicles; local STOP stops
+capture immediately and authoritative STOP prevents any delayed
+GPS sample from bringing a point back. All GPS feature activation
+remains OFF until owner explicitly approves policy and deployment.
+
+**END OF UNIFIED CODEX ASSIGNMENT — EDIT EXISTING PR #97 ONLY**
