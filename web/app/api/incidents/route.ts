@@ -13,7 +13,7 @@ import {loadAccount} from '../../../lib/auth/load';
 import {mutationNames} from '../../../lib/incidents/model';
 import {copErrors} from '../../../lib/incidents/cop';
 
-const reads = ['incident_vehicle_location_capabilities','incident_field_reliability_summary','incident_attachment_prepare','incident_attachment_page','incident_message_page','incident_message_history','incident_message_send','incident_sync_head','simulation_operational_command','simulation_operations_read','simulation_operational_actions','simulation_operation_resolve','simulation_hazard_history',...hazardRpcs,'simulation_map_sample',...scenarioEventRpcs,...templateRpcs,'simulation_automation_feed','simulation_agents_read','simulation_agent_command',...navigationReads,...simulationReads,'simulation_command',...taskReads,'incident_resource_selection_page','incident_team_template','incident_entry','incident_list','incident_context','incident_timeline_page','incident_candidates','incident_command_candidates','incident_command_view','incident_command_inbox','incident_cop','incident_cop_hydrants','incident_resources','incident_unit_candidates','incident_resource_candidates','incident_crew_candidates','incident_crew_history','incident_unit_leader_candidates'];
+const reads = ['vehicle_location_positions','incident_vehicle_location_capabilities','incident_field_reliability_summary','incident_attachment_prepare','incident_attachment_page','incident_message_page','incident_message_history','incident_message_send','incident_sync_head','simulation_operational_command','simulation_operations_read','simulation_operational_actions','simulation_operation_resolve','simulation_hazard_history',...hazardRpcs,'simulation_map_sample',...scenarioEventRpcs,...templateRpcs,'simulation_automation_feed','simulation_agents_read','simulation_agent_command',...navigationReads,...simulationReads,'simulation_command',...taskReads,'incident_resource_selection_page','incident_team_template','incident_entry','incident_list','incident_context','incident_timeline_page','incident_candidates','incident_command_candidates','incident_command_view','incident_command_inbox','incident_cop','incident_cop_hydrants','incident_resources','incident_unit_candidates','incident_resource_candidates','incident_crew_candidates','incident_crew_history','incident_unit_leader_candidates'];
 const safeErrors = new Set(['ATTACHMENT_TYPE_UNSUPPORTED','ATTACHMENT_TOO_LARGE','ATTACHMENT_MALFORMED','ATTACHMENT_NOT_READY','ATTACHMENT_REJECTED','ATTACHMENT_LIMIT','SCOPE_CHANGED','MESSAGE_SCOPE_LIMIT',...operationalErrors,'INVALID_TEMPLATE','INVALID_EVENT_PLAN','INVALID_HAZARD_PLAN','SCHEMA_MISMATCH','REQUEST_TOO_LARGE','TEMPLATE_SETUP_REQUIRED',...agentErrors,...navigationErrors,...simulationErrors,'NOT_AUTHORIZED','STALE_VERSION','INVALID_TRANSITION','INVALID_COMMANDER','INVALID_PARTICIPANT','INCIDENT_TERMINAL','OPERATION_REUSED','VALIDATION_FAILED','INVALID_STATE',
  'INVALID_COMMAND_HIERARCHY','INVALID_COMMAND_ROLE','INVALID_COMMAND_CANDIDATE','TRANSFER_NOT_CURRENT','TRANSFER_EXPIRED','TRANSFER_ALREADY_PENDING','LEAD_TRANSFER_REQUIRES_CONSENT','COMMANDER_STILL_VALID','PARTICIPANT_HAS_ACTIVE_COMMAND',...copErrors,...resourceErrors,...taskErrors]);
 export async function POST(request:Request) {
@@ -28,6 +28,17 @@ export async function POST(request:Request) {
   const input=JSON.parse(text) as {name?:unknown;args?:unknown};
   if(typeof input.name!=='string'||![...reads,...Object.values(mutationNames)].includes(input.name)||!input.args||typeof input.args!=='object'||Array.isArray(input.args))
    return NextResponse.json({error:'VALIDATION_FAILED'},{status:400,headers});
+  if(input.name==='vehicle_location_positions'){
+   const args=input.args as Record<string,unknown>;
+   if(Object.keys(args).length!==2||typeof args.p_acting_organization_id!=='string'||typeof args.p_incident_id!=='string')
+    return NextResponse.json({error:'NOT_AUTHORIZED'},{status:403,headers});
+   const {data:{user}}=await client.auth.getUser();
+   if(!user)return NextResponse.json({error:'NOT_AUTHORIZED'},{status:403,headers});
+   const result=await client.functions.invoke('vehicle-location',{headers:{'X-Gasilko-Account':user.id},body:{action:'positions',organization:args.p_acting_organization_id,
+    incident:args.p_incident_id,operation:crypto.randomUUID(),args:{}}});
+   if(result.error||!result.data?.ok)return NextResponse.json({error:'POSITION_UNAVAILABLE'},{status:403,headers});
+   return NextResponse.json({data:result.data.result},{headers});
+  }
   if(input.name==='incident_navigation_calculate'){
    const result=await client.functions.invoke('incident-navigation',{body:input.args});
    if(result.error){

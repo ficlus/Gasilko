@@ -39,7 +39,7 @@ class SupabaseAuthGateway(private val client: SupabaseClient, scope: CoroutineSc
     override fun usingOfflineAuthorization() = offlineAccount != null && offlineAccount == accountId()
     private fun unavailable(e: Exception) = e is java.io.IOException || e is io.ktor.client.plugins.HttpRequestTimeoutException ||
         (e is RestException && e.statusCode >= 500) || (e is RegistryFailure && e.reason in listOf(RegistryError.NETWORK, RegistryError.SERVER))
-    override suspend fun invalidateAuthorization() { authorization.withLock { offlineAccount = null; offline.clear() } }
+    override suspend fun invalidateAuthorization() { si.gasilko.app.feature.incidents.VehicleLocationRuntime.invalidateIdentity();authorization.withLock { offlineAccount = null; offline.clear() } }
     override suspend fun authorizationNotice(): AuthMessage {
         val remaining = offline.read(account()).second
         return when { remaining <= OfflineAuthorization.DAY -> AuthMessage.OFFLINE_ONE_DAY
@@ -66,8 +66,10 @@ class SupabaseAuthGateway(private val client: SupabaseClient, scope: CoroutineSc
             else -> if (e.statusCode == 401 || e.statusCode == 403) AuthMessage.EXPIRED else AuthMessage.ERROR
         })
     } catch (_: Exception) { throw AuthFailure(AuthMessage.ERROR) }
-    private suspend fun <T> identityRequest(block: suspend ()->T): T =
-        si.gasilko.app.feature.incidents.incidentIdentityAccess.withLock { request(block) }
+    private suspend fun <T> identityRequest(block: suspend ()->T): T {
+        si.gasilko.app.feature.incidents.VehicleLocationRuntime.invalidateIdentity()
+        return si.gasilko.app.feature.incidents.incidentIdentityAccess.withLock { request(block) }
+    }
     override suspend fun startGoogle() = identityRequest { notifications(notificationContext).detach();invalidateAuthorization(); client.auth.awaitInitialization(); client.auth.signInWith(Google); Unit }
     override suspend fun completeGoogle(code: String) = identityRequest { client.auth.awaitInitialization(); client.auth.exchangeCodeForSession(code); Unit }
     fun accessGateway() = si.gasilko.app.core.access.SupabaseAccessGateway(client)

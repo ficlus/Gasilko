@@ -6,7 +6,7 @@ import kotlinx.serialization.json.*
 import si.gasilko.app.core.database.IncidentSyncCursor
 
 internal class FieldProtocolFailure(val code: String): IllegalStateException(code)
-internal data class ReconciledField(val incidents: List<JsonObject>,val cursors: List<IncidentSyncCursor>,val caughtUp: Boolean)
+internal data class ReconciledField(val incidents: List<JsonObject>,val cursors: List<IncidentSyncCursor>,val caughtUp: Boolean,val readProtocol: Int)
 
 /** Bounded protocol helper for the existing repository, not a scheduler or local store. */
 internal class IncidentReconciliation(
@@ -15,6 +15,26 @@ internal class IncidentReconciliation(
     private val revokeIncident: suspend (String)->Unit,
     private val hideMapRoutes: suspend (String)->Unit = {}
 ) {
+    private var readProtocol=1
+    private var readNegotiated=false
+    private val readNames=mapOf("incident_snapshot_manifest" to "incident_read_snapshot_manifest",
+        "incident_snapshot_page" to "incident_read_snapshot_page","incident_change_feed" to "incident_read_change_feed",
+        "incident_field_entities" to "incident_read_entities","incident_field_timeline" to "incident_read_timeline")
+    private suspend fun readCall(name: String,args: JsonObject): JsonObject {
+        val started=android.os.SystemClock.elapsedRealtime()
+        val result=call(if(readProtocol==2)readNames[name] ?: name else name,args)
+        return if(readProtocol==2 && name=="incident_field_entities")
+            JsonObject(result+("payload" to localDeadline(result.obj("payload"),started))) else result
+    }
+    private fun localDeadline(row: JsonObject,started: Long): JsonObject {
+        val deadlines=row.rows("command_roles").mapNotNull {r->r.text("valid_until").takeIf {it.isNotEmpty()}
+            ?.let {java.time.OffsetDateTime.parse(it).toInstant().toEpochMilli()} }
+        if(deadlines.isEmpty())return JsonObject(row-"read_expiry_elapsed")
+        val verified=java.time.OffsetDateTime.parse(row.text("read_verified_at")).toInstant().toEpochMilli()
+        val remaining=(deadlines.minOrNull()!!-verified).coerceAtLeast(0)
+        // Request start precedes server authorization; slow paging can only shorten local validity.
+        return JsonObject(row+("read_expiry_elapsed" to JsonPrimitive(started+remaining)))
+    }
     private fun fail(code: String): Nothing=throw FieldProtocolFailure(code)
     private fun checkProtocol(value: Boolean) { if(!value)fail("PROTOCOL") }
     private fun number(value: String): Long=value.toLongOrNull()?.takeIf { it>=0 } ?: fail("PROTOCOL")
@@ -26,14 +46,17 @@ internal class IncidentReconciliation(
             row.text("schema_version")=="1" && (id==null || row.text("incident_id")==id))
     }
     private fun payload(row: JsonObject,id: String,revision: Long,sequence: Long) {
-        checkProtocol(row.text("leadership_schema")=="1")
+        checkProtocol(row.text("leadership_schema")=="1" && (readProtocol!=2 || row.text("read_schema")=="2"))
         checkProtocol(row.text("id")==id && number(row.text("revision"))==revision &&
             number(row.text("timeline_sequence"))==sequence &&
             row["units"] is JsonArray && row["assignments"] is JsonArray && row["history"] is JsonArray)
         checkProtocol(row.rows("units").size<=100 && row.rows("assignments").size<=1000 && row.rows("history").size<=100)
         checkProtocol(row.toString().toByteArray(Charsets.UTF_8).size<=3_145_728)
         for(u in row.rows("units")) {
-            checkProtocol(u.text("organization_id")==org && u.rows("crew").size<=100 &&
+            val commandOnly=readProtocol==2 && row.text("read_schema")=="2" && !u.flag("field_access") && u.flag("read_only") && (row.flag("commander_read") || row.flag("historic_read"))
+            checkProtocol((readProtocol!=2 || u.flag("field_access") || commandOnly) && (u.text("organization_id")==org || (commandOnly && canonicalUuid(u.text("organization_id")))) &&
+                (!commandOnly || (!u.flag("leader") && !u.flag("can_return") && !u.flag("can_manage_crew") &&
+                    u.rows("crew").isEmpty() && u.rows("resources").isEmpty() && (u["status_actions"] as? JsonArray)?.isEmpty()==true)) && u.rows("crew").size<=100 &&
                 u.rows("crew_history").size<=30 && u.rows("resources").size<=230)
             if(u.flag("leader"))checkProtocol(canonicalUuid(u.obj("leader_assignment").text("id")) &&
                 number(u.obj("leader_assignment").text("version"))>0)
@@ -47,7 +70,16 @@ internal class IncidentReconciliation(
         }
     }
     private suspend fun directory(): List<JsonObject> {
-        val data=call("incident_field_directory",args());identity(data)
+        val data=if(readNegotiated)call(if(readProtocol==2)"incident_read_directory" else "incident_field_directory",args()) else try {
+            call("incident_read_directory",args()).also { checkProtocol(it.text("read_protocol")=="2");readProtocol=2 }
+        } catch(e: CancellationException){throw e}
+        catch(e: Exception) {
+            // Only absent versioned RPC is a supported legacy server. Never downgrade a denial.
+            if(e.message.orEmpty().let {"PGRST202" !in it && "42883" !in it})throw e
+            readProtocol=1;call("incident_field_directory",args())
+        }
+        readNegotiated=true
+        identity(data)
         checkProtocol(data["incidents"] is JsonArray)
         val rows=data.rows("incidents")
         checkProtocol(rows.size<=50 && rows.map { it.text("id") }.distinct().size==rows.size &&
@@ -57,7 +89,7 @@ internal class IncidentReconciliation(
     private suspend fun messageHead(id: String,revision: String,fingerprint: String?,limit: Int=30): JsonObject? {
         for(attempt in 0..1) {
             try {
-                val page=call("incident_message_page",args(id) {
+                val page=readCall("incident_message_page",args(id) {
                     put("p_expected_revision",revision);put("p_limit",if(attempt==0)limit else 30)
                     if(attempt==0 && !fingerprint.isNullOrEmpty())put("p_scope_fingerprint",fingerprint)
                 })
@@ -76,7 +108,8 @@ internal class IncidentReconciliation(
         // One bounded restart for manifest expiry; never mix pages from attempts.
         for(attempt in 0..1) {
             try {
-                val manifest=call("incident_snapshot_manifest",args(id));identity(manifest,id)
+                val snapshotStarted=android.os.SystemClock.elapsedRealtime()
+                val manifest=readCall("incident_snapshot_manifest",args(id));identity(manifest,id)
                 val token=manifest.text("manifest_id");val revision=number(manifest.text("snapshot_revision"))
                 val sequence=number(manifest.text("timeline_sequence"));val fingerprint=manifest.text("scope_fingerprint")
                 checkProtocol(canonicalUuid(token) && fingerprint.length==32)
@@ -90,7 +123,7 @@ internal class IncidentReconciliation(
                     // Fetch even an empty collection to validate the pinned identity.
                     do {
                         if(++pages>52)fail("PROTOCOL")
-                        val page=call("incident_snapshot_page",args(id) {
+                        val page=readCall("incident_snapshot_page",args(id) {
                             put("p_manifest_id",token);put("p_collection",kind);put("p_after_ordinal",ordinal);put("p_limit",25)
                         })
                         identity(page,id)
@@ -113,10 +146,11 @@ internal class IncidentReconciliation(
                     collections[kind]=rows
                 }
                 val core=collections.getValue("core").single()
-                val assembled=JsonObject(core+mapOf(
+                val assembledRaw=JsonObject(core+mapOf(
                     "units" to JsonArray(collections.getValue("units")),
                     "assignments" to JsonArray(collections.getValue("assignments")),
                     "history" to JsonArray(collections.getValue("history"))))
+                val assembled=if(readProtocol==2)localDeadline(assembledRaw,snapshotStarted) else assembledRaw
                 payload(assembled,id,revision,sequence)
                 Log.d("IncidentSync","snapshot pages=$pages bytes=$bytes")
                 return assembled to IncidentSyncCursor(account,org,id,token,revision,Int.MAX_VALUE,sequence,fingerprint,1,System.currentTimeMillis())
@@ -129,7 +163,7 @@ internal class IncidentReconciliation(
         fail("MANIFEST_EXPIRED")
     }
     private suspend fun changes(id: String,old: JsonObject,cursor: IncidentSyncCursor): Pair<JsonObject,IncidentSyncCursor>? {
-        val feed=call("incident_change_feed",args(id) {
+        val feed=readCall("incident_change_feed",args(id) {
             put("p_scope_fingerprint",cursor.fingerprint);put("p_after_revision",cursor.revision)
             put("p_after_ordinal",cursor.ordinal);put("p_limit",100)
         })
@@ -163,7 +197,7 @@ internal class IncidentReconciliation(
             checkProtocol(current==cursor.revision && number(feed.text("timeline_sequence"))==cursor.timelineSequence)
             return old to cursor.copy(syncedAt=System.currentTimeMillis())
         }
-        val result=call("incident_field_entities",args(id) {
+        val result=readCall("incident_field_entities",args(id) {
             put("p_scope_fingerprint",cursor.fingerprint);put("p_expected_revision",current)
         })
         identity(result,id)
@@ -183,7 +217,8 @@ internal class IncidentReconciliation(
             val id=entry.text("id");val old=previous.find { it.text("id")==id }
             val cursor=saved.find { it.incident==id && it.account==account && it.organization==org }
             val compatible=old!=null && old.text("leadership_schema")=="1" && old.obj("field_map").text("schema")=="1" && old.obj("field_map").text("_scope")==cursor?.fingerprint && !old.flag("leader_reset") && cursor!=null && cursor.schemaVersion==1 &&
-                old.text("revision")==cursor.revision.toString() && entry.text("scope_fingerprint")==cursor.fingerprint
+                old.text("revision")==cursor.revision.toString() && entry.text("scope_fingerprint")==cursor.fingerprint &&
+                (readProtocol!=2 || old.text("read_schema")=="2")
             // Missing/old protocol metadata is a data reset, not evidence of access loss.
             if(old!=null && cursor!=null && entry.text("scope_fingerprint")!=cursor.fingerprint)
                 revokeIncident(id)
@@ -201,7 +236,7 @@ internal class IncidentReconciliation(
                 // data watermark changes; never reinterpret it as scope revocation.
                 if(entry.text("map_source").length==32 && pair.first.obj("field_map").text("source")!=entry.text("map_source")) {
                     val current=pair.second
-                    val mapRead=call("incident_field_entities",args(id) {
+                    val mapRead=readCall("incident_field_entities",args(id) {
                         put("p_scope_fingerprint",current.fingerprint);put("p_expected_revision",current.revision)
                     })
                     identity(mapRead,id)
@@ -285,6 +320,6 @@ internal class IncidentReconciliation(
                 (head.text("map_source").isEmpty() || result.find {it.text("id")==c.incident}?.obj("field_map")?.text("source")==head.text("map_source"))
             }==true
         }
-        return ReconciledField(result,cursors,caughtUp)
+        return ReconciledField(result,cursors,caughtUp,readProtocol)
     }
 }

@@ -3268,3 +3268,52 @@ M10/NAV/SIM and existing permissions/queues/receipts remain unchanged.
 See [M15A.3 actual versus blocked boundaries and40 UNEXECUTED owner cases](M15A3-trusted-challenge-credential-lifecycle.md).
 Owner-reported full-file #86 SQL42601 and unconfirmed subsequent rollout remain
 unresolved; no tests/build/SQL/runtime/deploy/merge performed.
+
+
+## M15B — connected REAL vehicle GPS source, default OFF (2026-11-04)
+
+Source adds a trusted JWT/real P-256 gateway, atomic proof finalization, private
+inactive binding/explicit versioned consent/finite session, latest-only signed
+sample ingestion, independent precise readers and existing Web/Android MapLibre
+integration. Android has an explicit visible location FGS and notification STOP;
+no background-location permission, auto-start, coordinate history, Room change
+or new field worker/queue. Executable independent cleanup and aggregate health
+are source only; no scheduler, alert, migration or deployment was installed.
+
+All P01–P16/A01 remain UNAPPROVED and all six capability flags initially false.
+Per-key out-of-band approval, exact reader grants, current DRIVER, consent,
+finite lease, owner readiness, external release epoch and healthy independent
+retention are separate fail-closed conditions. Source is unverified and not
+pilot-ready. Existing Room16/B1/B2/D1/D2/M10/NAV and REAL/SIM contracts remain.
+No tests/build/SQL/deploy/runtime checks were run;64 owner cases are UNEXECUTED.
+Updated2026-11-05 owner report: #86 applied after a local parenthesized CASE,
+then #87–#90/#92/#96 applied; evidence Edge ACTIVE v1. Historical #86 source drift
+remains a separate review. New #97 SQL/vehicle-location Edge remain uninstalled. See [M15B implementation/contracts/limits](M15B-end-to-end-real-vehicle-gps.md)
+and [unapproved owner decisions](M15B-owner-privacy-activation-decisions.md).
+
+
+## M14.8E / PR #97 unified correction source — 2026-11-05
+
+PR #97 remains open/unmerged. A new versioned B1 read audience admits effective
+incident/deputy/agency/sector commanders without unit membership; role/agency/
+explicit sector scope is independent of field execution. Canonical current
+terminal read is narrowed to own-org historical summaries, not expired-role
+revival. V1 field predicates/mutations stay unchanged. Read-only DTO flags,
+private reason/crew redaction, current scope pinning, atomic Room16 cache/cursor,
+known role-expiry masking and encrypted V2 lease discriminator preserve boundaries.
+No command, message/evidence or precise GPS grant follows from commander read.
+
+Default/SI/DE commander filter/overview reuse existing incidents and map. M15B now
+has explicit zero/one/many canonical vehicle selection, frozen/cancelled enrollment
+scope and ticket-bound local/notification STOP/send checks. Existing SQL already
+serialized SAMPLE/STOP/RENEW and rechecked terminal session after crypto; no new
+queue/worker or automatic tracking was added. GPS policy P01–P16/A01 UNAPPROVED,
+six initial flagsfalse. Owner-reported dependencies/evidence Edge status are in
+the corrected ledger; new GPS/commander SQL and vehicle-location Edge uninstalled.
+
+Forward migration20261105100000_android_commander_incident_read.sql follows
+20261104120000_vehicle_location_end_to_end.sql. Neither executed here. Existing
+64 M15B +45 commander +25 correction manual cases are all UNEXECUTED. No
+build/test/SQL/cloud/runtime/deploy/merge performed. See
+[M14.8E authority/protocol](M14.8E-android-commander-incident-access.md) and
+[M15B corrected ledger/races](M15B-end-to-end-real-vehicle-gps.md#pr97-unified-corrections-2026-11-05).

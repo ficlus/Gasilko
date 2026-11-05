@@ -1,4 +1,5 @@
 'use client';
+import {VehicleLocationLayer,type VehiclePosition} from './VehicleLocationLayer';
 import {OperationalEffectsMap} from './OperationalEffectsMap';
 import {HazardMapLayer} from './HazardMapLayer';
 import {useEffect,useRef,useMemo} from 'react';
@@ -26,7 +27,7 @@ import type {ContextHydrant} from '../../lib/hydrants/viewport';
 import {OperationalMapCanvas,orderOperationalLayers,type ViewportBounds} from '../map/OperationalMapCanvas';
 
 export type CopLayers={sectors:boolean;markers:boolean;zones:boolean;hydrants:boolean};
-type Props=TacticalObjectActions&{busy:boolean;previewRequest:number;focusRequest:number;locale:Locale;cop:Cop;layers:CopLayers;drawing:Geometry['type']|null;draft:Geometry|null;vertices:Position[];
+type Props=TacticalObjectActions&{vehiclePositions:VehiclePosition[];busy:boolean;previewRequest:number;focusRequest:number;locale:Locale;cop:Cop;layers:CopLayers;drawing:Geometry['type']|null;draft:Geometry|null;vertices:Position[];
  selected:string;contextHydrants:ContextHydrant[];onBounds:(b:ViewportBounds)=>void;onPoint:(p:Position)=>void;onSelect:(id:string)=>void};
 const ids=['cop-primary','cop-sectors','cop-markers','cop-zones','cop-hydrants','cop-draft'] as const;
 const features=(items:{id:string;geometry:Geometry;label:string;kind?:string;status?:string}[])=>({type:'FeatureCollection' as const,
@@ -106,7 +107,7 @@ export default function CopMap(props:Props){
    const clickable=map.getStyle().layers.filter(l=>(l.id.startsWith('cop-')||l.id.startsWith('context-'))&&!l.id.startsWith('cop-draft')).map(l=>l.id);
    const id=map.queryRenderedFeatures(event.point,{layers:clickable}).find(f=>typeof f.properties?.id==='string')?.properties?.id;
    if(typeof id==='string')props.onSelect(id);
-  }}>{map=><><MapOverlayHosts/><CopRendering map={map} props={props}/><ScenarioEventMapLayer map={map}/><HazardMapLayer map={map} locale={props.locale}/><OperationalEffectsMap map={map}/><TaskIntentLayers map={map} locale={props.locale}/><SimulationMapLayer map={map} locale={props.locale}/><IncidentNavigationLayer map={map} locale={props.locale} representedTargets={representedTargets}/><RtsMapInteraction map={map} locale={props.locale} layers={recipientLayers}/>{workspace?.view==='command'&&<MapOverlapStacks map={map} locale={props.locale} cop={props.cop} hydrants={props.contextHydrants} layers={recipientLayers} busy={props.busy||!!props.drawing||!!navigation?.picking||!!sim?.move}/>}{workspace?.view==='command'&&<RtsContextMenu onCreateObject={props.onCreateObject} onEditObject={props.onEditObject} onDeactivateObject={props.onDeactivateObject} busy={props.busy||!!props.drawing||!!navigation?.picking||!!sim?.move} map={map} locale={props.locale} cop={props.cop} hydrants={props.contextHydrants} layers={recipientLayers}/>}</>}</OperationalMapCanvas>;
+  }}>{map=><><MapOverlayHosts/><VehicleLocationLayer map={map} positions={props.vehiclePositions}/><CopRendering map={map} props={props}/><ScenarioEventMapLayer map={map}/><HazardMapLayer map={map} locale={props.locale}/><OperationalEffectsMap map={map}/><TaskIntentLayers map={map} locale={props.locale}/><SimulationMapLayer map={map} locale={props.locale}/><IncidentNavigationLayer map={map} locale={props.locale} representedTargets={representedTargets}/><RtsMapInteraction map={map} locale={props.locale} layers={recipientLayers}/>{workspace?.view==='command'&&<MapOverlapStacks map={map} locale={props.locale} cop={props.cop} hydrants={props.contextHydrants} layers={recipientLayers} busy={props.busy||!!props.drawing||!!navigation?.picking||!!sim?.move}/>}{workspace?.view==='command'&&<RtsContextMenu onCreateObject={props.onCreateObject} onEditObject={props.onEditObject} onDeactivateObject={props.onDeactivateObject} busy={props.busy||!!props.drawing||!!navigation?.picking||!!sim?.move} map={map} locale={props.locale} cop={props.cop} hydrants={props.contextHydrants} layers={recipientLayers}/>}</>}</OperationalMapCanvas>;
 }
 function CopRendering({map,props}:{map:Map;props:Props}){
  const fitted=useRef(''),previewed=useRef(0),focused=useRef(0),sourceBytes=useRef(new globalThis.Map<string,string>());

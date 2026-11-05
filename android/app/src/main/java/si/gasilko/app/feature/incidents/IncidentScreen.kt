@@ -54,6 +54,10 @@ import java.util.Date
     "COMPLETED"->R.string.field_complete
     else->R.string.field_cannot
 })
+@Composable internal fun commanderRoleName(role: String)=stringResource(when(role) {
+    "INCIDENT_COMMANDER"->R.string.ce_incident;"AGENCY_COMMANDER"->R.string.ce_agency
+    "SECTOR_COMMANDER"->R.string.ce_sector;"DEPUTY_COMMANDER"->R.string.ce_deputy;else->R.string.ce_read_only
+})
 private fun point(geometry: JsonObject): GeoPoint? {
     if(geometry.text("type")!="Point")return null
     val coordinates=geometry["coordinates"] as? JsonArray ?: return null
@@ -73,7 +77,7 @@ fun IncidentScreen(model: IncidentViewModel,registry: HydrantViewModel,organizat
     val syncMessage=when(syncFailure) {
             "ACCESS","SCOPE" -> R.string.field_sync_scope
             "MANIFEST" -> R.string.field_sync_manifest
-            "CAPACITY" -> R.string.field_sync_capacity
+            "CAPACITY" -> R.string.ce_incomplete
             "PROTOCOL" -> R.string.field_sync_protocol
             "BUSY" -> R.string.field_sync_busy
             "NETWORK" -> R.string.field_sync_network
@@ -171,21 +175,24 @@ fun IncidentScreen(model: IncidentViewModel,registry: HydrantViewModel,organizat
         if(error)FieldBanner(stringResource(R.string.field_error),FieldTone.WARNING)
         recoveryFailure?.let {FieldBanner(recoveryErrorText(it),FieldTone.WARNING)}
         if(stale || syncFailure!=null)FieldBanner(stringResource(syncMessage),FieldTone.WARNING)
+        if(data.diagnosticsFailure=="ROLE_EXPIRED")FieldBanner(stringResource(R.string.ce_changed),FieldTone.WARNING)
+        if(!data.commanderAvailable)FieldBanner(stringResource(R.string.ce_unavailable),FieldTone.INFO)
         if(data.warning)FieldBanner(stringResource(R.string.field_lease_warning),FieldTone.WARNING)
         data.verifiedAt?.let { Text(stringResource(R.string.field_verified,DateFormat.getDateTimeInstance().format(Date(it))),style=MaterialTheme.typography.bodySmall) }
         if(incidentId!=null && incident==null)FieldBanner(stringResource(R.string.field_unavailable),FieldTone.WARNING)
         if(incident==null) {
             FlowRow(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-                listOf(R.string.field_active,R.string.field_mine,R.string.field_unit,R.string.field_history,R.string.field_training).forEachIndexed { index,id ->
+                listOf(R.string.field_active,R.string.field_mine,R.string.field_unit,R.string.field_history,R.string.field_training,R.string.ce_mine).forEachIndexed { index,id ->
                     FilterChip(selected=filter==index,onClick={filter=index},label={Text(stringResource(id))})
                 }
             }
             val rows=data.incidents.filter { i->when(filter) {
                 0->i.text("status") in listOf("ACTIVE","STABILIZED")
                 1->i.rows("assignments").any { it.flag("mine") }
-                2->i.rows("units").isNotEmpty()
+                2->i.rows("units").any {it["field_access"]==null || it.flag("field_access")}
                 3->i.text("status") in listOf("CLOSED","CANCELLED") || i.rows("assignments").any { it.text("status") in terminal }
-                else->i.text("mode")=="TRAINING"
+                4->i.text("mode")=="TRAINING"
+                else->i.flag("commander_read")
             } }
             LazyColumn(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(12.dp)) {
                 if(rows.isEmpty())item { Text(stringResource(R.string.field_empty)) }
@@ -258,20 +265,40 @@ fun IncidentScreen(model: IncidentViewModel,registry: HydrantViewModel,organizat
             }
         } else {
             Text(incident.text("reference")+" · "+incident.text("title"),style=MaterialTheme.typography.titleLarge)
-            TextButton(onClick={messages=true}) { Text(stringResource(R.string.mc_title)) }
-            TextButton(onClick={evidence=EvidenceTarget("INCIDENT",null)}) { Text(stringResource(R.string.ev_title)) }
+            if(incident.flag("commander_read") || incident.flag("historic_read")) {
+                OperationalCard {
+                    SectionHeading(stringResource(R.string.ce_title))
+                    StatusBadge(incident.text("mode"),FieldTone.INFO)
+                    Text(stringResource(R.string.ce_scope_counts,incident.rows("units").size,incident.rows("assignments").size))
+                    incident.rows("command_roles").forEach {role->
+                        Text(commanderRoleName(role.text("role"))+
+                            (role.text("sector_id").takeIf {it.isNotEmpty()}?.let {" · "+it.take(8)} ?: ""))
+                    }
+                    if(incident.flag("read_only"))Text(stringResource(R.string.ce_read_only))
+                }
+            }
+            if(!incident.flag("read_only")) {
+                TextButton(onClick={messages=true}) { Text(stringResource(R.string.mc_title)) }
+                TextButton(onClick={evidence=EvidenceTarget("INCIDENT",null)}) { Text(stringResource(R.string.ev_title)) }
+            }
             FlowRow(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
                 FilterChip(selected=!unitTab,onClick={unitTab=false},label={Text(stringResource(R.string.field_orders))})
-                FilterChip(selected=unitTab,onClick={unitTab=true},label={Text(stringResource(R.string.field_unit))})
+                FilterChip(selected=unitTab,onClick={unitTab=true},label={Text(stringResource(if(incident.flag("commander_read") || incident.flag("historic_read"))R.string.ce_units else R.string.field_unit))})
                 TextButton(onClick={mapAssignment=null;incidentMap=true}) { Text(stringResource(R.string.field_map)) }
             }
             LazyColumn(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(12.dp),contentPadding=PaddingValues(bottom=24.dp)) {
                 if(unitTab) {
+                    if(incident.rows("units").isEmpty())item {Text(stringResource(R.string.ce_no_units))}
                     items(incident.rows("units"),key={it.text("id")}) { unit ->
                         OperationalCard {
                             SectionHeading(unit.text("name"));Text(unit.text("status"));Text(unit.text("leader_name"))
                             unit.rows("crew").forEach { c->Text(c.text("name")+" · "+c.text("role")) }
-                            OutlinedButton(onClick={commandUnit=unit.text("id")}) { Text(stringResource(R.string.ul_title)) }
+                            if(unit["field_access"]==null || unit.flag("field_access")) {
+                                OutlinedButton(onClick={commandUnit=unit.text("id")}) { Text(stringResource(R.string.ul_title)) }
+                            } else {
+                                Text(stringResource(R.string.ce_read_only))
+                                Text(stringResource(R.string.ce_crew_count,unit.text("crew_count").toIntOrNull() ?: 0))
+                            }
                             val tasks=incident.rows("assignments").filter { it.text("unit_id")==unit.text("id") }
                             Text(stringResource(R.string.field_outstanding,tasks.count { it.text("status") !in terminal }))
                             if(unit.flag("leader") && unit.rows("crew").any { it.flag("can_issue") })
@@ -279,14 +306,14 @@ fun IncidentScreen(model: IncidentViewModel,registry: HydrantViewModel,organizat
                         }
                     }
                 }
-                val rows=incident.rows("assignments").filter { unitTab || it.flag("mine") || it.flag("can_execute") }
+                val rows=incident.rows("assignments").filter { unitTab || incident.flag("commander_read") || incident.flag("historic_read") || it.flag("mine") || it.flag("can_execute") }
                     .sortedWith(compareBy<JsonObject> {
                         when {
                             it.text("status")=="ISSUED"->0
                             data.operations.any { op->op.operation.entityId==it.text("id") && op.operation.state=="NEEDS_ATTENTION" }->1
                             else->when(it.text("status")) {"BLOCKED"->1;"IN_PROGRESS"->2;"ACKNOWLEDGED"->3;else->4 } }
                     }.thenBy { it.text("id") })
-                if(rows.isEmpty())item { Text(stringResource(R.string.field_no_orders)) }
+                if(rows.isEmpty())item { Text(stringResource(if(incident.flag("commander_read") || incident.flag("historic_read"))R.string.ce_no_tasks else R.string.field_no_orders)) }
                 items(rows,key={it.text("id")}) { a ->
                     OutlinedCard(onClick={assignmentId=a.text("id")},modifier=Modifier.fillMaxWidth()) {
                         Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {

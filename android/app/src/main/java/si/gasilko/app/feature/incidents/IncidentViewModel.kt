@@ -7,6 +7,7 @@ import si.gasilko.app.core.notifications.NotificationTap
 import kotlinx.serialization.json.JsonObject
 
 class IncidentViewModel(val repository: IncidentRepository,val organization: String,private val scope: CoroutineScope): ViewModel() {
+    internal val vehicleLocations=repository.vehicleLocations(organization)
     val syncFailure=repository.syncFailure
     private val observation=MutableStateFlow(0)
     @OptIn(ExperimentalCoroutinesApi::class)
