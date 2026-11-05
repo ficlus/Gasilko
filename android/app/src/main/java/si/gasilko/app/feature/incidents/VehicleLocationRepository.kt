@@ -30,6 +30,26 @@ internal class VehicleLocationRepository(private val context: Context,private va
     private val scheduler=HydrantSyncScheduler(context)
     private val epoch=java.util.concurrent.atomic.AtomicLong(-1)
     @Volatile private var access: LocalDeviceProofAccess?=null
+    @Volatile private var incidentScope: String?=null
+    private val ceremony=java.util.concurrent.atomic.AtomicLong(0)
+    private val scopeGeneration=java.util.concurrent.atomic.AtomicLong(0)
+    @Synchronized fun selectIncident(incident: String,fingerprint: String) {
+        val next=incident+"/"+fingerprint
+        if(incidentScope!=next) {
+            scopeGeneration.incrementAndGet();ceremony.incrementAndGet();revokeLocal()
+            VehicleLocationRuntime.active?.let {t->
+                if(t.incident!=incident || (t.repository.incidentScope!=null && t.repository.incidentScope!=next))VehicleLocationRuntime.stopIfCurrent(t,"ERROR")
+            }
+            incidentScope=next
+        }
+    }
+    fun cancelCeremony() {ceremony.incrementAndGet();if(VehicleLocationRuntime.active?.repository!==this)revokeLocal()}
+    private fun liveDispatch(action: String,args: JsonObject) {
+        if(action!="sample" && action!="renew")return
+        val t=VehicleLocationRuntime.active ?: throw CancellationException()
+        val id=if(action=="sample")args.obj("sample").text("sessionId") else args.text("session")
+        if(t.repository!==this || !t.current() || t.session.text("session")!=id)throw CancellationException()
+    }
     fun revokeLocal() { access?.revoke();access=null }
     private suspend fun guard(withdraw: Boolean=false) {
         currentCoroutineContext().ensureActive()
@@ -45,7 +65,13 @@ internal class VehicleLocationRepository(private val context: Context,private va
     }
     internal suspend fun request(action: String,incident: String,operation: String,args: JsonObject,
         org: String=organization,withdraw: Boolean=false): JsonObject {
+        val originalCeremony=ceremony.get()
+        val originalScope=scopeGeneration.get()
+        val enrollment=action in setOf("register","issue","confirm","consent","start")
+        fun sameOrigin()=originalScope==scopeGeneration.get() && (!enrollment || originalCeremony==ceremony.get())
         guard(withdraw)
+        if(!withdraw && incidentScope?.substringBefore("/")!=incident)throw CancellationException()
+        liveDispatch(action,args)
         val session=client.auth.currentSessionOrNull() ?: throw VehicleLocationFailure("NOT_AUTHORIZED")
         if(session.user?.id!=account)throw CancellationException()
         val token=session.accessToken
@@ -58,7 +84,15 @@ internal class VehicleLocationRepository(private val context: Context,private va
                 connection.setRequestProperty("X-Gasilko-Account",account)
                 connection.setRequestProperty("Authorization","Bearer "+token);connection.setRequestProperty("apikey",BuildConfig.SUPABASE_PUBLISHABLE_KEY)
                 connection.setRequestProperty("Content-Type","application/json");connection.setRequestProperty("Cache-Control","no-store")
-                connection.doOutput=true;connection.outputStream.use {it.write(envelope.toString().toByteArray())}
+                currentCoroutineContext().ensureActive()
+                if(!withdraw && !sameOrigin())throw CancellationException()
+                liveDispatch(action,args)
+                connection.doOutput=true;connection.outputStream.use {out->
+                    currentCoroutineContext().ensureActive()
+                    if(!withdraw && !sameOrigin())throw CancellationException()
+                    liveDispatch(action,args)
+                    out.write(envelope.toString().toByteArray())
+                }
                 val stream=if(connection.responseCode in 200..299)connection.inputStream else connection.errorStream
                 val bytes=stream?.use {input->
                     val out=java.io.ByteArrayOutputStream();val buffer=ByteArray(4096)
@@ -70,6 +104,7 @@ internal class VehicleLocationRepository(private val context: Context,private va
             } finally {connection.disconnect()}
         }} catch(_: java.io.IOException){throw VehicleLocationFailure("OUTCOME_UNKNOWN")}
         guard(withdraw)
+        if(!withdraw && !sameOrigin())throw CancellationException()
         if(!response.flag("ok"))throw VehicleLocationFailure(response.text("code").ifEmpty {"BACKEND_UNAVAILABLE"})
         return JsonObject(response.obj("result")+("_requestStart" to JsonPrimitive(requestStart)))
     }
@@ -100,6 +135,11 @@ internal class VehicleLocationRepository(private val context: Context,private va
         val data=request("context",incident,newVehicleOperation(),buildJsonObject {})
         if(data.text("account")!=account || data.text("organization")!=organization || data.text("incident")!=incident ||
             data.text("fieldFingerprint")!=fingerprint)throw VehicleLocationFailure("SCOPE_CHANGED")
+        val vehicles=data.rows("vehicles")
+        if(data["vehicles"] !is JsonArray || vehicles.size!=(data["vehicles"] as JsonArray).size || vehicles.size>100 ||
+            vehicles.any {v->listOf("deployment","vehicle","authorityEpisode","unit").any {key->!canonicalUuid(v.text(key))}} ||
+            vehicles.map {it.text("deployment")+"/"+it.text("vehicle")+"/"+it.text("authorityEpisode")}.distinct().size!=vehicles.size)
+            throw VehicleLocationFailure("BACKEND_UNAVAILABLE")
         return data
     }
     suspend fun positions(incident: String,fingerprint: String): List<VehicleFix> {
@@ -150,7 +190,8 @@ internal class VehicleLocationRepository(private val context: Context,private va
         guard()
         var j=journal()
         if(j.isNotEmpty() && (j.text("organization")!=organization || j.text("incident")!=incident ||
-            j.obj("scope").text("deployment")!=vehicle.text("deployment")))throw VehicleLocationFailure("SCOPE_CHANGED")
+            j.obj("scope").text("deployment")!=vehicle.text("deployment") || j.obj("scope").text("vehicle")!=vehicle.text("vehicle") ||
+            j.obj("scope").text("authorityEpisode")!=vehicle.text("authorityEpisode") || j.obj("scope").text("unit")!=vehicle.text("unit") || j.obj("policy")!=policy))throw VehicleLocationFailure("SCOPE_CHANGED")
         if(j.isEmpty()) {
             val scope=DeviceProofScope(account,organization,incident,vehicle.text("deployment"),vehicle.text("vehicle"),vehicle.text("authorityEpisode"))
             val keys=keyOwner(scope,policy);val credential=keys.createNew()

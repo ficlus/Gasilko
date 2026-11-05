@@ -49,7 +49,7 @@ internal fun unreconciledReceipt(assignment: JsonObject,op: FieldOperation?): Bo
 }
 data class IncidentFieldState(val incidents: List<JsonObject> = emptyList(),val operations: List<FieldOperation> = emptyList(),
     val locked: Boolean=true,val warning: Boolean=false,val verifiedAt: Long?=null,val leaseRemaining: Long=0,
-    val queueAvailable: Boolean=false,val diagnosticsFailure: String?=null)
+    val queueAvailable: Boolean=false,val diagnosticsFailure: String?=null,val commanderAvailable: Boolean=false)
 
 /** Captures one authenticated identity. Scope checks also run after every network suspension. */
 class IncidentRepository(private val context: Context,private val client: SupabaseClient,
@@ -69,7 +69,9 @@ class IncidentRepository(private val context: Context,private val client: Supaba
         val remaining=scope(org)
         if(row==null)return 0
         val saved=secure.loadIncidentLease(account,org)?.let(::parse) ?: return 0
-        if(saved.text("wall")!=row.verifiedAt.toString() || saved.text("elapsed")!=row.elapsed.toString() ||
+        // Old apps require a decimal wall stamp. They fail closed on a cached V2 command audience.
+        val leaseIdentity=if(parse(row.payload).text("read_protocol")=="2")"read-v2:"+row.verifiedAt else row.verifiedAt.toString()
+        if(saved.text("wall")!=leaseIdentity || saved.text("elapsed")!=row.elapsed.toString() ||
             saved.text("boot")!=row.boot.toString())return 0
         val wall=System.currentTimeMillis()-row.verifiedAt
         val elapsed=SystemClock.elapsedRealtime()-row.elapsed
@@ -81,9 +83,20 @@ class IncidentRepository(private val context: Context,private val client: Supaba
         return combine(dao.observe(account,org),dao.observeOperations(account,org),ticks,activeDispatches) { row,ops,_,active ->
             try {
                 val left=lease(org,row)
-                if(left<=0)IncidentFieldState(operations=ops.map(::neutralOperation),queueAvailable=true) else IncidentFieldState(parse(row!!.payload).rows("incidents"),ops.map { op ->
-                    if(op.operation.state=="SENDING" && "$account/$org/${op.operation.operationId}" !in active)op.copy(operation=op.operation.copy(state="OUTCOME_UNKNOWN")) else op
-                },false,left<=7_200_000,row.verifiedAt,left,queueAvailable=true)
+                if(left<=0)IncidentFieldState(operations=ops.map(::neutralOperation),queueAvailable=true) else {
+                    val incidents=parse(row!!.payload).rows("incidents")
+                    val expired=incidents.filter {i->
+                        i.rows("command_roles").any {it.text("valid_until").isNotEmpty()} &&
+                            (i.text("read_expiry_elapsed").toLongOrNull()?.let {it<=SystemClock.elapsedRealtime()} ?: true)
+                    }.map {it.text("id")}.toSet()
+                    IncidentFieldState(incidents.filterNot {it.text("id") in expired},ops.map {op->
+                        if(payload(op).text("incident") in expired)neutralOperation(op)
+                        else if(op.operation.state=="SENDING" && "$account/$org/${op.operation.operationId}" !in active)
+                            op.copy(operation=op.operation.copy(state="OUTCOME_UNKNOWN")) else op
+                    },false,left<=7_200_000,row.verifiedAt,left,queueAvailable=true,
+                        diagnosticsFailure=if(expired.isNotEmpty())"ROLE_EXPIRED" else null,
+                        commanderAvailable=parse(row.payload).text("read_protocol")=="2")
+                }
             } catch(e: CancellationException) {
                 if(currentCoroutineContext().isActive && (client.auth.currentUserOrNull()?.id!=account || !scheduler.selected(account,org)))IncidentFieldState() else throw e
             } catch(e: Exception) { if(client.auth.currentUserOrNull()?.id==account && scheduler.selected(account,org))
@@ -214,7 +227,7 @@ class IncidentRepository(private val context: Context,private val client: Supaba
             val staged=reconciler.reconcile(previous?.let { runCatching {parse(it.payload).rows("incidents")}.getOrDefault(emptyList()) }.orEmpty(),dao.cursors(account,org))
             scope(org)
             val payload=buildJsonObject {
-                put("account",account);put("organization",org);put("incidents",JsonArray(staged.incidents))
+                put("account",account);put("organization",org);put("read_protocol",staged.readProtocol);put("incidents",JsonArray(staged.incidents))
             }
             val row=IncidentFieldCache(account,org,payload.toString(),System.currentTimeMillis(),SystemClock.elapsedRealtime(),boot())
             // Account changes cannot cross this final authorization + atomic cache/cursor commit.
@@ -226,7 +239,8 @@ class IncidentRepository(private val context: Context,private val client: Supaba
                 }
                 // Saving lease first fails closed if Room commit is interrupted.
                 secure.saveIncidentLease(account,org,buildJsonObject {
-                    put("wall",row.verifiedAt);put("elapsed",row.elapsed);put("boot",row.boot)
+                    if(staged.readProtocol==2)put("wall","read-v2:"+row.verifiedAt) else put("wall",row.verifiedAt)
+                    put("elapsed",row.elapsed);put("boot",row.boot)
                 }.toString())
                 db.withTransaction {
                     scope(org)
@@ -376,7 +390,8 @@ class IncidentRepository(private val context: Context,private val client: Supaba
         incidentLoop@ for((incident,ops) in candidates.groupBy {payload(it).text("incident")}) {
         for(batch in ops.chunked(4)) {
             val result=try {
-                rpc("incident_field_operation_receipts",buildJsonObject {
+                rpc(if(dao.snapshot(account,org)?.let {parse(it.payload).text("read_protocol")}=="2")
+                    "incident_read_operation_receipts" else "incident_field_operation_receipts",buildJsonObject {
                     put("p_acting_organization_id",org);put("p_incident_id",incident)
                     put("p_requests",JsonArray(batch.map {op->buildJsonObject {
                         put("rpc",payload(op).text("rpc"));put("request",parse(op.request!!))

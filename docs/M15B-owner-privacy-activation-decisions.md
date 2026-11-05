@@ -85,7 +85,8 @@ requires explicit approval.
 | P01–P16/A01 decisions and notices | — | UNAPPROVED |
 | Device trust/out-of-band process/attestation choice | — | UNAPPROVED |
 | Exact precise-reader audience | — | UNAPPROVED |
-| SQL dependencies including separate #86 correction | — | UNCONFIRMED |
+| SQL #82–#90/#92/#96 | Owner report2026-11-05, #86 local CASE patch | OWNER_REPORTED_APPLIED; historical source drift open |
+| New #97 GPS and commander SQL | — | NOT APPLIED |
 | Trusted Edge deployment and external epoch | — | NOT DEPLOYED BY THIS PR |
 | Android/Web release and64 manual cases | — | UNEXECUTED |
 | Independent erasure and alerts/no-traffic acceptance | — | NOT INSTALLED/VERIFIED |
@@ -94,3 +95,48 @@ requires explicit approval.
 Use the rollout/rollback procedure in
 [M15B source implementation and manual acceptance](M15B-end-to-end-real-vehicle-gps.md).
 Owner alone approves, executes, deploys, installs, monitors and merges.
+
+
+## Owner-reported rollout ledger — 2026-11-05 (not independently executed/verified by Codex)
+
+| Item | Current evidence/status |
+|---|---|
+| SQL #82–#85 | OWNER_REPORTED_APPLIED |
+| #86 attachment SQL | OWNER_REPORTED_APPLIED after one parenthesized CASE expression in SQL Editor input; full paste was correct |
+| SQL #87–#90, #92, #96 | OWNER_REPORTED_APPLIED |
+| Read-only target-object probe | Owner reports7/7 true; no agent cloud probe |
+| incident-evidence Edge | Owner reports ACTIVE v1, CLI2.122.1, Verify JWT ON |
+| Storage | Owner reports incident-evidence PRIVATE20MiB, global50MB |
+| Owner Android build | Owner reports main built with two warnings, then empty commander directory; not acceptance of this PR |
+| #97 M15B migration20261104120000 | NOT APPLIED |
+| vehicle-location Edge | NOT DEPLOYED |
+| New commander migration20261105100000 | NOT APPLIED |
+| P01–P16/A01 | ALL UNAPPROVED, GPS OFF |
+| GPS cleaner schedule/independent alerts | NOT DEPLOYED |
+| M15B/commander runtime acceptance | UNEXECUTED |
+| Attachment complete upload/download authorization acceptance | UNVERIFIED despite evidence Edge ACTIVE |
+| Historical #86 Git source | DRIFT: unparenthesized original remains checked in; live owner-applied DB is not described as broken |
+
+The stale November4 source report that #86 still blocks the owner's already
+completed rollout is superseded by this ledger. Git/source and deployed state
+are different evidence. No successful owner SQL/build is credited as a Codex
+execution or verification of these new changes.
+
+**Separate source repair plan (not performed here):** owner reviews one focused
+future syntax-only source correction for fresh environments, preserving the
+exact deployed CASE semantics and documenting the migration ledger discrepancy.
+Review fresh-install reproducibility and existing migration-history/checksum
+consequences separately. Do NOT rerun/reapply #86 on the already-patched DB;
+do not silently edit it in this PR or claim an additional database migration is
+required to repeat already-applied DDL. Any genuinely necessary forward change
+requires a separate source-backed owner review.
+
+Later owner order: already-applied #96 → unapplied #97 M15B migration →
+new commander migration. Install matching client/Edge only under owner control;
+all GPS gates still OFF. Existing CLI3.0.0 rejected old inbucket config; owner used
+2.122.1 with a warning. This correction does not change config/tooling or deploy.
+Owner-local Gradle/generated Room/pnpm-lock/environment settings remain untouched.
+
+GPS approvals remain entirely UNAPPROVED. Commander read is not precise-reader
+approval, driver identity, consent or device trust. Correcting rollout facts
+records no operational GPS sign-off.

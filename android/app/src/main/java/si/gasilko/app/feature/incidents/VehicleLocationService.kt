@@ -72,6 +72,9 @@ internal object VehicleLocationRuntime {
         check(ticket.repository.current() && SystemClock.elapsedRealtime()<ticket.deadline)
         active=ticket;state.value="ACQUIRING_FIX"
     }
+    @Synchronized fun stopIfCurrent(ticket: VehicleLocationTicket,reason: String) {
+        if(active===ticket)stopNow(reason)
+    }
     /** Synchronous local denial comes before disk/network work. */
     @Synchronized fun stopNow(reason: String) {
         val old=active ?: return
@@ -101,10 +104,22 @@ class VehicleLocationService: Service(),LocationListener {
     override fun onBind(intent: Intent?)=null
     override fun onCreate() {super.onCreate();manager=getSystemService(LocationManager::class.java)}
     override fun onStartCommand(intent: Intent?,flags: Int,startId: Int): Int {
-        if(intent?.action=="STOP"){VehicleLocationRuntime.stopNow("USER_STOP");stopSelf();return START_NOT_STICKY}
+        if(intent?.action=="STOP"){
+            val original=VehicleLocationRuntime.active
+            if(original!=null && intent.getStringExtra("nonce")==original.nonce)
+                VehicleLocationRuntime.stopIfCurrent(original,"USER_STOP")
+            if(ticket==null)stopSelf(startId)
+            return START_NOT_STICKY // A delayed old notification must not stop a newer session/service.
+        }
         val current=VehicleLocationRuntime.active
-        if(current==null || intent?.getStringExtra("nonce")!=current.nonce || !current.current()) {stopSelf();return START_NOT_STICKY}
-        if(ticket!=null)return START_NOT_STICKY
+        if(current==null || intent?.getStringExtra("nonce")!=current.nonce || !current.current()) {
+            if(ticket==null)stopSelf(startId)
+            return START_NOT_STICKY
+        }
+        if(ticket!=null) {
+            if(ticket!==current)VehicleLocationRuntime.stopIfCurrent(current,"ERROR")
+            return START_NOT_STICKY
+        }
         ticket=current
         VehicleLocationRuntime.release={
             runCatching {manager.removeUpdates(this)}
@@ -122,7 +137,8 @@ class VehicleLocationService: Service(),LocationListener {
             getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
             if(getSystemService(NotificationManager::class.java).getNotificationChannel("vehicle_location").importance==NotificationManager.IMPORTANCE_NONE)
                 throw SecurityException()
-            val stop=PendingIntent.getService(this,0,Intent(this,VehicleLocationService::class.java).setAction("STOP"),
+            val stop=PendingIntent.getService(this,0,Intent(this,VehicleLocationService::class.java).setAction("STOP")
+                .setData(android.net.Uri.parse("gasilko-vehicle-stop:"+current.nonce)).putExtra("nonce",current.nonce),
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
             val notification=Notification.Builder(this,"vehicle_location").setSmallIcon(android.R.drawable.ic_menu_mylocation)
                 .setContentTitle(getString(R.string.gps_sharing_vehicle,current.label))
@@ -140,7 +156,7 @@ class VehicleLocationService: Service(),LocationListener {
                         !getSystemService(NotificationManager::class.java).areNotificationsEnabled() ||
                         (getSystemService(NotificationManager::class.java).getNotificationChannel("vehicle_location")?.importance ?: NotificationManager.IMPORTANCE_NONE)==NotificationManager.IMPORTANCE_NONE ||
                         (Build.VERSION.SDK_INT>=33 && ContextCompat.checkSelfPermission(this@VehicleLocationService,Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED)) {
-                        VehicleLocationRuntime.stopNow("PERMISSION_REVOKED");break
+                        VehicleLocationRuntime.stopIfCurrent(current,"PERMISSION_REVOKED");break
                     }
                 }
             }
@@ -152,13 +168,13 @@ class VehicleLocationService: Service(),LocationListener {
                         if(current.current())current.deadline=VehicleLocationTicket.deadline(renewed)
                     } catch(e: CancellationException){throw e}
                     catch(e: VehicleLocationFailure) {
-                        if(e.code !in listOf("BACKEND_UNAVAILABLE","OUTCOME_UNKNOWN","RATE_LIMITED"))VehicleLocationRuntime.stopNow("ERROR")
-                        else VehicleLocationRuntime.state.value="OFFLINE"
-                    } catch(_: Exception){VehicleLocationRuntime.state.value="OFFLINE"}
+                        if(e.code !in listOf("BACKEND_UNAVAILABLE","OUTCOME_UNKNOWN","RATE_LIMITED"))VehicleLocationRuntime.stopIfCurrent(current,"ERROR")
+                        else if(current.current())VehicleLocationRuntime.state.value="OFFLINE"
+                    } catch(_: Exception){if(current.current())VehicleLocationRuntime.state.value="OFFLINE"}
                 }
             }
-        } catch(_: SecurityException){VehicleLocationRuntime.state.value="PERMISSION_DENIED";VehicleLocationRuntime.stopNow("PERMISSION_REVOKED")}
-        catch(_: Exception){VehicleLocationRuntime.stopNow("ERROR")}
+        } catch(_: SecurityException){VehicleLocationRuntime.stopIfCurrent(current,"PERMISSION_REVOKED")}
+        catch(_: Exception){VehicleLocationRuntime.stopIfCurrent(current,"ERROR")}
         return START_NOT_STICKY
     }
     override fun onLocationChanged(location: Location) {
@@ -174,7 +190,7 @@ class VehicleLocationService: Service(),LocationListener {
         }
         val lat=BigDecimal.valueOf(location.latitude).movePointRight(7).setScale(0,RoundingMode.HALF_UP).toPlainString()
         val lon=BigDecimal.valueOf(location.longitude).movePointRight(7).setScale(0,RoundingMode.HALF_UP).toPlainString()
-        if(t.sequence==Long.MAX_VALUE){VehicleLocationRuntime.stopNow("ERROR");return}
+        if(t.sequence==Long.MAX_VALUE){VehicleLocationRuntime.stopIfCurrent(t,"ERROR");return}
         val sequence=++t.sequence
         val sample=DeviceLocationSampleV1(listOf(DeviceLocationSampleV1.sampleId(t.session.text("session"),sequence),t.session.text("session"),t.repository.account,t.repository.organization,
             t.incident,t.session.text("deployment"),t.session.text("vehicle"),t.credential.id,t.session.text("generation"),
@@ -190,21 +206,22 @@ class VehicleLocationService: Service(),LocationListener {
                 }
             } catch(e: CancellationException){throw e}
             catch(e: VehicleLocationFailure) {
+                if(!t.current())return@launch
                 if(e.code=="INVALID_LOCATION")VehicleLocationRuntime.state.value="POOR_ACCURACY"
                 else if(e.code=="RATE_LIMITED")VehicleLocationRuntime.state.value="RATE_LIMITED"
                 else if(e.code in listOf("BACKEND_UNAVAILABLE","OUTCOME_UNKNOWN"))VehicleLocationRuntime.state.value="OFFLINE"
-                else VehicleLocationRuntime.stopNow("ERROR")
-            } catch(_: Exception){VehicleLocationRuntime.stopNow("ERROR")}
+                else VehicleLocationRuntime.stopIfCurrent(t,"ERROR")
+            } catch(_: Exception){VehicleLocationRuntime.stopIfCurrent(t,"ERROR")}
             finally {inFlight=false} // Drop unknown samples; NEVER enqueue/replay a trip.
         }
     }
-    override fun onProviderDisabled(provider: String) {if(provider==LocationManager.GPS_PROVIDER)VehicleLocationRuntime.stopNow("ERROR")}
+    override fun onProviderDisabled(provider: String) {if(provider==LocationManager.GPS_PROVIDER)ticket?.let {VehicleLocationRuntime.stopIfCurrent(it,"ERROR")}}
     override fun onProviderEnabled(provider: String) {}
     @Deprecated("Legacy platform callback") override fun onStatusChanged(provider: String?,status: Int,extras: Bundle?) {}
     override fun onDestroy() {
         runCatching {manager.removeUpdates(this)}
         jobs.cancel()
-        if(ticket===VehicleLocationRuntime.active)VehicleLocationRuntime.stopNow("ERROR")
+        ticket?.let {VehicleLocationRuntime.stopIfCurrent(it,"ERROR")}
         ticket=null;super.onDestroy()
     }
 }

@@ -12,6 +12,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.selected
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -39,6 +41,7 @@ import si.gasilko.app.core.ui.*
     val repo=model.vehicleLocations
     val scopeIdentity=repo.account+"/"+repo.organization+"/"+incident+"/"+fingerprint
     val identity=remember(scopeIdentity,locked){scopeIdentity+"/"+newVehicleOperation()}
+    SideEffect {repo.selectIncident(incident,fingerprint)}
     val currentIdentity=rememberUpdatedState(identity)
     val state=produceState<Pair<String,List<VehicleFix>>>(identity to emptyList(),identity,locked,owner) {
         value=identity to emptyList()
@@ -61,18 +64,23 @@ import si.gasilko.app.core.ui.*
 internal fun VehicleLocationPanel(model: IncidentViewModel,incident: String,fingerprint: String) {
     val repo=model.vehicleLocations
     val lifecycle=LocalLifecycleOwner.current.lifecycle
-    val scope=rememberCoroutineScope()
     val identity=repo.account+"/"+repo.organization+"/"+incident+"/"+fingerprint
     key(identity) {
+        val scope=rememberCoroutineScope()
+        var selectionChanged by remember {mutableStateOf(false)}
         var data by remember {mutableStateOf<JsonObject?>(null)}
         var error by remember {mutableStateOf("")}
         var busy by remember {mutableStateOf(false)}
         var proof by remember {mutableStateOf(false)}
         var keyHash by remember {mutableStateOf("")}
+        var selectedVehicle by remember {mutableStateOf<String?>(null)}
+        fun vehicleIdentity(row: JsonObject)=listOf(row.text("deployment"),row.text("vehicle"),row.text("authorityEpisode"),row.text("unit")).joinToString("/")
+        SideEffect {repo.selectIncident(incident,fingerprint)}
         var accepted by remember(data?.obj("policy")?.text("id")) {mutableStateOf(false)}
         val runtime by VehicleLocationRuntime.state.collectAsStateWithLifecycle()
         val collecting=VehicleLocationRuntime.active!=null || VehicleLocationRuntime.pendingFor(repo.account)!=null
-        val owned=VehicleLocationRuntime.active?.let {it.repository.account==repo.account && it.repository.organization==repo.organization && it.incident==incident}==true
+        val liveTicket=VehicleLocationRuntime.active
+        val owned=liveTicket?.let {it.repository.account==repo.account && it.repository.organization==repo.organization && it.incident==incident}==true
         fun action(block: suspend ()->Unit) {
             if(busy)return
             busy=true
@@ -84,7 +92,7 @@ internal fun VehicleLocationPanel(model: IncidentViewModel,incident: String,fing
             }
         }
         DisposableEffect(identity) {onDispose {
-            if(VehicleLocationRuntime.active?.repository!==repo)repo.revokeLocal()
+            if(VehicleLocationRuntime.active?.repository!==repo)repo.cancelCeremony()
         }}
         OperationalCard {
             Text(stringResource(R.string.gps_title),style=MaterialTheme.typography.titleMedium)
@@ -92,15 +100,39 @@ internal fun VehicleLocationPanel(model: IncidentViewModel,incident: String,fing
             if(!owned && data==null && error.isEmpty())Text(stringResource(R.string.gps_unavailable))
             if(error.isNotEmpty())FieldBanner(vehicleStatus(error),FieldTone.WARNING)
             if(busy)LinearProgressIndicator(Modifier.fillMaxWidth())
-            OutlinedButton(enabled=!busy && !collecting,onClick={action {data=repo.context(incident,fingerprint);proof=false;accepted=false}}) {
+            OutlinedButton(enabled=!busy && !collecting,onClick={action {val refreshed=repo.context(incident,fingerprint)
+                if(data!=refreshed) {proof=false;accepted=false;keyHash="";selectedVehicle=null}
+                data=refreshed}}) {
                 Text(stringResource(R.string.gps_review))
             }
             data?.let {current->
                 val vehicles=current.rows("vehicles")
-                val vehicle=vehicles.singleOrNull()
+                val selected=selectedVehicle
+                val vehicle=vehicles.find {vehicleIdentity(it)==selected}
                 val policy=current.obj("policy")
-                if(vehicle==null)Text(stringResource(R.string.gps_driver_only))
+                if(selectionChanged)FieldBanner(stringResource(R.string.gps_selection_changed),FieldTone.INFO)
+                if(vehicles.isEmpty())Text(stringResource(R.string.gps_no_vehicle))
                 else {
+                    Text(stringResource(if(vehicles.size>1)R.string.gps_multiple_vehicles else R.string.gps_select_vehicle))
+                    Column {
+                        vehicles.forEach {candidate->
+                            val candidateId=vehicleIdentity(candidate)
+                            val chosen=selected==candidateId
+                            OutlinedButton(enabled=!busy && !collecting,onClick={action {
+                                if(selected!=candidateId) {
+                                    repo.cancelCeremony()
+                                    repo.revokeDevice() // Only own old credential; do not retarget any original UUID.
+                                    proof=false;accepted=false;keyHash="";selectionChanged=selected!=null;selectedVehicle=candidateId
+                                }
+                            }},modifier=Modifier.fillMaxWidth().semantics {this.selected=chosen}) {
+                                Text((if(chosen)"● " else "○ ")+candidate.text("label").ifBlank {candidate.text("vehicle").take(8)}+
+                                    " · "+candidate.text("vehicle")+" / "+candidate.text("deployment").take(8))
+                            }
+                        }
+                    }
+                    Text(stringResource(R.string.gps_no_capture))
+                }
+                if(vehicle!=null) {
                     Text(vehicle.text("label"),style=MaterialTheme.typography.titleMedium)
                     val language=LocalContext.current.resources.configuration.locales[0].language
                     Text(policy.obj("notice").text(language).ifEmpty {policy.obj("notice").text("default")})
@@ -121,7 +153,7 @@ internal fun VehicleLocationPanel(model: IncidentViewModel,incident: String,fing
                         // A late callback may not launch location from a background Activity.
                         VehicleLocationRuntime.begin(ticket)
                         if(!lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
-                            VehicleLocationRuntime.stopNow("ERROR");return@action
+                            VehicleLocationRuntime.stopIfCurrent(ticket,"ERROR");return@action
                         }
                         VehicleLocationRuntime.state.value="PERMISSION_REQUIRED"
                         VehicleLocationRuntime.permissionRequest.value=ticket
@@ -132,8 +164,8 @@ internal fun VehicleLocationPanel(model: IncidentViewModel,incident: String,fing
                 }
             }
             FlowRow {
-                TextButton(enabled=owned,onClick={VehicleLocationRuntime.stopNow("USER_STOP")}){Text(stringResource(R.string.gps_stop))}
-                TextButton(enabled=owned,onClick={VehicleLocationRuntime.stopNow("LEFT_VEHICLE")}){Text(stringResource(R.string.gps_leave))}
+                TextButton(enabled=owned,onClick={liveTicket?.let {VehicleLocationRuntime.stopIfCurrent(it,"USER_STOP")}}){Text(stringResource(R.string.gps_stop))}
+                TextButton(enabled=owned,onClick={liveTicket?.let {VehicleLocationRuntime.stopIfCurrent(it,"LEFT_VEHICLE")}}){Text(stringResource(R.string.gps_leave))}
                 TextButton(enabled=!owned && !busy,onClick={action {repo.flushStop()}}){Text(stringResource(R.string.gps_retry_stop))}
             }
             Text(stringResource(R.string.gps_offline_stop),style=MaterialTheme.typography.bodySmall)
@@ -162,14 +194,14 @@ internal fun VehicleLocationPanel(model: IncidentViewModel,incident: String,fing
                 try {
                     context.startForegroundService(Intent(context,VehicleLocationService::class.java).putExtra("nonce",ticket.nonce))
                     VehicleLocationRuntime.permissionRequest.value=null
-                } catch(_: Exception){VehicleLocationRuntime.stopNow("ERROR")}
-            } else if(VehicleLocationRuntime.active===ticket)VehicleLocationRuntime.stopNow("PERMISSION_REVOKED")
+                } catch(_: Exception){VehicleLocationRuntime.stopIfCurrent(ticket,"ERROR")}
+            } else if(VehicleLocationRuntime.active===ticket)VehicleLocationRuntime.stopIfCurrent(ticket,"PERMISSION_REVOKED")
         }
     }
     DisposableEffect(request?.nonce) {
         val owned=request
         onDispose {if(owned!=null && VehicleLocationRuntime.active===owned && VehicleLocationRuntime.permissionRequest.value===owned)
-            VehicleLocationRuntime.stopNow("ERROR")}
+            VehicleLocationRuntime.stopIfCurrent(owned,"ERROR")}
     }
     LaunchedEffect(request?.nonce,origin==null) {
         val ticket=request ?: return@LaunchedEffect
@@ -181,6 +213,6 @@ internal fun VehicleLocationPanel(model: IncidentViewModel,incident: String,fing
             origin=ticket;launched=ticket.nonce
             permission.launch(arrayOf(Manifest.permission.ACCESS_COARSE_LOCATION,Manifest.permission.ACCESS_FINE_LOCATION)+
                 if(Build.VERSION.SDK_INT>=33)arrayOf(Manifest.permission.POST_NOTIFICATIONS) else emptyArray())
-        } else if(VehicleLocationRuntime.active===ticket)VehicleLocationRuntime.stopNow("ERROR")
+        } else if(VehicleLocationRuntime.active===ticket)VehicleLocationRuntime.stopIfCurrent(ticket,"ERROR")
     }
 }

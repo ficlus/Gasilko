@@ -656,7 +656,7 @@ begin
  if v_head is null then raise exception 'NOT_AUTHORIZED' using errcode='42501';end if;
  p:=private.vehicle_location_policy(p_org);
  select coalesce(jsonb_agg(q.value order by q.id),'[]') into v_units from (
-  select d.id,jsonb_build_object('deployment',d.id,'vehicle',v.id,'label',v.callsign,'authorityEpisode',c.id) value
+  select d.id,jsonb_build_object('deployment',d.id,'vehicle',v.id,'unit',u.id,'label',v.callsign,'authorityEpisode',c.id) value
   from public.incident_units d join public.incidents i on i.id=d.incident_id and i.status='ACTIVE'
   join public.incident_participants ip on ip.id=d.participation_id and ip.incident_id=i.id and ip.organization_id=p_org and ip.status='ACTIVE'
   join public.operational_units u on u.id=d.unit_id and u.organization_id=p_org and u.active
@@ -664,8 +664,9 @@ begin
   join public.incident_crew_members c on c.unit_assignment_id=d.id and c.user_id=p_actor and c.status='ACTIVE' and c.crew_role='DRIVER'
    and c.membership_organization_id=p_org and c.incident_id=i.id
   where d.incident_id=p_incident and d.organization_id=p_org and d.status not in ('RELEASED','UNAVAILABLE')
-   and not exists(select 1 from public.simulation_scenarios z where z.incident_id=i.id) order by d.id limit 100
+   and not exists(select 1 from public.simulation_scenarios z where z.incident_id=i.id) order by d.id limit 101
  )q;
+ if jsonb_array_length(v_units)>100 then raise exception 'RESOURCE_LIMIT_REACHED';end if;
  return jsonb_build_object('account',p_actor,'organization',p_org,'incident',p_incident,'fingerprint',v_head->>'scope_fingerprint','fieldFingerprint',private.vehicle_location_field_fingerprint(p_org,p_incident),
   'policy',jsonb_build_object('id',p.id,'version',p.version,'notice',p.notice,'noticeHash',p.document_sha256,
    'audience',p.audience,'audienceHash',p.audience_sha256,'recoveryEpoch',p.recovery_epoch),'vehicles',v_units,'serverTime',clock_timestamp());

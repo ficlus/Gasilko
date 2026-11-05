@@ -731,4 +731,24 @@
     <string name="gps_device_approval">Dokazilo telefona je neaktivno. Lastnik mora pred deljenjem odobriti ta konkretni ključ.</string>
     <string name="gps_key_fingerprint">Prstni odtis prijave: %1$s</string>
     <string name="gps_proof_inactive">Dokazilo telefona je neaktivno. Ne pomeni soglasja ali dovoljenja za deljenje.</string>
+    <string name="ce_title">Poveljniški pregled</string>
+    <string name="ce_mine">Moje poveljevanje</string>
+    <string name="ce_incident">Poveljnik intervencije</string>
+    <string name="ce_agency">Poveljnik organizacije</string>
+    <string name="ce_sector">Poveljnik sektorja</string>
+    <string name="ce_deputy">Namestnik poveljnika</string>
+    <string name="ce_read_only">Samo pregled</string>
+    <string name="ce_units">Dovoljene enote</string>
+    <string name="ce_no_units">Ni dovoljenih enot</string>
+    <string name="ce_no_tasks">Ni dovoljenih nalog</string>
+    <string name="ce_unavailable">Poveljniški pregled na tem strežniku ni na voljo. Obstoječi terenski dostop ostaja nespremenjen.</string>
+    <string name="ce_scope_counts">Samo dovoljeni obseg: %1$d enot · %2$d dodelitev</string>
+    <string name="ce_crew_count">Aktivna posadka: %1$d · identitete so omejene</string>
+    <string name="ce_changed">Dovoljenja so se spremenila. Dostop znova preveri prek spleta.</string>
+    <string name="ce_incomplete">Podatki niso popolni ali je dosežena omejitev. Delni poveljniški posnetek ni bil shranjen.</string>
+    <string name="gps_select_vehicle">Izberi vozilo</string>
+    <string name="gps_multiple_vehicles">Več dovoljenih vozil — izberi eno</string>
+    <string name="gps_no_vehicle">Ni vozila, za katero si trenutno upravičen voznik</string>
+    <string name="gps_selection_changed">Izbira se je spremenila; znova preveri vozilo</string>
+    <string name="gps_no_capture">Samo izbira. Zbiranje GPS še ni zagnano.</string>
 </resources>

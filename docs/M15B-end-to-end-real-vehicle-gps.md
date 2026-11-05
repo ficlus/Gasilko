@@ -1,6 +1,6 @@
 # M15B — End-to-end REAL vehicle GPS, source only / default OFF
 
-2026-11-04. **IMPLEMENTED_BUT_DISABLED · NOT RUNTIME-VERIFIED · NOT PILOT-READY.**
+2026-11-04 source; corrected2026-11-05. **IMPLEMENTED_BUT_DISABLED · NOT RUNTIME-VERIFIED · NOT PILOT-READY.**
 All P01–P16/A01 remain **UNAPPROVED**. No source merge approves surveillance.
 See [owner decisions](M15B-owner-privacy-activation-decisions.md).
 This document describes checked-in source, not an installed database or accepted deployment.
@@ -14,8 +14,10 @@ This document describes checked-in source, not an installed database or accepted
   assignment M15B.txt, not a different implementation. Open PR collection was empty
   at initial inspection and final source handoff check.
 - No local files/checkout were changed; source prepared via GitHub. No deployment
-  state inferred from merge. Owner reported #82–#85 SQL applied, #86 full correctly
-  pasted file failed42601 near109; later SQL/Edge is unconfirmed.
+  state inferred from merge. Updated owner report: #82–#90/#92/#96 applied;
+  #86 required one parenthesized CASE in SQL Editor input (full paste was correct).
+  incident-evidence ACTIVE v1 is owner-reported; historical source drift remains.
+  New #97 GPS/commander SQL and vehicle-location Edge remain uninstalled.
 - Existing SDK/source signatures below were inspected; old contracts remain the
   authority. Room stays16. No Gradle/dependency/toolchain/generated-schema change.
 
@@ -39,7 +41,7 @@ This document describes checked-in source, not an installed database or accepted
 | Local device keys | [android/app/src/main/java/si/gasilko/app/core/security/deviceproof/LocalDeviceProofKeys.kt:59](https://github.com/ficlus/Gasilko/blob/78c892c54f48079c04604d9257ad5a5e236e788b/android/app/src/main/java/si/gasilko/app/core/security/deviceproof/LocalDeviceProofKeys.kt#L59) | createNew/openExisting:85/prepareProof:91; scoped nonexportable P-256 SHA256withECDSA | Explicit local ceremony, identity episode cancellation | No server enrollment/consent | Wire explicit driver ceremony + separate GPS sample signer |
 | Android byte contract | [android/app/src/main/java/si/gasilko/app/core/security/deviceproof/DeviceProofProtocol.kt:53](https://github.com/ficlus/Gasilko/blob/78c892c54f48079c04604d9257ad5a5e236e788b/android/app/src/main/java/si/gasilko/app/core/security/deviceproof/DeviceProofProtocol.kt#L53) | DeviceProofChallengeV1.bytes() exact27LF; DeviceProofEncoding.kt canonical91byte SPKI/DER↔raw64 | Immutable typed local transcript | Not server authorization | Enrollment27 lines unchanged; new sample20-line domain |
 | Pure server verifier | [supabase/functions/_shared/deviceProofV1.ts:210](https://github.com/ficlus/Gasilko/blob/78c892c54f48079c04604d9257ad5a5e236e788b/supabase/functions/_shared/deviceProofV1.ts#L210) | verifyDeviceProofV1(unknown)→Promise<DeviceSignatureEvidenceV1>; encodeDeviceProofTranscriptV1 | Strict copies, raw64/point/keyhash/transcript/scope/math; SIGNATURE_VALID_ONLY | No JWT/SQL/origin/one-use guarantee | Extract shared math; no second crypto implementation |
-| Existing Edge boundary | [supabase/functions/incident-evidence/index.ts:53](https://github.com/ficlus/Gasilko/blob/78c892c54f48079c04604d9257ad5a5e236e788b/supabase/functions/incident-evidence/index.ts#L53) | POST, auth/v1/user, caller RPC, separate private service verification | Evidence-specific live authorization | Not a device-proof finalizer; deployment unconfirmed | Reuse verified Auth/user + service-only writer pattern in new handler |
+| Existing Edge boundary | [supabase/functions/incident-evidence/index.ts:53](https://github.com/ficlus/Gasilko/blob/78c892c54f48079c04604d9257ad5a5e236e788b/supabase/functions/incident-evidence/index.ts#L53) | POST, auth/v1/user, caller RPC, separate private service verification | Evidence-specific live authorization | Not a device-proof finalizer; owner now reports evidence Edge ACTIVE v1 | Reuse verified Auth/user + service-only writer pattern in new handler |
 | Exposed API | [supabase/config.toml:7](https://github.com/ficlus/Gasilko/blob/78c892c54f48079c04604d9257ad5a5e236e788b/supabase/config.toml#L7) | schemas public/graphql_public; db.major_version=17; no device-proof handler | private not PostgREST exposed | No registered device verifier identity | Keep private schema unexposed; vehicle-location gateway JWT true |
 | Android clients/cache | [android/app/src/main/java/si/gasilko/app/feature/incidents/IncidentRepository.kt:115](https://github.com/ficlus/Gasilko/blob/78c892c54f48079c04604d9257ad5a5e236e788b/android/app/src/main/java/si/gasilko/app/feature/incidents/IncidentRepository.kt#L115) | vehicleLocationCapability(org,incident); ViewModel:45; RegistryDatabase.kt:130 version16 | Lease/current account/org checks before+after optional read | No device enrollment dispatch | Add online ephemeral GPS repo via existing VM; Room stays16 |
 | Web clients | [web/app/api/incidents/route.ts:16](https://github.com/ficlus/Gasilko/blob/78c892c54f48079c04604d9257ad5a5e236e788b/web/app/api/incidents/route.ts#L16) | ACTIVE account/same-origin allowlist; VehicleLocationCapability.tsx keyed identity+abort; RealUnitPosition.tsx unavailable | Manual OFF read, no new polling | No proof endpoint or REAL marker | Use existing authenticated same-origin route + existing COP map |
@@ -406,10 +408,10 @@ The source declarations (linked at the actual line) are:
 - [public.vehicle_location_control(p_actor uuid,p_epoch uuid,p_action text,p_org uuid,p_incident uuid,p_operation uuid,p_payload jsonb)](../supabase/migrations/20261104120000_vehicle_location_end_to_end.sql#L407)
 - [private.vehicle_location_field_fingerprint(p_org uuid,p_incident uuid) returns text](../supabase/migrations/20261104120000_vehicle_location_end_to_end.sql#L637)
 - [public.vehicle_location_context(p_actor uuid,p_epoch uuid,p_org uuid,p_incident uuid) returns jsonb](../supabase/migrations/20261104120000_vehicle_location_end_to_end.sql#L650)
-- [public.vehicle_location_sample(p_actor uuid,p_epoch uuid,p_org uuid,p_incident uuid,p_sample jsonb,p_hash text,p_commit boolean)](../supabase/migrations/20261104120000_vehicle_location_end_to_end.sql#L676)
-- [public.vehicle_location_positions(p_actor uuid,p_epoch uuid,p_org uuid,p_incident uuid) returns jsonb](../supabase/migrations/20261104120000_vehicle_location_end_to_end.sql#L756)
-- [public.incident_vehicle_location_capabilities(p_acting_organization_id uuid,p_incident_id uuid) returns jsonb](../supabase/migrations/20261104120000_vehicle_location_end_to_end.sql#L818)
-- [public.vehicle_location_budget(p_actor uuid,p_epoch uuid,p_org uuid,p_incident uuid) returns void](../supabase/migrations/20261104120000_vehicle_location_end_to_end.sql#L851)
+- [public.vehicle_location_sample(p_actor uuid,p_epoch uuid,p_org uuid,p_incident uuid,p_sample jsonb,p_hash text,p_commit boolean)](../supabase/migrations/20261104120000_vehicle_location_end_to_end.sql#L677)
+- [public.vehicle_location_positions(p_actor uuid,p_epoch uuid,p_org uuid,p_incident uuid) returns jsonb](../supabase/migrations/20261104120000_vehicle_location_end_to_end.sql#L757)
+- [public.incident_vehicle_location_capabilities(p_acting_organization_id uuid,p_incident_id uuid) returns jsonb](../supabase/migrations/20261104120000_vehicle_location_end_to_end.sql#L819)
+- [public.vehicle_location_budget(p_actor uuid,p_epoch uuid,p_org uuid,p_incident uuid) returns void](../supabase/migrations/20261104120000_vehicle_location_end_to_end.sql#L852)
 
 All new functions have `search_path=''`, qualified application objects, owner
 postgres and no PUBLIC/anon/authenticated EXECUTE. Only these public bridges
@@ -598,8 +600,10 @@ worker or new dependency. Default/SI/DE labels and errors are added.
 
 Incident Units panel → existing VM repository → notice/review → enroll/proof
 → independent key approval → unchecked consent → START. Canonical vehicle must
-be the sole current DRIVER choice; ambiguous assignments require correction,
-not a guessed vehicle. No map/login/FCM path generates a key or launches GPS.
+be selected from validated current DRIVER candidates. Zero/one/many cases are
+separate, choices use full vehicle UUID/deployment/crew episode/unit identity;
+no first-item guessing or automatic enrollment. Changing selection decisively
+revokes the old own credential before replacement and resets proof/consent. No map/login/FCM path generates a key or launches GPS.
 
 Root-owned permission launcher survives normal auth-loading recomposition;
 immutable ticket/account/org/incident and epoch survive only in current process.
@@ -729,64 +733,83 @@ approval. No performance/load/price claim or actual external billing action.
 | Browser/device coordinate retention | volatile current DTO only, no persistence/offline GPS queue | Managed OS screenshots/compromised clients not prevented |
 | Cleaner crash/no traffic | independent executable cleaner + health fails closed | Owner schedule/alerts not deployed |
 | SQL rollback/lost HTTP | atomic latest/ACK and fixed command receipts | No runtime concurrency checks executed |
-| Old clients/incomplete migrations | initial OFF; bounded unavailable branch; no Room change | #86 blocks owner rollout, source merge≠install |
+| Old clients/incomplete migrations | initial OFF; bounded unavailable branch; no Room change | #86 applied with owner-local CASE fix; Git source drift remains; new GPS rollout not installed |
 | DB restore/backup/history privacy | epoch gate and latest-only primary table; no history | Automatic restore hook/PITR erasure not implemented, owner gates open |
 
-## 11. Owner-only rollout and rollback — NOT EXECUTED
+## 11. Owner-only rollout and rollback — NOT EXECUTED BY CODEX
 
-No commands below were run. The owner must separately approve all policy and
-infrastructure, resolve SQL source blocker and accept the code before deployment.
+## Owner-reported rollout ledger — 2026-11-05 (not independently executed/verified by Codex)
 
-1. Separately correct #86 `20261030160000_incident_private_attachments.sql`
-   42601 near109. The full correct file was pasted; no truncation assumption.
-   Do not blindly rerun or repair as part of M15B.
-2. Confirm owner-controlled chronological dependencies, reviewing each applied
-   version and exact function signature rather than inferring from Git:
-   #87 `20261030180000_android_unit_leadership.sql`;
-   #88 `20261030200000_incident_field_map.sql`;
-   #89 `20261102100000_incident_field_receipt_recovery.sql`;
-   #90 `20261102120000_incident_field_reliability.sql`;
-   #92 `20261102140000_incident_vehicle_location_capability.sql`;
-   #96 `20261103100000_vehicle_device_proof_lifecycle.sql`;
-   then M15B `20261104120000_vehicle_location_end_to_end.sql`.
-   No later SQL/incident-evidence/new Edge is confirmed installed.
-3. In authorized isolated nonproduction environment, owner reviews and applies
-   this forward migration, NO seed activation; inspect grants/RLS/function owner/
-   exact signatures and constraints. Expected initial capability sixfalse.
-4. Owner installs reviewed trusted Edge source with JWT validation and existing
-   server credentials, with independent non-secret release epoch. No value or
-   deployment supplied by agent. Check missing epoch/backend safely unavailable.
-5. Complete P01–P16/A01, approved notices/hash/audience, finite policy and recovery
-   epoch, read grants, key out-of-band trust process. Do NOT copy dummy approvals.
-   Keep manual_enabled=false throughout installation and OFF acceptance.
-6. Owner installs independently approved maintenance and monitoring. Illustrative
-   SQL below is only a future owner action, extension/cadence not presumed:
+| Item | Current evidence/status |
+|---|---|
+| SQL #82–#85 | OWNER_REPORTED_APPLIED |
+| #86 attachment SQL | OWNER_REPORTED_APPLIED after one parenthesized CASE expression in SQL Editor input; full paste was correct |
+| SQL #87–#90, #92, #96 | OWNER_REPORTED_APPLIED |
+| Read-only target-object probe | Owner reports7/7 true; no agent cloud probe |
+| incident-evidence Edge | Owner reports ACTIVE v1, CLI2.122.1, Verify JWT ON |
+| Storage | Owner reports incident-evidence PRIVATE20MiB, global50MB |
+| Owner Android build | Owner reports main built with two warnings, then empty commander directory; not acceptance of this PR |
+| #97 M15B migration20261104120000 | NOT APPLIED |
+| vehicle-location Edge | NOT DEPLOYED |
+| New commander migration20261105100000 | NOT APPLIED |
+| P01–P16/A01 | ALL UNAPPROVED, GPS OFF |
+| GPS cleaner schedule/independent alerts | NOT DEPLOYED |
+| M15B/commander runtime acceptance | UNEXECUTED |
+| Attachment complete upload/download authorization acceptance | UNVERIFIED despite evidence Edge ACTIVE |
+| Historical #86 Git source | DRIFT: unparenthesized original remains checked in; live owner-applied DB is not described as broken |
+
+The stale November4 source report that #86 still blocks the owner's already
+completed rollout is superseded by this ledger. Git/source and deployed state
+are different evidence. No successful owner SQL/build is credited as a Codex
+execution or verification of these new changes.
+
+**Separate source repair plan (not performed here):** owner reviews one focused
+future syntax-only source correction for fresh environments, preserving the
+exact deployed CASE semantics and documenting the migration ledger discrepancy.
+Review fresh-install reproducibility and existing migration-history/checksum
+consequences separately. Do NOT rerun/reapply #86 on the already-patched DB;
+do not silently edit it in this PR or claim an additional database migration is
+required to repeat already-applied DDL. Any genuinely necessary forward change
+requires a separate source-backed owner review.
+
+Later owner order: already-applied #96 → unapplied #97 M15B migration →
+new commander migration. Install matching client/Edge only under owner control;
+all GPS gates still OFF. Existing CLI3.0.0 rejected old inbucket config; owner used
+2.122.1 with a warning. This correction does not change config/tooling or deploy.
+Owner-local Gradle/generated Room/pnpm-lock/environment settings remain untouched.
+
+
+Future owner actions, **not commands executed by agent**:
+1. Review/apply UNAPPLIED20261104120000_vehicle_location_end_to_end.sql, preserving
+   all OFF defaults; then20261105100000_android_commander_incident_read.sql.
+   Do not rerun applied #86/#87–90/#92/#96. Separate #86 source drift review only.
+2. Inspect new function signatures/owner/ACL/search_path/RLS and unchanged v1/
+   canonical mutation gates; all C2 fields must remainfalse. Commander read
+   can work without installing GPS Edge or approving precise-location policy.
+3. Build/install matching Android only by owner; run commander cases before any
+   GPS policy activation. Old server gives field-only fallback/banner, not fake access.
+4. Separately review/install trusted vehicle-location Edge with existing server
+   credentials and independent non-secret release epoch. Existing incident-evidence
+   ACTIVE v1 need not be redeployed. Do not change inbucket/toolchain to do this.
+5. P01–P16/A01, precise audience, per-key physical trust, consent wording, bounded
+   lease/quality/retention/restore process all require explicit approval; no dummy rows.
+6. Owner independently installs cleaner schedule/alerts and proves no-traffic
+   deletion/capacity before retention signoff. Illustrative future SQL only:
    `select cron.schedule('gasilko-vehicle-location-purge','* * * * *',
    $$select private.vehicle_location_cleanup();$$);`
-   One minute is only an example; approved SLA may require different safe cadence
-   and bounded capacity. Owner monitors cron job failure/lag plus
-   `select private.vehicle_location_health();`; evaluate empty/no-traffic and
-   >10-org behavior before setting retention_schedule_approved.
-7. Owner read-only checks before any activation: pg_proc exact signatures/owners/
-   proconfig ACL; pg_class relrowsecurity; pg_indexes static live slot; no public
-   private-table grants; policy/readiness/reader/trust status; aggregate health;
-   no actual coordinate telemetry in logs/receipts/notifications/timeline. Owner
-   verifies capability remains OFF until all required gates, not only manual flag.
-8. Owner builds/installs Web+Android and runs64 manual cases in approved controlled
-   REAL nonproduction scope. No field GPS on TRAINING or production as a shortcut.
-   Review app-target OS/notification/permission/driver/key/consent/scheduler behavior.
-9. Explicit separately recorded staged operational activation only after all
-   gates and acceptance; compare driver key fingerprint out-of-band; exact narrow
-   reader grants, expiry/health/watchdog and owner rollback rehearsal.
+   Cadence is an unapproved example; health is `select private.vehicle_location_health();`.
+   One-minute schedule may not satisfy shorter SLA or>10-org capacity; evaluate first.
+7. Verify granted precise audience/current roles, logs/FCM/B1/B2 contain no GPS,
+   backup/PITR/restore external-epoch handling, real-device notifications/STOP and
+   all64 original +45 commander +25 correction cases in approved isolated scope.
+   ALL remain UNEXECUTED here. Source is not pilot-ready.
 
-Kill/rollback: owner sets manual_enabled=false and disables/rotates external
-release epoch; readers/renew/ingest fail closed and own STOP/REVOKE remain
-available. Keep cleaner RUNNING and remove existing latest rows through reviewed
-maintenance; do not drop immutable proof/consent/receipts or rollback old SQL.
-Revoke policy/key/trust/grants as appropriate, release installed app explicitly.
-No automatic reenable; new approved version/epoch/ceremony after incident review.
-Record backup/PITR separate handling; old DB restore without epoch rotation is
-not covered by source alone. No owner approval was requested or assumed here.
+Kill: disable manual_enabled and external release epoch, leave cleaner running,
+revoke relevant policy/trust/grants, use own immutable STOP/REVOKE. Preserve
+original field queues and non-coordinate immutable evidence. No automatic
+reactivation; approved new epoch/version/ceremony needed after reviewed recovery.
+Backup/PITR deletion and pre-restore epoch rotation remain owner obligations;
+automatic restore detection is NOT_IMPLEMENTED.
 
 ## 12. OFF-by-default evidence (actual code guards)
 
@@ -1363,3 +1386,318 @@ instantaneous private GPS push. Approval may require additional reviewed work.
 No tests/build/lint/typecheck/CI/Gradle sync/emulator/browser runtime/SQL/Supabase
 production inspection/deployment/installation/monitoring/GPS exercise was performed.
 No merge. Owner alone reviews, merges, executes, deploys, approves and activates.
+
+
+## PR97 unified corrections 2026-11-05
+
+Same PR, no new milestone branch. See
+[M14.8E source authority matrix/protocol](M14.8E-android-commander-incident-access.md).
+Current main bdb9466067fac563b48ccf7bdd17d098297885a8 adds only the correction
+assignment to the prior base; starting PR head05742f8f8727bcd93aaa5c30f995b5296546dccd
+unchanged, only #97 open. No competing edit observed. Not a cloud/runtime check.
+
+### G1 — actual zero/one/many vehicle choice
+
+VehicleLocationUi now offers explicit accessible choices, each exact canonical
+vehicle UUID and deployment discriminator; no singleOrNull conflation of multiple
+candidates with missing DRIVER authority. Selected tuple is scoped to authenticated
+account/org/incident, inventory unit, deployment, vehicle and DRIVER episode.
+Context adds source-verified inventory unit UUID and raises RESOURCE_LIMIT_REACHED
+on101st candidate instead of silent truncation. Native validates UUIDs/shapes/
+duplicate tuples, not label/list-index authorization. The current active-crew
+uniqueness often yields one row; multiple-choice handling is still correct for
+authorized server fixtures/future candidates, not an excuse to synthesize rows.
+
+Selecting creates NO key or GPS. Selection locked while busy/active/withdrawal
+pending. Changing an initialized selection explicitly revokes old own credential
+(and preserves evidence) before allowing B; failure keeps old choice. Old operation
+UUIDs/signatures/bytes are never relabeled. Selection/proof/key display/unchecked
+consent reset; context refresh/scope change cannot silently accept consent.
+Enrollment and scope generation are distinct: changing a ceremony does not cancel
+an independent reader loop. In-flight UI coroutine is keyed by account/org/incident/
+fingerprint; positive requests recheck frozen generations around suspensions/send.
+Current active STOP uses captured session/ticket even if candidate disappears.
+
+REGISTER/ISSUE/CONFIRM still call current canonical DRIVER/version/vehicle checks;
+selection is just a display snapshot. Original protocol and privileged verifier
+remain unchanged. No secret, approved policy/trust or START default added.
+
+### G2 — commander read identity ≠ precise authorization
+
+Commander B1 read uses new role-aware32-char scope, never field_unit_visible
+broadening. private.vehicle_location_field_fingerprint now returns that current
+read identity (nullable for Web reader lacking field admission; oversized optional
+B1 metadata staysnull). Native compares it with its current cursor; Web keeps its
+existing independent head fingerprint. This helper supplies metadata only.
+vehicle_location_positions still independently requires approved current policy,
+explicit precise reader grant, exact acting-org/deployment and effective role,
+current actual DRIVER/source/key/consent/session/lease for sender. No grant from
+IC/deputy/agency/sector/ADMIN/callsign/COP read. No precise data added to B1.
+
+Current agency/sector scope narrowing invalidates camera/cache/generation. Existing
+one bounded10s foreground reader and≤15s frame deadline remain, no second poller/
+channel/worker. Age is observation time (<120 current, permitted120–899 last-known,
+≥900 unavailable; lease/quality/policy can remove earlier). OFF/missing policy/grant
+means unavailable while ordinary commander units/tasks remain readable.
+
+### G3 — SQL race proof and confirmed native defects
+
+**Already guarded in original #97 SQL, not newly invented bugs:**
+SAMPLE prepare releases DB before crypto, but commit reacquires canonical org/
+actor/incident lock via incident_sync_lock, shared policy/readiness, credential and
+session row locks and repeats live/terminal/lease/driver/key/generation checks.
+STOP/REVOKE use the SAME org mutex, lock own credential/session, terminalize and
+delete latest in one transaction. RENEW shares org/session serialization.
+Receipt replays do not update terminal state or repopulate raw position.
+Positions calls current authorized head/org mutex and filters SHARING/current lease/
+consent/trust/role. Therefore DELETE and UPSERT cannot pass each other across an
+authoritative STOP commit. No lock-order rewrite or speculative second worker.
+
+| Ordering | Source postcommit invariant |
+|---|---|
+| STOP commits before delayed SAMPLE commit | sample recheck rejects terminal session; no upsert |
+| SAMPLE commits before STOP | STOP deletes coordinate with terminal state/receipt atomically |
+| RENEW waits after STOP | state not SHARING, no renewed lease |
+| valid signature after REVOKE/LEFT | current key/binding/session denies |
+| old sample ACK replay after STOP | live terminal check precedes ACK return; no resurrection |
+| two same STOP retries | original request/receipt, no second operation |
+| STOP UUID changed reason/session | OPERATION_REUSED, immutable original |
+| offline local STOP | collector off, remote pending; finite lease, no false ACK |
+| restored STOP journal | original UUID/session/reason, no auto-start |
+| remote online reader | empty after authoritative read; existing poll/≤15s validity bounds display |
+
+**Confirmed native gaps corrected:** notification STOP previously had one unscoped
+PendingIntent and global stopNow; an old delivered action could stop a newer
+active session. Notification now has unique opaque process ticket identity and
+compares original nonce; stale STOP never stopSelfs a current service. Async
+service/provider/permission/UI error callbacks use stopIfCurrent(ticket), not
+global stop. UI STOP/LEAVE captures original live ticket. An older service cannot
+cancel a new ticket through late error/destruction. If old service teardown
+overlaps new start, new unserviceable ticket safely stops for explicit retry.
+
+Previously request() only checked account/org/lease; a sample/renew queued after
+t.current() could enter IO after local STOP. Now it checks exact active repository/
+session/live ticket before request, after IO handoff, before body write, and
+cancellation/generation before/after suspensions. stopNow already synchronously
+removed updates/cancelled jobs before disk/network; retained. No claim to intercept
+a packet already sent or atomically lock UI STOP across blocking network IO.
+Authoritative SQL commit ordering is the ultimate no-resurrection boundary.
+
+STOP pending/unknown remains honest; original non-coordinate encrypted journal
+and receipts unchanged. Incident/role/account/org switch aborts old positive
+ceremony, no new login/boot/service auto-restart. Remote frames are not instant
+push; offline viewers cannot know a remote STOP until bounded expiry/revalidation.
+
+### G4 — rollout correction / scope of edits
+
+Owner ledger in section11 supersedes historical November4 assumptions, including
+the context assumed by the preserved original64 cases. Their text/status is kept
+unchanged as requested; none was executed or promoted to PASS. #86 DB is
+owner-reported patched/applied, checked-in source remains separately reviewed
+drift. No migration/toolchain/evidence deployment was rerun.
+
+This correction changes only the NEW UNAPPLIED #97 migration to add candidate
+unit ID and honest candidate bound; no lock/FK/grant/state schema was modified in
+it. New commander function migration follows it. No already-applied migration is
+edited. No Web authorization/canonical mutations, original UUIDs, Room16, Gradle/
+dependencies/generated schemas, M10/NAV/SIM or field queues were broadened.
+
+### 25 additional correction cases — all UNEXECUTED
+
+GPS activation-dependent cases BLOCKED_BY_POLICY. Other cases require owner
+deployment. Original64 cases remain in section13, all UNEXECUTED.
+### G01 — Zero vehicles
+
+- **PRECONDITION:** Authorized context in approved isolated fixture, no current DRIVER candidates.
+- **ACTION:** Open panel.
+- **EXPECTED SERVER/UI:** No eligible vehicle; no enrollment/START/FGS.
+- **STATUS:** UNEXECUTED · BLOCKED_BY_POLICY
+
+### G02 — One vehicle
+
+- **PRECONDITION:** One canonical server candidate.
+- **ACTION:** Select and review.
+- **EXPECTED SERVER/UI:** Explicit selection/identity, no automatic key or GPS.
+- **STATUS:** UNEXECUTED · BLOCKED_BY_POLICY
+
+### G03 — Multiple vehicles
+
+- **PRECONDITION:** Two distinct authorized tuples in controlled fixture.
+- **ACTION:** Choose second.
+- **EXPECTED SERVER/UI:** Correct second tuple; no false not-driver result.
+- **STATUS:** UNEXECUTED · BLOCKED_BY_POLICY
+
+### G04 — Selection after proof
+
+- **PRECONDITION:** Original A proof/journal exists.
+- **ACTION:** Select B.
+- **EXPECTED SERVER/UI:** Old own enrollment is explicitly revoked before replacement selection; no UUID/key/consent retarget; failed revoke blocks change.
+- **STATUS:** UNEXECUTED · BLOCKED_BY_POLICY
+
+### G05 — Deployment changes
+
+- **PRECONDITION:** Issued A challenge, then driver episode/vehicle/deployment/version changes.
+- **ACTION:** Confirm old challenge.
+- **EXPECTED SERVER/UI:** Existing live/version check rejects, no relabeled binding.
+- **STATUS:** UNEXECUTED · BLOCKED_BY_POLICY
+
+### G06 — Duplicate labels
+
+- **PRECONDITION:** Different UUIDs share callsign/label.
+- **ACTION:** Inspect choices/screen reader.
+- **EXPECTED SERVER/UI:** Full vehicle UUID plus deployment discriminator/selected semantics control intent.
+- **STATUS:** UNEXECUTED · BLOCKED_BY_POLICY
+
+### G07 — Commander-only incident
+
+- **PRECONDITION:** Effective IC, no visible field unit.
+- **ACTION:** Refresh versioned Android read.
+- **EXPECTED SERVER/UI:** Scoped command incident/units/tasks visible without field grant.
+- **STATUS:** UNEXECUTED · BLOCKED_BY_DEPLOYMENT
+
+### G08 — Read without precise grant
+
+- **PRECONDITION:** Commander B1 read valid; no GPS grant/approved policy.
+- **ACTION:** Open map.
+- **EXPECTED SERVER/UI:** Units/tasks remain; no dot or implicit precise reader.
+- **STATUS:** UNEXECUTED · BLOCKED_BY_POLICY
+
+### G09 — Independent precise grant
+
+- **PRECONDITION:** Owner-approved isolated REAL activation; current command read scope and explicit exact-deployment precise grant, no crew fingerprint.
+- **ACTION:** Open Android map.
+- **EXPECTED SERVER/UI:** New authenticated reader fingerprint accepted; independent precise authority still required, no execute rights.
+- **STATUS:** UNEXECUTED · BLOCKED_BY_POLICY
+
+### G10 — Foreign agency GPS
+
+- **PRECONDITION:** Agency A commander, vehicle B.
+- **ACTION:** Read B position under A.
+- **EXPECTED SERVER/UI:** Exact org/deployment/role policy denies; summary cannot reveal it.
+- **STATUS:** UNEXECUTED · BLOCKED_BY_POLICY
+
+### G11 — Sector narrowing
+
+- **PRECONDITION:** Cached command view/precise frame, approved fixture.
+- **ACTION:** Narrow sector and refresh.
+- **EXPECTED SERVER/UI:** B1 scope/camera/read-only units reset; GPS generation/TTL clears foreign frame.
+- **STATUS:** UNEXECUTED · BLOCKED_BY_POLICY
+
+### G12 — Other firefighter completion
+
+- **PRECONDITION:** Read-only assignment to another responder.
+- **ACTION:** Attempt ACK/COMPLETE.
+- **EXPECTED SERVER/UI:** can_execute=false and canonical mutation denies absent independent actual executor authority.
+- **STATUS:** UNEXECUTED · BLOCKED_BY_DEPLOYMENT
+
+### G13 — STOP during callback
+
+- **PRECONDITION:** Active native collector/sample signing.
+- **ACTION:** Tap STOP.
+- **EXPECTED SERVER/UI:** Callbacks/jobs stopped and pre-send live/session/generation checks reject further scheduling; already-sent packet not physically intercepted.
+- **STATUS:** UNEXECUTED · BLOCKED_BY_POLICY
+
+### G14 — STOP first
+
+- **PRECONDITION:** Sample verifier outside DB, STOP commits first.
+- **ACTION:** Allow sample final commit.
+- **EXPECTED SERVER/UI:** Shared org/key/session locks and terminal recheck reject; latest remains absent.
+- **STATUS:** UNEXECUTED · BLOCKED_BY_POLICY
+
+### G15 — Sample first
+
+- **PRECONDITION:** Sample commits before STOP acquires lock.
+- **ACTION:** Commit STOP.
+- **EXPECTED SERVER/UI:** Terminal state, coordinate delete and receipt atomic.
+- **STATUS:** UNEXECUTED · BLOCKED_BY_POLICY
+
+### G16 — Renew/STOP race
+
+- **PRECONDITION:** Live session, both operations concurrent.
+- **ACTION:** Dispatch renew and STOP.
+- **EXPECTED SERVER/UI:** Same org/session serialization; no renew after terminal STOP.
+- **STATUS:** UNEXECUTED · BLOCKED_BY_POLICY
+
+### G17 — Offline LEAVE
+
+- **PRECONDITION:** Live collector, no network.
+- **ACTION:** Press LEAVE.
+- **EXPECTED SERVER/UI:** Local OFF immediately, immutable STOP_PENDING_SERVER, no coordinate backlog; lease expires.
+- **STATUS:** UNEXECUTED · BLOCKED_BY_POLICY
+
+### G18 — Delayed withdrawal
+
+- **PRECONDITION:** Persisted original STOP, lost response/process death.
+- **ACTION:** Reopen/reconnect and retry.
+- **EXPECTED SERVER/UI:** Same original UUID/session/reason; receipt recovery, no GPS auto-restart.
+- **STATUS:** UNEXECUTED · BLOCKED_BY_POLICY
+
+### G19 — Remote viewer
+
+- **PRECONDITION:** Current/last-known frame displayed online.
+- **ACTION:** Confirm STOP and revalidate.
+- **EXPECTED SERVER/UI:** No server position after commit; next10s poll or≤15s validity clears; no offline instant-ACK claim.
+- **STATUS:** UNEXECUTED · BLOCKED_BY_POLICY
+
+### G20 — Old session replay
+
+- **PRECONDITION:** Old STOPPED session, newer session for vehicle.
+- **ACTION:** Replay old signed sample/old notification STOP.
+- **EXPECTED SERVER/UI:** Old sample cannot replace current row; stale ticket/notification cannot stop newer session.
+- **STATUS:** UNEXECUTED · BLOCKED_BY_POLICY
+
+### G21 — Unapproved new schema
+
+- **PRECONDITION:** Owner installs source migrations without approvals.
+- **ACTION:** Capabilities/START/positions.
+- **EXPECTED SERVER/UI:** Six flags false; no live session/coordinates.
+- **STATUS:** UNEXECUTED · BLOCKED_BY_POLICY
+
+### G22 — Old Android compatibility
+
+- **PRECONDITION:** New commander SQL, unchanged v1 app; optionally v2 cache on downgrade.
+- **ACTION:** Open field UI.
+- **EXPECTED SERVER/UI:** V1 field-only RPCs; secure V2 lease marker masks cached command data from old app.
+- **STATUS:** UNEXECUTED · BLOCKED_BY_DEPLOYMENT
+
+### G23 — Current rollout ledger
+
+- **PRECONDITION:** Owner-reported November4 rollout.
+- **ACTION:** Read documentation.
+- **EXPECTED SERVER/UI:** #86 local CASE patch, #87–90/#92/#96 applied and evidence Edge ACTIVE are attributed to owner; new GPS/commander SQL/Edge remain uninstalled.
+- **STATUS:** UNEXECUTED · BLOCKED_BY_DEPLOYMENT
+
+### G24 — No precise audience
+
+- **PRECONDITION:** Incident commander can read B1, no approved GPS audience.
+- **ACTION:** Open Android/Web maps and inspect B1.
+- **EXPECTED SERVER/UI:** No real dot or GPS lat/lon in B1; unavailable truthful.
+- **STATUS:** UNEXECUTED · BLOCKED_BY_POLICY
+
+### G25 — Protected local changes
+
+- **PRECONDITION:** Owner-modified Gradle/Room generated/lock/config files exist locally.
+- **ACTION:** Review GitHub correction diff.
+- **EXPECTED SERVER/UI:** No changes to protected files, no CLI update/#86 rerun/test/build/deploy.
+- **STATUS:** UNEXECUTED · BLOCKED_BY_DEPLOYMENT
+
+
+
+## Correction file map
+
+Spans below are first-to-last changed source line relative to starting PR head;
+unchanged lines may lie between narrow insertions. New files are complete.
+
+| File | Correction span |
+|---|---|
+| [supabase/migrations/20261105100000_android_commander_incident_read.sql](../supabase/migrations/20261105100000_android_commander_incident_read.sql#L1) | 1–533 |
+| [android/app/src/main/java/si/gasilko/app/feature/incidents/IncidentReconciliation.kt](../android/app/src/main/java/si/gasilko/app/feature/incidents/IncidentReconciliation.kt#L9) | 9–323 |
+| [android/app/src/main/java/si/gasilko/app/feature/incidents/IncidentRepository.kt](../android/app/src/main/java/si/gasilko/app/feature/incidents/IncidentRepository.kt#L52) | 52–394 |
+| [android/app/src/main/java/si/gasilko/app/feature/incidents/IncidentScreen.kt](../android/app/src/main/java/si/gasilko/app/feature/incidents/IncidentScreen.kt#L57) | 57–316 |
+| [android/app/src/main/java/si/gasilko/app/feature/incidents/VehicleLocationRepository.kt](../android/app/src/main/java/si/gasilko/app/feature/incidents/VehicleLocationRepository.kt#L33) | 33–194 |
+| [android/app/src/main/java/si/gasilko/app/feature/incidents/VehicleLocationUi.kt](../android/app/src/main/java/si/gasilko/app/feature/incidents/VehicleLocationUi.kt#L15) | 15–216 |
+| [supabase/migrations/20261104120000_vehicle_location_end_to_end.sql](../supabase/migrations/20261104120000_vehicle_location_end_to_end.sql#L659) | 659–669 |
+| [android/app/src/main/res/values/strings.xml](../android/app/src/main/res/values/strings.xml#L807) | 807–826 |
+| [android/app/src/main/res/values-sl/strings.xml](../android/app/src/main/res/values-sl/strings.xml#L734) | 734–753 |
+| [android/app/src/main/res/values-de/strings.xml](../android/app/src/main/res/values-de/strings.xml#L807) | 807–826 |
+| [android/app/src/main/java/si/gasilko/app/feature/incidents/VehicleLocationService.kt](../android/app/src/main/java/si/gasilko/app/feature/incidents/VehicleLocationService.kt#L75) | 75–224 |

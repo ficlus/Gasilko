@@ -804,4 +804,24 @@
     <string name="gps_device_approval">Phone proof is inactive. An owner must approve this exact key before sharing.</string>
     <string name="gps_key_fingerprint">Enrollment fingerprint: %1$s</string>
     <string name="gps_proof_inactive">Phone proof is inactive. It does not grant consent or sharing.</string>
+    <string name="ce_title">Commander overview</string>
+    <string name="ce_mine">My command incidents</string>
+    <string name="ce_incident">Incident commander</string>
+    <string name="ce_agency">Agency commander</string>
+    <string name="ce_sector">Sector commander</string>
+    <string name="ce_deputy">Deputy commander</string>
+    <string name="ce_read_only">Read only</string>
+    <string name="ce_units">Authorized units</string>
+    <string name="ce_no_units">No authorized units</string>
+    <string name="ce_no_tasks">No authorized tasks</string>
+    <string name="ce_unavailable">Commander view unavailable on this server. Existing field access is unchanged.</string>
+    <string name="ce_scope_counts">Authorized scope only: %1$d units · %2$d assignments</string>
+    <string name="ce_crew_count">Active crew: %1$d · identities restricted</string>
+    <string name="ce_changed">Role access changed. Verify access online again.</string>
+    <string name="ce_incomplete">Data incomplete or capacity exceeded. No partial command snapshot was committed.</string>
+    <string name="gps_select_vehicle">Select vehicle</string>
+    <string name="gps_multiple_vehicles">Multiple authorized vehicles — select one</string>
+    <string name="gps_no_vehicle">No vehicle for which you are currently an eligible driver</string>
+    <string name="gps_selection_changed">Selected vehicle changed; review again</string>
+    <string name="gps_no_capture">Selection only. No GPS collection has started.</string>
 </resources>
